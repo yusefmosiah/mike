@@ -31,7 +31,7 @@ import {
   handleUnhandledError,
   protectInternalErrorResponses,
 } from "./middleware/internalErrorResponse";
-import { configuredAllowedOrigins } from "./lib/origins";
+import { configuredAllowedOrigins, requestOriginIsTrusted } from "./lib/origins";
 import { envInt } from "./lib/runtimeConfig";
 import { tagCurrentRequest } from "./lib/observability/sentry";
 
@@ -214,7 +214,7 @@ app.use(
       // throwing here would propagate to Express's default handler and turn
       // every disallowed cross-origin request, including preflight, into an
       // HTTP 500.
-      callback(null, !origin || allowedOrigins.has(origin));
+      callback(null, !origin || requestOriginIsTrusted(origin));
     },
     credentials: true,
     allowedHeaders: ["Authorization", "Content-Type"],

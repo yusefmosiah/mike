@@ -21,13 +21,46 @@ export function configuredAllowedOrigins(
   );
 }
 
+function isDevelopmentPrivateOrigin(parsed: URL): boolean {
+  const hostname = parsed.hostname;
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".ts.net")
+  ) {
+    return true;
+  }
+  const parts = hostname.split(".").map(Number);
+  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
+    // 10.0.0.0/8
+    if (parts[0] === 10) return true;
+    // 172.16.0.0/12
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    // 192.168.0.0/16
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    // 100.64.0.0/10 (Carrier-Grade NAT / Tailscale IP range)
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+  }
+  return false;
+}
+
 export function requestOriginIsTrusted(
   origin: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (!origin) return false;
   try {
-    return configuredAllowedOrigins(env).has(new URL(origin).origin);
+    const parsed = new URL(origin);
+    if (configuredAllowedOrigins(env).has(parsed.origin)) {
+      return true;
+    }
+    if (env.NODE_ENV !== "production" && isDevelopmentPrivateOrigin(parsed)) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
