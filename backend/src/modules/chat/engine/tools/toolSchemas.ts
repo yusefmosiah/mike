@@ -339,7 +339,7 @@ export const TOOLS = [
                 content: {
                   type: "string",
                   description:
-                    "Prose text content (paragraphs separated by double newlines). You can include footnotes using standard markdown syntax: cite with [^1] in text and define with [^1]: citation text, or supply via the footnotes parameter. These compile into genuine Microsoft Word footnote fields.",
+                    "Prose text content (paragraphs separated by double newlines). You can include footnotes using standard markdown syntax (cite with [^1] and define with [^1]: citation text, or supply via the footnotes parameter). Markdown links [text](url) and bare URLs are automatically compiled into native clickable Word hyperlinks in body text, footnotes, and tables.",
                 },
                 footnotes: {
                   type: "object",

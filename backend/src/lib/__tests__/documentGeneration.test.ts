@@ -49,6 +49,8 @@ async function generatedXml(options: {
   documentXml: string;
   numberingXml: string;
   footnotesXml: string | null;
+  documentRelsXml: string;
+  footnotesRelsXml: string | null;
 }> {
   let bytes: ArrayBuffer | undefined;
   uploadFileMock.mockImplementationOnce(
@@ -76,7 +78,18 @@ async function generatedXml(options: {
     (await archive.file("word/numbering.xml")?.async("string")) ?? "";
   const footnotesXml =
     (await archive.file("word/footnotes.xml")?.async("string")) ?? null;
-  return { documentXml, numberingXml, footnotesXml };
+  const documentRelsXml =
+    (await archive.file("word/_rels/document.xml.rels")?.async("string")) ?? "";
+  const footnotesRelsXml =
+    (await archive.file("word/_rels/footnotes.xml.rels")?.async("string")) ??
+    null;
+  return {
+    documentXml,
+    numberingXml,
+    footnotesXml,
+    documentRelsXml,
+    footnotesRelsXml,
+  };
 }
 
 function paragraphContaining(xml: string, text: string): string {
@@ -249,5 +262,80 @@ describe("generateDocx footnotes", () => {
     expect(documentXml).not.toContain("<w:footnoteReference");
     // Standard Word separator entries (-1, 0) exist in OpenXML, but no user footnote (w:id="1")
     expect(footnotesXml).not.toContain('w:id="1"');
+  });
+});
+describe("generateDocx hyperlinks", () => {
+  it("compiles markdown links into native OpenXML hyperlinks in body prose", async () => {
+    const { documentXml, documentRelsXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Market Sources",
+          content:
+            "Review the IPO filing at [Reuters Report](https://reuters.com/report) for details.",
+        },
+      ],
+    });
+
+    expect(documentXml).toContain("<w:hyperlink");
+    expect(documentXml).toContain("Reuters Report");
+    expect(documentRelsXml).toContain('Target="https://reuters.com/report"');
+    expect(documentRelsXml).toContain('TargetMode="External"');
+  });
+
+  it("compiles bare URLs into clickable hyperlinks and trims trailing punctuation", async () => {
+    const { documentXml, documentRelsXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Direct Reference",
+          content:
+            "Official statement available at https://reuters.com/ipo-filing. Review immediately.",
+        },
+      ],
+    });
+
+    expect(documentXml).toContain("<w:hyperlink");
+    expect(documentRelsXml).toContain(
+      'Target="https://reuters.com/ipo-filing"',
+    );
+    expect(documentRelsXml).not.toContain(
+      'Target="https://reuters.com/ipo-filing."',
+    );
+  });
+
+  it("compiles clickable hyperlinks inside footnotes", async () => {
+    const { footnotesXml, footnotesRelsXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Statutory Review",
+          content:
+            "Directors owe a duty of loyalty under Delaware corporate law[^1].\n\n" +
+            "[^1]: See Reuters report at https://reuters.com/article/123.",
+        },
+      ],
+    });
+
+    expect(footnotesXml).toContain("<w:hyperlink");
+    expect(footnotesRelsXml).not.toBeNull();
+    expect(footnotesRelsXml).toContain('Target="https://reuters.com/article/123"');
+    expect(footnotesRelsXml).toContain('TargetMode="External"');
+  });
+
+  it("compiles clickable hyperlinks inside table cells", async () => {
+    const { documentXml, documentRelsXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Sources Table",
+          table: {
+            headers: ["Publication", "Link"],
+            rows: [["Reuters", "https://reuters.com/business"]],
+          },
+        },
+      ],
+    });
+
+    expect(documentXml).toContain("<w:hyperlink");
+    expect(documentRelsXml).toContain(
+      'Target="https://reuters.com/business"',
+    );
   });
 });

@@ -87,6 +87,8 @@ export async function generateDocx(
       BorderStyle,
       TextRun,
       FootnoteReferenceRun,
+      ExternalHyperlink,
+      UnderlineType,
       AlignmentType,
       LevelFormat,
       LevelSuffix,
@@ -144,14 +146,118 @@ export async function generateDocx(
       return id;
     };
 
+    const cleanBareUrl = (
+      rawUrl: string,
+    ): { url: string; trailing: string } => {
+      let url = rawUrl;
+      let trailing = "";
+      while (url.length > 0 && /[.,;:!?)\]>]$/.test(url)) {
+        if (
+          url.endsWith(")") &&
+          (url.match(/\(/g) || []).length >= (url.match(/\)/g) || []).length
+        ) {
+          break;
+        }
+        trailing = url.slice(-1) + trailing;
+        url = url.slice(0, -1);
+      }
+      return { url, trailing };
+    };
+
+    const LINK_REGEX =
+      /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)|(https?:\/\/[^\s,;\)\]\>]+)/g;
+
+    const parseRunsWithLinks = (
+      inputText: string,
+      font: string = FONT,
+      size: number = SIZE,
+    ): (
+      | InstanceType<typeof TextRun>
+      | InstanceType<typeof ExternalHyperlink>
+    )[] => {
+      const runs: (
+        | InstanceType<typeof TextRun>
+        | InstanceType<typeof ExternalHyperlink>
+      )[] = [];
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = LINK_REGEX.exec(inputText)) !== null) {
+        if (match.index > lastIndex) {
+          runs.push(
+            new TextRun({
+              text: inputText.substring(lastIndex, match.index),
+              font,
+              size,
+            }),
+          );
+        }
+        if (match[1]) {
+          runs.push(
+            new ExternalHyperlink({
+              link: match[2],
+              children: [
+                new TextRun({
+                  text: match[1],
+                  font,
+                  size,
+                  color: "0563C1",
+                  underline: { type: UnderlineType.SINGLE },
+                }),
+              ],
+            }),
+          );
+        } else {
+          const { url, trailing } = cleanBareUrl(match[3]);
+          runs.push(
+            new ExternalHyperlink({
+              link: url,
+              children: [
+                new TextRun({
+                  text: url,
+                  font,
+                  size,
+                  color: "0563C1",
+                  underline: { type: UnderlineType.SINGLE },
+                }),
+              ],
+            }),
+          );
+          if (trailing) {
+            runs.push(
+              new TextRun({
+                text: trailing,
+                font,
+                size,
+              }),
+            );
+          }
+        }
+        lastIndex = LINK_REGEX.lastIndex;
+      }
+      if (lastIndex < inputText.length) {
+        runs.push(
+          new TextRun({
+            text: inputText.substring(lastIndex),
+            font,
+            size,
+          }),
+        );
+      }
+      return runs.length > 0
+        ? runs
+        : [new TextRun({ text: inputText, font, size })];
+    };
+
     const parseRunsWithFootnotes = (
       inputText: string,
     ): (
       | InstanceType<typeof TextRun>
+      | InstanceType<typeof ExternalHyperlink>
       | InstanceType<typeof FootnoteReferenceRun>
     )[] => {
       const runs: (
         | InstanceType<typeof TextRun>
+        | InstanceType<typeof ExternalHyperlink>
         | InstanceType<typeof FootnoteReferenceRun>
       )[] = [];
       const regex = /\[\^([^\]]+)\]|§(\d+)§|\[(\d+)\]/g;
@@ -165,11 +271,11 @@ export async function generateDocx(
         if (key) {
           if (match.index > lastIndex) {
             runs.push(
-              new TextRun({
-                text: inputText.substring(lastIndex, match.index),
-                font: FONT,
-                size: SIZE,
-              }),
+              ...parseRunsWithLinks(
+                inputText.substring(lastIndex, match.index),
+                FONT,
+                SIZE,
+              ),
             );
           }
           runs.push(new FootnoteReferenceRun(getFootnoteId(key.trim())));
@@ -178,16 +284,12 @@ export async function generateDocx(
       }
       if (lastIndex < inputText.length) {
         runs.push(
-          new TextRun({
-            text: inputText.substring(lastIndex),
-            font: FONT,
-            size: SIZE,
-          }),
+          ...parseRunsWithLinks(inputText.substring(lastIndex), FONT, SIZE),
         );
       }
       return runs.length > 0
         ? runs
-        : [new TextRun({ text: inputText, font: FONT, size: SIZE })];
+        : parseRunsWithLinks(inputText, FONT, SIZE);
     };
 
     type DocChild = InstanceType<typeof Paragraph> | InstanceType<typeof Table>;
@@ -492,13 +594,7 @@ export async function generateDocx(
                     borders: cellBorder,
                     children: [
                       new Paragraph({
-                        children: [
-                          new TextRun({
-                            text: cell,
-                            font: FONT,
-                            size: SIZE,
-                          }),
-                        ],
+                        children: parseRunsWithLinks(cell, FONT, SIZE),
                       }),
                     ],
                   }),
@@ -581,14 +677,7 @@ export async function generateDocx(
       documentFootnotes[numId] = {
         children: [
           new Paragraph({
-            children: [
-              new TextRun({
-                text: fnText,
-                font: FONT,
-                size: FOOTNOTE_SIZE,
-                color: "000000",
-              }),
-            ],
+            children: parseRunsWithLinks(fnText, FONT, FOOTNOTE_SIZE),
           }),
         ],
       };
