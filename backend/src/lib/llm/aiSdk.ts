@@ -24,14 +24,14 @@ import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
  * a backstop set `LLM_MAX_OUTPUT_TOKENS`; an unusable value is ignored rather
  * than sent upstream.
  *
- * OpenCode Go keeps the previous 16,384: its Messages models (MiniMax, Qwen)
- * go through the Anthropic adapter, which does not recognise them and would
- * otherwise fall back to 4,096.
+ * OpenCode Go defaults to 65,536: modern frontier and flash models (DeepSeek,
+ * GLM, Qwen) support 64k+ output tokens, and large legal drafts or JSON tool
+ * payloads exceed 16k.
  */
 export function maxOutputTokensFor(provider: Provider): number | undefined {
   const value = Number(process.env.LLM_MAX_OUTPUT_TOKENS);
   if (Number.isSafeInteger(value) && value > 0) return value;
-  return provider === "opencode-go" ? 16_384 : undefined;
+  return provider === "opencode-go" ? 65_536 : undefined;
 }
 
 /**

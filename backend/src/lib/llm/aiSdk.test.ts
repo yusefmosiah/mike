@@ -16,9 +16,9 @@ describe("maxOutputTokensFor", () => {
     expect(maxOutputTokensFor("gemini")).toBeUndefined();
   });
 
-  it("keeps 16,384 for OpenCode Go, whose Messages models the Anthropic adapter would cap at 4,096", () => {
+  it("defaults to 65,536 for OpenCode Go models", () => {
     delete process.env.LLM_MAX_OUTPUT_TOKENS;
-    expect(maxOutputTokensFor("opencode-go")).toBe(16_384);
+    expect(maxOutputTokensFor("opencode-go")).toBe(65_536);
   });
 
   it("uses an operator-set limit for every provider", () => {
