@@ -136,6 +136,87 @@ export const OPENCODE_GO_MESSAGES_MODEL_IDS: ReadonlySet<string> = new Set([
     "qwen3.6-plus",
 ]);
 
+/**
+ * Canonical maximum output tokens by model ID for OpenCode Go models.
+ * Sourced from Models.dev (https://models.dev/providers/opencode-go/ and https://models.dev/api.json).
+ *
+ * To sync or add new models as they are released:
+ *   curl -s "https://models.dev/api.json" | jq '.["opencode-go"].models | map_values(.limit.output)'
+ */
+export const OPENCODE_GO_MODEL_OUTPUT_LIMITS: Readonly<Record<string, number>> = {
+    // DeepSeek (384,000 max output tokens, 1,000,000 context window)
+    "deepseek-flash": 384_000,
+    "deepseek-v4-flash": 384_000,
+    "deepseek-v4-flash-vision-exp": 384_000,
+    "deepseek-v4.1-flash": 384_000,
+    "deepseek-v4-pro": 384_000,
+
+    // xAI Grok (500,000 max output tokens)
+    "grok-4.5": 500_000,
+    "grok-4.6": 500_000,
+    "grok-4.7": 500_000,
+
+    // Space Bunny (524,288 max output tokens)
+    "space-bunny": 524_288,
+    "space-bunny-free": 524_288,
+
+    // Moonshot Kimi
+    "kimi-k2.6": 65_536,
+    "kimi-k2.7-code": 262_144,
+    "kimi-k3": 131_072,
+
+    // Zhipu AI GLM
+    "glm-5": 131_072,
+    "glm-5.1": 131_072,
+    "glm-5.2": 131_072,
+    "glm-5.3": 131_072,
+    "glm-5.3-flash": 131_072,
+
+    // OpenAI Luna on OpenCode Go
+    "gpt-5.6-luna": 128_000,
+    "gpt-6-luna": 128_000,
+
+    // Meituan LongCat
+    "longcat-2.0": 131_072,
+    "longcat-2.5-preview-free": 131_072,
+
+    // Xiaomi MiMo
+    "mimo-v2.5": 128_000,
+    "mimo-v2.5-pro": 128_000,
+    "mimo-v2.6-flash": 131_072,
+    "mimo-v2.6-pro": 131_072,
+
+    // MiniMax
+    "minimax-m2.5": 131_072,
+    "minimax-m2.7": 131_072,
+    "minimax-m3": 131_072,
+
+    // Meta Muse Spark
+    "muse-spark-1.2-contributor": 131_072,
+    "muse-spark-1.3-contributor": 131_072,
+
+    // Alibaba Qwen
+    "qwen3.6-plus": 65_536,
+    "qwen3.7-plus": 65_536,
+    "qwen3.7-max": 65_536,
+    "qwen3.8-flash": 131_072,
+    "qwen3.8-max": 131_072,
+
+    // Tencent Hunyuan
+    "hy3": 128_000,
+    "hy4-preview": 64_000,
+
+    // Other experimental models
+    "omen-alpha": 128_000,
+};
+
+export function maxOutputTokensForOpenCodeGoModel(modelId?: string): number {
+    if (modelId && OPENCODE_GO_MODEL_OUTPUT_LIMITS[modelId]) {
+        return OPENCODE_GO_MODEL_OUTPUT_LIMITS[modelId];
+    }
+    return 65_536; // safe baseline fallback for uncataloged OpenCode Go models
+}
+
 const ALL_MODELS = new Set<string>([
     ...CLAUDE_MAIN_MODELS,
     ...GEMINI_MAIN_MODELS,

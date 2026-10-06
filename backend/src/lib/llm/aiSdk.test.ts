@@ -16,11 +16,15 @@ describe("maxOutputTokensFor", () => {
     expect(maxOutputTokensFor("gemini")).toBeUndefined();
   });
 
-  it("defaults to 65,536 for OpenCode Go models", () => {
+  it("resolves model-specific maximum output tokens for OpenCode Go models", () => {
     delete process.env.LLM_MAX_OUTPUT_TOKENS;
-    expect(maxOutputTokensFor("opencode-go")).toBe(65_536);
+    expect(maxOutputTokensFor("opencode-go", "deepseek-v4.1-flash")).toBe(384_000);
+    expect(maxOutputTokensFor("opencode-go", "deepseek-v4-pro")).toBe(384_000);
+    expect(maxOutputTokensFor("opencode-go", "grok-4.7")).toBe(500_000);
+    expect(maxOutputTokensFor("opencode-go", "glm-5.3")).toBe(131_072);
+    expect(maxOutputTokensFor("opencode-go", "kimi-k2.6")).toBe(65_536);
+    expect(maxOutputTokensFor("opencode-go", "unknown-future-model")).toBe(65_536);
   });
-
   it("uses an operator-set limit for every provider", () => {
     process.env.LLM_MAX_OUTPUT_TOKENS = "32000";
     expect(maxOutputTokensFor("claude")).toBe(32_000);

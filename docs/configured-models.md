@@ -109,3 +109,36 @@ that needs it, or off for a local one that behaves properly.
 
 Set `DEBUG_LLM_TOOL_CALLS=1` to log the raw text of a tool call that could not
 be recovered.
+
+---
+
+## OpenCode Go Model Limits & Synchronization (Models.dev)
+
+OpenCode Go model specifications, context windows, and maximum output token limits are tracked canonically from [Models.dev](https://models.dev/providers/opencode-go/).
+
+Mike dynamically assigns each model its full native output token budget rather than applying a blanket ceiling:
+
+| Model Family | Canonical Model IDs | Max Output Tokens | Context Window |
+| --- | --- | --- | --- |
+| **DeepSeek** | `deepseek-v4.1-flash`, `deepseek-v4-flash`, `deepseek-v4-pro` | **384,000** | 1,000,000 |
+| **xAI Grok** | `grok-4.5`, `grok-4.6`, `grok-4.7` | **500,000** | 500,000 |
+| **Space Bunny** | `space-bunny`, `space-bunny-free` | **524,288** | 1,048,576 |
+| **Moonshot Kimi** | `kimi-k2.7-code`, `kimi-k3` | **262,144** / **131,072** | 262,144 / 1,048,576 |
+| **Zhipu AI GLM** | `glm-5.2`, `glm-5.3`, `glm-5.3-flash` | **131,072** | 1,000,000 |
+| **Alibaba Qwen** | `qwen3.8-max`, `qwen3.8-flash` | **131,072** | 1,000,000 |
+| **Xiaomi MiMo** | `mimo-v2.6-flash`, `mimo-v2.6-pro` | **131,072** | 1,048,576 |
+| **MiniMax** | `minimax-m2.7`, `minimax-m3` | **131,072** | 1,000,000 |
+
+### Synchronizing New Models from Models.dev
+
+When OpenCode releases new models or updates token ceilings:
+
+1. **Query the live Models.dev catalog**:
+   ```bash
+   curl -s "https://models.dev/api.json" | jq '.["opencode-go"].models | map_values({output: .limit.output, context: .limit.context})'
+   ```
+2. **Update `backend/src/lib/llm/models.ts`**:
+   +- Add the new model ID to `OPENCODE_GO_CHAT_COMPLETIONS_MODEL_IDS` (or `OPENCODE_GO_MESSAGES_MODEL_IDS` if served over Anthropic protocol).
+   +- Add its exact output limit to `OPENCODE_GO_MODEL_OUTPUT_LIMITS`.
+3. **Operator Override**:
+   +- Set `LLM_MAX_OUTPUT_TOKENS` in `backend/.env` or Docker Compose to enforce a global backstop across all providers if desired.

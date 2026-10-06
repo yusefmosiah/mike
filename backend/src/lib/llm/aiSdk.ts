@@ -14,6 +14,7 @@ import type {
 import { streamChunkTimeouts } from "../runtimeConfig";
 import { asProviderStallError, toProviderStreamError } from "./providerErrors";
 import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
+import { maxOutputTokensForOpenCodeGoModel } from "./models";
 
 /**
  * Per-step output limit, or undefined to leave it to the provider.
@@ -24,14 +25,19 @@ import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
  * a backstop set `LLM_MAX_OUTPUT_TOKENS`; an unusable value is ignored rather
  * than sent upstream.
  *
- * OpenCode Go defaults to 65,536: modern frontier and flash models (DeepSeek,
- * GLM, Qwen) support 64k+ output tokens, and large legal drafts or JSON tool
- * payloads exceed 16k.
+ * OpenCode Go resolves each model's canonical maximum output capacity from
+ * Models.dev (https://models.dev/providers/opencode-go/): e.g. 384,000 for
+ * DeepSeek V4/V4.1, 500,000 for Grok, 131,072 for GLM-5/Qwen3.8.
  */
-export function maxOutputTokensFor(provider: Provider): number | undefined {
+export function maxOutputTokensFor(
+  provider: Provider,
+  modelId?: string,
+): number | undefined {
   const value = Number(process.env.LLM_MAX_OUTPUT_TOKENS);
   if (Number.isSafeInteger(value) && value > 0) return value;
-  return provider === "opencode-go" ? 65_536 : undefined;
+  return provider === "opencode-go"
+    ? maxOutputTokensForOpenCodeGoModel(modelId)
+    : undefined;
 }
 
 /**
@@ -466,7 +472,7 @@ export async function streamAiSdk(
         ? { providerOptions }
         : {}),
       tools,
-      maxOutputTokens: maxOutputTokensFor(config.provider),
+      maxOutputTokens: maxOutputTokensFor(config.provider, config.modelId),
       stopWhen: sdk.stepCountIs(maxIterations),
       abortSignal: internalAbort.signal,
       // Cut off a provider that stops sending, at the source. Tool execution
