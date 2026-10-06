@@ -44,7 +44,12 @@ function fakeDb() {
 async function generatedXml(options: {
   sections: unknown[];
   numberSections?: boolean;
-}): Promise<{ documentXml: string; numberingXml: string }> {
+  footnotes?: Record<string, string>;
+}): Promise<{
+  documentXml: string;
+  numberingXml: string;
+  footnotesXml: string | null;
+}> {
   let bytes: ArrayBuffer | undefined;
   uploadFileMock.mockImplementationOnce(
     async (_key: string, uploaded: ArrayBuffer) => {
@@ -57,17 +62,21 @@ async function generatedXml(options: {
     options.sections,
     "test-user",
     fakeDb() as never,
-    options.numberSections === undefined
-      ? undefined
-      : { numberSections: options.numberSections },
+    {
+      numberSections: options.numberSections,
+      footnotes: options.footnotes,
+    },
   );
 
   expect(result).not.toHaveProperty("error");
   expect(bytes).toBeDefined();
   const archive = await JSZip.loadAsync(bytes!);
   const documentXml = await archive.file("word/document.xml")!.async("string");
-  const numberingXml = await archive.file("word/numbering.xml")!.async("string");
-  return { documentXml, numberingXml };
+  const numberingXml =
+    (await archive.file("word/numbering.xml")?.async("string")) ?? "";
+  const footnotesXml =
+    (await archive.file("word/footnotes.xml")?.async("string")) ?? null;
+  return { documentXml, numberingXml, footnotesXml };
 }
 
 function paragraphContaining(xml: string, text: string): string {
@@ -158,5 +167,87 @@ describe("generateDocx numbering", () => {
     expect(first).not.toContain("- First item");
     expect(second).not.toContain("- Second item");
     expect(numberingXml).toContain('<w:numFmt w:val="bullet"/>');
+  });
+});
+describe("generateDocx footnotes", () => {
+  it("compiles markdown footnote citations and definitions into native OpenXML footnotes", async () => {
+    const { documentXml, footnotesXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Fiduciary Duties",
+          content:
+            "Directors owe a duty of loyalty under Delaware law[^1].\n" +
+            "This extends to corporate opportunities[^2].\n\n" +
+            "[^1]: See Guth v. Loft, Inc., 5 A.2d 503 (Del. 1939).\n" +
+            "[^2]: See Broz v. Cellular Information Systems, Inc., 673 A.2d 148 (Del. 1996).",
+        },
+      ],
+    });
+
+    // Body paragraph contains native OpenXML footnoteReference runs
+    expect(documentXml).toContain("<w:footnoteReference");
+    expect(footnotesXml).not.toBeNull();
+    // word/footnotes.xml contains the actual citation text
+    expect(footnotesXml).toContain("Guth v. Loft, Inc.");
+    expect(footnotesXml).toContain("Broz v. Cellular Information Systems");
+    // Body paragraphs do not leak the raw definition lines
+    expect(documentXml).not.toContain("[^1]: See Guth");
+    expect(documentXml).not.toContain("[^2]: See Broz");
+  });
+
+  it("compiles structured footnotes parameter into native footnotes", async () => {
+    const { documentXml, footnotesXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Standard of Review",
+          content: "The business judgment rule applies by default[^1].",
+        },
+      ],
+      footnotes: {
+        "1": "Aronson v. Lewis, 473 A.2d 805 (Del. 1984).",
+      },
+    });
+
+    expect(documentXml).toContain("<w:footnoteReference");
+    expect(footnotesXml).not.toBeNull();
+    expect(footnotesXml).toContain("Aronson v. Lewis");
+  });
+
+  it("converts bracketed markers (§1§ and [2]) to footnotes when defined in footnotes map", async () => {
+    const { documentXml, footnotesXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Statutory Basis",
+          content:
+            "Governed by Delaware General Corporation Law §1§ and liability cap [2]. Regular brackets like [Schedule A] stay plain text.",
+        },
+      ],
+      footnotes: {
+        "1": "8 Del. C. § 141(a).",
+        "2": "8 Del. C. § 102(b)(7).",
+      },
+    });
+
+    expect(documentXml).toContain("<w:footnoteReference");
+    expect(footnotesXml).not.toBeNull();
+    expect(footnotesXml).toContain("8 Del. C. § 141(a)");
+    expect(footnotesXml).toContain("8 Del. C. § 102(b)(7)");
+    // Normal bracketed text without a matching footnote is preserved as plain text
+    expect(documentXml).toContain("[Schedule A]");
+  });
+
+  it("omits user footnote references when a document has no footnotes", async () => {
+    const { documentXml, footnotesXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Summary",
+          content: "This is a clean document with no footnotes.",
+        },
+      ],
+    });
+
+    expect(documentXml).not.toContain("<w:footnoteReference");
+    // Standard Word separator entries (-1, 0) exist in OpenXML, but no user footnote (w:id="1")
+    expect(footnotesXml).not.toContain('w:id="1"');
   });
 });

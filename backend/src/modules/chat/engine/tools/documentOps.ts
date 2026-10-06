@@ -67,11 +67,12 @@ export async function generateDocx(
   sections: unknown[],
   userId: string,
   db: Db,
-  options?: {
-    landscape?: boolean;
-    numberSections?: boolean;
-    projectId?: string | null;
-  },
+    options?: {
+      landscape?: boolean;
+      numberSections?: boolean;
+      projectId?: string | null;
+      footnotes?: Record<string, string>;
+    },
 ) {
   try {
     const {
@@ -85,6 +86,7 @@ export async function generateDocx(
       WidthType,
       BorderStyle,
       TextRun,
+      FootnoteReferenceRun,
       AlignmentType,
       LevelFormat,
       LevelSuffix,
@@ -94,6 +96,99 @@ export async function generateDocx(
 
     const FONT = "Times New Roman";
     const SIZE = 22; // 11pt in half-points
+    const FOOTNOTE_SIZE = 20; // 10pt in half-points (standard legal footnote)
+
+    const rawFootnotes = new Map<string, string>();
+    if (options?.footnotes && typeof options.footnotes === "object") {
+      for (const [key, value] of Object.entries(options.footnotes)) {
+        if (typeof value === "string" && value.trim()) {
+          rawFootnotes.set(key.trim(), value.trim());
+        }
+      }
+    }
+
+    const FOOTNOTE_DEF_REGEX = /^\s*\[\^([^\]]+)\]:\s*(.+)$/;
+    const BRACKET_DEF_REGEX = /^\s*\[(\d+)\]:\s*(.+)$/;
+
+    for (const sec of sections as Array<{
+      footnotes?: Record<string, string>;
+      content?: string;
+    }>) {
+      if (sec && typeof sec.footnotes === "object" && sec.footnotes) {
+        for (const [k, v] of Object.entries(sec.footnotes)) {
+          if (typeof v === "string" && v.trim()) {
+            rawFootnotes.set(k.trim(), v.trim());
+          }
+        }
+      }
+      if (sec && typeof sec.content === "string") {
+        for (const line of sec.content.split("\n")) {
+          const match =
+            line.trim().match(FOOTNOTE_DEF_REGEX) ||
+            line.trim().match(BRACKET_DEF_REGEX);
+          if (match) {
+            rawFootnotes.set(match[1].trim(), match[2].trim());
+          }
+        }
+      }
+    }
+
+    const normalizedIdMap = new Map<string, number>();
+    let nextFootnoteId = 1;
+    const getFootnoteId = (key: string): number => {
+      let id = normalizedIdMap.get(key);
+      if (!id) {
+        id = nextFootnoteId++;
+        normalizedIdMap.set(key, id);
+      }
+      return id;
+    };
+
+    const parseRunsWithFootnotes = (
+      inputText: string,
+    ): (
+      | InstanceType<typeof TextRun>
+      | InstanceType<typeof FootnoteReferenceRun>
+    )[] => {
+      const runs: (
+        | InstanceType<typeof TextRun>
+        | InstanceType<typeof FootnoteReferenceRun>
+      )[] = [];
+      const regex = /\[\^([^\]]+)\]|§(\d+)§|\[(\d+)\]/g;
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(inputText)) !== null) {
+        const key =
+          match[1] ||
+          match[2] ||
+          (match[3] && rawFootnotes.has(match[3]) ? match[3] : null);
+        if (key) {
+          if (match.index > lastIndex) {
+            runs.push(
+              new TextRun({
+                text: inputText.substring(lastIndex, match.index),
+                font: FONT,
+                size: SIZE,
+              }),
+            );
+          }
+          runs.push(new FootnoteReferenceRun(getFootnoteId(key.trim())));
+          lastIndex = regex.lastIndex;
+        }
+      }
+      if (lastIndex < inputText.length) {
+        runs.push(
+          new TextRun({
+            text: inputText.substring(lastIndex),
+            font: FONT,
+            size: SIZE,
+          }),
+        );
+      }
+      return runs.length > 0
+        ? runs
+        : [new TextRun({ text: inputText, font: FONT, size: SIZE })];
+    };
 
     type DocChild = InstanceType<typeof Paragraph> | InstanceType<typeof Table>;
     const children: DocChild[] = [];
@@ -428,6 +523,13 @@ export async function generateDocx(
         for (const line of section.content.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          if (
+            trimmed.match(FOOTNOTE_DEF_REGEX) ||
+            (trimmed.match(BRACKET_DEF_REGEX) &&
+              rawFootnotes.has(trimmed.match(BRACKET_DEF_REGEX)![1]))
+          ) {
+            continue;
+          }
           const bulletMatch = trimmed.match(/^[-•*]\s+(.+)/);
           const rawText = bulletMatch ? bulletMatch[1].trim() : trimmed;
           const manualList = parseManualListMarker(rawText);
@@ -460,13 +562,7 @@ export async function generateDocx(
                   : legalNumbering(inferredLevel),
               bullet: bulletMatch ? { level: 0 } : undefined,
               spacing: { after: 120 },
-              children: [
-                new TextRun({
-                  text,
-                  font: FONT,
-                  size: SIZE,
-                }),
-              ],
+              children: parseRunsWithFootnotes(text),
             }),
           );
         }
@@ -476,8 +572,34 @@ export async function generateDocx(
     const pageSetup = options?.landscape
       ? { page: { size: { orientation: PageOrientation.LANDSCAPE } } }
       : {};
+    const documentFootnotes: Record<
+      number,
+      { children: InstanceType<typeof Paragraph>[] }
+    > = {};
+    for (const [key, numId] of normalizedIdMap.entries()) {
+      const fnText = rawFootnotes.get(key)?.trim() || `[${key}]`;
+      documentFootnotes[numId] = {
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: fnText,
+                font: FONT,
+                size: FOOTNOTE_SIZE,
+                color: "000000",
+              }),
+            ],
+          }),
+        ],
+      };
+    }
+
 
     const doc = new Document({
+      footnotes:
+        Object.keys(documentFootnotes).length > 0
+          ? documentFootnotes
+          : undefined,
       numbering: numberSections
         ? {
             config: [

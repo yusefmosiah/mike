@@ -1955,7 +1955,12 @@ export async function runToolCalls(
         args.sections as unknown[],
         userId,
         db,
-        { landscape, numberSections, projectId: projectId ?? null },
+        {
+          landscape,
+          numberSections,
+          projectId: projectId ?? null,
+          footnotes: args.footnotes as Record<string, string> | undefined,
+        },
       );
       registerGeneratedDocument(
         tc,

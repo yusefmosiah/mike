@@ -339,7 +339,13 @@ export const TOOLS = [
                 content: {
                   type: "string",
                   description:
-                    "Prose text content (paragraphs separated by double newlines)",
+                    "Prose text content (paragraphs separated by double newlines). You can include footnotes using standard markdown syntax: cite with [^1] in text and define with [^1]: citation text, or supply via the footnotes parameter. These compile into genuine Microsoft Word footnote fields.",
+                },
+                footnotes: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description:
+                    "Optional section-level mapping of footnote IDs (e.g. \"1\", \"2\") to footnote citation text. In content, cite them with [^1], [^2].",
                 },
                 pageBreak: {
                   type: "boolean",
@@ -369,6 +375,12 @@ export const TOOLS = [
                 },
               },
             },
+          },
+          footnotes: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description:
+              "Optional document-wide mapping of footnote IDs (e.g. {\"1\": \"citation text\", \"2\": \"...\"}). In content, cite them using standard markdown footnotes [^1], [^2]. Footnotes render as genuine Word footnote fields at the bottom of the page.",
           },
         },
         required: ["title", "sections"],
