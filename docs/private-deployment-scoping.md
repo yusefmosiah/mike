@@ -91,6 +91,14 @@ depth, and add active injection defense.*
     `toolResults` to flag indirect prompt injection payloads.
   * Dynamic auto-mode risk scoring (`ALLOW / ASK / DENY`) wrapping
     `runToolCalls` in `streaming.ts`.
+* **1.5. Web Search Tool (`web_search` via Keenable)**:
+  * Provider-neutral engine interface (`backend/src/lib/search/`):
+    * `search(query, options)` returning ranked results (`title`, `url`, `snippet`, `published_at`).
+  * Primary provider: **Keenable** (`POST https://api.keenable.ai/v1/search` with `X-API-Key`).
+    * Agent-first design, high rate limits, economical pricing, built-in snippet extraction.
+  * Swappable provider adapters: **Tavily**, **Exa**, **Brave**.
+  * Tool schema: expose `web_search` in `backend/src/modules/chat/engine/tools/toolSchemas.ts`.
+  * Gating & Policy: configurable via `SEARCH_PROVIDER` and `KEENABLE_API_KEY` (or per-user BYOK); gated off under `STRICT_PRIVATE_MODE=true` unless explicitly approved.
 
 ---
 
@@ -182,3 +190,38 @@ modules into a TypeScript REPL, enabling 24/7 autonomous work.*
   * Enable `pgvector`; chunk documents into `document_chunks`; implement
     permission-aware hybrid retrieval (BM25 + vector RRF) in
     `backend/src/modules/retrieval/`.
+
+---
+
+## 3. Upstream Contribution Strategy (Clean PR Slices)
+
+To maintain a healthy, mergeable fork and give back to Mike OSS (`open-legal-products/mike`), work is partitioned into clean, self-contained PR branches adhering to Mike's `backend-architecture.md` and layering rules:
+
+```
+Upstream PRs (Mike OSS)                     Private Fork (Firm-Owned)
+───────────────────────                     ────────────────────────
+PR 1: OpenCode Go fixes & models            Strict Private Mode & Egress
+PR 2: Configurable iteration limit          Phala TEE Attestation & Receipts
+PR 3: Provider-agnostic Web Search          DGX Spark vLLM Serving
+PR 4: Pi-style conversation tree            24/7 RLM REPL Dreaming
+PR 5: Local STT/TTS audio endpoints         Enterprise MDM Mobile Shell
+```
+
+### Upstream Candidate PRs:
+- PR 1: `fix(llm): OpenCode Go session routing metadata and catalog sync`
+  +- *Status*: Implemented on local `main`; ready to branch and submit upstream.
+  +- *Scope*: Fixes `MissingSessionID` error via `x-opencode-session` and `User-Agent` headers; adds `OPENCODE_GO_API_KEY` alias; updates catalog to current models.
+- PR 2: `feat(llm): configurable tool iteration ceiling`
+  +- *Scope*: Replaces hardcoded 16-step cap with `LLM_MAX_TOOL_ITERATIONS` environment variable.
+- PR 3: `feat(tools): provider-agnostic web search tool (Keenable, Tavily, Exa)`
+  +- *Scope*: Modular `backend/src/lib/search/` interface, Keenable primary adapter, tool schema, citation metadata, and user settings.
+- PR 4: `feat(chat): immutable conversation tree and branching UI`
+  +- *Scope*: Schema migration for `parent_message_id`, leaf pointer, server-authoritative context builder, and frontend sibling navigation.
+- PR 5: `feat(audio): local STT transcription and TTS read-aloud proxies`
+  +- *Scope*: Standard OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoints with UI composer dictation and sentence playback.
+
+### Private Fork Only (Not Upstreamed):
+- Phala TEE cryptographic attestation verifier and `inference_receipts` auditing.
+- `STRICT_PRIVATE_MODE=true` hard egress lockouts (disabling telemetry, unapproved BYOK, and external cloud models).
+- The 24/7 TypeScript RLM REPL Engine for overnight due diligence and firm memory dreaming on owned DGX compute.
+- Corporate MDM deployment packaging and internal distribution configurations.
