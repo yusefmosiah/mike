@@ -100,6 +100,11 @@ depth, and add active injection defense.*
   * Tool schema: expose `web_search` in `backend/src/modules/chat/engine/tools/toolSchemas.ts`.
   * Gating & Policy: configurable via `SEARCH_PROVIDER` and `KEENABLE_API_KEY` (or per-user BYOK); gated off under `STRICT_PRIVATE_MODE=true` unless explicitly approved.
 
+* **1.6. Native Legal Footnotes in Document Generation (`generate_docx`)**:
+  * Upgrade Level 1 declarative generator (`backend/src/modules/chat/engine/tools/documentOps.ts` and `toolSchemas.ts`).
+  * Add support for native Word footnotes via `docx` library's `FootnoteReferenceRun` and `Document({ footnotes })`.
+  * Support both Markdown-style footnote citations (`[^1]`) within prose content and explicit structured `"footnotes": { "1": "citation text" }` maps in the tool schema.
+  * Emits genuine Microsoft Word footnote fields that render at the bottom of the page with automatic numbering in MS Word (eliminating manual bracketed citation cleanup).
 ---
 
 ### Phase 2: Private Deployment Hardening & Phala TEE Lane (DEMO MILESTONE)
@@ -143,6 +148,9 @@ waterfall modeling, and tabular data analysis.*
   existing `connectorApprovals.ts` and `ask_inputs` system when strict
   approval mode is enabled.
 
+* **Full-Surface Microsoft Word Document Synthesis (Level 3)**:
+  * Complements Level 1's declarative schema (`docx` npm) and Level 2's tracked-changes OpenXML editor (`fast-xml-parser`).
+  * Enables the model to execute Python (`python-docx`, `openxml`) or TS scripts to build complex 100+ page agreements with automatic Tables of Contents (`{ TOC }`), Tables of Authorities, custom firm letterheads, dynamic page numbering, and multi-section layouts.
 ---
 
 ### Phase 4: TypeScript RLM (Recursive Language Model) Engine for 24/7 Deep Work
@@ -202,9 +210,10 @@ Upstream PRs (Mike OSS)                     Private Fork (Firm-Owned)
 ───────────────────────                     ────────────────────────
 PR 1: OpenCode Go fixes & models            Strict Private Mode & Egress
 PR 2: Configurable iteration limit          Phala TEE Attestation & Receipts
-PR 3: Provider-agnostic Web Search          DGX Spark vLLM Serving
-PR 4: Pi-style conversation tree            24/7 RLM REPL Dreaming
-PR 5: Local STT/TTS audio endpoints         Enterprise MDM Mobile Shell
+PR 3: Native Word Footnotes (generate_docx)  DGX Spark vLLM Serving
+PR 4: Provider-agnostic Web Search          24/7 RLM REPL Dreaming
+PR 5: Pi-style conversation tree            Enterprise MDM Mobile Shell
+PR 6: Local STT/TTS audio endpoints
 ```
 
 ### Upstream Candidate PRs:
@@ -213,13 +222,14 @@ PR 5: Local STT/TTS audio endpoints         Enterprise MDM Mobile Shell
   +- *Scope*: Fixes `MissingSessionID` error via `x-opencode-session` and `User-Agent` headers; adds `OPENCODE_GO_API_KEY` alias; updates catalog to current models.
 - PR 2: `feat(llm): configurable tool iteration ceiling`
   +- *Scope*: Replaces hardcoded 16-step cap with `LLM_MAX_TOOL_ITERATIONS` environment variable.
-- PR 3: `feat(tools): provider-agnostic web search tool (Keenable, Tavily, Exa)`
+- PR 3: `feat(tools): native Word footnote support in generate_docx`
+  +- *Scope*: Level 1 document generation upgrade: `FootnoteReferenceRun` and `Document({ footnotes })` in `documentOps.ts`, markdown `[^1]` parsing, and schema updates in `toolSchemas.ts`.
+- PR 4: `feat(tools): provider-agnostic web search tool (Keenable, Tavily, Exa)`
   +- *Scope*: Modular `backend/src/lib/search/` interface, Keenable primary adapter, tool schema, citation metadata, and user settings.
-- PR 4: `feat(chat): immutable conversation tree and branching UI`
+- PR 5: `feat(chat): immutable conversation tree and branching UI`
   +- *Scope*: Schema migration for `parent_message_id`, leaf pointer, server-authoritative context builder, and frontend sibling navigation.
-- PR 5: `feat(audio): local STT transcription and TTS read-aloud proxies`
+- PR 6: `feat(audio): local STT transcription and TTS read-aloud proxies`
   +- *Scope*: Standard OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoints with UI composer dictation and sentence playback.
-
 ### Private Fork Only (Not Upstreamed):
 - Phala TEE cryptographic attestation verifier and `inference_receipts` auditing.
 - `STRICT_PRIVATE_MODE=true` hard egress lockouts (disabling telemetry, unapproved BYOK, and external cloud models).
