@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   aiSdkFetch,
   completeAiSdkText,
@@ -70,6 +71,7 @@ const ROUTER_KEY_ENV_HINTS: Record<RouterProvider, string> = {
 // failed every request with "not configured".
 const ENVIRONMENT_KEY_ALIASES: Record<string, string[]> = {
   ANTHROPIC_API_KEY: ["CLAUDE_API_KEY"],
+  OPENCODE_API_KEY: ["OPENCODE_GO_API_KEY"],
 };
 
 function requiredKey(
@@ -99,7 +101,11 @@ function routerEnvironmentKey(provider: RouterProvider): string | undefined {
       process.env.VERCEL_AI_GATEWAY_API_KEY?.trim()
     );
   }
-  if (provider === "opencode-go") return process.env.OPENCODE_API_KEY?.trim();
+  if (provider === "opencode-go")
+    return (
+      process.env.OPENCODE_API_KEY?.trim() ||
+      process.env.OPENCODE_GO_API_KEY?.trim()
+    );
   return process.env.OPENROUTER_API_KEY?.trim();
 }
 
@@ -136,6 +142,13 @@ async function createAnthropicAdapter(args: {
     apiKey: args.apiKey,
     baseURL: args.baseURL,
     name: `${args.provider}.messages`,
+    headers:
+      args.provider === "opencode-go"
+        ? {
+            "User-Agent": "mike-legal-agent/1.0",
+            "x-opencode-session": randomUUID(),
+          }
+        : undefined,
     fetch: aiSdkFetch,
   });
   return {
@@ -195,6 +208,10 @@ async function createRouterAdapter(
     name: "opencodeGo",
     apiKey: key,
     baseURL: OPENCODE_GO_BASE_URL,
+    headers: {
+      "User-Agent": "mike-legal-agent/1.0",
+      "x-opencode-session": randomUUID(),
+    },
     fetch: aiSdkFetch,
   });
   return {

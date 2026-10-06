@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { LanguageModel, ToolSet } from "ai" with {
   "resolution-mode": "import",
 };
@@ -73,7 +74,31 @@ export async function aiSdkFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const response = await fetch(input, init);
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : typeof input === "object" && input !== null && "url" in input
+          ? (input as Request).url
+          : "";
+  let requestInit = init;
+  if (url.includes("opencode.ai")) {
+    const headers = new Headers(
+      init?.headers ??
+        (typeof input === "object" && input !== null && "headers" in input
+          ? (input as Request).headers
+          : undefined),
+    );
+    if (!headers.has("x-opencode-session")) {
+      headers.set("x-opencode-session", randomUUID());
+    }
+    if (!headers.has("User-Agent")) {
+      headers.set("User-Agent", "mike-legal-agent/1.0");
+    }
+    requestInit = { ...init, headers };
+  }
+  const response = await fetch(input, requestInit);
   if (
     !response.body ||
     !response.headers.get("content-type")?.includes("text/event-stream")

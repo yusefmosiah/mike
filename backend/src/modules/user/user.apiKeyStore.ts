@@ -55,7 +55,11 @@ function envApiKey(provider: ApiKeyProvider): string | null {
                 null
             );
         case "opencode-go":
-            return process.env.OPENCODE_API_KEY?.trim() || null;
+            return (
+                process.env.OPENCODE_API_KEY?.trim() ||
+                process.env.OPENCODE_GO_API_KEY?.trim() ||
+                null
+            );
         case "courtlistener":
             return process.env.COURTLISTENER_API_TOKEN?.trim() || null;
         default:

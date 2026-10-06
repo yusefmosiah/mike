@@ -6,6 +6,9 @@
   registration, Ollama, and first-run setup
 - [Manual and production deployment](deployment.md) — managed infrastructure,
   environment variables, database upgrades, and deployment safety
+- [Private deployment scoping](private-deployment-scoping.md) — gap analysis
+  and release plan for a firm-owned private install (strict privacy mode,
+  attested confidential compute, conversation tree, voice, ingestion, mobile)
 - [Troubleshooting](troubleshooting.md) — common local and production problems
 - [Safe local testing](safe-local-testing.md) — disposable resources, synthetic
   documents, and secret handling
