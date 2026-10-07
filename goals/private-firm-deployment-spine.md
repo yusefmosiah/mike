@@ -29,7 +29,7 @@ metamission:
     - id: station-4-context-resilience-and-compaction
       path: goals/station-4-context-resilience-and-compaction.md
       readiness: executable
-      status: working
+      status: complete
       depends_on: [station-3-modular-search-and-citations]
     - id: station-5-pi-tree-branching
       path: goals/station-5-pi-tree-branching.md
@@ -125,11 +125,9 @@ boundaries:
     - Rewriting the frontend in a non-Next.js framework
     - Arbitrary cloud model bypasses under strict private mode
 
-now:
   status: working
-  slice: station-4-context-resilience-and-compaction
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
-  deploy_identity: local-docker-compose
+  slice: station-5-pi-tree-branching
+  source_ref: 279abe1
   candidate:
     id: candidate-spine-init
     state: ready
@@ -159,15 +157,9 @@ now:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Author goals/station-1-doc-ast-and-block-tools.md and initialize companion ledger.
+  next_action: Advance Station 5 (Pi-tree branching); Station 4 landed at 279abe1.
 
 receipts:
-  - id: spine-init
-    boundary: define
-    identity: e5d6bc8
-    proof_refs: [docs/private-deployment-scoping.md]
-    rollback_ref: aaaa32d
-    disposition: Metamission spine initialized with 8 stations and approved phase sequence.
   - id: station-1-complete
     boundary: implement
     identity: 3a37928
@@ -194,6 +186,15 @@ receipts:
       - backend/src/modules/chat/engine/verifyCitations.test.ts
     rollback_ref: 60efb70
     disposition: Station 3 landed on main with passing 84-test suite.
+  - id: station-4-complete
+    boundary: implement
+    identity: 279abe1
+    proof_refs:
+      - goals/station-4-context-resilience-and-compaction.md
+      - backend/src/lib/llm/__tests__/toolRepair.test.ts
+      - backend/src/modules/chat/engine/__tests__/contextCompaction.test.ts
+    rollback_ref: e1a9700
+    disposition: Station 4 landed on main with passing 116-test affected surface (full suite 2835 pass, 2 pre-existing openrouter failures).
 ---
 
 # Metamission: Private Firm Deployment Spine
