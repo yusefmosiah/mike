@@ -232,6 +232,9 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                     chatId,
                     turnId: run.id,
                     ...(assistantMessageId ? { assistantMessageId } : {}),
+                    // Same contract as the non-project chat route: the
+                    // caller's user row already exists (turnUserMessageId).
+                    ...(turnUserMessageId ? { userMessageId: turnUserMessageId } : {}),
                 })}\n\n`,
             );
             writeApprovedConnectorFrames(write, approvalEvents);

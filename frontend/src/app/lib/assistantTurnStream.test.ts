@@ -60,9 +60,26 @@ describe("consumeAssistantTurnStream", () => {
       { turn, sink, cursor, hooks: { onChatId } },
     );
     expect(cursor).toEqual({ chatId: "chat-a", turnId: "turn-1", lastSeq: 4 });
-    expect(onChatId).toHaveBeenCalledWith("chat-a", "answer-1");
+    expect(onChatId).toHaveBeenCalledWith("chat-a", "answer-1", undefined);
     expect(turn.turn.assistant.id).toBe("answer-1");
     expect(text(turn.turn.assistant)).toBe("Hello");
+    turn.finish();
+  });
+
+  it("stamps the optimistic user message when the frame names it", async () => {
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const cursor = createTurnCursor("chat-a");
+    const onChatId = vi.fn();
+    await consumeAssistantTurnStream(
+      sseResponse([
+        frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1", assistantMessageId: "answer-1", userMessageId: "user-1" }),
+        "id: 2\ndata: [DONE]\n\n",
+      ]),
+      { turn, sink, cursor, hooks: { onChatId } },
+    );
+    expect(onChatId).toHaveBeenCalledWith("chat-a", "answer-1", "user-1");
+    expect(turn.turn.userMessage?.id).toBe("user-1");
     turn.finish();
   });
 

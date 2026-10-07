@@ -37,7 +37,7 @@ export function createTurnCursor(chatId?: string): TurnCursor {
 }
 
 export type TurnStreamHooks = {
-  onChatId?: (chatId: string, assistantMessageId?: string) => void;
+  onChatId?: (chatId: string, assistantMessageId?: string, userMessageId?: string) => void;
   onChatTitle?: (chatId: string, title: string) => void;
   onRejectedApiKey?: () => void;
   /** The server sent an `error` frame; the turn is over as far as the model goes. */
@@ -328,10 +328,12 @@ export async function consumeAssistantTurnStream(
             typeof data.assistantMessageId === "string"
               ? data.assistantMessageId
               : undefined;
+          const userMessageId =
+            typeof data.userMessageId === "string" ? data.userMessageId : undefined;
           cursor.chatId = streamed;
           if (typeof data.turnId === "string") cursor.turnId = data.turnId;
-          turn.identify(streamed, assistantMessageId);
-          hooks.onChatId?.(streamed, assistantMessageId);
+          turn.identify(streamed, assistantMessageId, userMessageId);
+          hooks.onChatId?.(streamed, assistantMessageId, userMessageId);
           continue;
         }
 

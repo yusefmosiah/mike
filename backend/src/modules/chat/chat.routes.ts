@@ -725,6 +725,11 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                     chatId,
                     turnId: run.id,
                     ...(assistantMessageId ? { assistantMessageId } : {}),
+                    // The caller's own row already exists (inserted in
+                    // prepare, id = turnUserMessageId). The client stamps
+                    // its optimistic user message with this so branch
+                    // controls render while the answer still streams.
+                    ...(turnUserMessageId ? { userMessageId: turnUserMessageId } : {}),
                 })}\n\n`,
             );
             writeApprovedConnectorFrames(write, approvalEvents);

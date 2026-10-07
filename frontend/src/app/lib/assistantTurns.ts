@@ -130,10 +130,17 @@ export function beginAssistantTurn(
     if (!current?.size) turns.delete(chatId);
     notify(chatId, "finish", record);
   };
-  const identify = (id: string, messageId?: string) => {
+  const identify = (id: string, messageId?: string, userMessageId?: string) => {
     if (record.finished) return;
     if (messageId && record.assistant.id !== messageId) {
       record.assistant = { ...record.assistant, id: messageId };
+      publish();
+    }
+    // The server names the durable user row this turn answers. Stamp the
+    // optimistic user message so branch controls (edit, regenerate parent,
+    // leaf moves) work while the answer still streams.
+    if (userMessageId && record.userMessage && !record.userMessage.id) {
+      record.userMessage = { ...record.userMessage, id: userMessageId };
       publish();
     }
     if (id === record.chatId) return;
