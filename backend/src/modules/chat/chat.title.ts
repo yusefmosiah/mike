@@ -1,6 +1,7 @@
 import { completeText, type UserApiKeys } from "../../lib/llm";
 import { providerFailureStatus } from "../../lib/llm/providerErrors";
 import { reportError } from "../../lib/observability/sentry";
+import { assertModelAllowed } from "../../lib/privateMode";
 import { UserFacingError } from "../../lib/userFacingError";
 
 const CAUSE_CHAIN_DEPTH = 8;
@@ -92,6 +93,13 @@ export async function generateAssistantChatTitle(args: {
     message: string;
     apiKeys?: UserApiKeys;
 }): Promise<string> {
+    // Every title path (generate-title route and the background generations
+    // in chat streams) funnels through here with the resolved title model.
+    // Strict private mode refuses a hosted lane before a key is spent; the
+    // refusal surfaces through this call's existing error handling — the
+    // reply it runs beside is unaffected, and no fallback title model is
+    // attempted.
+    assertModelAllowed(args.model);
     const titleText = await completeText({
         model: args.model,
         user: `Generate a concise title (3–6 words) for a chat in an AI Legal Platform that starts with this message. The title should describe the topic or document — do NOT include words like "Legal Assistant", "AI", "Chat", or any similar prefix. If there is not enough information to generate a title, return exactly "${TITLE_FALLBACK}". Return only the title, no quotes or punctuation.\n\nMessage: ${args.message.slice(0, 500)}`,

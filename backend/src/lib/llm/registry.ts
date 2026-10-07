@@ -205,6 +205,27 @@ function validBaseUrl(value: string): boolean {
   }
 }
 
+/**
+ * Attestation declarations are all-or-nothing: a malformed record rejects the
+ * whole model entry rather than silently dropping the requirement, so a typo
+ * can never downgrade an attested endpoint to an unattested one.
+ */
+function parseAttestation(
+  value: unknown,
+): ConfiguredModel["attestation"] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const endpoint = optionalString(record, "endpoint");
+  if (!endpoint || !validBaseUrl(endpoint)) return null;
+  const expectedMeasurement = optionalString(record, "expectedMeasurement");
+  if (expectedMeasurement === null) return null;
+  return {
+    endpoint,
+    ...(expectedMeasurement ? { expectedMeasurement } : {}),
+  };
+}
+
 function parseConfiguredModel(value: unknown): ConfiguredModel | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -216,6 +237,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
   const apiKey = optionalString(record, "apiKey");
   const apiKeyProvider = record.apiKeyProvider;
   const maxTokensField = record.maxTokensField;
+  const attestation = parseAttestation(record.attestation);
 
   if (
     !id ||
@@ -229,6 +251,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     apiModel === null ||
     apiKeyEnv === null ||
     apiKey === null ||
+    attestation === null ||
     (apiKeyProvider !== undefined &&
       (typeof apiKeyProvider !== "string" ||
         !USER_API_KEY_PROVIDERS.has(apiKeyProvider as keyof UserApiKeys))) ||
@@ -248,6 +271,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     provider: "openai-compatible",
     location: record.location,
     baseUrl: baseUrl.replace(/\/+$/, ""),
+    ...(attestation ? { attestation } : {}),
     ...(label ? { label } : {}),
     ...(apiModel ? { apiModel } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),

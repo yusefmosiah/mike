@@ -15,6 +15,7 @@ import {
     type UserApiKeys,
 } from "../../lib/llm";
 import { loadPdfjs } from "../../lib/pdfjs";
+import { assertModelAllowed } from "../../lib/privateMode";
 import { formatPromptSuffix } from "./tabular.prompt";
 import { type CellResult, type Column } from "./tabular.shared";
 
@@ -178,6 +179,12 @@ Rules:
             // malformed line — skip
         }
     };
+
+    // Strict private mode refuses a hosted extraction lane before the
+    // document text (the prompt) can leave for it. The caller resolved and
+    // validated this id; a refusal reports through the same stream-error
+    // path as a provider rejection — never as a fallback model.
+    assertModelAllowed(model);
 
     // Preserve any partial lines before re-throwing the stream failure. An abort
     // is not logged because it is the caller stopping the run; provider failures

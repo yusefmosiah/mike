@@ -7,13 +7,15 @@
 //
 // The failure union is provider-catalog specific rather than the shared
 // `ServiceResult`: a missing key answers 422 (the frontend keys off that to
-// prompt for credentials) and an upstream catalog failure answers 502, and
-// neither status exists in the shared vocabulary.
+// prompt for credentials), an upstream catalog failure answers 502, and a
+// hosted catalog requested under strict private mode answers 403 — none of
+// which exists in the shared vocabulary.
 
 import type { Db } from "../../lib/supabase";
 import { ollamaAuthHeaders as authHeaders } from "../../lib/llm/providers";
 import { isSupportedOpenCodeGoModel } from "../../lib/llm/models";
 import { configuredEndpointSummaries } from "../../lib/llm/registry";
+import { PrivateModeError, isStrictPrivateMode } from "../../lib/privateMode";
 import { getUserApiKeys } from "../user/user.service";
 
 export type CatalogPricing = {
@@ -38,6 +40,7 @@ export type ConfiguredCatalogModel = LocalModel & {
 
 export type CatalogFailure =
     | { ok: false; kind: "missing_api_key"; code: string; detail: string }
+    | { ok: false; kind: "private_mode_disabled"; error: PrivateModeError }
     | { ok: false; kind: "upstream"; error: Error }
     | { ok: false; kind: "error"; error: unknown };
 
@@ -74,6 +77,21 @@ function catalogPricing(
 
 function missingApiKey(detail: string): CatalogFailure {
     return { ok: false, kind: "missing_api_key", code: "missing_api_key", detail };
+}
+
+/**
+ * Strict private mode withholds the hosted router catalogs outright; the
+ * route turns this into a 403 so the settings UI can hide the provider
+ * instead of showing an upstream failure the user might retry.
+ */
+function privateModeDisabled(provider: string): CatalogFailure {
+    return {
+        ok: false,
+        kind: "private_mode_disabled",
+        error: new PrivateModeError(
+            `The ${provider} model catalog is disabled in strict private mode.`,
+        ),
+    };
 }
 
 async function upstreamFailure(
@@ -141,6 +159,7 @@ export async function listOpenRouterModels(
     db: Db,
     userId: string,
 ): Promise<CatalogResult> {
+    if (isStrictPrivateMode()) return privateModeDisabled("OpenRouter");
     try {
         const apiKeys = await getUserApiKeys(userId, db);
         const key = apiKeys.openrouter?.trim();
@@ -205,6 +224,7 @@ export async function listVercelModels(
     db: Db,
     userId: string,
 ): Promise<CatalogResult> {
+    if (isStrictPrivateMode()) return privateModeDisabled("Vercel AI Gateway");
     try {
         const apiKeys = await getUserApiKeys(userId, db);
         if (!apiKeys.vercel?.trim()) {

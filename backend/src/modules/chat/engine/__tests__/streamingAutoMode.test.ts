@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskInputsEvent } from "@mike/contracts";
 
 // Auto Mode is the unattended contract of the tool loop: nothing may pause for
@@ -84,7 +84,7 @@ vi.mock("../tools/toolDispatcher", () => ({
     runToolCalls(calls),
 }));
 
-import { runLLMStream } from "../streaming";
+import { AssistantStreamError, runLLMStream } from "../streaming";
 
 type RunToolsFn = (
   calls: { id: string; name: string; input: Record<string, unknown> }[],
@@ -174,6 +174,12 @@ beforeEach(() => {
     verdict: "allow",
     reason: "allowed",
   });
+});
+
+afterEach(() => {
+  // Strict private mode is read from process.env per call; a leaked stub
+  // would silently deny the model every later test in this file.
+  vi.unstubAllEnvs();
 });
 
 describe("runLLMStream Auto Mode", () => {
@@ -578,5 +584,26 @@ describe("runLLMStream Auto Mode", () => {
     // The pause is the pre-existing contract of every attended surface.
     expect(capture.threw).toBe(true);
     expect(result.events).toContainEqual(askEvent);
+  });
+});
+
+describe("runLLMStream strict private mode", () => {
+  it("refuses a hosted lane before any provider call", async () => {
+    // lib/privateMode's gate sits right after model resolution, so a hosted
+    // lane must not reach the adapter at all — no key is spent on it.
+    vi.stubEnv("STRICT_PRIVATE_MODE", "true");
+
+    await expect(runLLMStream(baseParams())).rejects.toBeInstanceOf(
+      AssistantStreamError,
+    );
+    expect(streamChatWithTools).not.toHaveBeenCalled();
+  });
+
+  it("still runs a permitted lane", async () => {
+    vi.stubEnv("STRICT_PRIVATE_MODE", "true");
+
+    await runLLMStream({ ...baseParams(), model: "ollama/qwen3" });
+
+    expect(streamChatWithTools).toHaveBeenCalledTimes(1);
   });
 });

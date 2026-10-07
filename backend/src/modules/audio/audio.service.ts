@@ -24,6 +24,7 @@ import {
     type AudioFailure,
     type SpeechFormat,
 } from "./audio.shared";
+import { assertEgressAllowed } from "../../lib/egress";
 
 export type TranscribeInput = {
     // The buffer parameter is pinned to ArrayBuffer rather than the default
@@ -83,6 +84,10 @@ export async function transcribeAudio(
     );
     form.append("model", configuration.model);
     if (language) form.append("language", language);
+
+    // Shared egress gate: in strict private mode a public operator endpoint
+    // is refused before the recording leaves the process.
+    await assertEgressAllowed(configuration.baseUrl, "audio");
 
     // An unset operator key sends no Authorization header at all, never an
     // empty bearer (see ttsConfiguration for the same policy).
@@ -190,6 +195,10 @@ export async function synthesizeSpeech(input: unknown): Promise<SpeechResult> {
             "Speech synthesis is not configured on this deployment.",
         );
     }
+
+    // Shared egress gate: in strict private mode a public operator endpoint
+    // is refused before the response text leaves the process.
+    await assertEgressAllowed(configuration.baseUrl, "audio");
 
     const response = await fetch(`${configuration.baseUrl}/audio/speech`, {
         method: "POST",

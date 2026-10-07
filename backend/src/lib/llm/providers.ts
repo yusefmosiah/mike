@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { assertModelAllowed } from "../privateMode";
 import {
   aiSdkFetch,
   completeAiSdkText,
   streamAiSdk,
   type AiSdkAdapterConfig,
 } from "./aiSdk";
+import { recordReceipt, verifyAttestation } from "./attestation";
 import { localModelToleranceMiddleware } from "./localModelMiddleware";
 import {
   isOpenCodeGoChatCompletionsModel,
@@ -241,6 +243,26 @@ async function createConfiguredAdapter(
   apiKeys?: UserApiKeys,
 ): Promise<AiSdkAdapterConfig> {
   const configured = configuredModelOrThrow(id);
+  if (configured.attestation) {
+    // Fail closed: an attested endpoint either verifies right now or the
+    // request never reaches it. No fallback lane, no silent retry.
+    const verification = await verifyAttestation({
+      verifierUrl: configured.attestation.endpoint,
+      expectedMeasurement: configured.attestation.expectedMeasurement,
+    });
+    if (!verification.ok) {
+      throw new Error(
+        `Attested inference unavailable: ${verification.reason}`,
+      );
+    }
+    recordReceipt({
+      endpointId: verification.endpointId,
+      modelId: configured.id,
+      measurement: verification.measurement,
+      verifierVersion: verification.verifierVersion,
+      requestId: randomUUID(),
+    });
+  }
   const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
   const apiKey = apiKeyForConfiguredModel(configured, apiKeys);
   const client = createOpenAICompatible({
@@ -302,6 +324,10 @@ async function createProviderAdapter(
   model: string,
   apiKeys?: UserApiKeys,
 ): Promise<AiSdkAdapterConfig> {
+  // Strict private mode refuses hosted lanes before any transport is built.
+  // The gate consults the configured-model registry itself, so this one call
+  // covers hosted, router, local, and configured ids.
+  assertModelAllowed(model);
   const provider = providerForModel(model);
 
   if (provider === "claude") {

@@ -110,6 +110,19 @@ describe("sentryConfiguration", () => {
     expect(config.dsnSource).toBe("disabled");
   });
 
+  it("is forced off in strict private mode, even with a DSN and a test override", () => {
+    const config = sentryConfiguration({
+      STRICT_PRIVATE_MODE: "true",
+      SENTRY_DSN: "https://key@self.example/9",
+      NODE_ENV: "test",
+      SENTRY_ALLOW_IN_TESTS: "true",
+    } as NodeJS.ProcessEnv);
+    expect(config.enabled).toBe(false);
+    // The DSN fields stay populated for diagnostics.
+    expect(config.dsn).toBe("https://key@self.example/9");
+    expect(config.dsnSource).toBe("env");
+  });
+
   it("uses a self-hoster's own DSN when set and marks the official deployment", () => {
     const config = sentryConfiguration({
       SENTRY_DSN: "https://key@self.example/9",

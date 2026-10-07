@@ -33,11 +33,25 @@ import {
   protectInternalErrorResponses,
 } from "./middleware/internalErrorResponse";
 import { configuredAllowedOrigins, requestOriginIsTrusted } from "./lib/origins";
+import { assertPrivateModeBoot } from "./lib/privateMode";
 import { envInt } from "./lib/runtimeConfig";
 import { tagCurrentRequest } from "./lib/observability/sentry";
 
 export const app = express();
 const isProduction = process.env.NODE_ENV === "production";
+
+// Station 8: strict private mode fails closed before any route is mounted.
+// index.ts imports this module before main() binds the listener, so exiting
+// here means a leaking segmented deployment never serves a request. The gate
+// is a no-op unless STRICT_PRIVATE_MODE=true.
+try {
+  assertPrivateModeBoot();
+} catch (error) {
+  console.error(
+    `[boot] refusing to start: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exit(1);
+}
 
 // Ceiling for JSON API requests. File bytes upload directly to object storage;
 // only small upload-session manifests and control requests reach Express.

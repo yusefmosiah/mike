@@ -13,6 +13,10 @@ export class EgressSecurityError extends Error {
  * 1. Must use http: or https:
  * 2. Hostname must not resolve to a loopback, private, or reserved IP (SSRF protection).
  * 3. In strict private mode, external egress is blocked unless explicitly allowlisted.
+ *
+ * This remains the single search policy: lib/egress.ts delegates its
+ * "search"-purpose checks here, and mirrors the allowlist semantics for the
+ * LLM/audio purposes it gates itself.
  */
 export async function assertSafeEgressUrl(rawUrl: string): Promise<URL> {
   let parsed: URL;

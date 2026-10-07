@@ -5,6 +5,7 @@ import { streamChatWithTools, type OpenAIToolSchema, type UserApiKeys } from "..
 import { hasApiKeyForModel, resolveEffectiveChatModel } from "../../lib/modelSelection";
 import { resolveModel } from "../../lib/llm/models";
 import { can } from "../../lib/permissions";
+import { assertModelAllowed } from "../../lib/privateMode";
 // The user module's facade is the one door to per-user model settings. A
 // lib file reaching into modules/ is the documented exception the
 // architecture test allowlists (the curator is a DB job handler, and job
@@ -743,6 +744,11 @@ export async function runMemoryCuratorScope(
   let terminalReason: CuratorScopeOutcome["reason"] | null = null;
   let invalidCalls = 0;
   let writeFailure: unknown;
+  // Strict private mode refuses a hosted curator lane before the transcript
+  // is sent. The caller resolved this id (resolveEffectiveChatModel +
+  // memoryCuratorModelForChat); the refusal leaves this function unwrapped so
+  // a hosted lane can never be reached as a fallback.
+  assertModelAllowed(args.model);
   try {
     await services.stream({
       model: args.model,

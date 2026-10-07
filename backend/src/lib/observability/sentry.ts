@@ -19,6 +19,7 @@
 
 import * as Sentry from "@sentry/node";
 import { diagnosticErrorTags, privacyBoundaryIntegration } from "./sentryPrivacy";
+import { isStrictPrivateMode } from "../privateMode";
 
 export type SentryRole = "api" | "worker" | "worker-thread" | "job";
 
@@ -543,11 +544,18 @@ export function sentryConfiguration(env: NodeJS.ProcessEnv = process.env) {
   // and would flood the project with fake failures.
   const isTestProcess =
     env.NODE_ENV === "test" || env.VITEST === "true" || env.VITEST === "1";
+  // Strict private mode keeps telemetry on the deployment: force reporting
+  // off regardless of DSN or test overrides. The boot gate already requires
+  // SENTRY_DISABLED=true, so this is the fail-closed backstop for any code
+  // path that builds a configuration without that gate. The DSN fields stay
+  // populated for diagnostics.
+  const strictPrivateMode = isStrictPrivateMode(env);
   return {
     dsn,
     dsnSource: resolved.source,
     install: installKind(env.SENTRY_INSTALL),
     enabled:
+      !strictPrivateMode &&
       dsn.length > 0 &&
       (!isTestProcess || env.SENTRY_ALLOW_IN_TESTS === "true"),
     environment: env.SENTRY_ENVIRONMENT?.trim() || "self-hosted",
@@ -805,7 +813,11 @@ export function initSentry(
     if (env.NODE_ENV !== "test") {
       console.log(
         `[sentry] disabled for ${role} (${
-          config.dsnSource === "disabled" ? "SENTRY_DISABLED=true" : "test process"
+          config.dsnSource === "disabled"
+            ? "SENTRY_DISABLED=true"
+            : isStrictPrivateMode(env)
+              ? "STRICT_PRIVATE_MODE=true"
+              : "test process"
         })`,
       );
     }

@@ -135,6 +135,18 @@ export type ConfiguredModel = {
     /** Model name to send upstream when it differs from the Mike-facing id. */
     apiModel?: string;
     baseUrl: string;
+    /**
+     * Remote-attestation requirement for this endpoint. When declared, every
+     * inference request first verifies the endpoint's attestation document
+     * (lib/llm/attestation) and fails closed on any verification error. There
+     * is deliberately no insecure bypass.
+     */
+    attestation?: {
+        /** Base URL of the verifier; the request goes to `{endpoint}/attestation`. */
+        endpoint: string;
+        /** TEE measurement the endpoint must report; a mismatch fails closed. */
+        expectedMeasurement?: string;
+    };
     apiKeyEnv?: string;
     apiKeyProvider?: keyof UserApiKeys;
     apiKey?: string;

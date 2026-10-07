@@ -57,6 +57,7 @@ import {
 } from "./tools/documentOps";
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
+import { assertModelAllowed } from "../../../lib/privateMode";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
   classifyToolCall,
@@ -704,6 +705,12 @@ export async function runLLMStream(params: {
       db,
       "throw",
     );
+    // Strict private mode (lib/privateMode): this resolution is the one
+    // request-time choke point shared by every streaming surface (chat,
+    // project chat, Word chat, tabular), so the lane check belongs here —
+    // after the user's saved selection is applied, before any provider or
+    // stored BYOK key can be spent. No-op outside strict mode.
+    assertModelAllowed(selectedModel);
     await streamChatWithTools({
       model: selectedModel,
       systemPrompt,

@@ -13,6 +13,7 @@ import type {
   StreamChatResult,
 } from "./types";
 import { streamChunkTimeouts } from "../runtimeConfig";
+import { assertEgressAllowed } from "../egress";
 import { asProviderStallError, toProviderStreamError } from "./providerErrors";
 import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
 import {
@@ -93,6 +94,13 @@ export async function aiSdkFetch(
         : typeof input === "object" && input !== null && "url" in input
           ? (input as Request).url
           : "";
+  // Every provider SDK calls this with an absolute http(s) URL; a relative or
+  // empty value could not be fetched either (Node's fetch requires an
+  // absolute URL), so the gate only runs where a request could actually
+  // leave. A blocked host throws here, before any bytes or credentials.
+  if (/^https?:\/\//i.test(url)) {
+    await assertEgressAllowed(url, "llm");
+  }
   let requestInit = init;
   if (url.includes("opencode.ai")) {
     const headers = new Headers(

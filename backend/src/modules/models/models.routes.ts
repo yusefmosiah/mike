@@ -4,7 +4,8 @@
 // models.service catalog functions, and map their typed results onto status
 // codes and JSON. A missing provider key is a 422 the settings UI keys off;
 // an upstream catalog failure is a 502 whose raw body never reaches the
-// client.
+// client; a hosted catalog under strict private mode is a 403 with a
+// `private_mode_disabled` code.
 
 import { Router, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
@@ -26,6 +27,16 @@ export const modelsRouter = Router();
 function sendCatalogFailure(res: Response, failure: CatalogFailure): void {
     if (failure.kind === "missing_api_key") {
         res.status(422).json({ code: failure.code, detail: failure.detail });
+        return;
+    }
+    if (failure.kind === "private_mode_disabled") {
+        // Strict private mode never offers hosted catalogs; the settings UI
+        // matches on this code, so it must not collapse into the generic 500
+        // an unrecognized failure kind would produce.
+        res.status(403).json({
+            code: "private_mode_disabled",
+            detail: failure.error.message,
+        });
         return;
     }
     if (failure.kind === "upstream") {

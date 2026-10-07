@@ -1,3 +1,8 @@
+// Strict private mode's boot gate lives in lib/privateMode (which also owns
+// the model allow-gate); re-exported here so this module stays the single
+// discoverable home for boot-time configuration checks.
+export { assertPrivateModeBoot } from "./privateMode";
+
 function required(env: NodeJS.ProcessEnv, names: readonly string[]): string {
   for (const name of names) {
     const value = env[name]?.trim();
