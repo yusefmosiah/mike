@@ -37,6 +37,7 @@ import {
     parseOptionalDisplayedDoc,
     parseOptionalModel,
     parseOptionalReasoning,
+    devLog,
 } from "../chat/chat.service";
 import {
     generateAssistantChatTitle,
@@ -101,6 +102,18 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: parsedAskInputsResponse.detail });
     }
+    // Auto Mode is a per-turn opt-in, off unless the caller asks for it.
+    // Anything but a boolean is a client bug, not a preference. The content
+    // .edit gate prepareProjectChatStream already applies to every send (403
+    // for a viewer) is the same standing writing needs, so a stream never
+    // starts for a caller who may not write.
+    const rawAutoMode = body.auto_mode;
+    if (rawAutoMode !== undefined && typeof rawAutoMode !== "boolean") {
+        return void res
+            .status(400)
+            .json({ detail: "auto_mode must be a boolean" });
+    }
+    const autoMode = rawAutoMode === true;
     // Regenerate names the existing prompt the new answer hangs from; see
     // linkOnlyToMessageId in prepareProjectChatStream. Without it a send is a send.
     const rawLinkOnlyToMessageId = body.link_only_to_message_id;
@@ -127,6 +140,14 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
 
     const db = createServerSupabase();
 
+    devLog("[project-chat/stream] incoming request", {
+        userId,
+        projectId,
+        chat_id,
+        model,
+        auto_mode: autoMode,
+    });
+
     const prep = await prepareProjectChatStream(db, {
         userId,
         userEmail,
@@ -138,6 +159,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         displayed_doc,
         attached_documents,
         askInputsResponse,
+        autoMode,
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
@@ -168,6 +190,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         selectedReasoningLevel,
         nonce,
         approvalEvents,
+        autoMode: turnAutoMode,
     } = prep.prepared;
     // Mutable: the title-generation flow below reassigns it once a title
     // has been persisted.
@@ -276,6 +299,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                 conversationId: chatId,
                 includeMemory: true,
                 connectorApprovals: true,
+                autoMode: turnAutoMode,
                 memoryProjectId: projectId,
                 memorySharedAudience,
                 nonce,

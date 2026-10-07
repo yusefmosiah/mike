@@ -4,6 +4,7 @@ import {
   resolveModel,
   type LlmMessage,
   type LlmUserContent,
+  type NormalizedToolCall,
   type OpenAIToolSchema,
 } from "../../../lib/llm";
 import { resolveRequestedModel } from "../../../lib/routerModels";
@@ -56,6 +57,12 @@ import {
 } from "./tools/documentOps";
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
+import {
+  AUTO_MODE_SAFE_DEFAULTS,
+  classifyToolCall,
+  inScopeForContainer,
+  tierForTool,
+} from "../../../lib/guardrails";
 
 export type { AssistantEvent } from "@mike/contracts";
 import type { AssistantEvent, AssistantErrorCode } from "@mike/contracts";
@@ -197,6 +204,150 @@ function throwIfAborted(signal?: AbortSignal) {
   throw err;
 }
 
+/**
+ * The turn's own words: the last user message, flattened to text. Auto Mode's
+ * classifier judges a tool call against what the USER asked for, so the intent
+ * is read from the user's message alone — assistant prose is model-written and
+ * must never be able to argue a call into an allow.
+ */
+function lastUserIntent(apiMessages: unknown[]): string {
+  for (let index = apiMessages.length - 1; index >= 0; index -= 1) {
+    const message = apiMessages[index];
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      continue;
+    }
+    if (!("role" in message) || message.role !== "user") continue;
+    if (!("content" in message)) continue;
+    const content = message.content;
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .map((part) => {
+        if (!part || typeof part !== "object" || !("text" in part)) return "";
+        return typeof part.text === "string" ? part.text : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+/**
+ * The deterministic answer Auto Mode gives to a model-emitted `ask_inputs`
+ * call. In Auto Mode the tool is not advertised, so this only fires if the
+ * model names it from memory; there is no user to pause for, so every item
+ * gets the least committal answer (AUTO_MODE_SAFE_DEFAULTS): the first
+ * offered option for a choice, an empty string for free text, a skip for
+ * document requests — Auto Mode cannot upload a file — and a rejection for
+ * approval items, because Auto Mode never approves a write on the user's
+ * behalf.
+ */
+function autoAnswerAskInputs(args: Record<string, unknown>): {
+  event: AskInputsEvent;
+  responses: AskInputResponseItem[];
+} {
+  const items: AskInputsEvent["items"] = [];
+  const responses: AskInputResponseItem[] = [];
+  const rawItems = Array.isArray(args.items) ? args.items : [];
+  rawItems.forEach((rawItem, index) => {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+      return;
+    }
+    const rawId = "id" in rawItem ? rawItem.id : undefined;
+    const rawKind = "kind" in rawItem ? rawItem.kind : undefined;
+    const rawQuestion = "question" in rawItem ? rawItem.question : undefined;
+    const id =
+      typeof rawId === "string" && rawId.trim()
+        ? rawId.trim().slice(0, 80)
+        : `auto-${index + 1}`;
+    const question =
+      typeof rawQuestion === "string"
+        ? rawQuestion.trim().slice(0, 500)
+        : "";
+
+    if (rawKind === "approval") {
+      // Approval items carry a connector write; Auto Mode denies them
+      // (AUTO_MODE_SAFE_DEFAULTS.approval) and the write never runs.
+      responses.push({ id, kind: "approval", decision: "reject" });
+      return;
+    }
+
+    if (rawKind === "documents") {
+      // Nothing can be attached without a human: documents → "skip".
+      items.push({ id, kind: "documents", document_types: [] });
+      responses.push({ id, kind: "documents", filenames: [], skipped: true });
+      return;
+    }
+
+    if (rawKind === "text") {
+      const asked = question || "Please provide the requested information.";
+      items.push({ id, kind: "text", question: asked });
+      responses.push({
+        id,
+        kind: "text",
+        question: asked,
+        answer: AUTO_MODE_SAFE_DEFAULTS.text,
+      });
+      return;
+    }
+
+    const multiChoice = rawKind === "multi_choice";
+    const asked =
+      question ||
+      (multiChoice
+        ? "Please choose one or more options."
+        : "Please choose an option.");
+    const rawOptions = "options" in rawItem ? rawItem.options : undefined;
+    const options = (Array.isArray(rawOptions) ? rawOptions : [])
+      .map((option): string => {
+        if (typeof option === "string") return option.trim();
+        if (!option || typeof option !== "object" || Array.isArray(option)) {
+          return "";
+        }
+        const value = "value" in option ? option.value : undefined;
+        if (typeof value === "string" && value.trim()) return value.trim();
+        const label = "label" in option ? option.label : undefined;
+        return typeof label === "string" ? label.trim() : "";
+      })
+      .filter(Boolean)
+      .slice(0, 8);
+    // choice / multi_choice → "first_option".
+    const values = options.length > 0 ? options : ["Continue"];
+    const normalizedOptions = values.map((value) => ({ value }));
+    if (multiChoice) {
+      items.push({
+        id,
+        kind: "multi_choice",
+        question: asked,
+        options: normalizedOptions,
+        allow_other: false,
+        other_label: "Other",
+      });
+      responses.push({
+        id,
+        kind: "multi_choice",
+        question: asked,
+        answers: [values[0]],
+      });
+      return;
+    }
+    items.push({
+      id,
+      kind: "choice",
+      question: asked,
+      options: normalizedOptions,
+      allow_other: false,
+      other_label: "Other",
+    });
+    responses.push({ id, kind: "choice", question: asked, answer: values[0] });
+  });
+
+  return {
+    event: { type: "ask_inputs", event_id: crypto.randomUUID(), items },
+    responses,
+  };
+}
+
 export async function runLLMStream(params: {
   apiMessages: unknown[];
   docStore: DocStore;
@@ -226,6 +377,18 @@ export async function runLLMStream(params: {
    * thread would hand them edit_document over every document in the project.
    */
   allowDocumentMutation?: boolean;
+  /**
+   * Auto Mode: run the turn with no human in the loop, so nothing may pause
+   * for one. Every tool call is judged on the server before it runs
+   * (lib/guardrails): reads run, document writes run only where the caller
+   * may mutate documents and the call stays inside the turn's container, and
+   * everything with external egress needs the on-route classifier's allow.
+   * A refusal is an in-band tool result the model can read — never a throw —
+   * `ask_inputs` is neither advertised nor able to pause the turn, and
+   * connector approvals are recorded without pausing. Defaults to false;
+   * callers that omit it keep their exact behavior.
+   */
+  autoMode?: boolean;
   workflowStore?: WorkflowStore;
   tabularStore?: TabularCellStore;
   /** Tools executed by the connected client (Word add-in) instead of here. */
@@ -279,6 +442,7 @@ export async function runLLMStream(params: {
     includeAskInputs = true,
     connectorApprovals = false,
     allowDocumentMutation = true,
+    autoMode = false,
     workflowStore,
     tabularStore,
     clientTools,
@@ -298,9 +462,13 @@ export async function runLLMStream(params: {
   const researchTools = includeResearchTools ? COURTLISTENER_TOOLS : [];
   const mcpTools = await buildUserMcpTools(userId, db);
   const googleDriveTools = await buildGoogleDriveTools(userId, db);
-  const conversationTools = includeAskInputs
-    ? TOOLS
-    : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
+  // Auto Mode has no one to answer a question, so `ask_inputs` is withheld
+  // exactly as it is for surfaces that cannot render it. Enforcement for a
+  // call the model emits anyway is in the `runTools` wrapper below.
+  const conversationTools =
+    includeAskInputs && !autoMode
+      ? TOOLS
+      : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
   const baseTools = [...conversationTools, ...researchTools, ...WORKFLOW_TOOLS];
   const advertisedTools = [
     ...baseTools,
@@ -493,6 +661,19 @@ export async function runLLMStream(params: {
     }
   };
 
+  // Auto Mode bookkeeping for the whole turn: the intent every classifier
+  // call is judged against, and the tool names already attempted — allowed or
+  // denied — so a refused call cannot be laundered through a second,
+  // differently-named one.
+  const autoModeIntent = autoMode ? lastUserIntent(apiMessages) : "";
+  const priorToolNames: string[] = [];
+  if (autoMode) {
+    devLog("[chat/stream] auto mode turn", {
+      userId,
+      conversationId: conversationId ?? null,
+    });
+  }
+
   try {
     throwIfAborted(signal);
     // Single request-time choke point for every runLLMStream caller (chat,
@@ -581,15 +762,120 @@ export async function runLLMStream(params: {
         // server batch and sequentially among themselves: each call mutates
         // or reads the live document, so order is part of their semantics.
         const clientResultByCallId = new Map<string, string>();
+        // Results for calls the Auto Mode guardrails refuse or answer
+        // themselves. Keyed by tool_call_id and merged into the batch's
+        // results below, so every tool_use the model sent gets an answer.
+        const guardrailResultByCallId = new Map<string, string>();
+
+        // Auto Mode: judge every call before it can reach the dispatcher, and
+        // return the refusal as a tool RESULT the model can read and react
+        // to — a throw here would end the turn.
+        //   Tier 1 — reads; always allowed.
+        //   Tier 2 — document writes; allowed only where the caller may
+        //            mutate documents AND the arguments stay inside this
+        //            turn's container.
+        //   Tier 3 — connector writes, anything with external egress, and
+        //            every unknown tool; allowed only when the on-route
+        //            classifier says so, judged against the user's own words
+        //            and the tools already tried.
+        // A model-emitted ask_inputs call is answered here deterministically:
+        // Auto Mode has nobody to pause for.
+        const applyAutoModeGuardrails = async (
+          call: NormalizedToolCall,
+        ): Promise<string | null> => {
+          const denied = (reason: string) =>
+            JSON.stringify({
+              error: `Auto Mode guardrail denied ${call.name}: ${reason}`,
+            });
+
+          if (call.name === "ask_inputs") {
+            const { event, responses } = autoAnswerAskInputs(call.input);
+            // Mirror the dispatcher: a call with nothing to ask is no
+            // question, so it leaves no event behind.
+            if (event.items.length > 0) {
+              write(`data: ${JSON.stringify(event)}\n\n`);
+              events.push(event);
+              const answerEvent: AssistantEvent = {
+                type: "ask_inputs_response",
+                // The assistant row this turn becomes is reserved by the
+                // route, not known here; the pairing that matters in the
+                // transcript is ask_event_id.
+                assistant_message_id: "",
+                ask_event_id: event.event_id,
+                responses,
+              };
+              write(`data: ${JSON.stringify(answerEvent)}\n\n`);
+              events.push(answerEvent);
+            }
+            const approvalDenied = responses.some(
+              (response) =>
+                response.kind === "approval" && response.decision === "reject",
+            );
+            return JSON.stringify({
+              ok: true,
+              auto_answered: true,
+              responses,
+              message: approvalDenied
+                ? "Auto Mode answered these itself and rejected the approval items: nothing was approved. Do not ask again or retry the approvals."
+                : "Auto Mode answered these itself — no user is present. Continue with the answers above and do not ask again.",
+            });
+          }
+
+          const tier = tierForTool(call.name);
+          if (tier === 1) return null;
+          if (tier === 2) {
+            if (!allowDocumentMutation) {
+              return denied(
+                "this conversation does not allow changing documents",
+              );
+            }
+            if (!inScopeForContainer(call.input, projectId ?? null)) {
+              return denied(
+                "the call targets a container outside this conversation",
+              );
+            }
+            return null;
+          }
+
+          let verdict: { verdict: "allow" | "deny"; reason: string };
+          try {
+            verdict = await classifyToolCall({
+              userIntent: autoModeIntent,
+              toolName: call.name,
+              toolArgs: call.input,
+              history: [...priorToolNames],
+              model: selectedModel,
+              apiKeys,
+            });
+          } catch {
+            // `classifyToolCall` fails closed by contract; this catch is the
+            // second belt, because a throw here would end the whole turn.
+            verdict = { verdict: "deny", reason: "classifier unavailable" };
+          }
+          if (verdict.verdict === "allow") return null;
+          return denied(verdict.reason || "the classifier did not allow it");
+        };
+
         // Enforcement, not just omission: a document-writing call from a
         // caller who may not write is dropped before dispatch, on the server
         // side and the client side alike. It falls through to the
         // "Tool 'x' is not available." answer below, which every tool_use
         // without a result already gets, so the model is told plainly rather
         // than left waiting on a call that silently did nothing.
-        const permittedCalls = allowDocumentMutation
-          ? calls
-          : calls.filter((c) => !isDocumentMutatingTool(c.name));
+        let permittedCalls: NormalizedToolCall[];
+        if (autoMode) {
+          permittedCalls = [];
+          for (const call of calls) {
+            const refusal = await applyAutoModeGuardrails(call);
+            if (refusal === null) permittedCalls.push(call);
+            else guardrailResultByCallId.set(call.id, refusal);
+            priorToolNames.push(call.name);
+          }
+        } else {
+          permittedCalls = allowDocumentMutation
+            ? calls
+            : calls.filter((c) => !isDocumentMutatingTool(c.name));
+        }
         const serverCalls = clientTools
           ? permittedCalls.filter((c) => !clientTools.owns(c.name))
           : permittedCalls;
@@ -711,7 +997,11 @@ export async function runLLMStream(params: {
           events.push(event);
         }
 
-        if (askInputsEvents.length > 0) {
+        // Auto Mode never pauses for input. The events above still stream and
+        // persist (a connector approval can be answered from the transcript
+        // later), but the turn continues toward the model's summary; a pause
+        // would park the run on a user who is not there.
+        if (askInputsEvents.length > 0 && !autoMode) {
           throw new AssistantStreamAskInputsPause();
         }
 
@@ -722,6 +1012,9 @@ export async function runLLMStream(params: {
         // tool_use that didn't produce one, so Claude's next request
         // has a tool_result for every tool_use it sent.
         const resultByCallId = new Map<string, string>(clientResultByCallId);
+        for (const [callId, content] of guardrailResultByCallId) {
+          resultByCallId.set(callId, content);
+        }
         for (const r of toolResults) {
           const row = r as {
             tool_call_id: string;

@@ -54,6 +54,10 @@ export type PreparedChatStream = {
     // Connector actions the user approved in this continuation, already run
     // and appended; the route streams them before the model continues.
     approvalEvents: McpToolEvent[];
+    // Auto Mode opt-in for this turn, forwarded to runLLMStream. Same
+    // content.edit standing as writing; the route is what gates a caller, the
+    // stream is what enforces the guardrails.
+    autoMode: boolean;
     // Whether the document-writing tools are offered this turn. A standalone
     // chat writes into the caller's own library, so it keeps them; a project
     // chat writes into the PROJECT, and that is a question about the caller's
@@ -106,6 +110,12 @@ export async function prepareChatStream(
         // user's answers are appended onto the previous assistant message
         // instead of being stored as a new user message.
         askInputsResponse: AskInputsResponseRequest | null;
+        /**
+         * Auto Mode requested for this turn. Echoed back through `prepared`
+         * so the route hands the stream one verdict; whether the caller may
+         * use it at all is the same content.edit standing writing needs.
+         */
+        autoMode?: boolean;
         requestedModel: string | null | undefined;
         requestedReasoning:
             | ReturnType<typeof resolveEffectiveReasoningLevel>
@@ -507,6 +517,7 @@ export async function prepareChatStream(
                 resolvedProjectId,
                 completedTurnPersisted,
                 approvalEvents,
+                autoMode: args.autoMode === true,
                 allowDocumentMutation,
                 canReadProjectMemory,
                 canCurateProjectMemory,

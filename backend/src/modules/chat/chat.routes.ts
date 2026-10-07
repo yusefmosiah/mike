@@ -552,6 +552,19 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: parsedAskInputsResponse.detail });
     }
+    // Auto Mode is a per-turn opt-in, off unless the caller asks for it.
+    // Anything but a boolean is a client bug, not a preference. It needs no
+    // separate standing check here: every path that gets past
+    // prepareChatStream already holds content.edit — an existing chat is
+    // gated inside it, a new project chat by validateAccessibleProjectId —
+    // and a viewer is refused with 403 before any stream starts.
+    const rawAutoMode = body.auto_mode;
+    if (rawAutoMode !== undefined && typeof rawAutoMode !== "boolean") {
+        return void res
+            .status(400)
+            .json({ detail: "auto_mode must be a boolean" });
+    }
+    const autoMode = rawAutoMode === true;
     // Regenerate names the existing prompt the new answer hangs from; see
     // linkOnlyToMessageId in prepareChatStream. Without it a send is a send.
     const rawLinkOnlyToMessageId = body.link_only_to_message_id;
@@ -579,6 +592,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         project_id,
         model,
         messageCount: messages?.length,
+        auto_mode: autoMode,
     });
 
     const userEmail = res.locals.userEmail as string | undefined;
@@ -594,6 +608,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         projectIdProvided: parsedProjectId.value.provided,
         projectId: parsedProjectId.value.projectId,
         askInputsResponse,
+        autoMode,
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
@@ -627,6 +642,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         selectedReasoningLevel,
         nonce,
         approvalEvents,
+        autoMode: turnAutoMode,
     } = prep.prepared;
     let chatTitle = prep.prepared.chatTitle;
     let completedTurnPersisted = prep.prepared.completedTurnPersisted;
@@ -772,6 +788,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                 conversationId: chatId,
                 includeMemory: true,
                 connectorApprovals: true,
+                autoMode: turnAutoMode,
                 memoryProjectId: canReadProjectMemory
                     ? resolvedProjectId
                     : null,

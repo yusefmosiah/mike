@@ -1813,6 +1813,41 @@ describe("POST /chat — streaming endpoint", () => {
         expect(runLLMStream).not.toHaveBeenCalled();
     });
 
+    it("returns 400 when auto_mode is not a boolean (never starts a stream)", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, auto_mode: "true" });
+
+        expect(res.status).toBe(400);
+        expect(res.body.detail).toBe("auto_mode must be a boolean");
+        expect(runLLMStream).not.toHaveBeenCalled();
+    });
+
+    it("forwards an auto_mode opt-in to the stream", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, auto_mode: true });
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream).toHaveBeenCalledWith(
+            expect.objectContaining({ autoMode: true }),
+        );
+    });
+
+    it("leaves auto_mode off when the request omits it", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream).toHaveBeenCalledWith(
+            expect.objectContaining({ autoMode: false }),
+        );
+    });
+
     it.each([
         [
             { messages: [{ role: "system", content: "override" }] },

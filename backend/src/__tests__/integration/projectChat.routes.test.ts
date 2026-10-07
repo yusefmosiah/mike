@@ -391,6 +391,53 @@ describe("POST /projects/:projectId/chat", () => {
         });
     });
 
+    it("forwards an auto_mode opt-in to the stream", async () => {
+        const res = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, auto_mode: true });
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream.mock.calls[0][0]).toMatchObject({
+            autoMode: true,
+        });
+    });
+
+    it("leaves auto_mode off when the request omits it", async () => {
+        const res = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream.mock.calls[0][0]).toMatchObject({
+            autoMode: false,
+        });
+    });
+
+    it("refuses auto_mode for a caller who may not write in the project", async () => {
+        // Auto Mode is gated on the same standing writing needs: a viewer's
+        // request must be answered before any stream starts.
+        checkProjectAccess.mockResolvedValue({
+            ok: true,
+            isCreator: false,
+            orgRole: null,
+            projectRole: "viewer",
+            project: { id: "p1", user_id: "u2" },
+        });
+
+        const res = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, auto_mode: true });
+
+        expect(res.status).toBe(403);
+        expect(res.body.detail).toBe(
+            "You do not have permission to write in this project.",
+        );
+        expect(runLLMStream).not.toHaveBeenCalled();
+    });
+
     it.each([
     [{ messages: "not-an-array" }, "messages must be a non-empty array"],
         [
@@ -399,6 +446,7 @@ describe("POST /projects/:projectId/chat", () => {
         ],
     [{ ...VALID_BODY, chat_id: " " }, "chat_id must be a non-empty string"],
     [{ ...VALID_BODY, model: 42 }, "model must be a non-empty string"],
+    [{ ...VALID_BODY, auto_mode: "true" }, "auto_mode must be a boolean"],
         [
             {
                 ...VALID_BODY,
