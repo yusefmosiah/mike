@@ -43,6 +43,8 @@ const editRow = {
 };
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("DB_JOBS_ENABLED", "true");
+  vi.stubEnv("QUEUE_DRIVER", "postgres");
   mocks.active.mockResolvedValue({
     id: "active",
     filename: "Renamed.docx",

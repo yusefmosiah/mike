@@ -57,6 +57,7 @@ import {
   findInDocumentContent,
   findTextMatches,
   runEditDocument,
+  runReadBlocks,
   safeGeneratedFilename,
   type DocEditedResult,
   type TurnEditState,
@@ -65,6 +66,7 @@ import {
   type DocReplicatedResult,
   type TextMatch,
 } from "./documentOps";
+import type { BlockOperation } from "../../../../lib/docxAST";
 import {
   spotlight,
   spotlightFilename,
@@ -1468,8 +1470,11 @@ export async function runToolCalls(
           tool_call_id: tc.id,
           content: JSON.stringify({ error: err }),
         });
-      } else if (!Array.isArray(editsRaw) || editsRaw.length === 0) {
-        const err = "edits array is required and must not be empty.";
+      } else if (
+        (!Array.isArray(editsRaw) || editsRaw.length === 0) &&
+        (!Array.isArray(args.operations) || (args.operations as unknown[]).length === 0)
+      ) {
+        const err = "Either operations or edits array is required and must not be empty.";
         emitEditError(docInfo.filename, indexed.document_id, err);
         toolResults.push({
           role: "tool",
@@ -1491,20 +1496,24 @@ export async function runToolCalls(
             filename: docInfo.filename,
           })}\n\n`,
         );
-        const edits: EditInput[] = (editsRaw as Record<string, unknown>[]).map(
-          (e) => ({
-            find: String(e.find ?? ""),
-            replace: String(e.replace ?? ""),
-            context_before: String(e.context_before ?? ""),
-            context_after: String(e.context_after ?? ""),
-            reason: e.reason ? String(e.reason) : undefined,
-          }),
-        );
+        const edits: EditInput[] | undefined = Array.isArray(editsRaw)
+          ? (editsRaw as Record<string, unknown>[]).map((e) => ({
+              find: String(e.find ?? ""),
+              replace: String(e.replace ?? ""),
+              context_before: String(e.context_before ?? ""),
+              context_after: String(e.context_after ?? ""),
+              reason: e.reason ? String(e.reason) : undefined,
+            }))
+          : undefined;
+        const operations = Array.isArray(args.operations)
+          ? (args.operations as BlockOperation[])
+          : undefined;
         const reuseVersion = turnEditState?.get(indexed.document_id);
         const result = await runEditDocument({
           documentId: indexed.document_id,
           userId,
           edits,
+          operations,
           db,
           reuseVersion,
         });
@@ -1588,6 +1597,44 @@ export async function runToolCalls(
             }),
           });
         }
+      }
+    } else if (tc.function.name === "read_blocks" && docIndex) {
+      const rawDocId = args.doc_id as string;
+      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docInfo = docStore.get(docId);
+      const indexed = docIndex?.[docId];
+      if (!docInfo || !indexed) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: `Document '${docId}' not found.` }),
+        });
+      } else if (docInfo.file_type !== "docx") {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: "read_blocks only supports .docx files.",
+          }),
+        });
+      } else {
+        const startId = args.start_id ? String(args.start_id) : undefined;
+        const endId = args.end_id ? String(args.end_id) : undefined;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const includeEmpty = Boolean(args.include_empty);
+        const result = await runReadBlocks({
+          documentId: indexed.document_id,
+          db,
+          startId,
+          endId,
+          limit,
+          includeEmpty,
+        });
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
       }
     } else if (tc.function.name === "replicate_document" && docIndex) {
       const rawDocId = args.doc_id as string;

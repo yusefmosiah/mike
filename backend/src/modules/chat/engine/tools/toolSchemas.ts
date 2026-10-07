@@ -481,9 +481,9 @@ export const TOOLS = [
   {
     type: "function",
     function: {
-      name: "edit_document",
+      name: "read_blocks",
       description:
-        "Propose edits to a user-attached .docx as tracked changes. Each edit is a precise, minimal substitution of specific words/characters, NOT a whole-line or paragraph replacement. Use read_document first unless this same document/version has already been read in the current response. Anchor each edit with short before/after context so it can be located unambiguously. Returns per-edit annotations the UI will render as Accept/Reject cards and a download link to the edited document.",
+        "Read structured blocks (paragraphs, tables) from a user-attached .docx with stable block IDs (e.g. 'p_1', 'p_2', 'tbl_1'). Use this to inspect specific sections, extract table matrices, or identify block IDs for range deletion and block replacement.",
       parameters: {
         type: "object",
         properties: {
@@ -491,16 +491,117 @@ export const TOOLS = [
             type: "string",
             description: "Document slug (e.g. 'doc-0').",
           },
+          start_id: {
+            type: "string",
+            description: "Optional start block ID (e.g. 'p_1').",
+          },
+          end_id: {
+            type: "string",
+            description: "Optional end block ID (e.g. 'p_50').",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of blocks to return (default: 50).",
+          },
+          include_empty: {
+            type: "boolean",
+            description: "Whether to include empty paragraphs (default: false).",
+          },
+        },
+        required: ["doc_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_document",
+      description:
+        "Propose edits to a user-attached .docx as tracked changes. Supports atomic block operations (`operations`: delete_blocks, delete_empty_blocks, insert_block, replace_block) or word-level substitutions (`edits`). Returns per-edit annotations rendered as Accept/Reject cards and a download link to the edited document.",
+      parameters: {
+        type: "object",
+        properties: {
+          doc_id: {
+            type: "string",
+            description: "Document slug (e.g. 'doc-0').",
+          },
+          operations: {
+            type: "array",
+            description:
+              "List of atomic block operations (delete_blocks, delete_empty_blocks, insert_block, replace_block). Takes precedence over `edits`.",
+            items: {
+              type: "object",
+              properties: {
+                op: {
+                  type: "string",
+                  enum: [
+                    "delete_blocks",
+                    "delete_empty_blocks",
+                    "insert_block",
+                    "replace_block",
+                  ],
+                  description: "The block operation to execute.",
+                },
+                start_id: {
+                  type: "string",
+                  description:
+                    "Starting block ID for delete_blocks (e.g. 'p_10').",
+                },
+                end_id: {
+                  type: "string",
+                  description:
+                    "Ending block ID for delete_blocks (e.g. 'p_70').",
+                },
+                scope: {
+                  type: "string",
+                  enum: ["trailing", "all"],
+                  description: "Scope for delete_empty_blocks.",
+                },
+                after_id: {
+                  type: "string",
+                  description:
+                    "Block ID to insert after for insert_block (null/omitted = insert at top of document).",
+                },
+                content: {
+                  type: "string",
+                  description:
+                    "Content to insert for insert_block. Double newlines create separate paragraphs.",
+                },
+                style: {
+                  type: "string",
+                  description: "Optional style for insert_block (e.g. 'Heading1').",
+                },
+                block_id: {
+                  type: "string",
+                  description: "Target block ID for replace_block (e.g. 'p_5').",
+                },
+                new_content: {
+                  type: "string",
+                  description: "New text content for replace_block.",
+                },
+                expected_content: {
+                  type: "string",
+                  description:
+                    "Precondition check for replace_block: fails closed if actual block text does not match.",
+                },
+                reason: {
+                  type: "string",
+                  description: "Short explanation shown to the user on the card.",
+                },
+              },
+              required: ["op"],
+            },
+          },
           edits: {
             type: "array",
-            description: "List of precise substitutions.",
+            description: "List of precise substring substitutions.",
             items: {
               type: "object",
               properties: {
                 find: {
                   type: "string",
                   description:
-                    "Exact substring to replace (keep it as short as possible — ideally just the words/chars being changed).",
+                    "Exact substring to replace (keep it as short as possible).",
                 },
                 replace: {
                   type: "string",
@@ -526,7 +627,7 @@ export const TOOLS = [
             },
           },
         },
-        required: ["doc_id", "edits"],
+        required: ["doc_id"],
       },
     },
   },

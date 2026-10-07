@@ -15,6 +15,11 @@ import {
   extractDocxBodyText,
   type EditInput,
 } from "../../../../lib/docxTrackedChanges";
+import {
+  DocxASTDocument,
+  type BlockOperation,
+  type DocBlock,
+} from "../../../../lib/docxAST";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
 import {
   contentSha256,
@@ -1318,15 +1323,9 @@ export async function loadCurrentVersionBytes(
 export async function runEditDocument(params: {
   documentId: string;
   userId: string;
-  edits: EditInput[];
+  edits?: EditInput[];
+  operations?: BlockOperation[];
   db: Db;
-  /**
-   * If provided, append these edits to the existing turn-scoped version
-   * (overwrites the file at storagePath and reuses the document_versions
-   * row) instead of creating a new version. Used to collapse multiple
-   * edit_document tool calls within a single assistant turn into one
-   * version.
-   */
   reuseVersion?: {
     versionId: string;
     versionNumber: number;
@@ -1344,7 +1343,7 @@ export async function runEditDocument(params: {
     }
   | { ok: false; error: string }
 > {
-  const { documentId, userId, edits, db, reuseVersion } = params;
+  const { documentId, userId, edits, operations, db, reuseVersion } = params;
 
   const { data: doc } = await db
     .from("documents")
@@ -1367,21 +1366,57 @@ export async function runEditDocument(params: {
     .maybeSingle();
   const author = profileAttributionName(authorProfile, "Mike");
 
-  const {
-    bytes: editedBytes,
-    changes,
-    errors,
-  } = await applyTrackedEdits(current.bytes, edits, { author });
+  let editedBytes: Buffer;
+  let changes: {
+    id: string;
+    delId?: string;
+    insId?: string;
+    deletedText: string;
+    insertedText: string;
+    contextBefore?: string;
+    contextAfter?: string;
+    reason?: string;
+  }[] = [];
+  let errors: { index: number; reason: string }[] = [];
+
+  if (operations && operations.length > 0) {
+    try {
+      const astDoc = await DocxASTDocument.load(current.bytes);
+      const res = await astDoc.batchMutate(operations, { author });
+      editedBytes = res.bytes;
+      changes = res.changes.map((c) => ({
+        id: c.id,
+        delId: c.delId,
+        insId: c.insId,
+        deletedText: c.deletedText,
+        insertedText: c.insertedText,
+        contextBefore: "",
+        contextAfter: "",
+        reason: c.reason,
+      }));
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  } else if (edits !== undefined) {
+    const res = await applyTrackedEdits(current.bytes, edits, { author });
+    editedBytes = res.bytes;
+    changes = res.changes;
+    errors = res.errors;
+  } else {
+    return { ok: false, error: "Either operations or edits must be provided." };
+  }
 
   if (changes.length === 0) {
     return {
       ok: false,
       error:
         errors[0]?.reason ??
-        "No edits could be applied. Refine context_before/context_after and retry.",
+        "No edits could be applied. Refine context_before/context_after or block IDs and retry.",
     };
   }
-
   const ab = editedBytes.buffer.slice(
     editedBytes.byteOffset,
     editedBytes.byteOffset + editedBytes.byteLength,
@@ -1521,6 +1556,45 @@ export async function runEditDocument(params: {
     annotations,
     errors,
   };
+}
+export async function runReadBlocks(params: {
+  documentId: string;
+  db: Db;
+  startId?: string;
+  endId?: string;
+  limit?: number;
+  includeEmpty?: boolean;
+}): Promise<
+  | {
+      ok: true;
+      document_id: string;
+      blocks: DocBlock[];
+      total_count: number;
+    }
+  | { ok: false; error: string }
+> {
+  const current = await loadCurrentVersionBytes(params.documentId, params.db);
+  if (!current) return { ok: false, error: "Could not load document bytes." };
+  try {
+    const astDoc = await DocxASTDocument.load(current.bytes);
+    const blocks = astDoc.readBlocks({
+      startId: params.startId,
+      endId: params.endId,
+      limit: params.limit,
+      includeEmpty: params.includeEmpty,
+    });
+    return {
+      ok: true,
+      document_id: params.documentId,
+      blocks,
+      total_count: blocks.length,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
