@@ -14,16 +14,18 @@
 //                      read_document stops paying for LibreOffice per call
 //   memory.consolidate — curate scoped Markdown after chat inactivity
 import { chatTurnAuditEvents, insertAuditEvent, type ChatTurnAuditBase } from "../../lib/audit";
+import type { InferenceReceipt } from "../../lib/llm/attestation";
 import { type Db, type DbJob } from "../../lib/dbq/types";
 
 export async function handleChatTurnAudit(db: Db, job: DbJob): Promise<void> {
     const base = job.payload.base as ChatTurnAuditBase | undefined;
     if (!base?.userId) return; // malformed payload — nothing to retry into
     const events = (job.payload.events as unknown[] | undefined) ?? [];
+    const receipts = (job.payload.receipts as InferenceReceipt[] | undefined) ?? [];
     // Throwing inserts: a transient DB error retries the job. A retry after
     // a partial fan-out can duplicate a row (at-least-once) — for an audit
     // trail a rare duplicate beats a silent gap.
-    for (const event of chatTurnAuditEvents(base, events)) {
+    for (const event of chatTurnAuditEvents(base, events, receipts)) {
         await insertAuditEvent(db, event);
     }
 }

@@ -42,6 +42,7 @@ import {
   submitClientToolResult,
 } from "../chat/chat.service";
 import { enqueueChatTurnAudit } from "../../lib/audit";
+import { drainReceiptsSince } from "../../lib/llm/attestation";
 import {
   persistWordDocumentEdits,
   WORD_EDIT_FORMATS,
@@ -925,6 +926,7 @@ wordChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
       // doc_created/doc_edited artifacts, so there is nothing here for the
       // artifact fan-out to map — only the chat.message row.
       [],
+      drainReceiptsSince(),
     );
     write("data: [DONE]\n\n");
   } catch (error) {

@@ -31,6 +31,48 @@ const base = {
     model: "claude-x",
 };
 
+describe("recordChatTurn attested receipts", () => {
+    it("fans drained receipts into content-free inference.attested rows", async () => {
+        const { db, inserts } = makeDb();
+        await recordChatTurn(db, base, [], [
+            {
+                id: "receipt-1",
+                at: "2026-10-07T12:00:00.000Z",
+                endpointId: "endpoint-1",
+                modelId: "dgx-attested",
+                measurement: "measurement-1",
+                verifierVersion: "v3",
+                requestId: "request-1",
+            },
+        ]);
+
+        expect(inserts.map((r) => r.action)).toEqual([
+            "chat.message",
+            "inference.attested",
+        ]);
+        // Identity fields only: no prompt, response, or system text may
+        // ever ride a receipt row.
+        expect(inserts[1]).toMatchObject({
+            model: "dgx-attested",
+            detail: {
+                receipt_id: "receipt-1",
+                endpoint_id: "endpoint-1",
+                measurement: "measurement-1",
+                verifier_version: "v3",
+                request_id: "request-1",
+            },
+        });
+        expect(Object.keys(inserts[1].detail)).toHaveLength(6);
+    });
+
+    it("emits no receipt rows when the turn produced none", async () => {
+        const { db, inserts } = makeDb();
+        await recordChatTurn(db, base, []);
+
+        expect(inserts.map((r) => r.action)).toEqual(["chat.message"]);
+    });
+});
+
 describe("recordChatTurn artifact mining", () => {
     it("records a chat.message row plus mined artifact rows", async () => {
         const { db, inserts } = makeDb();

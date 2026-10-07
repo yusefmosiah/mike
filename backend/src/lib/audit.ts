@@ -101,6 +101,15 @@ export type ChatTurnAuditBase = {
 export function chatTurnAuditEvents(
   base: ChatTurnAuditBase,
   events: unknown[] | null | undefined,
+  receipts?: Array<{
+    id: string;
+    at: string;
+    endpointId: string;
+    modelId: string;
+    measurement: string;
+    verifierVersion: string;
+    requestId: string;
+  }>,
 ): AuditEventInput[] {
   const surface = base.surface ?? (base.projectId ? "project" : "assistant");
   const rows: AuditEventInput[] = [
@@ -117,6 +126,30 @@ export function chatTurnAuditEvents(
       detail: base.flags && Object.keys(base.flags).length ? base.flags : null,
     },
   ];
+  // Attested-lane receipts the turn produced, drained from the process-local
+  // ring at enqueue time. Content-free by type (identity fields only), one
+  // row per receipt, so the audit trail survives restarts the ring does not.
+  for (const receipt of receipts ?? []) {
+    rows.push({
+      userId: base.userId,
+      userEmail: base.userEmail,
+      action: "inference.attested",
+      status: base.status ?? "completed",
+      title: null,
+      surface,
+      projectId: base.projectId ?? null,
+      chatId: base.chatId,
+      model: receipt.modelId,
+      detail: {
+        receipt_id: receipt.id,
+        attested_at: receipt.at,
+        endpoint_id: receipt.endpointId,
+        measurement: receipt.measurement,
+        verifier_version: receipt.verifierVersion,
+        request_id: receipt.requestId,
+      },
+    });
+  }
   for (const raw of events ?? []) {
     const ev = raw as TurnEvent;
     // A single doc_replicated event can produce several copies; emit one
@@ -173,8 +206,17 @@ export async function recordChatTurn(
   db: Db,
   base: ChatTurnAuditBase,
   events: unknown[] | null | undefined,
+  receipts?: Array<{
+    id: string;
+    at: string;
+    endpointId: string;
+    modelId: string;
+    measurement: string;
+    verifierVersion: string;
+    requestId: string;
+  }>,
 ): Promise<void> {
-  for (const event of chatTurnAuditEvents(base, events)) {
+  for (const event of chatTurnAuditEvents(base, events, receipts)) {
     await recordAudit(db, event);
   }
 }
@@ -198,17 +240,26 @@ export async function enqueueChatTurnAudit(
   db: Db,
   base: ChatTurnAuditBase,
   events: unknown[] | null | undefined,
+  receipts?: Array<{
+    id: string;
+    at: string;
+    endpointId: string;
+    modelId: string;
+    measurement: string;
+    verifierVersion: string;
+    requestId: string;
+  }>,
 ): Promise<void> {
   try {
     await enqueueDbJob(db, {
       kind: "audit.chat_turn",
-      payload: { base, events: events ?? [] },
+      payload: { base, events: events ?? [], receipts: receipts ?? [] },
     });
   } catch (err) {
     console.error(
       "[audit] chat-turn enqueue failed; falling back to direct inserts:",
       err instanceof Error ? err.message : err,
     );
-    await recordChatTurn(db, base, events);
+    await recordChatTurn(db, base, events, receipts);
   }
 }

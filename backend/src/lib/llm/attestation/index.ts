@@ -4,5 +4,5 @@ export type {
     FetchLike,
     VerifyAttestationOptions,
 } from "./verifier";
-export { recordReceipt, queryReceipts, RECEIPT_BUFFER_CAP } from "./receipts";
+export { recordReceipt, queryReceipts, drainReceiptsSince, RECEIPT_BUFFER_CAP } from "./receipts";
 export type { InferenceReceipt, ReceiptFields } from "./receipts";

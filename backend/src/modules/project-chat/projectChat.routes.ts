@@ -16,6 +16,7 @@ import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import { createServerSupabase } from "../../lib/supabase";
 import { enqueueChatTurnAudit } from "../../lib/audit";
+import { drainReceiptsSince } from "../../lib/llm/attestation";
 import {
     appendAssistantEventsToMessage,
     AssistantStreamError,
@@ -406,6 +407,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                     model: selectedModel,
                 },
                 persistedEvents,
+                drainReceiptsSince(),
             );
             write("data: [DONE]\n\n");
         } catch (err) {

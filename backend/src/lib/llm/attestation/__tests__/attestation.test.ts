@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 
 import {
+    drainReceiptsSince,
     queryReceipts,
     recordReceipt,
     RECEIPT_BUFFER_CAP,
@@ -226,6 +227,45 @@ describe("verifyAttestation", () => {
             reason: "invalid verifier URL 'ftp://verifier.test'",
         });
         expect(fetchFn).not.toHaveBeenCalled();
+    });
+});
+
+describe("drainReceiptsSince", () => {
+    it("drains everything when no cursor is given, then leaves an empty ring", () => {
+        recordReceipt({
+            endpointId: "drain-endpoint",
+            modelId: "drain-model",
+            measurement: "m",
+            verifierVersion: "v",
+            requestId: "drain-1",
+        });
+        const drained = drainReceiptsSince();
+        expect(drained.map((receipt) => receipt.requestId)).toContain("drain-1");
+        expect(queryReceipts({ modelId: "drain-model" })).toHaveLength(0);
+    });
+
+    it("returns only receipts after the cursor and removes them", () => {
+        const first = recordReceipt({
+            endpointId: "cursor-endpoint",
+            modelId: "cursor-model",
+            measurement: "m",
+            verifierVersion: "v",
+            requestId: "cursor-1",
+        });
+        recordReceipt({
+            endpointId: "cursor-endpoint",
+            modelId: "cursor-model",
+            measurement: "m",
+            verifierVersion: "v",
+            requestId: "cursor-2",
+        });
+        const drained = drainReceiptsSince(first.id);
+        expect(drained.map((receipt) => receipt.requestId)).toEqual(["cursor-2"]);
+        // The cursor receipt itself stays: it is the since-marker the next
+        // drain measures from.
+        expect(
+            queryReceipts({ modelId: "cursor-model" }).map((receipt) => receipt.requestId),
+        ).toEqual(["cursor-1"]);
     });
 });
 

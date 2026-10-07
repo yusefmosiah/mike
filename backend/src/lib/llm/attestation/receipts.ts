@@ -56,3 +56,17 @@ export function queryReceipts(filter?: {
                 receipt.endpointId === filter.endpointId),
     );
 }
+
+/**
+ * Removes and returns every receipt recorded since `sinceId` (exclusive),
+ * oldest first; with no argument, drains the whole ring. The turn-audit path
+ * calls this after persisting, so a receipt that reaches Postgres leaves the
+ * process-local ring exactly once. Unknown ids drain everything rather than
+ * nothing: a missed cursor must widen the audit trail, never narrow it.
+ */
+export function drainReceiptsSince(sinceId?: string): InferenceReceipt[] {
+    if (!sinceId) return receipts.splice(0, receipts.length);
+    const index = receipts.findIndex((receipt) => receipt.id === sinceId);
+    if (index < 0) return receipts.splice(0, receipts.length);
+    return receipts.splice(index + 1);
+}
