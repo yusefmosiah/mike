@@ -691,10 +691,11 @@ export async function streamAiSdk(
             name: part.toolName,
             input: normalizeToolInput(part.input),
           };
-          if (!notifiedEarlyToolCalls.has(call.name)) {
-            notifiedEarlyToolCalls.add(call.name);
-            params.callbacks?.onToolCallStart?.(call);
-          }
+          // The early stub (input: {}) opens the client's Working state; the
+          // parsed call re-fires with the real arguments so a consumer that
+          // records the last notification per tool ends with the true input.
+          notifiedEarlyToolCalls.add(call.name);
+          params.callbacks?.onToolCallStart?.(call);
           break;
         }
         case "finish-step":
