@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: f0dbb93
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:59:30Z"
+  captured_at: "2026-10-07T04:00:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: f0dbb93
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard f0dbb93
 
 finish:
   deliver: >-
@@ -68,17 +68,17 @@ boundaries:
     - Modifying external connector OAuth scopes
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: auto-mode-and-guardrails
+  source_ref: f0dbb93
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-automode-done
+    state: ready
+    ref: main
+    base: 6fa23be
     digest: none
-    scope: []
+    scope: [backend/src/lib/guardrails/, backend/src/modules/chat/engine/streaming.ts]
   conjecture:
     id: c-auto-mode-throughput
     claim: >-
@@ -88,22 +88,30 @@ now:
     edge: resource
     delta_o: Evaluation against curated agentic incident log.
     scope_if_supported: Agent execution pipeline.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [f0dbb93]
   decision:
-    what: Use Jev via OpenRouter for dev; deploy fast quantized System 1 model on local DGX for private production.
+    what: On-route classifier over the turn's own OpenCode Go model; no external Jev/OpenRouter endpoint.
     kind: architecture
     status: settled
-    evidence_ref: user-prompt-2026-10-06
-    owner_ratification_ref: user-prompt-2026-10-06
+    evidence_ref: user-prompt-2026-10-07
+    owner_ratification_ref: user-prompt-2026-10-07
   belief:
-    believed_state: Dependent on Station 6.
-    main_uncertainty: Classifier latency overhead on Tier 3 tool calls.
-    next_observation: Benchmarking fast System 1 model token latency on DGX.
-  blocker_or_risk: Blocked on completion of Station 6.
-  next_action: Await Station 6 completion.
+    believed_state: Station 7 landed at f0dbb93; auto mode + guardrails live with on-route classification.
+    main_uncertainty: Classifier precision/recall on real tool traffic (needs live traffic evaluation).
+    next_observation: Station 8 private hardening.
+  blocker_or_risk: none
+  next_action: Advance spine to Station 8.
+receipts:
+  - id: station-7-complete
+    boundary: implement
+    identity: f0dbb93
+    proof_refs:
+      - backend/src/lib/guardrails/__tests__/autoMode.test.ts
+      - backend/src/modules/chat/engine/__tests__/streamingAutoMode.test.ts
+    rollback_ref: 6fa23be
+    disposition: Station 7 landed on main; guardrails 33/33, automode 16/16, full suite 2930 pass (2 pre-existing openrouter failures).
 
-receipts: []
 ---
 
 # Station 7: Auto Mode & System 1 Guardrails Engine

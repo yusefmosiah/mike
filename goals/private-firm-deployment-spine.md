@@ -43,8 +43,8 @@ metamission:
       depends_on: [station-5-pi-tree-branching]
     - id: station-7-auto-mode-and-guardrails
       path: goals/station-7-auto-mode-and-guardrails.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: complete
       depends_on: [station-6-local-audio-stt-tts]
     - id: station-8-private-hardening-and-phala
       path: goals/station-8-private-hardening-and-phala.md
@@ -126,8 +126,8 @@ boundaries:
     - Arbitrary cloud model bypasses under strict private mode
 
   status: working
-  slice: station-7-auto-mode-and-guardrails
-  source_ref: 743fa26
+  slice: station-8-private-hardening-and-phala
+  source_ref: f0dbb93
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 7 (Auto Mode guardrails); Station 6 landed at 743fa26.
+  next_action: Advance Station 8 (private hardening + Phala TEE); Station 7 landed at f0dbb93.
 
 receipts:
   - id: station-1-complete
@@ -215,6 +215,15 @@ receipts:
       - frontend/src/app/components/assistant/useReadAloud.test.ts
     rollback_ref: 5c9b863
     disposition: Station 6 landed on main; backend audio 25/25, frontend audio 304/304, typechecks clean.
+  - id: station-7-complete
+    boundary: implement
+    identity: f0dbb93
+    proof_refs:
+      - goals/station-7-auto-mode-and-guardrails.md
+      - backend/src/lib/guardrails/__tests__/autoMode.test.ts
+      - backend/src/modules/chat/engine/__tests__/streamingAutoMode.test.ts
+    rollback_ref: 6fa23be
+    disposition: Station 7 landed on main; guardrails 33/33, automode 16/16, full suite 2930 pass (2 pre-existing openrouter failures).
 ---
 
 # Metamission: Private Firm Deployment Spine
