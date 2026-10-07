@@ -38,8 +38,8 @@ metamission:
       depends_on: [station-4-context-resilience-and-compaction]
     - id: station-6-local-audio-stt-tts
       path: goals/station-6-local-audio-stt-tts.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: complete
       depends_on: [station-5-pi-tree-branching]
     - id: station-7-auto-mode-and-guardrails
       path: goals/station-7-auto-mode-and-guardrails.md
@@ -126,8 +126,8 @@ boundaries:
     - Arbitrary cloud model bypasses under strict private mode
 
   status: working
-  slice: station-6-local-audio-stt-tts
-  source_ref: a756ea2
+  slice: station-7-auto-mode-and-guardrails
+  source_ref: 743fa26
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 6 (local audio STT/TTS proxies); Station 5 landed at a756ea2.
+  next_action: Advance Station 7 (Auto Mode guardrails); Station 6 landed at 743fa26.
 
 receipts:
   - id: station-1-complete
@@ -205,6 +205,16 @@ receipts:
       - frontend/src/app/components/assistant/useChatBranchActions.test.tsx
     rollback_ref: e8a9b1c
     disposition: Station 5 landed on main; backend 2848 pass (2 pre-existing openrouter failures), assistant suite 245/245, pages 44/44, hooks+lib 729/729.
+  - id: station-6-complete
+    boundary: implement
+    identity: 743fa26
+    proof_refs:
+      - goals/station-6-local-audio-stt-tts.md
+      - backend/src/modules/audio/__tests__/audio.routes.test.ts
+      - frontend/src/app/components/assistant/useDictation.test.ts
+      - frontend/src/app/components/assistant/useReadAloud.test.ts
+    rollback_ref: 5c9b863
+    disposition: Station 6 landed on main; backend audio 25/25, frontend audio 304/304, typechecks clean.
 ---
 
 # Metamission: Private Firm Deployment Spine

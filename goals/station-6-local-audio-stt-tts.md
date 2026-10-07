@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: 743fa26
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:59:00Z"
+  captured_at: "2026-10-07T03:00:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: 743fa26
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard 743fa26
 
 finish:
   deliver: >-
@@ -66,17 +66,17 @@ boundaries:
     - Multi-speaker conversational diarization
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: local-audio-stt-tts
+  source_ref: 743fa26
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-audio-done
+    state: ready
+    ref: main
+    base: 5c9b863
     digest: none
-    scope: []
+    scope: [backend/src/modules/audio/, frontend/src/app/components/assistant/, frontend/src/app/lib/mikeApi.ts]
   conjecture:
     id: c-local-voice-ephemeral-privacy
     claim: >-
@@ -86,22 +86,31 @@ now:
     edge: resource
     delta_o: Audio transcription latency benchmark on local container.
     scope_if_supported: Audio processing layer.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [743fa26]
   decision:
-    what: Implement OpenAI-compatible /audio/transcriptions and /audio/speech endpoints.
+    what: Implemented OpenAI-compatible /audio/transcriptions and /audio/speech endpoints.
     kind: architecture
     status: settled
     evidence_ref: user-prompt-2026-10-06
     owner_ratification_ref: user-prompt-2026-10-06
   belief:
-    believed_state: Dependent on Station 5.
-    main_uncertainty: Riva vs Kokoro container packaging on local workstation.
-    next_observation: Testing lightweight local TTS server container.
-  blocker_or_risk: Blocked on completion of Station 5.
-  next_action: Await Station 5 completion.
+    believed_state: Station 6 landed at 743fa26; dictation + read-aloud live with ephemeral proxies.
+    main_uncertainty: Live latency against a real Whisper/TTS container (no operator endpoint configured in this env).
+    next_observation: Station 7 Auto Mode guardrails.
+  blocker_or_risk: none
+  next_action: Advance spine to Station 7.
+receipts:
+  - id: station-6-complete
+    boundary: implement
+    identity: 743fa26
+    proof_refs:
+      - backend/src/modules/audio/__tests__/audio.routes.test.ts
+      - frontend/src/app/components/assistant/useDictation.test.ts
+      - frontend/src/app/components/assistant/useReadAloud.test.ts
+    rollback_ref: 5c9b863
+    disposition: Station 6 landed on main; backend audio 25/25, frontend audio 304/304, typechecks clean.
 
-receipts: []
 ---
 
 # Station 6: Local Audio STT & TTS Proxies
