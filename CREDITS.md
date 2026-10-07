@@ -13,6 +13,8 @@ infrastructure, and development workflow, including optional local integrations.
 | [LibreOffice](https://www.libreoffice.org/) | Server-side office-document conversion, including PDF renditions. |
 | [libreoffice-convert](https://github.com/elwerene/libreoffice-convert) | Node.js integration with LibreOffice's conversion tools. |
 | [PDF.js](https://github.com/mozilla/pdf.js) | PDF viewing in the browser and PDF text extraction on the backend through `pdfjs-dist`. |
+| [Tesseract.js](https://github.com/naptha/tesseract.js) and [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) | Local OCR of scanned PDF pages, with the English model vendored in `backend/assets/tessdata/`. |
+| [@napi-rs/canvas](https://github.com/Brooooooklyn/canvas) | Rasterising PDF pages for OCR through PDF.js's Node canvas backend. |
 | [EigenPal DOCX Editor](https://github.com/eigenpal/docx-editor) | Browser-based Word document viewing and editing through `@docx-editor.dev/core`, `@docx-editor.dev/react`, and the packaged fonts. |
 | [Mammoth](https://github.com/mwilliamson/mammoth.js) | Extracting content from Word documents. |
 | [docx](https://github.com/dolanmiu/docx) | Creating Word documents. |

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type FakeItem = {
   str: string;
@@ -32,22 +32,52 @@ function item(str: string, x: number, y: number, hasEOL = false): FakeItem {
   };
 }
 
+type FakePdf = {
+  getDocument: () => { promise: Promise<unknown> };
+};
+
+type FakePageOptions = {
+  /** `true` paints a full-page image; "error" makes the op list unreadable. */
+  imageOps?: boolean | "error";
+  /** Rasterising the page fails. */
+  renderFails?: boolean;
+};
+
 function fakePdf(
   pages: FakeItem[][],
   annotations: FakeAnnotationResult[] = [],
-) {
+  pageOptions: FakePageOptions[] = [],
+): FakePdf {
   return {
     getDocument: () => ({
       promise: Promise.resolve({
         numPages: pages.length,
         getPage: (n: number) => {
           const pageAnnotations = annotations[n - 1] ?? [];
+          const options = pageOptions[n - 1] ?? {};
           return Promise.resolve({
             getTextContent: () => Promise.resolve({ items: pages[n - 1] }),
             getAnnotations: () =>
               pageAnnotations instanceof Error
                 ? Promise.reject(pageAnnotations)
                 : Promise.resolve(pageAnnotations),
+            getOperatorList: () =>
+              options.imageOps === "error"
+                ? Promise.reject(new Error("operator list unavailable"))
+                : Promise.resolve({
+                    fnArray:
+                      options.imageOps === true
+                        ? [pdfState.OPS.paintImageXObject]
+                        : [],
+                  }),
+            getViewport: ({ scale }: { scale: number }) => ({
+              width: 612 * scale,
+              height: 792 * scale,
+            }),
+            render: () => {
+              if (options.renderFails) throw new Error("render failed");
+              return { promise: Promise.resolve() };
+            },
           });
         },
       }),
@@ -55,21 +85,52 @@ function fakePdf(
   };
 }
 
-vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
-  getDocument: (opts: unknown) =>
-    (
-      globalThis as { __fakePdf?: ReturnType<typeof fakePdf> }
-    ).__fakePdf!.getDocument(),
+/**
+ * Hoisted so the mocked modules can reach it: the fake document being read,
+ * and pdfjs' real OPS enum so a scanned-page fake emits the op pdfjs emits.
+ */
+const pdfState = vi.hoisted(() => ({
+  OPS: {} as Record<string, number>,
+  pdf: undefined as FakePdf | undefined,
 }));
 
-import { extractPdfText } from "./pdfText";
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", async () => {
+  const actual = await vi.importActual<{ OPS: Record<string, number> }>(
+    "pdfjs-dist/legacy/build/pdf.mjs",
+  );
+  pdfState.OPS = actual.OPS;
+  return {
+    OPS: actual.OPS,
+    getDocument: () => pdfState.pdf!.getDocument(),
+  };
+});
+
+const ocrMocks = vi.hoisted(() => ({
+  createWorker: vi.fn(),
+  recognize: vi.fn(),
+  terminate: vi.fn(),
+}));
+
+// The OCR engine stays a mock (real OCR is seconds of wasm per page); the
+// rasteriser under it is real, because the PNG handed to it is the seam this
+// test can actually check.
+vi.mock("tesseract.js", () => ({
+  createWorker: ocrMocks.createWorker,
+}));
+
+import { extractPdfText, needsOcr } from "./pdfText";
+
+async function freshExtractPdfText() {
+  vi.resetModules();
+  return (await import("./pdfText")).extractPdfText;
+}
 
 function withPdf(
   pages: FakeItem[][],
   annotations: FakeAnnotationResult[] = [],
+  pageOptions: FakePageOptions[] = [],
 ) {
-  (globalThis as { __fakePdf?: ReturnType<typeof fakePdf> }).__fakePdf =
-    fakePdf(pages, annotations);
+  pdfState.pdf = fakePdf(pages, annotations, pageOptions);
 }
 
 describe("extractPdfText layout reconstruction", () => {
@@ -402,10 +463,186 @@ describe("extractPdfText layout reconstruction", () => {
   });
 
   it("returns an empty string when pdfjs cannot read the buffer", async () => {
-    (globalThis as { __fakePdf?: unknown }).__fakePdf = {
+    pdfState.pdf = {
       getDocument: () => ({ promise: Promise.reject(new Error("bad pdf")) }),
     };
 
     await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe("");
+  });
+});
+
+describe("extractPdfText scanned pages", () => {
+  beforeEach(() => {
+    // One worker is reused across this suite (the module caches it), so the
+    // per-test behavior lives on the shared recognize/terminate mocks.
+    ocrMocks.createWorker.mockReset();
+    ocrMocks.createWorker.mockImplementation(async () => ({
+      recognize: ocrMocks.recognize,
+      terminate: ocrMocks.terminate,
+    }));
+    ocrMocks.recognize.mockReset();
+    ocrMocks.terminate.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("keeps a text page on the text path, image or not", async () => {
+    withPdf(
+      [
+        [item("Settlement Agreement Terms", 72, 700)],
+        [item("Payment schedule clause", 72, 700)],
+      ],
+      [],
+      [{ imageOps: true }, {}],
+    );
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1]\nSettlement Agreement Terms\n\n[Page 2]\nPayment schedule clause",
+    );
+    expect(ocrMocks.recognize).not.toHaveBeenCalled();
+  });
+
+  it("leaves a short page without an image on the text path", async () => {
+    withPdf([[item("Page 3", 72, 700)]], [], [{}]);
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1]\nPage 3",
+    );
+    expect(ocrMocks.recognize).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a scan when the page's ops cannot be read", async () => {
+    withPdf([[item("Page 3", 72, 700)]], [], [{ imageOps: "error" }]);
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1]\nPage 3",
+    );
+    expect(ocrMocks.recognize).not.toHaveBeenCalled();
+  });
+
+  it("OCRs a scanned page and marks the recovered text", async () => {
+    withPdf([[]], [], [{ imageOps: true }]);
+    ocrMocks.recognize.mockResolvedValue({
+      data: { text: "IN WITNESS WHEREOF\n" },
+    });
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1 — OCR]\nIN WITNESS WHEREOF",
+    );
+    // The seam: a real PNG raster of the page reached the OCR engine.
+    const [image] = ocrMocks.recognize.mock.calls[0] as [Uint8Array];
+    expect(Array.from(image.subarray(0, 8))).toEqual([
+      137, 80, 78, 71, 13, 10, 26, 10,
+    ]);
+  });
+
+  it("keeps the page's own text below the text OCR recovered", async () => {
+    withPdf([[item("Exhibit A", 72, 700)]], [], [{ imageOps: true }]);
+    ocrMocks.recognize.mockResolvedValue({ data: { text: "EXHIBIT A" } });
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1 — OCR]\nEXHIBIT A\nExhibit A",
+    );
+  });
+
+  it("marks a scanned page pending when OCR fails", async () => {
+    withPdf([[item("Exhibit A", 72, 700)]], [], [{ imageOps: true }]);
+    ocrMocks.recognize.mockRejectedValue(new Error("recognition failed"));
+
+    const text = await extractPdfText(new ArrayBuffer(8));
+
+    expect(text).toBe("[Page 1 — scanned image, OCR pending]\nExhibit A");
+    expect(needsOcr(text)).toBe(true);
+  });
+
+  it("marks a scanned page pending when it cannot be rasterised", async () => {
+    withPdf([[]], [], [{ imageOps: true, renderFails: true }]);
+
+    await expect(extractPdfText(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1 — scanned image, OCR pending]\n",
+    );
+    expect(ocrMocks.recognize).not.toHaveBeenCalled();
+  });
+
+  it("stops at the per-document budget and marks the rest pending", async () => {
+    const pages = Array.from({ length: 11 }, () => [] as FakeItem[]);
+    withPdf(
+      pages,
+      [],
+      pages.map(() => ({ imageOps: true })),
+    );
+    ocrMocks.recognize.mockResolvedValue({ data: { text: "read" } });
+
+    const text = await extractPdfText(new ArrayBuffer(8));
+
+    expect(ocrMocks.recognize).toHaveBeenCalledTimes(10);
+    expect(text).toContain("[Page 10 — OCR]");
+    expect(text).toContain("[Page 11 — scanned image, OCR pending]");
+  });
+
+  it("marks scanned pages pending when the OCR worker cannot start", async () => {
+    // A fresh module: the worker cache is per module instance, and a worker
+    // that failed to start is remembered until the process restarts.
+    const extract = await freshExtractPdfText();
+    ocrMocks.createWorker.mockRejectedValueOnce(new Error("wasm unavailable"));
+    withPdf([[]], [], [{ imageOps: true }]);
+
+    await expect(extract(new ArrayBuffer(8))).resolves.toBe(
+      "[Page 1 — scanned image, OCR pending]\n",
+    );
+    expect(ocrMocks.recognize).not.toHaveBeenCalled();
+  });
+
+  it("marks scanned pages pending when the rasteriser is unavailable", async () => {
+    vi.doMock("@napi-rs/canvas", () => {
+      throw new Error("no canvas backend");
+    });
+    try {
+      const extract = await freshExtractPdfText();
+      withPdf([[]], [], [{ imageOps: true }]);
+
+      await expect(extract(new ArrayBuffer(8))).resolves.toBe(
+        "[Page 1 — scanned image, OCR pending]\n",
+      );
+      expect(ocrMocks.recognize).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@napi-rs/canvas");
+    }
+  });
+
+  it("drops the worker and suspends OCR for the rest of a timed-out document", async () => {
+    vi.useFakeTimers();
+    try {
+      const extract = await freshExtractPdfText();
+      withPdf([[], []], [], [{ imageOps: true }, { imageOps: true }]);
+      ocrMocks.recognize.mockImplementation(() => new Promise(() => {}));
+
+      const extraction = extract(new ArrayBuffer(8));
+      for (
+        let tick = 0;
+        tick < 200 && ocrMocks.recognize.mock.calls.length === 0;
+        tick++
+      ) {
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(ocrMocks.recognize).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const text = await extraction;
+
+      expect(text).toContain("[Page 1 — scanned image, OCR pending]");
+      expect(text).toContain("[Page 2 — scanned image, OCR pending]");
+      expect(ocrMocks.recognize).toHaveBeenCalledTimes(1);
+      expect(ocrMocks.terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("needsOcr", () => {
+  it("separates unreadable scans from pages that were read", () => {
+    expect(needsOcr("[Page 1]\nLease")).toBe(false);
+    expect(needsOcr("[Page 1 — OCR]\nLease")).toBe(false);
+    expect(
+      needsOcr("[Page 1]\nLease\n\n[Page 2 — scanned image, OCR pending]\n"),
+    ).toBe(true);
   });
 });

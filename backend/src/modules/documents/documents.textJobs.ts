@@ -1,7 +1,7 @@
 // documentJobs — implementation behind the module facade.
 import { downloadFile, extractedTextKey, uploadFile } from "../../lib/storage";
 import { requiresLibreOfficeTextExtraction } from "../../lib/documentTypes";
-import { extractLegacyOfficeText } from "../../lib/pdfText";
+import { extractLegacyOfficeText, needsOcr } from "../../lib/pdfText";
 import { type Db, type DbJob } from "../../lib/dbq/types";
 import { enqueueDbJob } from "../../lib/dbq/enqueue";
 
@@ -16,11 +16,16 @@ import { enqueueDbJob } from "../../lib/dbq/enqueue";
  *
  * Idempotent: the key is derived from the immutable version id, so a retry
  * overwrites its own object with identical bytes.
+ *
+ * Returns an `ocr_pending` note when the extracted text still contains pages
+ * the extractor could not read (scanned pages it marked as OCR pending): the
+ * cache is the only place that knows, and the job row is what an operator
+ * looks at.
  */
 export async function handleDocumentPrecomputeText(
   db: Db,
   job: DbJob,
-): Promise<void> {
+): Promise<Record<string, unknown> | void> {
   const versionId = job.payload.versionId as string | undefined;
   const storagePath = job.payload.storagePath as string | undefined;
   const fileType = job.payload.fileType as string | undefined;
@@ -77,4 +82,5 @@ export async function handleDocumentPrecomputeText(
   // Replacement/deletion during conversion invalidates the just-written
   // cache. The cleanup handler waits for this running claim to finish.
   if (!(await isCurrent())) await retireCache();
+  return needsOcr(text) ? { ocr_pending: true } : undefined;
 }

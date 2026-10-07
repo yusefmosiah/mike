@@ -10,7 +10,7 @@ backend/src/
 ├── index.ts               HTTP entrypoint
 ├── workerRuntime.ts       queue workers entrypoint (imports modules through facades)
 ├── middleware/            request plumbing (auth, trusted origin) — depends on lib/ only
-├── modules/<domain>/      one directory per HTTP surface (see "Module anatomy")
+├── modules/<domain>/      one directory per HTTP surface or internal service (see "Module anatomy")
 ├── lib/                   shared kernel: infrastructure + cross-domain primitives
 ├── workers/, jobs/        queue consumers and scheduled jobs — reach modules via facades
 └── __tests__/             cross-cutting suites, incl. architecture.test.ts
@@ -18,7 +18,8 @@ backend/src/
 
 ## Module anatomy
 
-Every directory under `src/modules/` follows the same shape:
+Every directory under `src/modules/` follows the same shape — a *service-only
+module*, described after the table, is the one shape without a routes file:
 
 | File | Role |
 |---|---|
@@ -27,6 +28,15 @@ Every directory under `src/modules/` follows the same shape:
 | `<name>.<topic>.ts` | **Service topic files** (large modules only). Business logic and data access for one topic: `documents.versions.ts`, `user.profile.ts`, `tabular.chats.ts`… Take an explicit `db: Db`, return typed results, never touch `req`/`res`. |
 | `<name>.shared.ts` | Types and helpers shared by the module's topic files but not exported through the facade. |
 | `__tests__/` | Unit tests for the service functions (fake `db`), colocated with the code. |
+
+A **service-only module** — an internal service other backend code calls
+directly, with no HTTP surface of its own — keeps this shape minus
+`<name>.routes.ts`. `retrieval` is the example: chunking, indexing, and hybrid
+search for chat context assembly. There is nothing for `app.ts` to mount, so
+the facade is the module's whole outward surface; it must be listed in the
+route-less exemption in `architecture.test.ts` with a comment explaining why.
+Reach for this only when no route is coming — a new HTTP surface is a new
+module with a routes file.
 
 Streaming endpoints are the one place HTTP leaks into the module body: SSE
 loops (header flush, LLM stream, stop handling, assistant-message
@@ -321,8 +331,9 @@ Existing module-local error unions remain supported. New operations use
 
 1. Create `src/modules/<domain>/` with `<name>.routes.ts` and
    `<name>.service.ts`; split into topic files when the service passes a few
-   hundred lines.
-2. Mount the router in `app.ts`.
+   hundred lines. A service-only module (no HTTP surface) ships without a
+   routes file — see "Module anatomy".
+2. Mount the router in `app.ts`. A service-only module has nothing to mount.
 3. Service functions take `db: Db` first and return `ServiceResult<T>` (or a
    module-local union); routes call `sendServiceFailure`.
 4. Put unit tests in `src/modules/<domain>/__tests__/`; route-level behavior

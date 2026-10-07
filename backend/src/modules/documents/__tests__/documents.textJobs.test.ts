@@ -12,7 +12,10 @@ vi.mock("../../../lib/storage", () => ({
   uploadFile: mocks.uploadFile,
   extractedTextKey: (id: string) => `extracted-text/${id}.txt`,
 }));
-vi.mock("../../../lib/pdfText", () => ({
+vi.mock("../../../lib/pdfText", async (importOriginal) => ({
+  // needsOcr stays REAL: the note the handler records is only correct if it
+  // follows the marker the extractor itself writes.
+  ...(await importOriginal<typeof import("../../../lib/pdfText")>()),
   extractLegacyOfficeText: mocks.extractLegacyOfficeText,
 }));
 vi.mock("../../../lib/dbq/enqueue", () => ({
@@ -64,6 +67,37 @@ it("does not write when it cannot establish version liveness", async () => {
   expect(mocks.enqueueDbJob).not.toHaveBeenCalled();
   fake.done();
 });
+it("records an ocr_pending note when the text still has unreadable pages", async () => {
+  const fake = scriptedDb([
+    { table: "document_versions", data: { id: "v" } },
+    { table: "document_versions", data: { id: "v" } },
+  ]);
+  mocks.extractLegacyOfficeText.mockResolvedValue(
+    "[Page 1]\nLease\n\n[Page 2 — scanned image, OCR pending]\n",
+  );
+
+  await expect(handleDocumentPrecomputeText(fake.db, job)).resolves.toEqual({
+    ocr_pending: true,
+  });
+  expect(mocks.enqueueDbJob).not.toHaveBeenCalled();
+  fake.done();
+});
+
+it("records no note for pages recovered by OCR", async () => {
+  const fake = scriptedDb([
+    { table: "document_versions", data: { id: "v" } },
+    { table: "document_versions", data: { id: "v" } },
+  ]);
+  mocks.extractLegacyOfficeText.mockResolvedValue(
+    "[Page 1 — OCR]\nSettlement Agreement",
+  );
+
+  await expect(
+    handleDocumentPrecomputeText(fake.db, job),
+  ).resolves.toBeUndefined();
+  fake.done();
+});
+
 it("propagates cleanup scheduling failure so the worker retries", async () => {
   const fake = scriptedDb([{ table: "document_versions", data: null }]);
   mocks.enqueueDbJob.mockRejectedValue(new Error("queue unavailable"));

@@ -1,0 +1,15 @@
+# Node
+node_modules/
+
+# Capacitor native projects — generated locally with
+# `npx cap add ios` / `npx cap add android` (needs Xcode / Android SDK).
+# The firm's hardening edits (see README.md "Native shell hardening") must be
+# re-applied after regeneration, so keep them as a patch or script; the
+# generated shells themselves are never committed.
+ios/
+android/
+
+# Tooling noise
+.DS_Store
+*.log
+*.tsbuildinfo

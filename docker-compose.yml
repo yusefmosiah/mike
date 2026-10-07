@@ -165,6 +165,7 @@ services:
       - ./backend/migrations/20261002_04_remove_user_time_zone.sql:/remove-user-time-zone-migration.sql:ro
       - ./backend/migrations/20261002_05_mcp_oauth_grants.sql:/mcp-oauth-grants-migration.sql:ro
       - ./backend/migrations/20261007_01_chat_message_tree_branching.sql:/chat-message-tree-migration.sql:ro
+      - ./backend/migrations/20261007_02_document_chunks.sql:/document-chunks-migration.sql:ro
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -214,6 +215,7 @@ services:
         psql "$$DB" -v ON_ERROR_STOP=1 -f /remove-user-time-zone-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /mcp-oauth-grants-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /chat-message-tree-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /document-chunks-migration.sql || exit 1;
         psql "$$DB" -c "grant usage on schema public to service_role;
           grant all privileges on all tables in schema public to service_role;
           grant all privileges on all sequences in schema public to service_role;
