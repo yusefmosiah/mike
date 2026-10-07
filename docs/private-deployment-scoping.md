@@ -2,44 +2,100 @@
 
 Phased implementation roadmap for running Mike as a firm-owned, private AI
 platform with confidential TEE inference, local DGX compute, a Pi-style
-branching conversation model, local voice, sandboxed code execution, and a
-24/7 Recursive Language Model (RLM) engine.
+branching conversation model, local voice, Auto Mode guardrails, sandboxed code
+execution, and a 24/7 Recursive Language Model (RLM) engine.
 
-Verified against `main` at `9a0a0a5` (2026-10-07).
+Verified against `main` (October 2026). Incorporates findings from the
+multi-agent consensus review (Claude Opus, Codex, GPT-6.1 Sol, GPT-6 Luna,
+Gemini 3.8 Flash, GLM 5.3 Flash) and coding agent Auto Mode security patterns.
 
 ---
 
-## 1. Guiding Strategy
+## 1. Guiding Strategy & Architectural Reset
 
-1. **Crawl, Walk, Run**: Prove stock Mike locally first before altering the
-   engine.
+1. **Crawl, Walk, Run**: Prove stock Mike locally first on Docker Compose before
+   altering core runtime engines or schemas.
 2. **TypeScript-Native**: Because Mike’s entire backend and domain model is in
    TypeScript (`backend/src/modules/*`), sandboxed code execution and RLM
-   engines should be built in **JavaScript/TypeScript (Bun / isolated VM)**,
-   not Python. This allows the REPL to import Mike's existing compiled domain
+   engines are built in **JavaScript/TypeScript (Bun / isolated VM)**, not
+   Python. This allows the REPL to import Mike's existing compiled domain
    modules directly without dual-language maintenance.
 3. **Hardware Economics (The 24/7 Night Shift)**: On owned compute (DGX Spark)
    and confidential TEEs, tokens have near-zero marginal cost. The RLM harness
    unlocks overnight recursive due diligence, speculative redlining, and memory
    "dreaming" while lawyers sleep.
+4. **Auto Mode & The Autonomy Spectrum**: Current Mike suffers from approval
+   friction: every connector write and document edit is flagged `pending` and
+   demands manual human clicks. While a cautious "Human-in-the-Loop" posture is
+   appropriate for some legal clients, engineers and autonomous overnight RLM
+   tasks require **Auto Mode**. We implement an intelligent, multi-tiered
+   permission engine (Jev / System 1 model) that evaluates tool calls dynamically
+   into `ALLOW`, `ASK`, or `DENY`.
+
+### What R&D Taught Us About Document Editing
+During testing on a 13-page human-authored Word document, Mike's stock document
+tool surface (`read_document`, `find_in_document`, `edit_document`) failed
+ambiguously:
+1. **Fallback Ambiguity**: While `docxTrackedChanges.ts` has `findUniqueAnchor`,
+   when surrounding context fails to match, it relaxes constraints and matches
+   on lone text if unique anywhere, causing silent wrong-location edits.
+2. **Operations That Cannot Be Expressed**: Deleting 60 entries required 60
+   separate API calls; newlines inside replacements become soft breaks (`<w:br/>`)
+   rather than new paragraphs (`<w:p>`); empty paragraphs cannot be matched or
+   removed; edits cannot span paragraph boundaries.
+3. **No Self-Verification**: The agent receives a success signal without seeing
+   a diff or inspecting whether the file satisfies the prompt.
+4. **Partial Batch Failure**: If some edits in a batch succeed while others fail,
+   the partial mutations are activated anyway (`documentOps.ts:1376`), violating
+   atomicity.
+
+### Industry Findings (Harvey & Legora 2025–2026)
+* **Code Mode for Word Documents Failed**: In late 2025, Harvey researched
+  Claude's Docx skill (generating Python scripts to edit `.docx` via
+  `python-docx`). They abandoned it: it was too slow, degraded legal reasoning,
+  and `python-docx` lacks full OOXML support and corrupted document formatting.
+  *Conclusion: Keep deterministic code on the server engine; expose high-level,
+  fail-closed semantic tools to the model.*
+* **Harvey's Current (March 2026) Architecture**:
+  1. Parse `.docx` into an in-memory document tree (preservation-first: legal text
+     is first-class, while opaque XML nodes pass through untouched).
+  2. The agent edits this in-memory representation via focused, iterative tools
+     (`read_blocks`, `insert_block`, `delete_blocks`, `replace_block`).
+  3. The document updates in memory after every tool call.
+  4. The agent **must self-verify** using a `get_diff` tool before finalizing.
+  5. Deterministic backend code diffs the working tree against an immutable
+     baseline snapshot and compiles native Word tracked changes (`<w:ins>` /
+     `<w:del>`) and relationship tables.
+* **RLM is for Large-Scale Diligence, Not Micro-Editing**: In September 2026,
+  Harvey and Baseten showed that Recursive Language Models (RLMs) load an entire
+  5,000-document data room (80M tokens) into a REPL to achieve 96% coverage via
+  recursive subagents. RLM is a discovery and diligence harness, not a Word
+  patching primitive.
+* **Legora's Dual-Domain Model**: Legora separates web drafting (structured
+  drafting with live citation provenance) from Word document editing (handled
+  inside Microsoft Word via OfficeJS direct DOM manipulation). *Note: Mike
+  already has an OfficeJS tracked-change editing path in `wordClientTools.ts`
+  and `useWordDoc.ts`; extending this path is deferred while server-side editing
+  is stabilized.*
 
 ---
 
-## 2. Phase-by-Phase Roadmap
+## 2. Updated Priority Roadmap
 
 ```mermaid
 graph TD
-    P0[Phase 0: Local Stock Bring-Up with OpenCode Go & QA] --> P1[Phase 1: Usability Upgrades: Pi-Tree, Voice, Guardrails]
-    P1 --> P2[Phase 2: Private Hardening & Phala Attested Lane - DEMO MILESTONE]
-    P2 --> P3[Phase 3: Sandboxed JS/TS Code Execution Tool]
-    P3 --> P4[Phase 4: TypeScript RLM Engine for 24/7 Night Shift & Dreaming]
-    P2 --> P5[Phase 5: Native Mobile Client Capacitor & Ingestion OCR]
-    P4 --> P5
+    P0[Phase 0: Local Stock Bring-Up with OpenCode Go & QA] --> P1[Phase 1 & 2 Gate: In-Memory Doc AST, Block Tools & get_diff Loop]
+    P1 --> P3[Phase 3: Modular Search, Citation Verification & Auto Mode Guardrails]
+    P3 --> P4[Phase 4: Core Usability: Pi-Tree Branching & Local Voice STT/TTS]
+    P4 --> P5[Phase 5: Private Hardening & Phala Attested Lane - DEMO MILESTONE]
+    P5 --> P6[Phase 6: Ingestion OCR, Sandboxed Code Execution & 24/7 RLM Diligence]
+    P6 --> P7[Phase 7: Native Mobile Client Capacitor]
+    P7 -.-> P8[Deferred Track: Advanced Word Add-In Capabilities - Legora Model]
 ```
 
 ---
 
-### Phase 0: Local Stock Bring-Up & Baseline QA
+### Phase 0: Local Stock Bring-Up & Baseline QA (Completed)
 *Goal: Stand up stock Mike locally on macOS using Docker Compose and OpenCode Go
 for inference; verify all baseline legal features.*
 
@@ -59,145 +115,202 @@ for inference; verify all baseline legal features.*
 
 ---
 
-### Phase 1: Core Usability & Modularity Upgrades
-*Goal: Fix conversational rigidity, add voice dictation/playback, expose loop
-depth, and add active injection defense.*
+### Phase 1 & 2: In-Memory Document AST, Block Tools & Self-Verification (Immediate Priority 1)
+*Goal: Replace naive flat-string regex substitution with a preservation-first
+in-memory document tree, fail-closed atomic block operations, and a model-friendly
+`get_diff` verification gate.*
 
-* **1.1. Pi-Style Conversation Tree (Branching & Regeneration)**:
-  * Migration: add `parent_message_id uuid references chat_messages(id)` to
-    `chat_messages` and `chat_leaf_state (chat_id, user_id, leaf_message_id)`.
-  * Backfill: map assistant parents from existing `memory_input_message_id`;
-    map user parents from preceding assistant `created_at`.
-  * Backend: change context building in `chat.prepare.ts` to be
-    server-authoritative (walk tree upward from requested leaf ID; stop relying
-    on unvalidated client-supplied history arrays).
-  * Frontend: add "Edit and branch" to `UserMessage.tsx`, "Regenerate" to
-    `AssistantMessage.tsx`, and sibling switcher controls (`< 2 of 3 >`) to
-    `ChatView.tsx`.
-* **1.2. Local Audio STT & TTS**:
-  * Backend: add `backend/src/modules/audio/` exposing standard OpenAI-compatible
-    proxies `POST /audio/transcriptions` (multipart audio) and
-    `POST /audio/speech` (streamed audio). Ephemeral in-memory handling; zero
-    disk retention.
-  * Frontend: add microphone dictation to `ChatInput.tsx` (appends text to
-    editable draft; never auto-submits); add sentence-streamed speech playback
-    controls to `AssistantMessage.tsx`.
-* **1.3. Configurable Tool Iteration Ceiling**:
+* **1.1. Preservation-First Document Parser (`backend/src/lib/docxAST.ts`)**:
+  * Retains the entire Open Packaging Convention (OPC) zip container and opaque
+    XML structures (headers, footers, drawings, bookmarks, section properties,
+    and styles).
+  * Projects body content into a queryable block index:
+    * Paragraph blocks (`id`: stable ID derived from `w14:paraId` or sequential hash,
+      heading level, style, text content).
+    * Table blocks (`id: "tbl_N"`, rows, columns, cells).
+    * Footnote blocks (`id: "fn_N"`, citation text, references).
+  * Immutable baseline: retains a snapshot of the starting document bytes and hash
+    for diff generation and rollback.
+* **1.2. Atomic Block-Level Tool Surface (`toolSchemas.ts` & `documentOps.ts`)**:
+  * `read_blocks({ start_id, end_id, doc_id })`: Read bounded sections by block ID.
+  * `delete_blocks({ start_id, end_id, doc_id })`: Delete entire ranges of
+    paragraphs or table rows atomically (e.g., deleting 60 entries cleanly).
+  * `delete_empty_blocks({ scope, doc_id })`: Clean up truly empty paragraphs
+    (guarded against removing paragraphs that host section breaks or bookmarks).
+  * `insert_block({ after_id, content, style, doc_id })`: Insert multi-line
+    paragraphs without newline stripping or collapsing into soft breaks.
+  * `replace_block({ block_id, new_content, expected_content, doc_id })`:
+    Strict fail-closed replacement; rejects immediately if `expected_content` does
+    not match (no fallback to loose lone-string matching).
+  * **All-or-Nothing Batches**: A batch either applies completely or leaves the
+    document untouched.
+* **1.3. Deterministic OOXML Compiler & Reversibility Guarantee**:
+  * Compiles mutations into native Word tracked changes (`<w:ins>` / `<w:del>`),
+    supporting paragraph-mark deletions (`w:pPr/w:rPr/w:del`) and table rows.
+  * **Relationship Reversibility**: Hyperlink targets and footnote definitions
+    belonging to deleted text MUST NOT be pruned while changes are pending.
+    (If a user rejects the deletion in Word, the link/footnote must remain intact).
+  * Records individual `del_w_id` / `ins_w_id` so the existing Word Add-in and Web
+    Accept/Reject cards continue to function seamlessly.
+* **1.4. Self-Verification Loop (`get_diff`) & Invariant Linter**:
+  * Expose `get_diff({ doc_id })` returning a model-friendly structured diff.
+  * System prompt enforces that the agent calls `get_diff` and checks its own work
+    against user intent before declaring completion.
+  * Server-side invariant linter:
+    * Validates package XML integrity.
+    * Exempts standard Word separators (`w:separator`, `w:continuationSeparator`
+      with IDs `-1` and `0`) from orphan footnote checks.
+    * Flags unreferenced new relationships or dangling bookmark references.
+
+---
+
+### Phase 3: Modular Search, Citation Verification & Auto Mode Guardrails (Priority 2)
+*Goal: Provide robust, multi-provider web search and web fetch with strict
+egress controls, extend citation verification, and implement coding agent Auto
+Mode with System 1 guardrails.*
+
+* **3.1. Outbound Egress Policy & SSRF Guard (`backend/src/lib/search/egress.ts`)**:
+  * Enforce allowed egress domains, SSRF protection via `backend/src/lib/privateIp.ts`,
+    connection-time DNS validation, and payload size limits.
+  * Under `STRICT_PRIVATE_MODE=true`, disable external search unless an approved
+    on-premise or confidential gateway is explicitly configured.
+* **3.2. Modular Search Provider Engine (`backend/src/lib/search/`)**:
+  * Provider-neutral interface:
+    * `search(query: string, options: SearchOptions): Promise<SearchResult[]>`
+    * `fetchPage(url: string, options?: FetchOptions): Promise<FetchedPage>`
+  * **Supported Providers**:
+    1. **Keenable** (`https://api.keenable.ai/v1/search`): Primary, agent-first,
+       economical, fast structured snippets.
+    2. **Tavily** (`https://api.tavily.com`): AI-optimized factual search.
+    3. **Exa** (`https://api.exa.ai`): Neural semantic search and clean page contents.
+    4. **Parallel** (`https://api.parallel.ai`): High-speed parallel search/extraction.
+* **3.3. Extended Citation Verification (`verifyCitations.ts`)**:
+  * *Code Reality*: Mike already has `verifyCitations.ts` (447 lines) called by
+    `streaming.ts:775`, which checks document page quotes and CourtListener opinions.
+  * *Extensions Needed*:
+    1. **Web Source Grounding**: Hash and cache fetched web page snapshots, then
+       verify quotes against the retained snapshot text.
+    2. **Entailment / Hallucination Check**: Fast verifier evaluating whether the
+       proposition asserted in the text is logically supported by the quote.
+    3. **Unify Verification Pipeline**: Ensure custom citation builders (such as
+       tabular review) pass through `verifyCitations` rather than bypassing it.
+* **3.4. Coding Agent "Auto Mode" & Guardrails Engine (`backend/src/lib/guardrails/`)**:
+  * *The Approval Problem*: Current Mike pauses and waits for manual user approval
+    on every write action via `connectorApprovals.ts` and `ask_inputs`. This causes
+    approval fatigue and makes autonomous overnight RLM impossible.
+  * *Three-Tier Permission Architecture (Claude Code Pattern)*:
+    1. **Tier 1 (Safe-Tool Allowlist)**: Read-only actions (`read_document`,
+       `read_blocks`, `find_in_document`, `web_search`) execute immediately with
+       zero permission friction.
+    2. **Tier 2 (In-Session Workspace Actions)**: Benign document mutations,
+       scratchpad calculations, and block replacements apply directly in Auto Mode.
+    3. **Tier 3 (Transcript Classifier)**: High-blast-radius actions (deleting
+       entire document sections, external email dispatch, code execution, RLM
+       spawns) pass through the guardrail model.
+  * *The Guardrail Classifier Pipeline*:
+    * **Development Engine**: Fast classifier via **Jev** (or OpenRouter fast model).
+    * **Private Production Engine**: **Self-hosted System 1 model on DGX Spark**
+      (e.g., fast quantized 3B–7B Llama/Qwen guardrail model), ensuring zero tokens
+      escape to external APIs.
+    * **Decision Outputs**:
+      * `ALLOW`: Tool executes automatically without user intervention.
+      * `ASK`: Tool pauses for human confirmation via `ask_inputs` (in client mode).
+      * `DENY`: Action blocked. Uses **Deny-and-Continue** semantics: returns an
+        in-band error to the LLM (*"Action blocked by policy: [reason]. Re-evaluate
+        and find a safer path"*) so the agent recovers without crashing.
+    * **Reasoning-Blind Design**: The classifier sees only the user's prompt and
+      the raw toolcall payload; it strips assistant prose and tool outputs to prevent
+      the model from rationalizing violations or being tricked by prompt injections.
+    * **Input Layer Injection Probe**: Screens uploaded contract text and fetched
+      web content to flag indirect prompt injection payloads before they enter context.
+* **3.5. Configurable Tool Iteration Ceiling**:
   * Replace hardcoded `DEFAULT_MAX_ITERATIONS = 16` in `aiSdk.ts` and
     `streaming.ts:515` with `envInt("LLM_MAX_TOOL_ITERATIONS", 32)`.
-* **1.4. Active Guardrails & Auto-Mode Policy (Jev Integration)**:
-  * Add `backend/src/lib/guardrails/jev.ts` calling a fast Jev classifier.
-  * Inspect tool outputs (uploaded contract text) before feeding them to
-    `toolResults` to flag indirect prompt injection payloads.
-  * Dynamic auto-mode risk scoring (`ALLOW / ASK / DENY`) wrapping
-    `runToolCalls` in `streaming.ts`.
-* **1.5. Web Search Tool (`web_search` via Keenable)**:
-  * Provider-neutral engine interface (`backend/src/lib/search/`):
-    * `search(query, options)` returning ranked results (`title`, `url`, `snippet`, `published_at`).
-  * Primary provider: **Keenable** (`POST https://api.keenable.ai/v1/search` with `X-API-Key`).
-    * Agent-first design, high rate limits, economical pricing, built-in snippet extraction.
-  * Swappable provider adapters: **Tavily**, **Exa**, **Brave**.
-  * Tool schema: expose `web_search` in `backend/src/modules/chat/engine/tools/toolSchemas.ts`.
-  * Gating & Policy: configurable via `SEARCH_PROVIDER` and `KEENABLE_API_KEY` (or per-user BYOK); gated off under `STRICT_PRIVATE_MODE=true` unless explicitly approved.
-
-* **1.6. Native Legal Footnotes in Document Generation (`generate_docx`)**:
-  * Upgrade Level 1 declarative generator (`backend/src/modules/chat/engine/tools/documentOps.ts` and `toolSchemas.ts`).
-  * Add support for native Word footnotes via `docx` library's `FootnoteReferenceRun` and `Document({ footnotes })`.
-  * Support both Markdown-style footnote citations (`[^1]`) within prose content and explicit structured `"footnotes": { "1": "citation text" }` maps in the tool schema.
-  * Emits genuine Microsoft Word footnote fields that render at the bottom of the page with automatic numbering in MS Word (eliminating manual bracketed citation cleanup).
----
-
-### Phase 2: Private Deployment Hardening & Phala TEE Lane (DEMO MILESTONE)
-*Goal: Make privacy enforceable by the server, connect Phala confidential
-inference with verified attestation, and stage the full private demo.*
-
-* **2.1. Strict Private Mode (`STRICT_PRIVATE_MODE=true`)**:
-  * Startup fail-fast in `runtimeConfig.ts`: refuse boot if Sentry is enabled or
-    hosted keys are present.
-  * Catalog lockdown: gate `models.service.ts` and `ModelToggle.tsx` to hide
-    hosted providers; reject unapproved models in `routerModels.ts:64`.
-  * Utility model protection: re-point `DEFAULT_TITLE_MODEL` and
-    `DEFAULT_MAIN_MODEL` to approved local/attested endpoints.
-  * SSO-only lockdown: add `SSO_ONLY=true`; disable password registration and
-    unmanaged social logins in `auth.routes.ts:117-239`.
-* **2.2. Phala Attested Lane**:
-  * Add `backend/src/lib/llm/attestation/` with a vendor-neutral verifier.
-  * In `providers.ts:222`, wrap `createConfiguredAdapter` with the attestation
-    verifier for `trust: "attested"` models. Fail closed on verification fault.
-  * Create `inference_receipts` table: record cryptographic measurement,
-    verifier version, endpoint ID, and turn ID. Zero prompt/output text stored.
-* **2.3. DGX Spark vLLM Integration**:
-  * Configure local DGX vLLM endpoints via `MIKE_MODEL_CONFIG_JSON` with
-    `location: "local"`, `trust: "local"`.
-* **2.4. Demonstration Milestone**:
-  * Full end-to-end demo of private matter review running over Phala TEE and
-    DGX compute with branching chat, dictation, and verifiable receipts.
 
 ---
 
-### Phase 3: Sandboxed Code Execution Tool
-*Goal: Give the agent a secure JS/TS sandbox for financial calculations,
-waterfall modeling, and tabular data analysis.*
+### Phase 4: Core Usability Upgrades (Priority 3)
+*Goal: Conversational branching and local voice capabilities.*
 
-* **Execution Runtime**: Deploy an isolated execution sandbox (e.g. Bun / Node
-  worker sandbox container with resource limits, zero network egress, and a
-  mounted temporary filesystem).
-* **Tool Schema**: Expose `execute_code` in `toolSchemas.ts` accepting
-  TypeScript/JavaScript snippets.
-* **Human-in-the-Loop Integration**: Route `execute_code` through Mike's
-  existing `connectorApprovals.ts` and `ask_inputs` system when strict
-  approval mode is enabled.
-
-* **Full-Surface Microsoft Word Document Synthesis (Level 3)**:
-  * Complements Level 1's declarative schema (`docx` npm) and Level 2's tracked-changes OpenXML editor (`fast-xml-parser`).
-  * Enables the model to execute Python (`python-docx`, `openxml`) or TS scripts to build complex 100+ page agreements with automatic Tables of Contents (`{ TOC }`), Tables of Authorities, custom firm letterheads, dynamic page numbering, and multi-section layouts.
----
-
-### Phase 4: TypeScript RLM (Recursive Language Model) Engine for 24/7 Deep Work
-*Goal: Achieve Harvey-level M&A diligence parity by exposing Mike's domain
-modules into a TypeScript REPL, enabling 24/7 autonomous work.*
-
-* **The Problem Solved**: Eliminates the step ceiling and context window
-  saturation. A 5,000-document data room is loaded into the REPL as queryable
-  variables; sub-agents return findings to REPL variables; only the Root
-  Orchestrator's explicit outputs enter context.
-* **TypeScript-Native SDK (`packages/mike-sdk`)**:
-  * Expose Mike's existing domain logic as a high-level TS module:
-    * `vault`: query, filter, and load matter documents.
-    * `workflows`: load markdown playbooks and schemas.
-    * `redline`: generate tracked-change Word versions.
-    * `citations`: verify exact quotes against source texts.
-    * `llm`: spawn bounded parallel sub-agents against DGX vLLM endpoints.
-* **The Root Orchestrator Harness**:
-  * An asynchronous job runner (`backend/src/jobs/registry.ts: rlm.deep_run`)
-    running a stateful Bun/TS REPL.
-  * The root model writes TS scripts that slice data rooms, dispatch parallel
-    sub-agent waves, filter findings in memory, and generate cited memos.
-* **The "Night Shift" Workloads**:
-  * **Overnight Diligence**: Exhaustive cross-category review across hundreds of
-    agreements.
-  * **Adversarial Redline Simulation**: Overnight generation of borrower vs.
-    lender redlines comparing incoming drafts against firm precedent.
-  * **Memory "Dreaming"**: Autonomous knowledge consolidation running across
-    completed matters to extract partner drafting habits into firm playbooks.
+* **4.1. Pi-Style Conversation Tree (Branching & Regeneration)**:
+  * Schema migration: add `parent_message_id uuid references chat_messages(id)`
+    to `chat_messages` and `chat_leaf_state (chat_id, user_id, leaf_message_id)`.
+  * Server-authoritative context builder: walk the tree upward from active leaf ID.
+  * UI: "Edit and branch" on `UserMessage.tsx`, "Regenerate" on
+    `AssistantMessage.tsx`, and branch switcher arrows (`< 2 of 3 >`).
+* **4.2. Local Audio STT & TTS**:
+  * OpenAI-compatible proxies: `POST /audio/transcriptions` (ASR/Whisper) and
+    `POST /audio/speech` (TTS).
+  * UI composer dictation (microphone appends text to editable draft, never
+    auto-submits) and sentence-by-sentence streaming speech playback.
 
 ---
 
-### Phase 5: Production Mobile Client & Ingestion Scaling
-*Goal: Native mobile access via MDM and deep document OCR / hybrid retrieval.*
+### Phase 5: Private Deployment Hardening & Phala TEE Lane (DEMO MILESTONE)
+*Goal: Enforceable privacy boundaries, Phala confidential TEE inference, and DGX
+Sparks.*
 
-* **5.1. Native Mobile Client (Capacitor)**:
-  * Capacitor wrapper around the web application.
-  * Native capabilities: FaceID biometric authentication, microphone capture
-    for dictation, background window blurring, and native document share sheets.
-  * Security: distribution via enterprise MDM over corporate WireGuard/Tailscale
-    VPN. Zero push notifications containing confidential text.
-* **5.2. Ingestion & Retrieval Scaling**:
-  * OCR fallback in `uploads.processing.ts:657-777` for scanned PDFs below a
-    text-density threshold.
-  * Enable `pgvector`; chunk documents into `document_chunks`; implement
-    permission-aware hybrid retrieval (BM25 + vector RRF) in
-    `backend/src/modules/retrieval/`.
+* **5.1. Strict Private Mode (`STRICT_PRIVATE_MODE=true`)**:
+  * Refuse startup if Sentry or hosted cloud keys are enabled.
+  * Lock down the model catalog to local DGX and Phala endpoints; disable
+    unapproved cloud providers and unmanaged signups (`SSO_ONLY=true`).
+* **5.2. Phala Attested Lane**:
+  * Vendor-neutral attestation verifier checking remote CVM measurements.
+  * Record cryptographic `inference_receipts` (measurement, verifier version,
+    endpoint ID). Zero prompt or response text recorded.
+* **5.3. DGX Spark vLLM Integration**:
+  * Connect to local DGX Spark vLLM endpoints via `MIKE_MODEL_CONFIG_JSON`
+    over segmented, TLS-secured internal networks.
+* **5.4. Full Demonstration Milestone**:
+  * Live demo of private matter analysis running on Phala and DGX with branching
+    conversations, verified citations, and cryptographic inference receipts.
+
+---
+
+### Phase 6: Ingestion OCR, Sandboxed Code Execution & TypeScript RLM
+*Goal: Deep ingestion, secure JS/TS sandboxing, and 24/7 autonomous M&A diligence.*
+
+* **6.1. Ingestion OCR & Hybrid Retrieval**:
+  * OCR fallback in `uploads.processing.ts:657-777` for scanned PDF documents.
+  * `pgvector` hybrid retrieval (BM25 + vector reciprocal rank fusion) in
+    `backend/src/modules/retrieval/` across `document_chunks`.
+* **6.2. Sandboxed JS/TS Code Execution**:
+  * Isolated Bun/Node container sandbox with zero network egress for financial
+    modeling, spreadsheet calculations, and tabular data transformation.
+  * Human-in-the-loop: In client mode, code execution can route through
+    `connectorApprovals.ts` / `ask_inputs`; in Auto Mode, it runs within strict
+    container resource limits.
+* **6.3. TypeScript RLM Engine for the "Night Shift" (Full Autonomy)**:
+  * Asynchronous background job runner (`backend/src/jobs/registry.ts: rlm.deep_run`).
+  * **Full Autonomy Invariant**: The Night Shift operates overnight while lawyers
+    sleep; it **never pauses on `ask_inputs`**. It is constrained entirely by
+    sandbox isolation, copy-on-write data room boundaries, and the System 1
+    guardrail model.
+  * A root orchestrator model writes TypeScript scripts to load large data rooms
+    (up to 80M tokens) as queryable variables in a REPL, dispatching parallel
+    subagents to review folders and synthesize comprehensive diligence memos.
+  * Overnight workloads: deep diligence reviews, adversarial redline simulations,
+    and autonomous firm memory consolidation ("dreaming").
+
+---
+
+### Phase 7: Native Mobile Client (Capacitor)
+*Goal: Secure mobile access via MDM.*
+
+* **7.1. Native Mobile Client**:
+  * Capacitor wrapper with biometric unlock (FaceID), local audio dictation,
+    app blurring when backgrounded, and corporate MDM distribution.
+  * Zero confidential matter text delivered in push notifications.
+
+---
+
+### Deferred Track: Advanced Word Add-In Capabilities (The Legora Model)
+*Status: Deferred for after Phase 7 / client demand (or dual-stream).*
+* **Current State**: Mike already includes direct OfficeJS tracked-change editing
+  in `wordClientTools.ts` and `word-addin/src/taskpane/hooks/useWordDoc.ts`.
+* **Deferred Scope**: Adding advanced multi-document synchronizations or
+  heavy client-side AST transformations inside the Word Add-in is deferred until
+  requested by a client.
 
 ---
 
@@ -208,30 +321,40 @@ To maintain a healthy, mergeable fork and give back to Mike OSS (`open-legal-pro
 ```
 Upstream PRs (Mike OSS)                     Private Fork (Firm-Owned)
 ───────────────────────                     ────────────────────────
-PR 1: OpenCode Go fixes & models            Strict Private Mode & Egress
-PR 2: Configurable iteration limit          Phala TEE Attestation & Receipts
-PR 3: Native Word Footnotes (generate_docx)  DGX Spark vLLM Serving
-PR 4: Provider-agnostic Web Search          24/7 RLM REPL Dreaming
-PR 5: Pi-style conversation tree            Enterprise MDM Mobile Shell
-PR 6: Local STT/TTS audio endpoints
+PR 1: OpenCode Go fixes & models (Merged)   Strict Private Mode & Egress
+PR 2: Word Footnotes & Hyperlinks (Merged)  Phala TEE Attestation & Receipts
+PR 3: In-Memory Doc AST & Block Tools       DGX Spark vLLM Serving
+PR 4: Self-Verification get_diff Tool       24/7 TypeScript RLM REPL
+PR 5: Modular Web Search (Keenable/Tavily)  System 1 DGX Guardrails & Auto Mode
+PR 6: Extended Web Citation Verifier        Enterprise MDM Mobile Shell
+PR 7: Configurable Tool Iteration Ceiling
+PR 8: Pi-Style Conversation Tree
+PR 9: Local STT/TTS Audio Proxies
 ```
 
 ### Upstream Candidate PRs:
-- PR 1: `fix(llm): OpenCode Go session routing metadata and catalog sync`
-  +- *Status*: Implemented on local `main`; ready to branch and submit upstream.
-  +- *Scope*: Fixes `MissingSessionID` error via `x-opencode-session` and `User-Agent` headers; adds `OPENCODE_GO_API_KEY` alias; updates catalog to current models.
-- PR 2: `feat(llm): configurable tool iteration ceiling`
-  +- *Scope*: Replaces hardcoded 16-step cap with `LLM_MAX_TOOL_ITERATIONS` environment variable.
-- PR 3: `feat(tools): native Word footnote support in generate_docx`
-  +- *Scope*: Level 1 document generation upgrade: `FootnoteReferenceRun` and `Document({ footnotes })` in `documentOps.ts`, markdown `[^1]` parsing, and schema updates in `toolSchemas.ts`.
-- PR 4: `feat(tools): provider-agnostic web search tool (Keenable, Tavily, Exa)`
-  +- *Scope*: Modular `backend/src/lib/search/` interface, Keenable primary adapter, tool schema, citation metadata, and user settings.
-- PR 5: `feat(chat): immutable conversation tree and branching UI`
-  +- *Scope*: Schema migration for `parent_message_id`, leaf pointer, server-authoritative context builder, and frontend sibling navigation.
-- PR 6: `feat(audio): local STT transcription and TTS read-aloud proxies`
-  +- *Scope*: Standard OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoints with UI composer dictation and sentence playback.
+- **PR 1**: `fix(llm): OpenCode Go session routing metadata and catalog sync`
+  - *Status*: Merged on local `main`.
+- **PR 2**: `feat(tools): native Word footnotes and clickable hyperlinks`
+  - *Status*: Merged on local `main` & `feat/docx-footnotes`.
+- **PR 3**: `feat(tools): in-memory document AST and atomic block tools`
+  - *Scope*: `docxAST.ts` preserving OPC package, block index, fail-closed operations (`read_blocks`, `delete_blocks`, `insert_block`, `replace_block`), and atomic batch execution.
+- **PR 4**: `feat(tools): get_diff self-verification and invariant linter`
+  - *Scope*: Structured diff tool, agent self-review prompt loop, and package-level invariant validation.
+- **PR 5**: `feat(tools): provider-agnostic modular web search (Keenable, Tavily, Exa, Parallel)`
+  - *Scope*: `backend/src/lib/search/` interface, SSRF protection, Keenable primary adapter, and settings.
+- **PR 6**: `feat(citations): web source grounding and entailment verification`
+  - *Scope*: Extend `verifyCitations.ts` to cache and verify web snapshots and claim entailment.
+- **PR 7**: `feat(llm): configurable tool iteration ceiling`
+  - *Scope*: `LLM_MAX_TOOL_ITERATIONS` environment variable replacing hardcoded 16.
+- **PR 8**: `feat(chat): immutable conversation tree and branching UI`
+  - *Scope*: Schema migration for `parent_message_id`, leaf pointer, server-authoritative context builder, and frontend sibling navigation.
+- **PR 9**: `feat(audio): local STT transcription and TTS read-aloud proxies`
+  - *Scope*: Standard OpenAI-compatible `/audio/transcriptions` and `/audio/speech` endpoints with UI composer dictation and sentence playback.
+
 ### Private Fork Only (Not Upstreamed):
-- Phala TEE cryptographic attestation verifier and `inference_receipts` auditing.
-- `STRICT_PRIVATE_MODE=true` hard egress lockouts (disabling telemetry, unapproved BYOK, and external cloud models).
-- The 24/7 TypeScript RLM REPL Engine for overnight due diligence and firm memory dreaming on owned DGX compute.
-- Corporate MDM deployment packaging and internal distribution configurations.
+- **Phala TEE Cryptographic Lane**: Remote attestation verification and `inference_receipts` auditing table.
+- **Strict Private Mode (`STRICT_PRIVATE_MODE=true`)**: Hard network egress lockouts, disabling telemetry, unapproved BYOK, and external cloud models.
+- **System 1 Auto Mode Guardrails Engine**: Local DGX classifier for dynamic `ALLOW / ASK / DENY` toolcall permissions and indirect prompt injection defense.
+- **The 24/7 TypeScript RLM REPL Engine**: Overnight autonomous due diligence, speculative redline simulations, and firm memory dreaming on owned DGX compute.
+- **Enterprise MDM Mobile Packaging**: Capacitor iOS/Android shell with biometric lock and corporate MDM distribution.

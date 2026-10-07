@@ -37,3 +37,4 @@ qa-contracts/
 
 # Local review artifact; it is a nested repository, not application source.
 /pr-267-analysis-site/
+.agentic-consensus/
