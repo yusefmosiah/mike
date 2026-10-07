@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: a756ea2
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:58:00Z"
+  captured_at: "2026-10-07T02:15:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: a756ea2
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard a756ea2
 
 finish:
   deliver: >-
@@ -62,17 +62,17 @@ boundaries:
     - Cross-conversation branch merging
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: pi-tree-branching
+  source_ref: a756ea2
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-branching-done
+    state: ready
+    ref: main
+    base: e8a9b1c
     digest: none
-    scope: []
+    scope: [backend/src/modules/chat/, backend/src/modules/project-chat/, frontend/src/app/components/assistant/]
   conjecture:
     id: c-tree-branching-context-integrity
     claim: >-
@@ -80,24 +80,33 @@ now:
       never leak into the LLM context window.
     test: Test suite verifies context tokens contain only the active branch's ancestry.
     edge: independence
-    delta_o: Context inspection unit tests in chat.prepare.test.ts.
+    delta_o: Context inspection unit tests in chat.tree.test.ts.
     scope_if_supported: Conversation engine.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [a756ea2]
   decision:
-    what: Implement parent_message_id hierarchy with per-user leaf tracking table.
+    what: Implemented parent_message_id hierarchy with per-user leaf tracking table.
     kind: architecture
     status: settled
-    evidence_ref: user-prompt-2026-10-06
-    owner_ratification_ref: user-prompt-2026-10-06
+    evidence_ref: user-prompt-2026-10-07
+    owner_ratification_ref: user-prompt-2026-10-07
   belief:
-    believed_state: Dependent on Station 4.
-    main_uncertainty: Backfill migration performance on existing long transcripts.
-    next_observation: Testing migration on local Supabase container.
-  blocker_or_risk: Blocked on completion of Station 4.
-  next_action: Await Station 4 completion.
+    believed_state: Station 5 landed at a756ea2; edit-prompt, regenerate, branch-into-new-thread, and sibling navigation live on both chat surfaces.
+    main_uncertainty: Sibling navigation on user messages shows the prompt without auto-hopping to its newest answer child.
+    next_observation: Station 6 local audio proxies.
+  blocker_or_risk: none
+  next_action: Advance spine to Station 6.
 
-receipts: []
+receipts:
+  - id: station-5-complete
+    boundary: implement
+    identity: a756ea2
+    proof_refs:
+      - backend/src/__tests__/integration/chat.tree.test.ts
+      - frontend/src/app/components/assistant/ChatView.branch.test.tsx
+      - frontend/src/app/components/assistant/useChatBranchActions.test.tsx
+    rollback_ref: e8a9b1c
+    disposition: Station 5 landed on main; backend 2848 pass (2 pre-existing openrouter failures), assistant suite 245/245, pages 44/44, hooks+lib 729/729.
 ---
 
 # Station 5: Pi-Style Conversation Tree & Branching UI

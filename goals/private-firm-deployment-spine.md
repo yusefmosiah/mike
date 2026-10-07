@@ -33,8 +33,8 @@ metamission:
       depends_on: [station-3-modular-search-and-citations]
     - id: station-5-pi-tree-branching
       path: goals/station-5-pi-tree-branching.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: complete
       depends_on: [station-4-context-resilience-and-compaction]
     - id: station-6-local-audio-stt-tts
       path: goals/station-6-local-audio-stt-tts.md
@@ -126,8 +126,8 @@ boundaries:
     - Arbitrary cloud model bypasses under strict private mode
 
   status: working
-  slice: station-5-pi-tree-branching
-  source_ref: 279abe1
+  slice: station-6-local-audio-stt-tts
+  source_ref: a756ea2
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 5 (Pi-tree branching); Station 4 landed at 279abe1.
+  next_action: Advance Station 6 (local audio STT/TTS proxies); Station 5 landed at a756ea2.
 
 receipts:
   - id: station-1-complete
@@ -195,6 +195,16 @@ receipts:
       - backend/src/modules/chat/engine/__tests__/contextCompaction.test.ts
     rollback_ref: e1a9700
     disposition: Station 4 landed on main with passing 116-test affected surface (full suite 2835 pass, 2 pre-existing openrouter failures).
+  - id: station-5-complete
+    boundary: implement
+    identity: a756ea2
+    proof_refs:
+      - goals/station-5-pi-tree-branching.md
+      - backend/src/__tests__/integration/chat.tree.test.ts
+      - frontend/src/app/components/assistant/ChatView.branch.test.tsx
+      - frontend/src/app/components/assistant/useChatBranchActions.test.tsx
+    rollback_ref: e8a9b1c
+    disposition: Station 5 landed on main; backend 2848 pass (2 pre-existing openrouter failures), assistant suite 245/245, pages 44/44, hooks+lib 729/729.
 ---
 
 # Metamission: Private Firm Deployment Spine
