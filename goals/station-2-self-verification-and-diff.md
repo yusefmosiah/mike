@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: metamission-spine-progression
+  frozen_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T21:30:00Z"
+  captured_at: "2026-10-06T22:30:00Z"
   source:
-    canonical_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+    canonical_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -67,17 +67,17 @@ boundaries:
     - Natural language proofreading checks inside the structural linter
 
 now:
-  status: pending
-  slice: none
-  source_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+  status: working
+  slice: get-diff-and-invariant-linter
+  source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-diff-init
+    state: ready
+    ref: main
+    base: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
     digest: none
-    scope: []
+    scope: [backend/src/lib/docxLinter.ts, backend/src/modules/chat/engine/tools/documentOps.ts]
   conjecture:
     id: c-self-verification-yield
     claim: >-
@@ -99,8 +99,8 @@ now:
     believed_state: Dependent on Station 1 in-memory AST and diff generator.
     main_uncertainty: Token consumption of diffs on large (50+ page) agreements.
     next_observation: Benchmarking get_diff representation on 13-page contract.
-  blocker_or_risk: Blocked on completion of Station 1.
-  next_action: Await Station 1 completion.
+  blocker_or_risk: none
+  next_action: Implement backend/src/lib/docxLinter.ts and get_diff tool.
 
 receipts: []
 ---

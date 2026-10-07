@@ -14,12 +14,12 @@ metamission:
     - id: station-1-doc-ast-and-block-tools
       path: goals/station-1-doc-ast-and-block-tools.md
       readiness: executable
-      status: working
+      status: complete
       depends_on: []
     - id: station-2-self-verification-and-diff
       path: goals/station-2-self-verification-and-diff.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: working
       depends_on: [station-1-doc-ast-and-block-tools]
     - id: station-3-modular-search-and-citations
       path: goals/station-3-modular-search-and-citations.md
@@ -117,8 +117,8 @@ boundaries:
 
 now:
   status: working
-  slice: station-1-doc-ast-and-block-tools
-  source_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+  slice: station-2-self-verification-and-diff
+  source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
   deploy_identity: local-docker-compose
   candidate:
     id: candidate-spine-init
@@ -158,6 +158,14 @@ receipts:
     proof_refs: [docs/private-deployment-scoping.md]
     rollback_ref: aaaa32d
     disposition: Metamission spine initialized with 8 stations and approved phase sequence.
+  - id: station-1-complete
+    boundary: implement
+    identity: 3a37928
+    proof_refs:
+      - goals/station-1-doc-ast-and-block-tools.md
+      - backend/src/lib/__tests__/docxAST.test.ts
+    rollback_ref: 9da0200
+    disposition: Station 1 landed on main with passing 38-test suite.
 ---
 
 # Metamission: Private Firm Deployment Spine

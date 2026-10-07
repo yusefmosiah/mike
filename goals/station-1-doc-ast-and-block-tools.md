@@ -71,13 +71,13 @@ boundaries:
     - Modifying client-side OfficeJS add-in logic
 
 now:
-  status: working
+  status: complete
   slice: docx-ast-core-parser
-  source_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+  source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
   deploy_identity: local-docker-compose
   candidate:
-    id: candidate-ast-init
-    state: ready
+    id: candidate-ast-landed
+    state: landed
     ref: main
     base: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
     digest: none
@@ -91,8 +91,8 @@ now:
     edge: missing_oracle
     delta_o: Canonicalized XML diff test against original fixture.
     scope_if_supported: Document editing engine.
-    status: active
-    evidence_refs: []
+    status: promoted_to_assertion
+    evidence_refs: [backend/src/lib/__tests__/docxAST.test.ts, backend/src/modules/chat/engine/tools/__tests__/documentOps.blocks.test.ts]
   decision:
     what: Use fast-xml-parser preserve-order mode in docxAST.ts, extending docxTrackedChanges.ts patterns.
     kind: architecture
@@ -100,13 +100,27 @@ now:
     evidence_ref: consensus-review-2026-10-06
     owner_ratification_ref: user-prompt-2026-10-06
   belief:
-    believed_state: Current docxTrackedChanges.ts already has preserve-order XML helpers that can be extended.
-    main_uncertainty: Handling paragraph-mark revisions (w:pPr/w:rPr/w:del) for deleted paragraphs in Word.
-    next_observation: Implementing docxAST.ts and verifying golden round-trip on Word documents.
+    believed_state: In-memory AST and atomic block tools operational and verified on main.
+    main_uncertainty: none
+    next_observation: Station 2 self-verification loop and get_diff tool.
   blocker_or_risk: none
-  next_action: Implement backend/src/lib/docxAST.ts with block indexing and golden round-trip test.
+  next_action: none
 
-receipts: []
+receipts:
+  - id: station-1-landed
+    boundary: terminal
+    identity: 3a37928
+    proof_refs:
+      - backend/src/lib/__tests__/docxAST.test.ts
+      - backend/src/modules/chat/engine/tools/__tests__/documentOps.blocks.test.ts
+    rollback_ref: 9da0200
+    disposition: Station 1 landed on main with passing 38-test suite.
+    landing:
+      source_commit: 3a37928
+      ci_ref: local_vitest_38_passed
+      deploy_ref: docker_compose_backend_rebuilt
+      environment_identity: local-docker-compose
+      deployed_acceptance: curl -f http://localhost:3000/health
 ---
 
 # Station 1: In-Memory Document AST & Block Tools
