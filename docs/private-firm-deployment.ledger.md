@@ -1,3 +1,5 @@
+> **Deprecated (2026-10-07).** This ledger records the unattended overnight run. Its receipts were not independently verified, and the Station 1 block tools it describes (`lib/docxAST.ts`, `read_blocks` and the block operations) have since been removed. See [`goals/STATUS.md`](../goals/STATUS.md) for the audited state.
+
 # Private Firm Deployment Metamission Ledger
 
 Append-only record of moves, observations, and settlement receipts across the private firm deployment metamission.

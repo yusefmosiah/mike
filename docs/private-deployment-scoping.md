@@ -1,3 +1,5 @@
+> **Deprecated (2026-10-07).** This roadmap describes the Station 1 block tools (`lib/docxAST.ts`, `read_blocks`, `insert_block`, `delete_blocks`, `replace_block`, `delete_empty_blocks`). They were removed in favor of the Mission 1a document model (`backend/src/lib/docx/`), and other station claims here are overstated. See [`goals/STATUS.md`](../goals/STATUS.md) for current state and order of work.
+
 # Private Deployment Roadmap: Mike OSS Fork
 
 Phased implementation roadmap for running Mike as a firm-owned, private AI
