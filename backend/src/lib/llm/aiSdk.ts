@@ -4,6 +4,7 @@ import type { LanguageModel, ToolSet } from "ai" with {
 };
 import type * as AiSdk from "ai" with { "resolution-mode": "import" };
 import type {
+  LlmUserContent,
   NormalizedToolCall,
   NormalizedToolResult,
   OpenAIToolSchema,
@@ -14,7 +15,11 @@ import type {
 import { streamChunkTimeouts } from "../runtimeConfig";
 import { asProviderStallError, toProviderStreamError } from "./providerErrors";
 import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
-import { maxOutputTokensForOpenCodeGoModel } from "./models";
+import {
+  maxOutputTokensForOpenCodeGoModel,
+  modelSupportsVision,
+} from "./models";
+import { repairToolArguments } from "./toolCallParsing";
 
 /**
  * Per-step output limit, or undefined to leave it to the provider.
@@ -327,14 +332,33 @@ function toAiSdkTools(
         ...(batcher
           ? {
               execute: (
-                input: Record<string, unknown>,
+                input: unknown,
                 { toolCallId }: { toolCallId: string },
-              ) =>
-                batcher.execute({
+              ) => {
+                // Some adapters hand execute() the raw argument text instead
+                // of a parsed object. Recover it through the shared ladder;
+                // when even that fails, resolve with an in-band error result
+                // (Station 4) instead of throwing, so the SDK feeds it back
+                // and the model can re-emit instead of the run aborting.
+                if (typeof input === "string") {
+                  const repaired = repairToolArguments(input);
+                  if (!repaired.ok) {
+                    return Promise.resolve(
+                      `Tool call failed: ${schema.function.name} arguments invalid (${repaired.error}). Re-emit with properly escaped JSON.`,
+                    );
+                  }
+                  return batcher.execute({
+                    id: toolCallId,
+                    name: schema.function.name,
+                    input: repaired.input,
+                  });
+                }
+                return batcher.execute({
                   id: toolCallId,
                   name: schema.function.name,
                   input: normalizeToolInput(input),
-                }),
+                });
+              },
             }
           : {}),
       };
@@ -369,6 +393,38 @@ function usesCourtlistenerTool(
 }
 
 /**
+ * Translate Mike's structured user content into AI SDK content parts.
+ *
+ * Text parts always survive. An image part becomes a `file` part only when the
+ * target model can read images; otherwise the model receives the part's
+ * fallback text, because an image sent to a text-only model fails the entire
+ * request (fail closed). Buffers are handed to the SDK as raw bytes — the
+ * provider adapter owns transport encoding — so nothing is base64-encoded
+ * here.
+ */
+function toAiSdkContent(
+  content: LlmUserContent,
+  supportsVision: boolean,
+): string | AiSdk.UserContent {
+  if (typeof content === "string") return content;
+  if (!supportsVision) {
+    return content
+      .map((part) => (part.type === "text" ? part.text : part.fallbackText))
+      .filter((text) => text.length > 0)
+      .join("\n\n");
+  }
+  return content.map((part) =>
+    part.type === "text"
+      ? { type: "text" as const, text: part.text }
+      : {
+          type: "file" as const,
+          data: part.image,
+          mediaType: part.mimeType ?? "image/png",
+        },
+  );
+}
+
+/**
  * Provider-specific hints that let a multi-turn conversation reuse the
  * already-processed prompt prefix instead of paying for it on every turn.
  *
@@ -378,29 +434,43 @@ function usesCourtlistenerTool(
  * covers the system prompt, tool definitions, and every earlier turn, and
  * the next request hits that prefix as long as it is byte-identical.
  * Providers ignore namespaces they do not own, so both hints are sent.
+ *
+ * Every message is also translated from the LlmMessage union to AI SDK
+ * content; `supportsVision` decides whether image parts travel as file parts
+ * or as their text fallback. It defaults to the requested model so callers
+ * that only pass a model id behave correctly.
  */
 type StreamTextProviderOptions = NonNullable<
   Parameters<typeof AiSdk.streamText>[0]["providerOptions"]
 >;
 
-export function withPrefixCacheHints(params: StreamChatParams): {
+export function withPrefixCacheHints(
+  params: StreamChatParams,
+  supportsVision: boolean = modelSupportsVision(params.model),
+): {
   messages: AiSdk.ModelMessage[];
   providerOptions?: StreamTextProviderOptions;
 } {
-  if (!params.conversationId || !params.messages.length) {
-    return { messages: params.messages };
+  const messages: AiSdk.ModelMessage[] = params.messages.map(
+    (message): AiSdk.ModelMessage =>
+      message.role === "assistant"
+        ? { role: "assistant", content: message.content }
+        : {
+            role: "user",
+            content: toAiSdkContent(message.content, supportsVision),
+          },
+  );
+  if (!params.conversationId || !messages.length) {
+    return { messages };
   }
-  const last = params.messages.length - 1;
+  const last = messages.length - 1;
   const breakpoint = {
     anthropic: { cacheControl: { type: "ephemeral" } },
   };
   return {
-    messages: params.messages.map((message, index): AiSdk.ModelMessage => {
-      if (index !== last) return message;
-      return message.role === "assistant"
-        ? { role: "assistant", content: message.content, providerOptions: breakpoint }
-        : { role: "user", content: message.content, providerOptions: breakpoint };
-    }),
+    messages: messages.map((message, index): AiSdk.ModelMessage =>
+      index === last ? { ...message, providerOptions: breakpoint } : message,
+    ),
     providerOptions: {
       openai: { promptCacheKey: params.conversationId },
     },
@@ -626,12 +696,14 @@ export async function streamAiSdk(
         // answering 401 says nothing about our LLM key, so this path keeps the
         // executor error rather than blaming the user's credentials.
         case "tool-error":
-          // `dynamic: true` = the SDK synthesized this part for a call it could
-          // not dispatch (unknown tool / unparseable input); it already queued
-          // the error as that call's result and continues the loop so the
-          // model can recover. Mike's tools are static, so only a genuine
-          // execute() failure reaches the throw.
-          if ((part as { dynamic?: boolean }).dynamic === true) break;
+          // Station 4: `dynamic: true` = the SDK synthesized this part for a
+          // call it could not dispatch (unknown tool / unparseable input). It
+          // has already queued the error as that call's result and keeps the
+          // step loop alive, so break out of the switch (continue the loop)
+          // and let the model recover in-band. Falling through to the throw
+          // would abort a turn the model can still finish. Mike's tools are
+          // static, so only a genuine execute() failure reaches the throw.
+          if ("dynamic" in part && part.dynamic === true) break;
           runToolsFailure.first ??= { error: part.error };
           throw guardAbortShaped(rethrowable(part.error, config.label));
         case "error":

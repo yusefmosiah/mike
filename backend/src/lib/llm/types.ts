@@ -32,10 +32,28 @@ export type OpenAIToolSchema = {
     };
 };
 
-export type LlmMessage = {
-    role: "user" | "assistant";
-    content: string;
+export type LlmTextPart = {
+    type: "text";
+    text: string;
 };
+
+export type LlmImagePart = {
+    type: "image";
+    /** Raw image bytes, a base64 string, or a URL. Never pre-encode Buffers. */
+    image: Buffer | Uint8Array | string | URL;
+    mimeType?: string;
+    /**
+     * What a text-only model receives in place of the image. Required so a
+     * fail-closed downgrade never silently drops the image's content.
+     */
+    fallbackText: string;
+};
+
+export type LlmUserContent = string | Array<LlmTextPart | LlmImagePart>;
+
+export type LlmMessage =
+    | { role: "user"; content: LlmUserContent }
+    | { role: "assistant"; content: string };
 
 export type NormalizedToolCall = {
     id: string;
@@ -125,6 +143,12 @@ export type ConfiguredModel = {
      * structured tool-call fields. Leave unset to infer from `location`.
      */
     tolerateTextToolCalls?: boolean;
+    /**
+     * Whether this endpoint accepts image content parts. Omitted means false:
+     * an image sent to a text-only model fails the whole request, so vision
+     * must be declared explicitly (fail closed).
+     */
+    supportsVision?: boolean;
     /** Request field used for the output-token limit by the compatible endpoint. */
     maxTokensField?: "max_tokens" | "max_completion_tokens";
 };

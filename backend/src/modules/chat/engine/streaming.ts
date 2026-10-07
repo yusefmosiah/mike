@@ -3,6 +3,7 @@ import {
   streamChatWithTools,
   resolveModel,
   type LlmMessage,
+  type LlmUserContent,
   type OpenAIToolSchema,
 } from "../../../lib/llm";
 import { resolveRequestedModel } from "../../../lib/routerModels";
@@ -319,9 +320,15 @@ export async function runLLMStream(params: {
 
   // Extract system prompt; pass remaining turns to the adapter as
   // plain user/assistant messages.
-  const rawMsgs = apiMessages as { role: string; content: string | null }[];
+  const rawMsgs = apiMessages as {
+    role: string;
+    content: string | LlmUserContent | null;
+  }[];
+  const firstMsg = rawMsgs[0];
   const baseSystemPrompt =
-    rawMsgs[0]?.role === "system" ? (rawMsgs[0].content ?? "") : "";
+    firstMsg?.role === "system" && typeof firstMsg.content === "string"
+      ? firstMsg.content
+      : "";
   const memory = await buildMemoryTurn({
     db,
     userId,
@@ -334,15 +341,28 @@ export async function runLLMStream(params: {
   const chatMessages: LlmMessage[] = rawMsgs
     .filter((m) => m.role !== "system")
     .map(
-      (m): LlmMessage => ({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content ?? "",
-      }),
+      (m): LlmMessage =>
+        m.role === "assistant"
+          ? {
+              role: "assistant",
+              content: typeof m.content === "string" ? m.content : "",
+            }
+          : { role: "user", content: m.content ?? "" },
     )
     // An assistant turn with no text (an error, a cancellation, or a client
     // that keeps prose in events) carries nothing for the model, and Anthropic
-    // rejects the entire request over one empty text block.
-    .filter((m) => m.role === "user" || m.content.trim().length > 0);
+    // rejects the entire request over one empty text block. A user turn with
+    // array content survives as long as one part carries text or an image —
+    // the adapter decides later whether the image becomes a file part or its
+    // fallback text.
+    .filter((m) => {
+      if (m.role === "assistant") return m.content.trim().length > 0;
+      return typeof m.content === "string"
+        ? m.content.trim().length > 0
+        : m.content.some(
+            (part) => part.type === "image" || part.text.trim().length > 0,
+          );
+    });
   // Before every real turn: see MemoryTurn for why it goes there.
   if (memory.message) chatMessages.unshift(memory.message);
 
@@ -800,6 +820,9 @@ export async function runLLMStream(params: {
         pending = label
           ? readDocumentContent(label, docStore, () => {}, docIndex, db, {
               emitEvents: false,
+              // Quote verification compares against the whole source; a
+              // bounded window would mark every quote past it unverified.
+              fullText: true,
             })
           : Promise.resolve("");
         sourceTextByDocId.set(docId, pending);

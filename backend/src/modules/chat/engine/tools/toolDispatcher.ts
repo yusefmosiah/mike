@@ -559,13 +559,24 @@ export async function runToolCalls(
     if (tc.function.name === "read_document") {
       const rawDocId = args.doc_id as string;
       const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const offset = typeof args.offset === "number" ? args.offset : undefined;
+      const limit = typeof args.limit === "number" ? args.limit : undefined;
       const readIdentity = await getTurnReadIdentity({
         docLabel: docId,
         docStore,
         docIndex,
         db,
       });
-      if (readIdentity && turnReadState?.has(readIdentity.key)) {
+      // A read that names a window continues a truncated earlier read — the
+      // continuation notice tells the model to call back with `offset` — so it
+      // must reach the document instead of being answered with the
+      // already-returned notice. Only unbounded repeats stay deduplicated.
+      const windowedRead = offset !== undefined || limit !== undefined;
+      if (
+        !windowedRead &&
+        readIdentity &&
+        turnReadState?.has(readIdentity.key)
+      ) {
         const promptFilename = spotlightFilename(readIdentity.filename, nonce);
         const sourceNotice = sourceMaterialNotice(
           docStore.get(docId)?.source_kind,
@@ -583,7 +594,7 @@ export async function runToolCalls(
         write,
         docIndex,
         db,
-        { readIdentity },
+        { readIdentity, offset, limit },
       );
       const filename = docStore.get(docId)?.filename;
       const documentId = docIndex?.[docId]?.document_id;

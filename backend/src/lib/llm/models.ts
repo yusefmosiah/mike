@@ -137,6 +137,74 @@ export const OPENCODE_GO_MESSAGES_MODEL_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * OpenCode Go models that accept image content parts. Everything else —
+ * including ids absent from this table and the whole text-only catalog
+ * (glm-5.3, glm-5.2, deepseek-v4-pro, qwen3.7-max, mimo-v2.5-pro, minimax-m2.7,
+ * hy3, hy4-preview, longcat-2.0, space-bunny/-free) — must receive text
+ * only, so the gate fails closed.
+ */
+export const OPENCODE_GO_VISION_MODEL_IDS: Readonly<Record<string, true>> = {
+    // DeepSeek
+    "deepseek-v4.1-flash": true,
+    "deepseek-v4-flash-vision-exp": true,
+
+    // Zhipu AI GLM
+    "glm-5.3-flash": true,
+
+    // MiniMax
+    "minimax-m3": true,
+
+    // Meta Muse Spark
+    "muse-spark-1.2-contributor": true,
+    "muse-spark-1.3-contributor": true,
+
+    // Moonshot Kimi
+    "kimi-k2.6": true,
+    "kimi-k2.7-code": true,
+    "kimi-k3": true,
+
+    // Xiaomi MiMo
+    "mimo-v2.5": true,
+    "mimo-v2.6-flash": true,
+    "mimo-v2.6-pro": true,
+
+    // Alibaba Qwen
+    "qwen3.6-plus": true,
+    "qwen3.7-plus": true,
+    "qwen3.8-flash": true,
+    "qwen3.8-max": true,
+
+    // Meituan LongCat
+    "longcat-2.5-preview-free": true,
+
+    // OpenAI Luna on OpenCode Go
+    "gpt-5.6-luna": true,
+    "gpt-6-luna": true,
+
+    // xAI Grok
+    "grok-4.5": true,
+    "grok-4.6": true,
+    "grok-4.7": true,
+};
+
+/**
+ * Whether Mike may send image content parts for this model.
+ *
+ * Router prefixes are stripped so the Mike-facing id
+ * ("opencode-go/kimi-k3") and the canonical catalog id ("kimi-k3") answer the
+ * same way. Unknown ids return false: a stray image part would otherwise fail
+ * the entire request against a text-only model.
+ */
+export function modelSupportsVision(modelId: string): boolean {
+    const configured = getConfiguredModel(modelId);
+    if (configured) return configured.supportsVision === true;
+    return Object.hasOwn(
+        OPENCODE_GO_VISION_MODEL_IDS,
+        modelId.replace(/^(?:opencode-go|openrouter|vercel|ollama)\//, ""),
+    );
+}
+
+/**
  * Canonical maximum output tokens by model ID for OpenCode Go models.
  * Sourced from Models.dev (https://models.dev/providers/opencode-go/ and https://models.dev/api.json).
  *
@@ -215,6 +283,40 @@ export function maxOutputTokensForOpenCodeGoModel(modelId?: string): number {
         return OPENCODE_GO_MODEL_OUTPUT_LIMITS[modelId];
     }
     return 65_536; // safe baseline fallback for uncataloged OpenCode Go models
+}
+
+/**
+ * Canonical context windows for the OpenCode Go focus models used by the
+ * context-resilience work (goals/station-4-context-resilience-and-compaction.md).
+ * Only the two 1,048,576-token models differ from the 1,000,000 default.
+ * Context management derives its trigger from this number, so it must reflect
+ * the model's real capacity rather than a guessed ceiling.
+ */
+export const OPENCODE_GO_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+    "deepseek-v4.1-flash": 1_000_000,
+    "glm-5.3": 1_000_000,
+    "glm-5.3-flash": 1_000_000,
+    "kimi-k3": 1_048_576,
+    "minimax-m3": 1_000_000,
+    "muse-spark-1.3-contributor": 1_048_576,
+};
+
+/**
+ * Context window for an OpenCode Go model, in tokens. Router prefixes are
+ * stripped so both "opencode-go/kimi-k3" and "kimi-k3" answer the same way.
+ * Uncataloged ids get the 1,000,000 default, which is the real window for
+ * four of the six focus models; the two 1,048,576-token models are listed
+ * explicitly rather than rounded.
+ */
+export function contextWindowForOpenCodeGoModel(modelId?: string): number {
+    const canonical = modelId?.replace(
+        /^(?:opencode-go|openrouter|vercel|ollama)\//,
+        "",
+    );
+    if (canonical && OPENCODE_GO_CONTEXT_WINDOWS[canonical]) {
+        return OPENCODE_GO_CONTEXT_WINDOWS[canonical];
+    }
+    return 1_000_000;
 }
 
 const ALL_MODELS = new Set<string>([

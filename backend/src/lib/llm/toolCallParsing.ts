@@ -471,3 +471,118 @@ export function extractJsonCandidate(value: string): string {
   }
   return cleaned.slice(start);
 }
+
+/**
+ * Recover a tool-call argument payload from text a model serialized badly.
+ *
+ * The ladder escalates in cost: an already-parsed object passes through;
+ * otherwise strict JSON, then a balanced-brace extraction (which also strips
+ * markdown fences and surrounding prose) run through the Qwen
+ * doubled-delimiter normalization, then jsonrepair over that candidate. It
+ * never throws: an unrecoverable payload returns the parsers' position
+ * information so the caller can hand the model an in-band error and keep the
+ * turn alive instead of aborting the stream.
+ */
+export function repairToolArguments(
+  raw: unknown,
+): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { ok: true, input: raw as Record<string, unknown> };
+  }
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      error: `arguments must be a JSON object or string, received ${
+        raw === null ? "null" : Array.isArray(raw) ? "an array" : typeof raw
+      }`,
+    };
+  }
+  const text = raw.trim();
+  if (!text) return { ok: false, error: "arguments are empty" };
+
+  const failures: string[] = [];
+  const parse = (
+    source: string,
+  ): { ok: true; input: Record<string, unknown> } | null => {
+    try {
+      const value: unknown = JSON.parse(source);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return { ok: true, input: value as Record<string, unknown> };
+      }
+      failures.push("parsed JSON is not an object");
+      return null;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  };
+
+  // (b) Strict JSON already.
+  const direct = parse(text);
+  if (direct) return direct;
+
+  // (c) Balanced-brace extraction: fences, prose wrappers, Qwen map syntax.
+  const candidate = normalizeQwenToolMapSyntax(extractJsonCandidate(text));
+  const extracted = parse(candidate);
+  if (extracted) return extracted;
+
+  // (d) Last resort: jsonrepair (trailing commas, single quotes, ...).
+  try {
+    const repaired = parse(jsonrepair(candidate));
+    if (repaired) return repaired;
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+  }
+
+  // (e) Unrecoverable. JSON.parse/jsonrepair messages carry the position and
+  // line/column of the first fault, which is what the model needs to re-emit
+  // proper arguments.
+  return {
+    ok: false,
+    error: `arguments are invalid JSON and could not be repaired (${[
+      ...new Set(failures),
+    ].join("; ")})`,
+  };
+}
+
+/**
+ * Flatten GFM pipe-table rows inside a content string into tab-separated
+ * lines. Generated document prose often carries a markdown table where a
+ * plain-text consumer would otherwise see raw pipes; splitting on unescaped
+ * pipes and trimming each cell keeps the columns readable. Lines that are
+ * not a full `| .. |` row — ordinary prose that merely contains a pipe —
+ * pass through untouched.
+ */
+export function markdownTableToText(value: string): string {
+  return value
+    .split("\n")
+    .map((line) => {
+      const row = line.trim();
+      if (row.length < 2 || !row.startsWith("|") || !row.endsWith("|")) {
+        return line;
+      }
+      const cells: string[] = [];
+      let cell = "";
+      const inner = row.slice(1, -1);
+      for (let index = 0; index < inner.length; index += 1) {
+        const char = inner[index];
+        if (
+          char === "\\" &&
+          (inner[index + 1] === "|" || inner[index + 1] === "\\")
+        ) {
+          cell += inner[index + 1];
+          index += 1;
+          continue;
+        }
+        if (char === "|") {
+          cells.push(cell.trim());
+          cell = "";
+          continue;
+        }
+        cell += char;
+      }
+      cells.push(cell.trim());
+      return cells.join("\t");
+    })
+    .join("\n");
+}

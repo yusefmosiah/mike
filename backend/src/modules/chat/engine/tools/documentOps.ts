@@ -1684,12 +1684,8 @@ export async function runGetDiff(params: {
 // Tool dispatch
 // ---------------------------------------------------------------------------
 
-export async function getTurnReadIdentity(params: {
-  docLabel: string;
-  docStore: DocStore;
-  docIndex?: DocIndex;
-  db?: Db;
-}): Promise<{
+/** The document/version identity a read is guarded on for one assistant turn. */
+export type TurnReadIdentity = {
   key: string;
   docLabel: string;
   filename: string;
@@ -1697,7 +1693,14 @@ export async function getTurnReadIdentity(params: {
   versionId?: string | null;
   versionNumber?: number | null;
   storagePath: string;
-} | null> {
+};
+
+export async function getTurnReadIdentity(params: {
+  docLabel: string;
+  docStore: DocStore;
+  docIndex?: DocIndex;
+  db?: Db;
+}): Promise<TurnReadIdentity | null> {
   const { docLabel, docStore, docIndex, db } = params;
   const docInfo = docStore.get(docLabel);
   if (!docInfo) return null;
@@ -1764,6 +1767,44 @@ export function clearTurnReadsForDocument(
   }
 }
 
+const DEFAULT_READ_LINES = 2_000;
+const MAX_READ_LINES = 5_000;
+
+/**
+ * Bound a document body to the requested line window.
+ *
+ * A document that fits inside the window (or whose window reaches the end)
+ * comes back verbatim with no notice, so short-document reads stay
+ * byte-identical to the pre-pagination behavior. A truncated window ends with
+ * an explicit continuation notice naming the next offset — without it a model
+ * reads the end of the window as the end of the document and answers from
+ * partial text.
+ */
+function paginateDocumentText(
+  text: string,
+  opts?: { offset?: number; limit?: number; fullText?: boolean },
+): string {
+  if (opts?.fullText) return text;
+  const requestedOffset = Math.floor(opts?.offset ?? 1);
+  const startLine = Number.isFinite(requestedOffset)
+    ? Math.max(1, requestedOffset)
+    : 1;
+  const requestedLimit = Math.floor(opts?.limit ?? DEFAULT_READ_LINES);
+  const maxLines = Number.isFinite(requestedLimit)
+    ? Math.min(MAX_READ_LINES, Math.max(1, requestedLimit))
+    : DEFAULT_READ_LINES;
+  const lines = text.split("\n");
+  const totalLines = lines.length;
+  // An offset past the end clamps to the final line rather than returning an
+  // empty body, which a model would read as "document is empty".
+  const startIndex = Math.min(startLine - 1, totalLines - 1);
+  const endIndex = Math.min(startIndex + maxLines, totalLines);
+  if (startIndex === 0 && endIndex >= totalLines) return text;
+  const windowText = lines.slice(startIndex, endIndex).join("\n");
+  if (endIndex >= totalLines) return windowText;
+  return `${windowText}\n\n[Showing lines ${startIndex + 1}–${endIndex} of ${totalLines}. Call read_document with doc_id and offset: ${endIndex + 1} to read further.]`;
+}
+
 export async function readDocumentContent(
   docLabel: string,
   docStore: DocStore,
@@ -1772,7 +1813,18 @@ export async function readDocumentContent(
   db?: Db,
   opts?: {
     emitEvents?: boolean;
-    readIdentity?: Awaited<ReturnType<typeof getTurnReadIdentity>>;
+    readIdentity?: TurnReadIdentity | null;
+    /** 1-based first line to return (default 1). */
+    offset?: number;
+    /** Maximum number of lines to return (default 2000, capped at 5000). */
+    limit?: number;
+    /**
+     * Return the whole extracted body, ignoring offset/limit. Internal
+     * callers that need every byte — find_in_document and server-side
+     * citation verification — must never see a window; only the
+     * model-facing read_document/fetch_documents results are bounded.
+     */
+    fullText?: boolean;
   },
 ): Promise<string> {
   const emitEvents = opts?.emitEvents ?? true;
@@ -1831,7 +1883,7 @@ export async function readDocumentContent(
         `[read_document] using request-scoped inline text (chars=${docInfo.inline_text.length}) for filename="${docInfo.filename}"`,
       );
       emitDocRead();
-      return docInfo.inline_text;
+      return paginateDocumentText(docInfo.inline_text, opts);
     }
 
     // Prefer the current tracked-changes version (if any) so read_document
@@ -1978,7 +2030,7 @@ export async function readDocumentContent(
       `[read_document] DONE filename="${docInfo.filename}" finalTextLength=${text.length} firstChars=${JSON.stringify(text.slice(0, 120))}`,
     );
     emitDocRead();
-    return text;
+    return paginateDocumentText(text, opts);
   } catch (err) {
     devLog(
       `[read_document] THREW for docLabel="${docLabel}" filename="${docInfo.filename}":`,
@@ -2112,7 +2164,7 @@ export async function findInDocumentContent(params: {
   write: (s: string) => void;
   docIndex?: DocIndex;
   db?: Db;
-  readIdentity?: Awaited<ReturnType<typeof getTurnReadIdentity>>;
+  readIdentity?: TurnReadIdentity | null;
 }): Promise<string> {
   const {
     docLabel,
@@ -2165,7 +2217,9 @@ export async function findInDocumentContent(params: {
     write,
     docIndex,
     db,
-    { emitEvents: false, readIdentity },
+    // A Ctrl+F must see every line: search is the escape hatch that keeps
+    // bounded reads viable, so it can never be served a window.
+    { emitEvents: false, readIdentity, fullText: true },
   );
   if (!text || text === "Document could not be read.") {
     write(
@@ -2238,17 +2292,7 @@ export type TurnEditState = Map<
   { versionId: string; versionNumber: number; storagePath: string }
 >;
 
-export type TurnReadState = Map<
-  string,
-  {
-    docLabel: string;
-    filename: string;
-    documentId?: string;
-    versionId?: string | null;
-    versionNumber?: number | null;
-    storagePath: string;
-  }
->;
+export type TurnReadState = Map<string, TurnReadIdentity>;
 
 export type DocCreatedResult = {
   filename: string;

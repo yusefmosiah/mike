@@ -56,7 +56,7 @@ export const PROJECT_EXTRA_TOOLS = [
     function: {
       name: "fetch_documents",
       description:
-        "Read the full text content of multiple documents in a single call. Use this instead of calling read_document repeatedly when you need to read several documents at once. In one response, fetch each document/version at most once; after it has been fetched, use the prior tool result or find_in_document for targeted checks.",
+        "Read the text content of multiple documents in a single call. Use this instead of calling read_document repeatedly when you need to read several documents at once. Long documents return one bounded window at a time (default first 2000 lines); when a document's text ends with a continuation notice, call read_document with that doc_id and the offset it names to read further. In one response, fetch each document/version at most once; after it has been fetched, use the prior tool result or find_in_document for targeted checks.",
       parameters: {
         type: "object",
         properties: {
@@ -251,7 +251,7 @@ export const TOOLS = [
     function: {
       name: "read_document",
       description:
-        "Read the full text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document, but call it at most once per document/version in a single response. After this returns, use the prior tool result or find_in_document for targeted checks instead of reading the same document/version again.",
+        "Read the text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document, but call it at most once per document/version in a single response. Long documents return one bounded window at a time (default first 2000 lines); when the result ends with a continuation notice, call read_document again with the same doc_id and the offset it names to read further. After this returns, use the prior tool result or find_in_document for targeted checks instead of reading the same document/version again.",
       parameters: {
         type: "object",
         properties: {
@@ -259,6 +259,19 @@ export const TOOLS = [
             type: "string",
             description:
               "The document ID to read (e.g. 'doc-0', 'doc-1', or 'active-word-document')",
+          },
+          offset: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "1-based line to start from (default 1). Use the offset from a continuation notice to read the next window.",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5000,
+            description:
+              "Maximum number of lines to return (default 2000, max 5000).",
           },
         },
         required: ["doc_id"],

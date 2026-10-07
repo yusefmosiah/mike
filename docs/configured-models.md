@@ -129,6 +129,20 @@ Mike dynamically assigns each model its full native output token budget rather t
 | **Xiaomi MiMo** | `mimo-v2.6-flash`, `mimo-v2.6-pro` | **131,072** | 1,048,576 |
 | **MiniMax** | `minimax-m2.7`, `minimax-m3` | **131,072** | 1,000,000 |
 
+### Vision capability & text fallback
+
+Vision input is explicit per-model metadata, never inferred from family or name.
+`OPENCODE_GO_VISION_MODEL_IDS` in `backend/src/lib/llm/models.ts` is the source:
+`deepseek-v4.1-flash`, `glm-5.3-flash`, `minimax-m3`,
+`muse-spark-1.3-contributor`, and `kimi-k3` accept image input; `glm-5.3` is
+text-only and proves the fallback path. Unknown or route-sensitive ids
+(`mimo-v2.5-pro`, `space-bunny`) fail closed to text. Deployments declaring
+their own OpenAI-compatible endpoints set `supportsVision: true` in
+`MIKE_MODEL_CONFIG_JSON` only when the endpoint actually accepts image parts;
+omitted means false. Context/output values in the table are route-specific to
+the OpenCode Go provider, not canonical lab defaults.
+
+
 ### Synchronizing New Models from Models.dev
 
 When OpenCode releases new models or updates token ceilings:
@@ -138,7 +152,8 @@ When OpenCode releases new models or updates token ceilings:
    curl -s "https://models.dev/api.json" | jq '.["opencode-go"].models | map_values({output: .limit.output, context: .limit.context})'
    ```
 2. **Update `backend/src/lib/llm/models.ts`**:
-   +- Add the new model ID to `OPENCODE_GO_CHAT_COMPLETIONS_MODEL_IDS` (or `OPENCODE_GO_MESSAGES_MODEL_IDS` if served over Anthropic protocol).
-   +- Add its exact output limit to `OPENCODE_GO_MODEL_OUTPUT_LIMITS`.
+   - Add the new model ID to `OPENCODE_GO_CHAT_COMPLETIONS_MODEL_IDS` (or `OPENCODE_GO_MESSAGES_MODEL_IDS` if served over Anthropic protocol).
+   - Add its exact output limit to `OPENCODE_GO_MODEL_OUTPUT_LIMITS`.
+   - Add its vision status to `OPENCODE_GO_VISION_MODEL_IDS` (check the route row's input modalities; fail closed when absent) and its context window to `OPENCODE_GO_CONTEXT_WINDOWS`.
 3. **Operator Override**:
    +- Set `LLM_MAX_OUTPUT_TOKENS` in `backend/.env` or Docker Compose to enforce a global backstop across all providers if desired.

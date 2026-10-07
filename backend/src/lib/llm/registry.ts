@@ -234,6 +234,8 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
         !USER_API_KEY_PROVIDERS.has(apiKeyProvider as keyof UserApiKeys))) ||
     (record.tolerateTextToolCalls !== undefined &&
       typeof record.tolerateTextToolCalls !== "boolean") ||
+    (record.supportsVision !== undefined &&
+      typeof record.supportsVision !== "boolean") ||
     (maxTokensField !== undefined &&
       maxTokensField !== "max_tokens" &&
       maxTokensField !== "max_completion_tokens")
@@ -255,6 +257,9 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
       : {}),
     ...(typeof record.tolerateTextToolCalls === "boolean"
       ? { tolerateTextToolCalls: record.tolerateTextToolCalls }
+      : {}),
+    ...(typeof record.supportsVision === "boolean"
+      ? { supportsVision: record.supportsVision }
       : {}),
     ...(maxTokensField ? { maxTokensField } : {}),
   };

@@ -23,6 +23,7 @@ import { ACTIVE_WORD_DOCUMENT_LIVE_FILENAME } from "./wordPrompt";
 import { parseCitations, createCitation } from "./citations";
 import type { AssistantEvent } from "./streaming";
 import { catalogWorkflowId, ensureDefaultWorkflows } from "../../../lib/workflowCatalog";
+import { compactIfNeeded, type CompactResult } from "../../../lib/compaction";
 
 // ---------------------------------------------------------------------------
 // Prompt-injection spotlighting helpers
@@ -445,8 +446,13 @@ export function buildMessages(
       const label = spotlightFilename(rawLabel, nonce);
       systemContent += `- ${doc.doc_id}: ${label}\n`;
     }
+    // Earlier reads stay in the append-only history, so re-reading the same
+    // version every turn only burns cache-write tokens; re-read only after an
+    // update event. Future document-update events surface in-line with the
+    // stable shape `[Document doc-X updated]`, which the model can watch for
+    // to invalidate just that handle.
     systemContent +=
-      "\nYou do NOT retain document content between conversation turns. You MUST call read_document (or fetch_documents) once at the start of every response that involves a document's content, even if you have read it in a previous turn. Within the same response, do not call read_document or fetch_documents again for a document/version that has already been read; use the prior tool result, find_in_document for targeted checks, or proceed to the next required tool. Failure to read once per turn will result in hallucinated or stale content.\n---\n";
+      "\nCall read_document (or fetch_documents) when you need a document's content and this conversation does not already contain it; earlier reads stay in the history, so reuse them instead of re-reading the same document/version in a later turn. Re-read only when the document changed - watch for `[Document doc-X updated]` events - or when the user asks for the latest version. Within the same response, never call read_document or fetch_documents again for a document/version that has already been read; use the prior tool result, find_in_document for targeted checks, or proceed to the next required tool.\n---\n";
   }
   formatted.push({ role: "system", content: systemContent });
 
@@ -484,6 +490,50 @@ export function buildMessages(
     formatted.push({ role: msg.role, content: stamp(msg, index, content) });
   }
   return formatted;
+}
+
+// ---------------------------------------------------------------------------
+// Context compaction hook (token-triggered; see lib/compaction)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stored-conversation token estimate (~4 chars/token). The compaction trigger
+ * takes the max of this estimate and provider-reported usage, so an
+ * under-reported usage field cannot hide an over-full context.
+ */
+export function estimateConversationTokens(
+  messages: readonly ChatMessage[],
+): number {
+  let chars = 0;
+  for (const message of messages) chars += message.content?.length ?? 0;
+  return Math.ceil(chars / 4);
+}
+
+/**
+ * Compaction hook for the chat engine: map stored history onto the compaction
+ * turn shape and run the token-triggered policy (checked post-turn, at a
+ * tool-loop boundary, or on overflow recovery). The result only ever proposes
+ * a history replacement — `compacted: false` means leave history untouched,
+ * which is what keeps the append-only prompt-cache prefix stable.
+ */
+export function compactConversationIfNeeded(args: {
+  messages: readonly ChatMessage[];
+  contextTokens?: number | null;
+  modelId: string;
+  thresholdPct?: number;
+  contextWindow?: number;
+}): CompactResult {
+  const turns = args.messages.map((message) => ({
+    role: message.role,
+    text: message.content ?? "",
+  }));
+  return compactIfNeeded({
+    turns,
+    contextTokens: args.contextTokens ?? null,
+    modelId: args.modelId,
+    thresholdPct: args.thresholdPct,
+    contextWindow: args.contextWindow,
+  });
 }
 
 /**
