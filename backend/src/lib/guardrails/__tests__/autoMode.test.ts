@@ -42,6 +42,7 @@ const T1_NAMES = [
     "courtlistener_find_in_case",
     "courtlistener_read_case",
     "courtlistener_verify_citations",
+    "execute_code",
 ];
 
 const T2_NAMES = [

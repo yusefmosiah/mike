@@ -4,6 +4,7 @@ import { handleAccountDelete, handleExportBuild, handleMcpRefreshToken } from ".
 import { handleDocumentCleanup, handleDocumentPrecomputeText, handleConversionConvert, markConversionFailed } from "../modules/documents/documents.service";
 import { handleExtractionExtract, markExtractionJobFailed } from "../modules/tabular/tabular.service";
 import { handleMemoryConsolidation, markMemoryConsolidationFailed } from "../modules/memory/memory.service";
+import { handleRlmDeepRun } from "../modules/diligence/diligence.service";
 import { handleStorageCleanup } from "../lib/dbq/storageCleanup";
 import { type DbJobHandlers } from "../lib/dbq/types";
 import { type DbJobFailureHook } from "../lib/dbq/runner";
@@ -19,6 +20,7 @@ export const DB_JOB_HANDLERS: DbJobHandlers = {
   "mcp.refresh_token": handleMcpRefreshToken,
   "document.precompute_text": handleDocumentPrecomputeText,
   "memory.consolidate": handleMemoryConsolidation,
+  "rlm.deep_run": handleRlmDeepRun,
 };
 export const DB_JOB_FAILURE_HOOKS: Record<string, DbJobFailureHook> = {
   "conversion.convert": markConversionFailed,

@@ -3,7 +3,8 @@
  * loop, and what "in scope" means for the workspace-scoped ones.
  *
  * Three tiers, fail closed:
- *  - Tier 1: reads with no workspace side effects. Always allowed.
+ *  - Tier 1: reads and pure computation with no workspace side effects.
+ *    Always allowed.
  *  - Tier 2: document writes the caller is already authorized for (the
  *    `allowDocumentMutation` decision upstream). Allowed, but only while the
  *    call stays inside the turn's own container — see `inScopeForContainer`.
@@ -23,7 +24,7 @@
 
 export type GuardrailTier = 1 | 2 | 3;
 
-/** Reads: no workspace side effects, so no judgment is needed. */
+/** Reads and pure computation: no workspace side effects, so no judgment. */
 export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   // Document, library, project and tabular reads.
   "read_document",
@@ -45,6 +46,12 @@ export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   "courtlistener_find_in_case",
   "courtlistener_read_case",
   "courtlistener_verify_citations",
+  // Sandboxed computation (lib/sandbox/executeCode.ts): runs model-written
+  // JavaScript with no network, filesystem, environment, or workspace access,
+  // so it neither reads nor mutates anything and needs no judgment. Tier 1 so
+  // Auto Mode (including unattended runs) may execute it freely; the sandbox's
+  // own timeout, code-length, and output caps are the guardrail.
+  "execute_code",
 ]);
 
 /**

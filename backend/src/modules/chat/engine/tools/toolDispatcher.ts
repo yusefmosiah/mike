@@ -73,6 +73,7 @@ import {
   fetchPage as webFetchPage,
   type SearchProvider,
 } from "../../../../lib/search/index";
+import { executeCode } from "../../../../lib/sandbox";
 import {
   spotlight,
   spotlightFilename,
@@ -1758,6 +1759,17 @@ export async function runToolCalls(
           }),
         });
       }
+    } else if (tc.function.name === "execute_code") {
+      const result = await executeCode({
+        code: args.code as string,
+        timeoutMs:
+          typeof args.timeout_ms === "number" ? args.timeout_ms : undefined,
+      });
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
+      });
     } else if (tc.function.name === "replicate_document" && docIndex) {
       const rawDocId = args.doc_id as string;
       const requestedFilename =
