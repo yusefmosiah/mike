@@ -11,7 +11,7 @@ export class KeenableAdapter implements ProviderAdapter {
       throw new Error("Keenable API key not configured (set KEENABLE_API_KEY).");
     }
 
-    const limit = options.limit ?? 10;
+    const maxResults = options.limit ?? 10;
     const res = await fetch("https://api.keenable.ai/v1/search", {
       method: "POST",
       headers: {
@@ -20,8 +20,7 @@ export class KeenableAdapter implements ProviderAdapter {
       },
       body: JSON.stringify({
         query,
-        limit,
-        include_raw_content: options.includeRawContent ?? false,
+        max_results: maxResults,
       }),
     });
 
@@ -35,19 +34,18 @@ export class KeenableAdapter implements ProviderAdapter {
         title?: string;
         url?: string;
         snippet?: string;
+        description?: string;
         published_date?: string;
         score?: number;
-        raw_content?: string;
       }>;
     };
 
     return (data.results ?? []).map((r) => ({
       title: r.title ?? "",
       url: r.url ?? "",
-      snippet: r.snippet ?? "",
+      snippet: r.snippet ?? r.description ?? "",
       publishedDate: r.published_date,
       score: r.score,
-      rawContent: r.raw_content,
     }));
   }
 }
@@ -59,7 +57,7 @@ export class TavilyAdapter implements ProviderAdapter {
       throw new Error("Tavily API key not configured (set TAVILY_API_KEY).");
     }
 
-    const limit = options.limit ?? 10;
+    const maxResults = options.limit ?? 10;
     const res = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: {
@@ -68,7 +66,7 @@ export class TavilyAdapter implements ProviderAdapter {
       body: JSON.stringify({
         api_key: apiKey,
         query,
-        max_results: limit,
+        max_results: maxResults,
         include_raw_content: options.includeRawContent ?? false,
       }),
     });
@@ -107,7 +105,7 @@ export class ExaAdapter implements ProviderAdapter {
       throw new Error("Exa API key not configured (set EXA_API_KEY).");
     }
 
-    const limit = options.limit ?? 10;
+    const numResults = options.limit ?? 10;
     const res = await fetch("https://api.exa.ai/search", {
       method: "POST",
       headers: {
@@ -116,8 +114,8 @@ export class ExaAdapter implements ProviderAdapter {
       },
       body: JSON.stringify({
         query,
-        numResults: limit,
-        useAutoprompt: true,
+        numResults,
+        contents: { text: { maxCharacters: 1500 } },
       }),
     });
 
@@ -153,7 +151,6 @@ export class ParallelAdapter implements ProviderAdapter {
       throw new Error("Parallel API key not configured (set PARALLEL_API_KEY).");
     }
 
-    const limit = options.limit ?? 10;
     const res = await fetch("https://api.parallel.ai/v1/search", {
       method: "POST",
       headers: {
@@ -161,8 +158,7 @@ export class ParallelAdapter implements ProviderAdapter {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        query,
-        limit,
+        search_queries: [query],
       }),
     });
 
@@ -175,17 +171,18 @@ export class ParallelAdapter implements ProviderAdapter {
       results?: Array<{
         title?: string;
         url?: string;
-        snippet?: string;
-        published_at?: string;
+        excerpts?: string[];
+        publish_date?: string;
         relevance?: number;
       }>;
     };
 
-    return (data.results ?? []).map((r) => ({
+    const limit = options.limit ?? 10;
+    return (data.results ?? []).slice(0, limit).map((r) => ({
       title: r.title ?? "",
       url: r.url ?? "",
-      snippet: r.snippet ?? "",
-      publishedDate: r.published_at,
+      snippet: Array.isArray(r.excerpts) ? r.excerpts.join("\n") : "",
+      publishedDate: r.publish_date,
       score: r.relevance,
     }));
   }
