@@ -20,6 +20,7 @@ import {
   type BlockOperation,
   type DocBlock,
 } from "../../../../lib/docxAST";
+import { lintDocx } from "../../../../lib/docxLinter";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
 import {
   contentSha256,
@@ -1595,6 +1596,88 @@ export async function runReadBlocks(params: {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+export interface DiffChangeItem {
+  block_id?: string;
+  op: "delete" | "insert" | "replace";
+  before: string;
+  after: string;
+  reason?: string;
+}
+
+export interface GetDiffResult {
+  ok: true;
+  document_id: string;
+  version_number: number | null;
+  filename: string;
+  has_changes: boolean;
+  summary: string;
+  changes: DiffChangeItem[];
+  lint: {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  };
+}
+
+export async function runGetDiff(params: {
+  documentId: string;
+  db: Db;
+}): Promise<GetDiffResult | { ok: false; error: string }> {
+  const { documentId, db } = params;
+
+  const activeVersion = await loadActiveVersion(documentId, db);
+  if (!activeVersion) return { ok: false, error: "Active version not found." };
+
+  const current = await loadCurrentVersionBytes(documentId, db);
+  if (!current) return { ok: false, error: "Could not load document bytes." };
+
+  // Fetch pending document_edits for this document/version
+  const { data: editRows } = await db
+    .from("document_edits")
+    .select("change_id, deleted_text, inserted_text, reason, status")
+    .eq("document_id", documentId)
+    .eq("version_id", activeVersion.id);
+
+  const changes: DiffChangeItem[] = (editRows ?? []).map((row) => {
+    let op: "delete" | "insert" | "replace" = "replace";
+    if (!row.deleted_text && row.inserted_text) op = "insert";
+    else if (row.deleted_text && !row.inserted_text) op = "delete";
+
+    return {
+      op,
+      before: row.deleted_text ?? "",
+      after: row.inserted_text ?? "",
+      reason: row.reason ?? undefined,
+    };
+  });
+
+  // Run invariant linter on the current active version bytes
+  const lintResult = await lintDocx(current.bytes);
+
+  const hasChanges = changes.length > 0;
+  const summary = hasChanges
+    ? `${changes.length} change(s) pending: ${changes.filter((c) => c.op === "insert").length} insertion(s), ${changes.filter((c) => c.op === "delete").length} deletion(s), ${changes.filter((c) => c.op === "replace").length} replacement(s).`
+    : "No pending edits found on active version.";
+
+  return {
+    ok: true,
+    document_id: documentId,
+    version_number: activeVersion.version_number,
+    filename: activeVersion.filename ?? "Untitled document.docx",
+    has_changes: hasChanges,
+    summary,
+    changes,
+    lint: {
+      valid: lintResult.ok,
+      errors: lintResult.issues
+        .filter((i) => i.severity === "error")
+        .map((i) => i.message),
+      warnings: lintResult.issues
+        .filter((i) => i.severity === "warning")
+        .map((i) => i.message),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

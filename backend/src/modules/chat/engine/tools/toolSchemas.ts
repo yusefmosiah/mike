@@ -631,4 +631,22 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_diff",
+      description:
+        "Inspect pending changes and package integrity for an edited document before declaring completion. Shows a model-friendly diff of insertions/deletions and validates OpenXML invariants (footnotes, relationships). Always invoke this after edit_document to verify your changes match user intent.",
+      parameters: {
+        type: "object",
+        properties: {
+          doc_id: {
+            type: "string",
+            description: "Document slug (e.g. 'doc-0').",
+          },
+        },
+        required: ["doc_id"],
+      },
+    },
+  },
 ];

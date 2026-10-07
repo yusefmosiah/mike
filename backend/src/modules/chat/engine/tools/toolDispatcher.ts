@@ -58,6 +58,7 @@ import {
   findTextMatches,
   runEditDocument,
   runReadBlocks,
+  runGetDiff,
   safeGeneratedFilename,
   type DocEditedResult,
   type TurnEditState,
@@ -1629,6 +1630,28 @@ export async function runToolCalls(
           endId,
           limit,
           includeEmpty,
+        });
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
+      }
+    } else if (tc.function.name === "get_diff" && docIndex) {
+      const rawDocId = args.doc_id as string;
+      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docInfo = docStore.get(docId);
+      const indexed = docIndex?.[docId];
+      if (!docInfo || !indexed) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: `Document '${docId}' not found.` }),
+        });
+      } else {
+        const result = await runGetDiff({
+          documentId: indexed.document_id,
+          db,
         });
         toolResults.push({
           role: "tool",
