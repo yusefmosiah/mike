@@ -944,6 +944,7 @@ wordChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
           status: "cancelled",
         },
         null,
+        drainReceiptsSince(),
       );
       if (error instanceof AssistantStreamError) {
         const partial = buildCancelledAssistantMessage({

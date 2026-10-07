@@ -966,6 +966,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                         status: "cancelled",
                     },
                     null,
+                    drainReceiptsSince(),
                 );
                 if (err instanceof AssistantStreamError) {
                     const partial = buildCancelledAssistantMessage({
