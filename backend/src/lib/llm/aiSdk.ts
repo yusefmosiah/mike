@@ -407,6 +407,48 @@ export function withPrefixCacheHints(params: StreamChatParams): {
   };
 }
 
+export function extractEarlyToolCall(raw: unknown): { name: string; id?: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+
+  // 1. OpenAI / OpenCode Go / vLLM / DeepSeek format
+  if (Array.isArray(obj.choices) && obj.choices.length > 0) {
+    const choice = obj.choices[0] as Record<string, unknown> | undefined;
+    const delta = choice?.delta as Record<string, unknown> | undefined;
+    if (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0) {
+      const tc = delta.tool_calls[0] as Record<string, unknown> | undefined;
+      const fn = tc?.function as Record<string, unknown> | undefined;
+      const name = typeof fn?.name === "string" ? fn.name : undefined;
+      if (name) {
+        return { name, id: typeof tc?.id === "string" ? tc.id : undefined };
+      }
+    }
+  }
+
+  // 2. Anthropic format
+  if (obj.type === "content_block_start") {
+    const cb = obj.content_block as Record<string, unknown> | undefined;
+    if (cb?.type === "tool_use" && typeof cb.name === "string" && cb.name) {
+      return { name: cb.name, id: typeof cb.id === "string" ? cb.id : undefined };
+    }
+  }
+
+  // 3. Google Gemini format
+  if (Array.isArray(obj.candidates) && obj.candidates.length > 0) {
+    const candidate = obj.candidates[0] as Record<string, unknown> | undefined;
+    const content = candidate?.content as Record<string, unknown> | undefined;
+    if (Array.isArray(content?.parts)) {
+      for (const part of content.parts as Record<string, unknown>[]) {
+        const fc = part?.functionCall as Record<string, unknown> | undefined;
+        if (typeof fc?.name === "string" && fc.name) {
+          return { name: fc.name };
+        }
+      }
+    }
+  }
+
+  return null;
+}
 export async function streamAiSdk(
   params: StreamChatParams,
   config: AiSdkAdapterConfig,
@@ -460,6 +502,7 @@ export async function streamAiSdk(
   let fullText = "";
   let iteration = 0;
   const openReasoningBlocks = new Set<string>();
+  const notifiedEarlyToolCalls = new Set<string>();
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   let lastFinishReason: string | undefined;
 
@@ -517,6 +560,7 @@ export async function streamAiSdk(
       switch (part.type) {
         case "start-step":
           iteration += 1;
+          notifiedEarlyToolCalls.clear();
           break;
         case "raw":
           logRawLlmStream({
@@ -531,6 +575,21 @@ export async function streamAiSdk(
             label: "ai_sdk_raw",
             payload: part.rawValue,
           });
+
+          // Early tool-call notification: fires the instant the provider names a tool in
+          // the first chunk of tool_calls, long before AI SDK parses the complete JSON
+          // arguments (which can take 15-60s for large tools like generate_docx). This
+          // flushes any trailing prose held back in visible buffers and signals the client
+          // to open "Working..." instead of appearing frozen mid-sentence.
+          const earlyCall = extractEarlyToolCall(part.rawValue);
+          if (earlyCall && !notifiedEarlyToolCalls.has(earlyCall.name)) {
+            notifiedEarlyToolCalls.add(earlyCall.name);
+            params.callbacks?.onToolCallStart?.({
+              id: earlyCall.id || randomUUID(),
+              name: earlyCall.name,
+              input: {},
+            });
+          }
           break;
         case "text-delta":
           fullText += part.text;
@@ -554,7 +613,10 @@ export async function streamAiSdk(
             name: part.toolName,
             input: normalizeToolInput(part.input),
           };
-          params.callbacks?.onToolCallStart?.(call);
+          if (!notifiedEarlyToolCalls.has(call.name)) {
+            notifiedEarlyToolCalls.add(call.name);
+            params.callbacks?.onToolCallStart?.(call);
+          }
           break;
         }
         case "finish-step":

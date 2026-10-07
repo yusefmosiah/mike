@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_ITERATIONS,
   maxOutputTokensFor,
   stopNotice,
+  extractEarlyToolCall,
 } from "./aiSdk";
 
 describe("maxOutputTokensFor", () => {
@@ -73,5 +74,65 @@ describe("stopNotice", () => {
   it("stays quiet below the cap", () => {
     expect(stopNotice(1, DEFAULT_MAX_ITERATIONS, "tool-calls")).toBe("");
     expect(stopNotice(0, DEFAULT_MAX_ITERATIONS, undefined)).toBe("");
+  });
+});
+describe("extractEarlyToolCall", () => {
+  it("detects tool calls from OpenAI / OpenCode Go / DeepSeek chunk format", () => {
+    const chunk = {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_abc",
+                function: { name: "generate_docx" },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    expect(extractEarlyToolCall(chunk)).toEqual({
+      name: "generate_docx",
+      id: "call_abc",
+    });
+  });
+
+  it("detects tool calls from Anthropic content_block_start format", () => {
+    const chunk = {
+      type: "content_block_start",
+      content_block: {
+        type: "tool_use",
+        id: "toolu_123",
+        name: "web_search",
+      },
+    };
+    expect(extractEarlyToolCall(chunk)).toEqual({
+      name: "web_search",
+      id: "toolu_123",
+    });
+  });
+
+  it("detects tool calls from Gemini parts format", () => {
+    const chunk = {
+      candidates: [
+        {
+          content: {
+            parts: [{ functionCall: { name: "read_blocks" } }],
+          },
+        },
+      ],
+    };
+    expect(extractEarlyToolCall(chunk)).toEqual({
+      name: "read_blocks",
+    });
+  });
+
+  it("returns null for ordinary text delta chunks", () => {
+    const textChunk = {
+      choices: [{ delta: { content: "Building the briefing now." } }],
+    };
+    expect(extractEarlyToolCall(textChunk)).toBeNull();
   });
 });
