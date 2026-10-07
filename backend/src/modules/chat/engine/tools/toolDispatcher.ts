@@ -44,7 +44,7 @@ import {
 } from "../../../../lib/documentTypes";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
 import { contentSha256, loadActiveVersion } from "../../../../lib/documentVersions";
-import { type EditInput } from "../../../../lib/docxTrackedChanges";
+import { parseEditOps } from "../../../../lib/docx/edit";
 import {
   citationReminder,
   generateDocx,
@@ -1537,15 +1537,7 @@ export async function runToolCalls(
             filename: docInfo.filename,
           })}\n\n`,
         );
-        const edits: EditInput[] = (editsRaw as Record<string, unknown>[]).map(
-          (e) => ({
-            find: String(e.find ?? ""),
-            replace: String(e.replace ?? ""),
-            context_before: String(e.context_before ?? ""),
-            context_after: String(e.context_after ?? ""),
-            reason: e.reason ? String(e.reason) : undefined,
-          }),
-        );
+        const edits = parseEditOps(editsRaw);
         const reuseVersion = turnEditState?.get(indexed.document_id);
         const result = await runEditDocument({
           documentId: indexed.document_id,
@@ -1607,6 +1599,7 @@ export async function runToolCalls(
               errors: result.errors,
               next_required_action: [
                 `The edited document remains available as doc_id "${docId}".`,
+                `Block ids of existing paragraphs are unchanged; inserted paragraphs are numbered after their anchor ("<id>+1", "<id>+2").`,
                 `Before making factual claims about the edited document's final contents, call read_document with doc_id "${docId}" and base the response on that returned text.`,
                 `Do not include download links or URLs in your prose response; the edited document card is shown automatically by the UI.`,
                 `If you describe specific content from the edited document, cite it with [N] markers and a final <CITATIONS> block using doc_id "${docId}".`,

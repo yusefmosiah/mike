@@ -1103,6 +1103,7 @@ create table if not exists public.document_edits (
   change_id text not null,
   del_w_id text,
   ins_w_id text,
+  w_ids text[] not null default '{}',
   deleted_text text not null default '',
   inserted_text text not null default '',
   context_before text,

@@ -13,7 +13,7 @@ const dbq = vi.hoisted(() => ({
   enqueueStorageCleanup: vi.fn(),
   requestDocumentCleanupDelivery: vi.fn(),
 }));
-const docx = vi.hoisted(() => ({ resolveTrackedChange: vi.fn() }));
+const docx = vi.hoisted(() => ({ resolveRevisions: vi.fn() }));
 const access = vi.hoisted(() => ({ ensureDocAccess: vi.fn() }));
 
 vi.mock("../../../lib/storage", () => ({
@@ -22,9 +22,9 @@ vi.mock("../../../lib/storage", () => ({
 }));
 vi.mock("../../../lib/dbq/enqueue", () => dbq);
 vi.mock("../../../lib/docxTrackedChanges", () => ({
-  ...docx,
   extractTrackedChangeIds: vi.fn(),
 }));
+vi.mock("../../../lib/docx/revisions", () => docx);
 vi.mock("../../../lib/access", () => access);
 vi.mock("../../../lib/permissions", () => ({ can: () => true }));
 vi.mock("../../../lib/downloadTokens", () => ({
@@ -49,6 +49,7 @@ const PENDING_EDIT = {
   change_id: "c1",
   del_w_id: "w-del",
   ins_w_id: "w-ins",
+  w_ids: ["w-del", "w-ins", "w-mark"],
   status: "pending",
 };
 const DOC = {
@@ -70,9 +71,9 @@ function arrange() {
   storage.uploadFile.mockResolvedValue(undefined);
   storage.deleteFile.mockResolvedValue(undefined);
   dbq.requestDocumentCleanupDelivery.mockResolvedValue(0);
-  docx.resolveTrackedChange.mockResolvedValue({
-    bytes: new Uint8Array([9, 9, 9]),
-    found: true,
+  docx.resolveRevisions.mockResolvedValue({
+    bytes: Buffer.from([9, 9, 9]),
+    found: new Set(["w-del", "w-ins", "w-mark"]),
   });
   access.ensureDocAccess.mockResolvedValue({ ok: true, projectRole: "owner" });
 }
@@ -95,6 +96,8 @@ describe("resolving a tracked edit", () => {
       expect(fake.calls.filter(call => call.table === "document_versions")).toHaveLength(0);
     });
     expect((await run(fake.db)).ok).toBe(true);
+    // Every revision the edit created is resolved together.
+    expect(docx.resolveRevisions).toHaveBeenCalledWith(expect.any(Buffer), "accept", ["w-del", "w-ins", "w-mark"]);
     const writes = fake.calls.filter(call => call.table === "document_versions");
     expect(writes).toHaveLength(1);
     expect(writes[0].payload).toEqual({ storage_path: storage.uploadFile.mock.calls[0][0], content_sha256: expect.stringMatching(/^[a-f0-9]{64}$/), pdf_storage_path: null, size_bytes: 3 });

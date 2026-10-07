@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   uploadFile: vi.fn(),
   apply: vi.fn(),
+  gate: vi.fn(),
 }));
 vi.mock("../../../../../lib/documentVersions", () => ({
   loadActiveVersion: mocks.active,
@@ -16,8 +17,10 @@ vi.mock("../../../../../lib/storage", () => ({
   uploadFile: mocks.uploadFile,
 }));
 vi.mock("../../../../../lib/docxTrackedChanges", () => ({
-  applyTrackedEdits: mocks.apply,
+  extractDocxBodyText: vi.fn(),
 }));
+vi.mock("../../../../../lib/docx/edit", () => ({ applyEdits: mocks.apply }));
+vi.mock("../../../../../lib/docx/gate", () => ({ checkEditedDocx: mocks.gate }));
 vi.mock("../../../../../lib/downloadTokens", () => ({
   buildDownloadUrl: (path: string, filename: string) =>
     `download:${filename}:${path}`,
@@ -32,6 +35,7 @@ const change = {
   contextBefore: "before",
   contextAfter: "after",
   reason: "clarify",
+  revisionIds: ["del", "ins", "mark"],
 };
 const editRow = {
   id: "edit",
@@ -52,10 +56,11 @@ beforeEach(() => {
   });
   mocks.downloadFile.mockResolvedValue(new ArrayBuffer(4));
   mocks.apply.mockResolvedValue({
+    ok: true,
     bytes: Buffer.from("edited"),
     changes: [change],
-    errors: [],
   });
+  mocks.gate.mockResolvedValue({ ok: true });
 });
 const initial = () => [
   { table: "documents", data: { id: "doc" } },
@@ -150,8 +155,38 @@ describe("assistant document-edit lifecycle", () => {
         change_id: "change",
         del_w_id: "del",
         ins_w_id: "ins",
+        w_ids: ["del", "ins", "mark"],
       }),
     ]);
+    fake.done();
+  });
+  it("changes nothing when an edit fails, and lists every failure", async () => {
+    mocks.apply.mockResolvedValue({
+      ok: false,
+      errors: [
+        { index: 0, error: "Unknown block id \"x\"." },
+        { index: 2, error: "Could not find \"y\"." },
+      ],
+    });
+    const fake = scriptedDb(initial());
+    const rpc = vi.fn();
+    expect(await run({ ...fake.db, rpc } as unknown as Db)).toEqual({
+      ok: false,
+      error: 'No changes were made.\nEdit 1: Unknown block id "x".\nEdit 3: Could not find "y".',
+    });
+    expect(mocks.uploadFile).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+    fake.done();
+  });
+  it("creates no version when the edited document fails the gate", async () => {
+    mocks.gate.mockResolvedValue({ ok: false, problems: ["Table without rows"] });
+    const fake = scriptedDb(initial());
+    const rpc = vi.fn();
+    const result = await run({ ...fake.db, rpc } as unknown as Db);
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/^No changes were made: the edited document failed validation/) });
+    expect(mocks.gate).toHaveBeenCalledWith(expect.any(Buffer), Buffer.from("edited"));
+    expect(mocks.uploadFile).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
     fake.done();
   });
   it("does not activate a new version if saving its edits fails", async () => {

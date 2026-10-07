@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { scriptedDb } from "../../../../../__tests__/helpers/scriptedDb";
@@ -61,7 +63,6 @@ describe("runGetDiff", () => {
         change_id: "c-1",
         deleted_text: "Section 1",
         inserted_text: "Section 1: Executive Overview",
-        reason: "Expand title",
         status: "pending",
       },
     ];
@@ -79,6 +80,15 @@ describe("runGetDiff", () => {
     });
 
     expect(res.ok).toBe(true);
+    // Only columns document_edits really has (PostgREST rejects the query otherwise).
+    const query = fake.calls.find((c) => c.table === "document_edits")!;
+    const table = readFileSync(path.resolve(__dirname, "../../../../../../schema.sql"), "utf8").match(
+      /create table if not exists public\.document_edits \(([\s\S]*?)\n\);/,
+    )![1];
+    for (const column of query.columns!.split(",").map((c) => c.trim())) {
+      expect(table, `document_edits.${column}`).toMatch(new RegExp(`^\\s+${column}\\s`, "m"));
+    }
+    expect(query.filters).toContainEqual(["eq", "status", "pending"]);
     if (res.ok) {
       expect(res.has_changes).toBe(true);
       expect(res.version_number).toBe(2);

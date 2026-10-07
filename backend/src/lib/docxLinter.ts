@@ -7,6 +7,9 @@
  *    OpenXML separators -1 and 0 exempted from orphan checks).
  * 3. Relationship integrity: all r:id references in document.xml resolve to targets
  *    in word/_rels/document.xml.rels.
+ * 4. Revision and table structure in document.xml: text inside a tracked
+ *    deletion is w:delText (and only there), tracked-change ids are unique,
+ *    every table has a row and every cell ends with a paragraph.
  *
  * Layering: shared kernel (backend/src/lib/); zero imports from modules/.
  */
@@ -140,6 +143,9 @@ export async function lintDocx(bytes: Buffer): Promise<LintResult> {
 
   for (const top of docTree) scanDocRefs(top);
 
+  // 4. Revision and table structure
+  issues.push(...structureIssues(docTree));
+
   // 2. Validate Footnotes
   const fnEntry = getZipEntry(zip, "word/footnotes.xml");
   if (fnEntry) {
@@ -256,4 +262,48 @@ export async function lintDocx(bytes: Buffer): Promise<LintResult> {
     errorCount,
     warningCount,
   };
+}
+
+const REVISION_WRAPPERS = new Set(["w:ins", "w:del", "w:moveFrom", "w:moveTo"]);
+const PROPERTY_CONTAINERS = new Set(["w:rPr", "w:pPr", "w:trPr", "w:numPr", "w:tcPr"]);
+
+function structureIssues(tree: XNode[]): LintIssue[] {
+  const issues: LintIssue[] = [];
+  const ids = new Map<string, number>();
+  const visit = (n: unknown, parent: string | null, revision: string | null) => {
+    const name = elName(n);
+    if (!name) return;
+    let inRevision = revision;
+    if (REVISION_WRAPPERS.has(name)) {
+      const id = elAttrs(n)["@_w:id"];
+      if (id != null) ids.set(String(id), (ids.get(String(id)) ?? 0) + 1);
+      if (!parent || !PROPERTY_CONTAINERS.has(parent)) inRevision = name;
+    }
+    // Word writes moved-from text as w:t; only a deletion needs w:delText.
+    if (name === "w:t" && revision === "w:del") {
+      issues.push({ severity: "error", category: "structure", message: "Text inside a tracked deletion is w:t instead of w:delText" });
+    }
+    if (name === "w:delText" && revision !== "w:del" && revision !== "w:moveFrom") {
+      issues.push({ severity: "error", category: "structure", message: "w:delText outside a tracked deletion" });
+    }
+    const kids = elChildren(n as XNode);
+    if (name === "w:tbl" && !kids.some((k) => elName(k) === "w:tr" || elName(k) === "w:sdt" || elName(k) === "w:customXml")) {
+      issues.push({ severity: "error", category: "structure", message: "Table without rows" });
+    }
+    if (name === "w:tc") {
+      const elements = kids.filter((k) => elName(k) !== null);
+      const last = elName(elements[elements.length - 1]);
+      if (last !== "w:p" && last !== "w:sdt" && last !== "w:customXml") {
+        issues.push({ severity: "error", category: "structure", message: "Table cell does not end with a paragraph" });
+      }
+    }
+    for (const c of kids) visit(c, name, inRevision);
+  };
+  for (const top of tree) visit(top, null, null);
+  for (const [id, count] of ids) {
+    if (count > 1) {
+      issues.push({ severity: "error", category: "structure", message: `Tracked-change id ${id} is used ${count} times`, target: id });
+    }
+  }
+  return issues;
 }

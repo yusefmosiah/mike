@@ -8,6 +8,8 @@ export type Query = {
   /** RPC arguments, for `op: "rpc"` calls (table is the function name). */
   args?: unknown;
   filters: Array<[string, ...unknown[]]>;
+  /** The column list passed to select(), when one was. */
+  columns?: string;
 };
 type Step =
   | {
@@ -46,7 +48,10 @@ export function scriptedDb(steps: Step[]) {
       });
     };
     const builder: Record<string, unknown> = {
-      select: () => builder,
+      select: (columns?: unknown) => {
+        if (typeof columns === "string") call.columns = columns;
+        return builder;
+      },
       single: settle,
       maybeSingle: settle,
       then: (

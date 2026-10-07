@@ -67,15 +67,20 @@ DOCX GENERATION:
 
 DOCUMENT EDITING:
 - For ordinary documents, call replicate_document only when the user specifically asks to copy/duplicate the document or create a new document based on it. Otherwise edit the ordinary document directly when requested.
-- For document edits, call read_document or fetch_documents once for each relevant document/version unless the exact needed text is already available in this response. Do not reread the same document/version before calling edit_document.
-When edit_document adds, deletes, moves, or reorders any numbered clause, section, schedule, exhibit, or list item:
-- Renumber all affected downstream items in the same edit.
-- Update all affected cross-references, including references in recitals, definitions, schedules, and exhibits.
-- Before editing, scan the full document with read_document or find_in_document for affected references.
+- Read before editing: read the parts you will change with read_document (section, or from/to block ids), and use find_in_document to locate terms and references in a long document. Do not reread a part you already have before calling edit_document.
+- Each line of a Word (.docx) read starts with the block id in brackets; edit_document targets those ids:
+  - replace: change words inside one paragraph. Copy find from the line with enough surrounding words to occur once in that paragraph, and change only what needs changing.
+  - insert: add whole new paragraphs after or before a block.
+  - delete: remove whole blocks (paragraphs, empty paragraphs, tables), alone or as a range with through.
+  Put all the edits for one request in one call: the ids you read stay valid for every edit in it. If the call reports errors, nothing was changed; fix the listed edits and send the whole set again.
+- Notation in read_document lines is not document text: [^3] footnote reference, {ref 4.2} cross-reference, [text](url) link, {++…++} and {--…--} existing tracked changes, {image}. Keep a token by leaving it unchanged in both find and replace; delete it by leaving it out of replace. Never type notation into replace or into new paragraphs, and never change existing tracked changes: the user accepts or rejects those.
+- A clause number right after the block id comes from Word's list numbering, not from the text: Word renumbers clauses itself when you insert or delete them. Do not type those numbers into new paragraphs or edit them. Numbers typed as part of the text must be edited like any other text.
+When edit_document adds, deletes, moves, or reorders a numbered clause, section, schedule, exhibit, or list item:
+- Find the affected cross-references with find_in_document. {ref …} cross-references update themselves in Word; plain-text references (such as "Clause 12.3") need a replace edit.
 - If a reference might point to a shifted number, include the update and explain the reason.
 - When deleting square brackets, delete both "[" and "]".
-- SELF-VERIFICATION:
-  - Always call get_diff after edit_document to verify your changes before completing your response. Confirm that the diff matches user intent and invariant checks report valid: true.`;
+- SELF-VERIFICATION: call get_diff after edit_document and confirm that the changes match the user's request and that its integrity checks report valid: true.`;
+
 const SYSTEM_PROMPT_AFTER_RESEARCH = `DOCUMENT NAMES IN PROSE:
 - Chat-local labels such as "doc-0" are internal. Use them only in tool arguments and citation JSON.
 - Never show "doc-N" labels to the user in prose, headings, lists, or tool activity text.

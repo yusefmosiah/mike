@@ -76,6 +76,16 @@ export class StyleSheet {
     return undefined;
   }
 
+  /** A paragraph style id from its id or display name (case-insensitive). */
+  resolveId(nameOrId: string): string | undefined {
+    if (this.styles.has(nameOrId)) return nameOrId;
+    const want = nameOrId.trim().toLowerCase().replace(/\s+/g, " ");
+    for (const style of this.styles.values()) {
+      if (style.id.toLowerCase() === want || style.name?.toLowerCase().replace(/\s+/g, " ") === want) return style.id;
+    }
+    return undefined;
+  }
+
   displayName(styleId: string | undefined): string | undefined {
     if (!styleId) return undefined;
     return this.styles.get(styleId)?.name ?? styleId;

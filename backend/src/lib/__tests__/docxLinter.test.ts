@@ -101,3 +101,39 @@ describe("lintDocx", () => {
     expect(res.issues[0].category).toBe("package");
   });
 });
+
+describe("lintDocx revision structure", () => {
+  const doc = async (body: string) => {
+    const zip = new JSZip();
+    zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8"?><w:document ${W_NS}><w:body>${body}</w:body></w:document>`);
+    return lintDocx(await zip.generateAsync({ type: "nodebuffer" }));
+  };
+
+  it("accepts well-formed tracked changes, including a deletion nested in an insertion", async () => {
+    const res = await doc(
+      `<w:p><w:pPr><w:rPr><w:ins w:id="1" w:author="A"/></w:rPr></w:pPr><w:ins w:id="2" w:author="A"><w:r><w:t>kept</w:t></w:r><w:del w:id="3" w:author="B"><w:r><w:delText>gone</w:delText></w:r></w:del></w:ins></w:p>`,
+    );
+    expect(res.issues).toEqual([]);
+  });
+
+  it("accepts moved-from text written as w:t, as Word writes it", async () => {
+    const res = await doc(`<w:p><w:moveFrom w:id="1" w:author="A"><w:r><w:t>moved</w:t></w:r></w:moveFrom></w:p>`);
+    expect(res.issues).toEqual([]);
+  });
+
+  it("flags w:t inside a deletion, stray w:delText, and duplicate ids", async () => {
+    const res = await doc(
+      `<w:p><w:del w:id="1" w:author="A"><w:r><w:t>x</w:t></w:r></w:del><w:r><w:delText>y</w:delText></w:r><w:ins w:id="1" w:author="A"><w:r><w:t>z</w:t></w:r></w:ins></w:p>`,
+    );
+    expect(res.issues.map((i) => i.message)).toEqual([
+      "Text inside a tracked deletion is w:t instead of w:delText",
+      "w:delText outside a tracked deletion",
+      "Tracked-change id 1 is used 2 times",
+    ]);
+  });
+
+  it("flags a table without rows and a cell without a final paragraph", async () => {
+    const res = await doc(`<w:tbl><w:tblPr/></w:tbl><w:tbl><w:tr><w:tc><w:tcPr/></w:tc></w:tr></w:tbl><w:p/>`);
+    expect(res.issues.map((i) => i.message)).toEqual(["Table without rows", "Table cell does not end with a paragraph"]);
+  });
+});

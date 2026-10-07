@@ -10,11 +10,9 @@ import { enqueueConversion } from "../../../../lib/queue/conversionQueue";
 import { enqueueDbJob, enqueueStorageCleanup } from "../../../../lib/dbq/enqueue";
 import type { Db } from "../../../../lib/supabase";
 import { profileAttributionName } from "../../../../lib/userLookup";
-import {
-  applyTrackedEdits,
-  extractDocxBodyText,
-  type EditInput,
-} from "../../../../lib/docxTrackedChanges";
+import { extractDocxBodyText } from "../../../../lib/docxTrackedChanges";
+import { applyEdits, type EditOp } from "../../../../lib/docx/edit";
+import { checkEditedDocx } from "../../../../lib/docx/gate";
 import { lintDocx } from "../../../../lib/docxLinter";
 import { DocxDocument } from "../../../../lib/docx/view";
 import { findInDocument as findInDocx } from "../../../../lib/docx/render";
@@ -1362,7 +1360,7 @@ export async function loadCurrentVersionBytes(
 export async function runEditDocument(params: {
   documentId: string;
   userId: string;
-  edits: EditInput[];
+  edits: EditOp[];
   db: Db;
   reuseVersion?: {
     versionId: string;
@@ -1404,18 +1402,22 @@ export async function runEditDocument(params: {
     .maybeSingle();
   const author = profileAttributionName(authorProfile, "Mike");
 
-  const {
-    bytes: editedBytes,
-    changes,
-    errors,
-  } = await applyTrackedEdits(current.bytes, edits, { author });
-
-  if (changes.length === 0) {
+  // All or nothing: any failed edit, or a result that does not pass the
+  // gate, leaves the document and its versions untouched.
+  const applied = await applyEdits(current.bytes, edits, { author });
+  if (!applied.ok) {
+    const list = applied.errors.map((e) => `Edit ${e.index + 1}: ${e.error}`).join("\n");
+    return { ok: false, error: `No changes were made.\n${list}` };
+  }
+  const editedBytes = applied.bytes;
+  const changes = applied.changes;
+  const errors: { index: number; reason: string }[] = [];
+  const gate = await checkEditedDocx(current.bytes, editedBytes);
+  if (!gate.ok) {
+    devLog(`[edit_document] gate rejected edit for ${documentId}: ${gate.problems.join("; ")}`);
     return {
       ok: false,
-      error:
-        errors[0]?.reason ??
-        "No edits could be applied. Refine context_before/context_after and retry.",
+      error: "No changes were made: the edited document failed validation. Try smaller edits, or report this document.",
     };
   }
   const ab = editedBytes.buffer.slice(
@@ -1492,6 +1494,7 @@ export async function runEditDocument(params: {
     change_id: c.id,
     del_w_id: c.delId ?? null,
     ins_w_id: c.insId ?? null,
+    w_ids: c.revisionIds,
     deleted_text: c.deletedText,
     inserted_text: c.insertedText,
     context_before: c.contextBefore ?? "",
@@ -1594,12 +1597,15 @@ export async function runGetDiff(params: {
   const current = await loadCurrentVersionBytes(documentId, db);
   if (!current) return { ok: false, error: "Could not load document bytes." };
 
-  // Fetch pending document_edits for this document/version
-  const { data: editRows } = await db
+  // Pending document_edits for this document/version. (document_edits has
+  // no reason column: reasons live on the cards only.)
+  const { data: editRows, error: editsErr } = await db
     .from("document_edits")
-    .select("change_id, deleted_text, inserted_text, reason, status")
+    .select("change_id, deleted_text, inserted_text, status")
     .eq("document_id", documentId)
-    .eq("version_id", activeVersion.id);
+    .eq("version_id", activeVersion.id)
+    .eq("status", "pending");
+  if (editsErr) return { ok: false, error: "Could not load the pending edits." };
 
   const changes: DiffChangeItem[] = (editRows ?? []).map((row) => {
     let op: "delete" | "insert" | "replace" = "replace";
@@ -1610,7 +1616,6 @@ export async function runGetDiff(params: {
       op,
       before: row.deleted_text ?? "",
       after: row.inserted_text ?? "",
-      reason: row.reason ?? undefined,
     };
   });
 

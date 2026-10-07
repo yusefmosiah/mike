@@ -3,10 +3,8 @@
 
 import { randomUUID } from "node:crypto";
 import { downloadFile, uploadFile, deleteFileBestEffort, versionStorageKey } from "../../lib/storage";
-import {
-    extractTrackedChangeIds,
-    resolveTrackedChange,
-} from "../../lib/docxTrackedChanges";
+import { extractTrackedChangeIds } from "../../lib/docxTrackedChanges";
+import { resolveRevisions } from "../../lib/docx/revisions";
 import { buildDownloadUrl } from "../../lib/downloadTokens";
 import { contentSha256, loadActiveVersion } from "../../lib/documentVersions";
 import { ensureDocAccess } from "../../lib/access";
@@ -65,7 +63,7 @@ export async function resolveEdit(
 
     const { data: edit, error: editErr } = await db
         .from("document_edits")
-        .select("id, document_id, change_id, del_w_id, ins_w_id, status")
+        .select("id, document_id, change_id, del_w_id, ins_w_id, w_ids, status")
         .eq("id", editId)
         .eq("document_id", documentId)
         .single();
@@ -147,15 +145,22 @@ export async function resolveEdit(
     });
     if (!raw) return { ok: false, detail: "Document bytes not available" };
 
-    const wIds = [edit.del_w_id, edit.ins_w_id].filter(
-        (v): v is string => typeof v === "string" && v.length > 0,
-    );
-    const { bytes: resolvedBytes, found } = await resolveTrackedChange(
+    // Every revision the edit created (deleted paragraph marks, table rows,
+    // each piece of a deletion), plus the first del/ins for older rows.
+    const wIds = [
+        ...new Set(
+            [...(Array.isArray(edit.w_ids) ? edit.w_ids : []), edit.del_w_id, edit.ins_w_id].filter(
+                (v): v is string => typeof v === "string" && v.length > 0,
+            ),
+        ),
+    ];
+    const { bytes: resolvedBytes, found: foundIds } = await resolveRevisions(
         Buffer.from(raw),
-        wIds,
         mode,
+        wIds,
     );
-    devLog(`[edit-resolution] resolveTrackedChange result`, {
+    const found = foundIds.size > 0;
+    devLog(`[edit-resolution] resolveRevisions result`, {
         mode,
         change_id: edit.change_id,
         wIds,

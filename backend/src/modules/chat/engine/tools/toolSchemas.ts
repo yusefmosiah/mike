@@ -251,7 +251,7 @@ export const TOOLS = [
     function: {
       name: "read_document",
       description:
-        "Read the text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document, but call it at most once per document/version in a single response. Long documents return one bounded window at a time (default first 2000 lines); when the result ends with a continuation notice, call read_document again with the same doc_id and the offset it names to read further. After this returns, use the prior tool result or find_in_document for targeted checks instead of reading the same document/version again.",
+        "Read the text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document. Word (.docx) documents read like a codebase: one block per line, starting with its id in brackets ([0000029F] or [p12]), then the clause number; a long document returns an outline and a first window, and you read further with section (a clause number or heading), from/to (block ids) or full. Other documents return line windows (offset/limit). Do not repeat a read you already have; read a different part, or use find_in_document for targeted checks.",
       parameters: {
         type: "object",
         properties: {
@@ -273,6 +273,25 @@ export const TOOLS = [
             description:
               "Maximum number of lines to return (default 2000, max 5000).",
           },
+          section: {
+            type: "string",
+            description:
+              ".docx only: a clause number or heading to read, e.g. '16', '5.3.1(a)', 'Schedule 2'.",
+          },
+          from: {
+            type: "string",
+            description:
+              ".docx only: block id to start reading at (from the outline, a find result, or a continuation notice).",
+          },
+          to: {
+            type: "string",
+            description: ".docx only: block id to stop after.",
+          },
+          full: {
+            type: "boolean",
+            description:
+              ".docx only: return the whole document. Use only when you need all of it.",
+          },
         },
         required: ["doc_id"],
       },
@@ -283,7 +302,7 @@ export const TOOLS = [
     function: {
       name: "find_in_document",
       description:
-        "Search for specific strings inside a document — a Ctrl+F equivalent. Returns each match with surrounding context so you can locate and quote the exact text without reading the whole document. Matching is case-insensitive and whitespace-tolerant. Use this for targeted lookups (e.g. finding a clause title, party name, or a specific phrase) rather than reading the whole document.",
+        "Search for specific strings inside a document — a Ctrl+F equivalent. Returns each match with surrounding context so you can locate and quote the exact text without reading the whole document. For .docx, each match names its block id and clause number, which read_document (from) and edit_document (block) accept. Matching is case-insensitive and whitespace-tolerant. Use this for targeted lookups (e.g. finding a clause title, party name, defined term or cross-reference) rather than reading the whole document.",
       parameters: {
         type: "object",
         properties: {
@@ -496,7 +515,7 @@ export const TOOLS = [
     function: {
       name: "edit_document",
       description:
-        "Propose edits to a user-attached .docx as tracked changes. Each edit is a precise, minimal substitution of specific words/characters, NOT a whole-line or paragraph replacement. Use read_document first unless this same document/version has already been read in the current response. Anchor each edit with short before/after context so it can be located unambiguously. Returns per-edit annotations the UI will render as Accept/Reject cards and a download link to the edited document.",
+        "Propose edits to a user-attached .docx as tracked changes the user can accept or reject, in Mike or in Word. Edits target blocks by the ids read_document and find_in_document show. All edits in one call are checked against the document as you read it, so ids stay valid throughout the call; if any edit fails, nothing is changed and every problem is reported. Formatting, footnote references, links and cross-references outside the changed words are kept. Returns one Accept/Reject card per edit.",
       parameters: {
         type: "object",
         properties: {
@@ -506,36 +525,60 @@ export const TOOLS = [
           },
           edits: {
             type: "array",
-            description: "List of precise substitutions.",
+            description:
+              "The edits, each one of: replace (change words inside one paragraph), insert (add new paragraphs), delete (remove whole blocks: paragraphs, empty paragraphs, tables, or a range of them).",
             items: {
               type: "object",
               properties: {
+                op: {
+                  type: "string",
+                  enum: ["replace", "insert", "delete"],
+                },
+                block: {
+                  type: "string",
+                  description:
+                    "replace, delete: the target block id, e.g. '0000029F'. For text in a table, use the id of the paragraph inside the cell.",
+                },
                 find: {
                   type: "string",
                   description:
-                    "Exact substring to replace (keep it as short as possible).",
+                    "replace: the words to change, copied from the block's line, with enough around them to occur once in that block. Only what differs between find and replace becomes a tracked change. Tokens such as [^3], {ref 4.2} or [text](url) may be included; keep them unchanged in replace, or leave them out of replace to delete them.",
                 },
                 replace: {
                   type: "string",
                   description:
-                    "Replacement text. Empty string = pure deletion.",
+                    "replace: the new text for find. An empty string deletes find. Plain text only; read_document notation cannot be typed.",
                 },
-                context_before: {
+                after: {
+                  type: "string",
+                  description: "insert: block id to insert after.",
+                },
+                before: {
+                  type: "string",
+                  description: "insert: block id to insert before (instead of after).",
+                },
+                paragraphs: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "insert: the new paragraphs' text, one string per paragraph. Do not type clause numbers that the document's list numbering provides.",
+                },
+                style: {
                   type: "string",
                   description:
-                    "~40 chars immediately preceding `find`, used to disambiguate.",
+                    "insert: paragraph style name for the new paragraphs. Default: formatted like the anchor paragraph.",
                 },
-                context_after: {
+                through: {
                   type: "string",
-                  description: "~40 chars immediately following `find`.",
+                  description:
+                    "delete: last block id of a range to delete, in the same body, table cell or note as block.",
                 },
                 reason: {
                   type: "string",
-                  description:
-                    "Short explanation shown to the user on the card.",
+                  description: "Short explanation shown to the user on the card.",
                 },
               },
-              required: ["find", "replace", "context_before", "context_after"],
+              required: ["op"],
             },
           },
         },
@@ -548,7 +591,7 @@ export const TOOLS = [
     function: {
       name: "get_diff",
       description:
-        "Inspect pending changes and package integrity for an edited document before declaring completion. Shows a model-friendly diff of insertions/deletions and validates OpenXML invariants (footnotes, relationships). Always invoke this after edit_document to verify your changes match user intent.",
+        "Inspect the pending changes of an edited document before declaring completion: each change's deleted and inserted text, plus integrity checks (footnotes, relationships, revision structure). Call this after edit_document to confirm the changes match what the user asked for.",
       parameters: {
         type: "object",
         properties: {

@@ -28,11 +28,13 @@ export interface Fmt {
 }
 
 export type Inline =
-  | { t: "text"; text: string; fmt: Fmt; run: XmlElement }
-  | { t: "tab"; run: XmlElement }
-  | { t: "break"; kind: "line" | "page" | "column"; run: XmlElement }
-  | { t: "note"; kind: "footnote" | "endnote"; id: string; mark: string; run: XmlElement }
-  | { t: "noteMark"; run: XmlElement }
+  // `node` is the run child an inline comes from (w:t, w:tab, ...), so an
+  // edit can split the run exactly there.
+  | { t: "text"; text: string; fmt: Fmt; run: XmlElement; node: XmlElement }
+  | { t: "tab"; run: XmlElement; node: XmlElement }
+  | { t: "break"; kind: "line" | "page" | "column"; run: XmlElement; node: XmlElement }
+  | { t: "note"; kind: "footnote" | "endnote"; id: string; mark: string; run: XmlElement; node: XmlElement }
+  | { t: "noteMark"; run: XmlElement; node: XmlElement }
   | {
       t: "sym";
       /** Unicode text when known; undefined for an unmapped symbol-font glyph. */
@@ -40,8 +42,17 @@ export type Inline =
       font?: string;
       code: string;
       run: XmlElement;
+      node: XmlElement;
     }
-  | { t: "field"; instr: string; result: Inline[] }
+  | {
+      t: "field";
+      instr: string;
+      result: Inline[];
+      /** Every run child from the begin marker to the end marker (complex fields). */
+      nodes?: XmlElement[];
+      /** The w:fldSimple element (simple fields). */
+      el?: XmlElement;
+    }
   | { t: "link"; target?: string; anchor?: string; content: Inline[]; el: XmlElement }
   | {
       t: "rev";
@@ -53,7 +64,7 @@ export type Inline =
       el: XmlElement;
     }
   | { t: "sdt"; tag?: string; alias?: string; content: Inline[]; el: XmlElement }
-  | { t: "comment"; id: string; run: XmlElement }
+  | { t: "comment"; id: string; run: XmlElement; node: XmlElement }
   | {
       t: "object";
       kind: string;
@@ -64,10 +75,10 @@ export type Inline =
 
 /** Field markers before folding; never present in a finished view. */
 type Marker =
-  | { t: "fldBegin" }
-  | { t: "fldSep" }
-  | { t: "fldEnd" }
-  | { t: "instr"; text: string };
+  | { t: "fldBegin"; node: XmlElement }
+  | { t: "fldSep"; node: XmlElement }
+  | { t: "fldEnd"; node: XmlElement }
+  | { t: "instr"; text: string; node: XmlElement };
 
 type Raw = Inline | Marker;
 
@@ -345,12 +356,27 @@ export class DocxDocument {
     return table;
   }
 
-  private paragraphId(p: XmlElement): string {
-    this.paragraphOrdinal++;
+  /**
+   * Word's w14:paraId when present and unique. Otherwise an ordinal counted
+   * over paragraphs whose mark is not a tracked insertion; an inserted
+   * paragraph is named after the paragraph it follows ("p12+1"), so
+   * inserting paragraphs never renumbers the ones after them.
+   */
+  private paragraphId(p: XmlElement, markRevision: "ins" | "del" | undefined): string {
     const pid = p.attrs["w14:paraId"];
-    if (pid && this.paraIdCounts.get(pid) === 1) return pid;
-    return `p${this.paragraphOrdinal}`;
+    if (pid && this.paraIdCounts.get(pid) === 1) {
+      this.lastBaseId = pid;
+      this.insertedSince = 0;
+      return pid;
+    }
+    if (markRevision === "ins") return `${this.lastBaseId}+${++this.insertedSince}`;
+    this.lastBaseId = `p${++this.paragraphOrdinal}`;
+    this.insertedSince = 0;
+    return this.lastBaseId;
   }
+
+  private lastBaseId = "p0";
+  private insertedSince = 0;
 
   private readParagraph(
     p: XmlElement,
@@ -368,7 +394,7 @@ export class DocxDocument {
       ? firstChild(markRPr, "w:ins") ? "ins" : firstChild(markRPr, "w:del") ? "del" : undefined
       : undefined;
 
-    const id = idOverride ?? this.paragraphId(p);
+    const id = idOverride ?? this.paragraphId(p, markRevision);
     const bookmarks = this.pendingBookmarks;
     this.pendingBookmarks = [];
     const raw = this.readInlines(p, bookmarks, part);
@@ -458,6 +484,7 @@ export class DocxDocument {
           t: "field",
           instr: (child.attrs["w:instr"] ?? "").trim(),
           result: foldFields(this.readInlines(child, bookmarks, part)),
+          el: child,
         });
       } else if (TRANSPARENT.has(name)) {
         out.push(...this.readInlines(child, bookmarks, part));
@@ -483,54 +510,60 @@ export class DocxDocument {
         case "w:t":
         case "w:delText": {
           const text = ownText(src, child);
-          if (text) out.push({ t: "text", text, fmt, run });
+          if (text) out.push({ t: "text", text, fmt, run, node: child });
           break;
         }
         case "w:tab":
         case "w:ptab":
-          out.push({ t: "tab", run });
+          out.push({ t: "tab", run, node: child });
           break;
         case "w:br": {
           const type = child.attrs["w:type"];
-          out.push({ t: "break", kind: type === "page" ? "page" : type === "column" ? "column" : "line", run });
+          out.push({ t: "break", kind: type === "page" ? "page" : type === "column" ? "column" : "line", run, node: child });
           break;
         }
         case "w:cr":
-          out.push({ t: "break", kind: "line", run });
+          out.push({ t: "break", kind: "line", run, node: child });
           break;
         case "w:noBreakHyphen":
-          out.push({ t: "text", text: "‑", fmt, run });
+          out.push({ t: "text", text: "‑", fmt, run, node: child });
           break;
         case "w:softHyphen":
           break;
         case "w:sym": {
           const code = (child.attrs["w:char"] ?? "").toUpperCase();
           const font = child.attrs["w:font"];
-          out.push({ t: "sym", char: symbolChar(font, code), font, code, run });
+          out.push({ t: "sym", char: symbolChar(font, code), font, code, run, node: child });
           break;
         }
         case "w:footnoteReference":
         case "w:endnoteReference": {
           const kind = child.name === "w:footnoteReference" ? "footnote" : "endnote";
           const id = child.attrs["w:id"] ?? "";
-          out.push({ t: "note", kind, id, mark: this.noteMark(kind, id, child), run });
+          out.push({ t: "note", kind, id, mark: this.noteMark(kind, id, child), run, node: child });
           break;
         }
         case "w:footnoteRef":
         case "w:endnoteRef":
-          out.push({ t: "noteMark", run });
+          out.push({ t: "noteMark", run, node: child });
           break;
         case "w:fldChar": {
           const type = child.attrs["w:fldCharType"];
-          out.push(type === "begin" ? { t: "fldBegin" } : type === "separate" ? { t: "fldSep" } : { t: "fldEnd" });
+          out.push(
+            type === "begin"
+              ? { t: "fldBegin", node: child }
+              : type === "separate"
+                ? { t: "fldSep", node: child }
+                : { t: "fldEnd", node: child },
+          );
           break;
         }
         case "w:instrText":
         case "w:delInstrText":
-          out.push({ t: "instr", text: ownText(src, child) });
+          out.push({ t: "instr", text: ownText(src, child), node: child });
           break;
         case "w:commentReference":
-          out.push({ t: "comment", id: child.attrs["w:id"] ?? "", run });
+          out.push({ t: "comment", id: child.attrs["w:id"] ?? "", run, node: child });
           break;
         case "w:drawing":
         case "w:pict":
@@ -665,11 +698,12 @@ function readFmt(rPr: XmlElement): Fmt {
  * result text stays visible as ordinary content.
  */
 export function foldFields(raw: Raw[]): Inline[] {
-  type Frame = { instr: string; phase: "instr" | "result"; result: Inline[] };
+  type Frame = { instr: string; phase: "instr" | "result"; result: Inline[]; nodes: XmlElement[] };
   const out: Inline[] = [];
   const stack: Frame[] = [];
   const emit = (inline: Inline) => {
     const top = stack[stack.length - 1];
+    if (top) top.nodes.push(...inlineNodes(inline));
     if (!top) out.push(inline);
     else if (top.phase === "result") top.result.push(inline);
     else if (inline.t === "field") top.instr += visibleText(inline.result);
@@ -678,21 +712,28 @@ export function foldFields(raw: Raw[]): Inline[] {
   for (const item of raw) {
     switch (item.t) {
       case "fldBegin":
-        stack.push({ instr: "", phase: "instr", result: [] });
+        stack.push({ instr: "", phase: "instr", result: [], nodes: [item.node] });
         break;
       case "instr": {
         const top = stack[stack.length - 1];
         if (top && top.phase === "instr") top.instr += item.text;
+        if (top) top.nodes.push(item.node);
         break;
       }
       case "fldSep": {
         const top = stack[stack.length - 1];
-        if (top) top.phase = "result";
+        if (top) {
+          top.phase = "result";
+          top.nodes.push(item.node);
+        }
         break;
       }
       case "fldEnd": {
         const frame = stack.pop();
-        if (frame) emit({ t: "field", instr: frame.instr.trim(), result: frame.result });
+        if (frame) {
+          frame.nodes.push(item.node);
+          emit({ t: "field", instr: frame.instr.trim(), result: frame.result, nodes: frame.nodes });
+        }
         break;
       }
       default:
@@ -710,6 +751,22 @@ export function foldFields(raw: Raw[]): Inline[] {
     if (frame.phase === "result") out.push(...frame.result);
   }
   return out;
+}
+
+/** Run children an inline covers, in document order. */
+export function inlineNodes(inline: Inline): XmlElement[] {
+  switch (inline.t) {
+    case "field":
+      return inline.nodes ?? (inline.el ? [inline.el] : []);
+    case "link":
+    case "rev":
+    case "sdt":
+      return inline.content.flatMap(inlineNodes);
+    case "object":
+      return [inline.el];
+    default:
+      return [inline.node];
+  }
 }
 
 /** Text as it currently reads: insertions in, deletions out, objects omitted. */
