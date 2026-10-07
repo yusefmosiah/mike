@@ -84,3 +84,20 @@ Append-only record of moves, observations, and settlement receipts across the pr
   - Pushed to `origin/main` at commit `51fb62c`.
 - **Verdict**: Station 3 conjecture `c-modular-search-grounding` promoted to assertion. Station 3 marked `complete`.
 - **Progression**: Advanced metamission spine `now.slice` to `station-4-core-usability-branching-voice`. Station 4 promoted to `readiness: executable`, `now.status: working`.
+
+---
+
+## Pass 5: Metamission Restructuring — Context Resilience & Snapcompact
+- **Timestamp**: 2026-10-07T00:15:00Z
+- **Canonical Ref**: `fc546ef2802ec79f5f0ce10b1473187ee055bdf9`
+- **Move Type**: `shift` (Decomposing usability into Context Resilience, Pi-Branching, and Audio)
+- **Claim**: Long JSON escaping failures and turn-scoped file eviction are fundamental context-resilience blockers that must be solved before tree branching or audio. Incorporating Oh-My-Pi's Snapcompact enables verbatim bitmap compression for vision models with text compaction fallback.
+- **Action**:
+  - Investigated root cause of session crashes on long JSON payloads (SyntaxError at pos 6359, unescaped markdown tables, unhandled tool-error).
+  - Spanned research across production agents (Claude Code, Aider, Cursor, Oh-My-Pi).
+  - Formulated 10-station metamission spine:
+    - Station 4: Context Resilience, In-Band Tool Repair, KV-Cache & Snapcompact (`goals/station-4-context-resilience-and-compaction.md`).
+    - Station 5: Pi-Style Conversation Tree & Branching UI (`goals/station-5-pi-tree-branching.md`).
+    - Station 6: Local Audio STT & TTS Proxies (`goals/station-6-local-audio-stt-tts.md`).
+    - Stations 7–10: Auto Mode, Private Hardening, 24/7 RLM, and Mobile Client.
+- **Observer Observation**: All 10 station goal files authored and aligned to Throughline v4 schema. Station 4 is active (`readiness: executable`, `now.status: working`).

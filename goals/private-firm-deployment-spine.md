@@ -26,31 +26,41 @@ metamission:
       readiness: executable
       status: complete
       depends_on: [station-2-self-verification-and-diff]
-    - id: station-4-core-usability-branching-voice
-      path: goals/station-4-core-usability-branching-voice.md
+    - id: station-4-context-resilience-and-compaction
+      path: goals/station-4-context-resilience-and-compaction.md
       readiness: executable
       status: working
       depends_on: [station-3-modular-search-and-citations]
-    - id: station-5-auto-mode-and-guardrails
-      path: goals/station-5-auto-mode-and-guardrails.md
+    - id: station-5-pi-tree-branching
+      path: goals/station-5-pi-tree-branching.md
       readiness: drafted
       status: pending
-      depends_on: [station-4-core-usability-branching-voice]
-    - id: station-6-private-hardening-and-phala
-      path: goals/station-6-private-hardening-and-phala.md
+      depends_on: [station-4-context-resilience-and-compaction]
+    - id: station-6-local-audio-stt-tts
+      path: goals/station-6-local-audio-stt-tts.md
       readiness: drafted
       status: pending
-      depends_on: [station-5-auto-mode-and-guardrails]
-    - id: station-7-code-execution-and-rlm
-      path: goals/station-7-code-execution-and-rlm.md
+      depends_on: [station-5-pi-tree-branching]
+    - id: station-7-auto-mode-and-guardrails
+      path: goals/station-7-auto-mode-and-guardrails.md
       readiness: drafted
       status: pending
-      depends_on: [station-6-private-hardening-and-phala]
-    - id: station-8-mobile-client-and-ocr
-      path: goals/station-8-mobile-client-and-ocr.md
+      depends_on: [station-6-local-audio-stt-tts]
+    - id: station-8-private-hardening-and-phala
+      path: goals/station-8-private-hardening-and-phala.md
       readiness: drafted
       status: pending
-      depends_on: [station-7-code-execution-and-rlm]
+      depends_on: [station-7-auto-mode-and-guardrails]
+    - id: station-9-code-execution-and-rlm
+      path: goals/station-9-code-execution-and-rlm.md
+      readiness: drafted
+      status: pending
+      depends_on: [station-8-private-hardening-and-phala]
+    - id: station-10-mobile-client-and-ocr
+      path: goals/station-10-mobile-client-and-ocr.md
+      readiness: drafted
+      status: pending
+      depends_on: [station-9-code-execution-and-rlm]
 
 start:
   captured_at: "2026-10-06T21:15:00Z"
@@ -117,7 +127,7 @@ boundaries:
 
 now:
   status: working
-  slice: station-4-core-usability-branching-voice
+  slice: station-4-context-resilience-and-compaction
   source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
   deploy_identity: local-docker-compose
   candidate:
@@ -194,8 +204,10 @@ This goal file serves as the executive spine authority for transitioning the Mik
 1. **Station 1**: In-Memory Document AST & Atomic Block Tools (`goals/station-1-doc-ast-and-block-tools.md`)
 2. **Station 2**: Self-Verification Loop & `get_diff` Tool (`goals/station-2-self-verification-and-diff.md`)
 3. **Station 3**: Modular Search & Extended Citation Verification (`goals/station-3-modular-search-and-citations.md`)
-4. **Station 4**: Core Usability: Pi-Tree Branching & Local Audio (`goals/station-4-core-usability-branching-voice.md`)
-5. **Station 5**: Auto Mode & System 1 Guardrails Engine (`goals/station-5-auto-mode-and-guardrails.md`)
-6. **Station 6**: Private Deployment Hardening & Phala TEE Lane (`goals/station-6-private-hardening-and-phala.md`)
-7. **Station 7**: Sandboxed Code Execution & 24/7 TypeScript RLM Diligence (`goals/station-7-code-execution-and-rlm.md`)
-8. **Station 8**: Native Mobile Client & Deep Ingestion OCR (`goals/station-8-mobile-client-and-ocr.md`)
+4. **Station 4**: Context Resilience, In-Band Repair, KV-Cache & Snapcompact (`goals/station-4-context-resilience-and-compaction.md`)
+5. **Station 5**: Pi-Style Conversation Tree & Branching UI (`goals/station-5-pi-tree-branching.md`)
+6. **Station 6**: Local Audio STT & TTS Proxies (`goals/station-6-local-audio-stt-tts.md`)
+7. **Station 7**: Auto Mode & System 1 Guardrails Engine (`goals/station-7-auto-mode-and-guardrails.md`)
+8. **Station 8**: Private Deployment Hardening & Phala TEE Lane (`goals/station-8-private-hardening-and-phala.md`)
+9. **Station 9**: Sandboxed Code Execution & 24/7 TypeScript RLM Diligence (`goals/station-9-code-execution-and-rlm.md`)
+10. **Station 10**: Native Mobile Client & Deep Ingestion OCR (`goals/station-10-mobile-client-and-ocr.md`)
