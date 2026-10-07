@@ -21,6 +21,9 @@ import {
   type DocBlock,
 } from "../../../../lib/docxAST";
 import { lintDocx } from "../../../../lib/docxLinter";
+import { DocxDocument } from "../../../../lib/docx/view";
+import { findInDocument as findInDocx } from "../../../../lib/docx/render";
+import { renderDocxRead, type DocxReadRequest } from "../../../../lib/docx/read";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
 import {
   contentSha256,
@@ -1733,6 +1736,11 @@ export type TurnReadIdentity = {
   versionId?: string | null;
   versionNumber?: number | null;
   storagePath: string;
+  /**
+   * Set once read: whether the whole document was returned. A repeat of a
+   * partial read gets a notice that says so instead of claiming it was full.
+   */
+  complete?: boolean;
 };
 
 export async function getTurnReadIdentity(params: {
@@ -1776,7 +1784,24 @@ export function duplicateReadDocumentResult(identity: {
   docLabel: string;
   documentId?: string;
   versionId?: string | null;
+  complete?: boolean;
 }) {
+  if (identity.complete === false) {
+    // The earlier read was an outline and a window, not the whole document.
+    // Repeating it would return the same window, so point at the next step.
+    return JSON.stringify({
+      ok: true,
+      already_read: true,
+      doc_id: identity.docLabel,
+      document_id: identity.documentId,
+      version_id: identity.versionId ?? null,
+      status: "window_already_returned",
+      explanation:
+        "This document was already opened earlier in this response: the outline and the first window were returned. That was NOT the whole document; repeating the same call returns the same window.",
+      next_required_action:
+        'Read a specific part with read_document section: "<clause or heading>" or from: "<block id>" (the continuation notice names the next one), search with find_in_document, or pass full: true for the whole document.',
+    });
+  }
   return JSON.stringify({
     ok: true,
     already_read: true,
@@ -1845,6 +1870,43 @@ function paginateDocumentText(
   return `${windowText}\n\n[Showing lines ${startIndex + 1}–${endIndex} of ${totalLines}. Call read_document with doc_id and offset: ${endIndex + 1} to read further.]`;
 }
 
+/**
+ * Bytes of the version a read should see: the current tracked-changes
+ * version when the document has one, otherwise the original upload.
+ */
+async function loadDocumentBytes(params: {
+  docInfo: { storage_path: string };
+  documentId?: string;
+  db?: Db;
+  versionId?: string | null;
+}): Promise<{ raw: ArrayBuffer; sourcePath: string } | null> {
+  const { docInfo, documentId, db, versionId } = params;
+  if (documentId && db) {
+    const current = await loadCurrentVersionBytes(documentId, db, versionId ?? null);
+    if (current) {
+      devLog(
+        `[read_document] using current version path="${current.storage_path}" (bytes=${current.bytes.byteLength})`,
+      );
+      return {
+        raw: current.bytes.buffer.slice(
+          current.bytes.byteOffset,
+          current.bytes.byteOffset + current.bytes.byteLength,
+        ) as ArrayBuffer,
+        sourcePath: current.storage_path,
+      };
+    }
+    devLog(
+      `[read_document] loadCurrentVersionBytes returned null for documentId="${documentId}", falling back to original storage_path`,
+    );
+  }
+  const raw = await downloadFile(docInfo.storage_path);
+  if (!raw) return null;
+  devLog(
+    `[read_document] fallback download from storage_path="${docInfo.storage_path}" (bytes=${raw.byteLength})`,
+  );
+  return { raw, sourcePath: docInfo.storage_path };
+}
+
 export async function readDocumentContent(
   docLabel: string,
   docStore: DocStore,
@@ -1865,6 +1927,13 @@ export async function readDocumentContent(
      * model-facing read_document/fetch_documents results are bounded.
      */
     fullText?: boolean;
+    /**
+     * Segmented .docx read (section, block range, or full). Model-facing
+     * .docx reads always go through the document view; see lib/docx/read.ts.
+     */
+    docx?: DocxReadRequest;
+    /** Told whether the whole document was returned (so a repeat can be deduplicated). */
+    onComplete?: (complete: boolean) => void;
   },
 ): Promise<string> {
   const emitEvents = opts?.emitEvents ?? true;
@@ -1923,45 +1992,20 @@ export async function readDocumentContent(
         `[read_document] using request-scoped inline text (chars=${docInfo.inline_text.length}) for filename="${docInfo.filename}"`,
       );
       emitDocRead();
-      return paginateDocumentText(docInfo.inline_text, opts);
+      const windowed = paginateDocumentText(docInfo.inline_text, opts);
+      opts?.onComplete?.(windowed === docInfo.inline_text);
+      return windowed;
     }
 
-    // Prefer the current tracked-changes version (if any) so read_document
-    // reflects accepted/pending edits rather than the original upload.
-    let raw: ArrayBuffer | null = null;
-    let sourcePath = docInfo.storage_path;
-    if (documentId && db) {
-      const current = await loadCurrentVersionBytes(documentId, db, versionId);
-      if (current) {
-        raw = current.bytes.buffer.slice(
-          current.bytes.byteOffset,
-          current.bytes.byteOffset + current.bytes.byteLength,
-        ) as ArrayBuffer;
-        sourcePath = current.storage_path;
-        devLog(
-          `[read_document] using current version path="${sourcePath}" (bytes=${raw.byteLength})`,
-        );
-      } else {
-        devLog(
-          `[read_document] loadCurrentVersionBytes returned null for documentId="${documentId}", falling back to original storage_path`,
-        );
-      }
-    }
-    if (!raw) {
-      raw = await downloadFile(docInfo.storage_path);
-      if (raw) {
-        devLog(
-          `[read_document] fallback download from storage_path="${docInfo.storage_path}" (bytes=${raw.byteLength})`,
-        );
-      }
-    }
-    if (!raw) {
+    const loaded = await loadDocumentBytes({ docInfo, documentId, db, versionId });
+    if (!loaded) {
       devLog(
-        `[read_document] FAILED to download any bytes for docLabel="${docLabel}" (tried path="${sourcePath}")`,
+        `[read_document] FAILED to download any bytes for docLabel="${docLabel}"`,
       );
       emitDocRead();
       return "Document could not be read.";
     }
+    const { raw, sourcePath } = loaded;
     // Log the first 8 bytes so we can identify real file format regardless
     // of the declared file_type. Valid .docx starts with "PK\x03\x04"
     // (zip). Legacy .doc starts with "\xD0\xCF\x11\xE0" (OLE/CFB).
@@ -1982,8 +2026,24 @@ export async function readDocumentContent(
         `[read_document] pdf extracted length=${text.length} for filename="${docInfo.filename}"`,
       );
     } else if (fileType === "docx") {
-      // Use the same flattening as the edit_document matcher so the
-      // LLM sees exactly the characters it can anchor against.
+      if (!opts?.fullText) {
+        // Model-facing read: the addressable document view, segmented.
+        try {
+          const view = await DocxDocument.load(Buffer.from(raw));
+          const result = renderDocxRead(view, opts?.docx ?? {});
+          devLog(
+            `[read_document] docx view read complete=${result.complete} length=${result.text.length} for filename="${docInfo.filename}"`,
+          );
+          opts?.onComplete?.(result.complete);
+          emitDocRead();
+          return result.text;
+        } catch (err) {
+          // A package the view cannot parse still gets the flat extractor.
+          devLog(`[read_document] docx view failed, using flat extractor`, err);
+        }
+      }
+      // Internal full-text consumers (citation verification, the text-anchor
+      // edit matcher) keep the flat accepted-view text they anchor against.
       text = await extractDocxBodyText(Buffer.from(raw));
       devLog(
         `[read_document] docx extractDocxBodyText length=${text.length} for filename="${docInfo.filename}"`,
@@ -2070,7 +2130,9 @@ export async function readDocumentContent(
       `[read_document] DONE filename="${docInfo.filename}" finalTextLength=${text.length} firstChars=${JSON.stringify(text.slice(0, 120))}`,
     );
     emitDocRead();
-    return paginateDocumentText(text, opts);
+    const windowed = paginateDocumentText(text, opts);
+    opts?.onComplete?.(windowed === text);
+    return windowed;
   } catch (err) {
     devLog(
       `[read_document] THREW for docLabel="${docLabel}" filename="${docInfo.filename}":`,
@@ -2250,6 +2312,52 @@ export async function findInDocumentContent(params: {
       query,
     })}\n\n`,
   );
+
+  const finish = (totalMatches: number) =>
+    write(
+      `data: ${JSON.stringify({
+        type: "doc_find",
+        filename: docInfo.filename,
+        document_id: readIdentity?.documentId ?? documentId,
+        version_id: versionId,
+        version_number: versionNumber,
+        query,
+        total_matches: totalMatches,
+      })}\n\n`,
+    );
+
+  // .docx: search the document view so every hit carries the block id and
+  // clause label the model reads and edits by.
+  if (docInfo.inline_text === undefined && docInfo.file_type?.toLowerCase() === "docx") {
+    const loaded = await loadDocumentBytes({ docInfo, documentId, db, versionId });
+    let view: DocxDocument | null = null;
+    if (loaded) {
+      try {
+        view = await DocxDocument.load(Buffer.from(loaded.raw));
+      } catch (err) {
+        devLog(`[find_in_document] docx view failed, using flat text`, err);
+      }
+    }
+    if (view) {
+      const { hits, total } = findInDocx(view, query, { maxResults, contextChars });
+      finish(total);
+      return JSON.stringify({
+        ok: true,
+        filename: docInfo.filename,
+        query,
+        total_matches: total,
+        returned: hits.length,
+        truncated: total > hits.length,
+        hits: hits.map((h, index) => ({
+          index,
+          block_id: h.id,
+          ...(h.label ? { label: h.label } : {}),
+          context: h.snippet,
+        })),
+        next: "Read around a hit with read_document from: \"<block_id>\".",
+      });
+    }
+  }
 
   const text = await readDocumentContent(
     docLabel,

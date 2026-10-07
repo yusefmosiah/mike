@@ -561,6 +561,12 @@ export async function runToolCalls(
       const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
       const offset = typeof args.offset === "number" ? args.offset : undefined;
       const limit = typeof args.limit === "number" ? args.limit : undefined;
+      const docxRead = {
+        section: typeof args.section === "string" && args.section.trim() ? args.section.trim() : undefined,
+        from: typeof args.from === "string" && args.from.trim() ? args.from.trim() : undefined,
+        to: typeof args.to === "string" && args.to.trim() ? args.to.trim() : undefined,
+        full: args.full === true ? true : undefined,
+      };
       const readIdentity = await getTurnReadIdentity({
         docLabel: docId,
         docStore,
@@ -571,7 +577,10 @@ export async function runToolCalls(
       // continuation notice tells the model to call back with `offset` — so it
       // must reach the document instead of being answered with the
       // already-returned notice. Only unbounded repeats stay deduplicated.
-      const windowedRead = offset !== undefined || limit !== undefined;
+      const windowedRead =
+        offset !== undefined ||
+        limit !== undefined ||
+        Object.values(docxRead).some((v) => v !== undefined);
       if (
         !windowedRead &&
         readIdentity &&
@@ -584,22 +593,33 @@ export async function runToolCalls(
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: `Document filename: ${promptFilename}${sourceNotice ? `\n${sourceNotice}` : ""}\n\n${duplicateReadDocumentResult(readIdentity)}`,
+          content: `Document filename: ${promptFilename}${sourceNotice ? `\n${sourceNotice}` : ""}\n\n${duplicateReadDocumentResult(turnReadState.get(readIdentity.key) ?? readIdentity)}`,
         });
         continue;
       }
+      let complete: boolean | undefined;
       const content = await readDocumentContent(
         docId,
         docStore,
         write,
         docIndex,
         db,
-        { readIdentity, offset, limit },
+        {
+          readIdentity,
+          offset,
+          limit,
+          docx: docxRead,
+          onComplete: (c) => {
+            complete = c;
+          },
+        },
       );
       const filename = docStore.get(docId)?.filename;
       const documentId = docIndex?.[docId]?.document_id;
-      if (readIdentity && turnReadState) {
-        turnReadState.set(readIdentity.key, readIdentity);
+      // Record the first read of this version (a later windowed read must not
+      // turn a recorded full read back into a partial one).
+      if (readIdentity && turnReadState && !turnReadState.get(readIdentity.key)?.complete) {
+        turnReadState.set(readIdentity.key, { ...readIdentity, complete });
       }
       if (filename)
         docsRead.push({
@@ -720,22 +740,28 @@ export async function runToolCalls(
           );
           parts.push(
             `--- ${docId} ---\nDocument filename: ${promptFilename}${sourceNotice ? `\n${sourceNotice}` : ""}\n\n${duplicateReadDocumentResult(
-              readIdentity,
+              turnReadState.get(readIdentity.key) ?? readIdentity,
             )}`,
           );
           continue;
         }
+        let complete: boolean | undefined;
         const content = await readDocumentContent(
           docId,
           docStore,
           write,
           docIndex,
           db,
-          { readIdentity },
+          {
+            readIdentity,
+            onComplete: (c) => {
+              complete = c;
+            },
+          },
         );
         const filename = docStore.get(docId)?.filename ?? docId;
         if (readIdentity && turnReadState) {
-          turnReadState.set(readIdentity.key, readIdentity);
+          turnReadState.set(readIdentity.key, { ...readIdentity, complete });
         }
         // Document body is user-controlled; spotlight it.
         const fencedContent = nonce ? spotlight(content, nonce) : content;
