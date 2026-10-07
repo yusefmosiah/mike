@@ -210,6 +210,13 @@ export function useAssistantChat({
         AssistantEvent,
         { type: "ask_inputs_response" }
       >;
+      /**
+       * Regenerate/re-answer: the id of the existing user prompt the new
+       * answer should hang from. Sent only after this caller's leaf points at
+       * that prompt; the server then reuses the row instead of inserting a
+       * sibling of the same text.
+       */
+      linkOnlyToMessageId?: string;
     },
   ): Promise<string | null> => {
     if (!message.content.trim() || hasAssistantTurn(chatId)) return null;
@@ -360,6 +367,7 @@ export function useAssistantChat({
                 attached_documents:
                   attachedDocs.length > 0 ? attachedDocs : undefined,
                 ask_inputs_response: opts?.askInputsResponse,
+                link_only_to_message_id: opts?.linkOnlyToMessageId,
                 signal: controller.signal,
               })
             : streamChat({
@@ -368,6 +376,7 @@ export function useAssistantChat({
                 model,
                 reasoning,
                 ask_inputs_response: opts?.askInputsResponse,
+                link_only_to_message_id: opts?.linkOnlyToMessageId,
                 signal: controller.signal,
               }),
         turn,

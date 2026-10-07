@@ -14,6 +14,14 @@
 // route needs to run the stream; it does not stream.
 import { type Db } from "../../lib/supabase";
 import { withoutEmptyAssistantReservations } from "./engine/index";
+import {
+    buildSiblingsIndex,
+    latestMessageId,
+    resolveLeaf,
+    walkPathFromRows,
+    type MessageSiblingInfo,
+    type TreeRow,
+} from "./chat.tree";
 
 // Stored doc_edited events capture the `status` at the time the assistant
 // produced the edit (always "pending"). If the user later accepts or rejects,
@@ -129,20 +137,52 @@ async function hydrateEditStatuses(
     });
 }
 
-// GET /chat/:chatId — the transcript, with the edit statuses hydrated and
-// the never-populated assistant reservations dropped.
+// GET /chat/:chatId — the caller's transcript. Only the active path (the
+// leaf's ancestry) is returned; messages on abandoned sibling branches stay
+// in the database but never appear here. Edit statuses are hydrated and the
+// never-populated assistant reservations dropped as before, and `siblings`
+// carries the per-message 1-based position/total the client renders branch
+// navigation from.
+export type ChatTranscript = {
+    messages: Record<string, unknown>[];
+    siblings: Record<string, MessageSiblingInfo>;
+    leaf: string | null;
+};
+
 export async function getChatMessages(
     db: Db,
     chatId: string,
-): Promise<Record<string, unknown>[]> {
-    const { data: messages } = await db
+    userId?: string,
+): Promise<ChatTranscript> {
+    const { data } = await db
         .from("chat_messages")
         .select("*")
         .eq("chat_id", chatId)
         .order("created_at", { ascending: true });
 
-    return hydrateEditStatuses(
-        withoutEmptyAssistantReservations(messages ?? []),
-        db,
-    );
+    const rows = (data ?? []) as TreeRow[];
+
+    // Without a caller there is no per-user leaf, and a caller who has never
+    // branched has no leaf-state row: both fall back to the chat's newest
+    // message, exactly what resolveLeaf resolves to.
+    let leaf = userId ? await resolveLeaf(db, chatId, userId) : null;
+    if (!leaf) leaf = latestMessageId(rows);
+
+    let path = walkPathFromRows(rows, leaf);
+    if (leaf !== null && path.length === 0) {
+        // The stored leaf vanished (deleted row, concurrent insert) — show
+        // the newest message's ancestry instead of an empty transcript.
+        leaf = latestMessageId(rows);
+        path = walkPathFromRows(rows, leaf);
+    }
+
+    const visible = withoutEmptyAssistantReservations(path);
+    return {
+        messages: await hydrateEditStatuses(visible, db),
+        siblings: buildSiblingsIndex(
+            rows,
+            visible.map((message) => message.id),
+        ),
+        leaf,
+    };
 }

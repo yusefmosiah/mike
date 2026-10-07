@@ -24,6 +24,7 @@ import {
     buildCancelledAssistantMessage,
     extractCitations,
     isAbortError,
+    isMessageId,
 
     runLLMStream,
     stripTransientAssistantEvents,
@@ -100,6 +101,20 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: parsedAskInputsResponse.detail });
     }
+    // Regenerate names the existing prompt the new answer hangs from; see
+    // linkOnlyToMessageId in prepareProjectChatStream. Without it a send is a send.
+    const rawLinkOnlyToMessageId = body.link_only_to_message_id;
+    if (
+        rawLinkOnlyToMessageId != null &&
+        !isMessageId(rawLinkOnlyToMessageId)
+    ) {
+        return void res
+            .status(400)
+            .json({ detail: "link_only_to_message_id must be a message id" });
+    }
+    const linkOnlyToMessageId = isMessageId(rawLinkOnlyToMessageId)
+        ? rawLinkOnlyToMessageId
+        : null;
 
     const messages = parsedMessages.value;
     const chat_id = parsedChatId.value;
@@ -119,6 +134,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         messages,
         chatId: chat_id ?? null,
         inputMessageId,
+        linkOnlyToMessageId,
         displayed_doc,
         attached_documents,
         askInputsResponse,
@@ -137,6 +153,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     const {
         chatId,
         lastUser,
+        turnUserMessageId,
         allowDocumentMutation,
         memorySharedAudience,
         memoryTurn,
@@ -283,7 +300,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                     events: persistedEvents,
                     citations,
                     authorUserId: userId,
-                    inputMessageId,
+                    inputMessageId: turnUserMessageId ?? inputMessageId,
                 });
                 if (!saved.ok) {
                     console.error(
@@ -394,7 +411,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                               events: partial.events,
                               citations: partial.citations,
                               authorUserId: userId,
-                              inputMessageId,
+                              inputMessageId: turnUserMessageId ?? inputMessageId,
                           });
                     const saveError = saved && !saved.ok ? saved.error : null;
                     if (askInputsResponse) {
@@ -437,7 +454,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                           events: errorEvents,
                           citations,
                           authorUserId: userId,
-                          inputMessageId,
+                          inputMessageId: turnUserMessageId ?? inputMessageId,
                       });
                 const saveError = saved && !saved.ok ? saved.error : null;
                 if (askInputsResponse) {

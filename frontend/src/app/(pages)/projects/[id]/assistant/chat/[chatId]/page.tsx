@@ -60,6 +60,7 @@ import { useExplorerDownload } from "@/app/hooks/useExplorerDownload";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { UserMessage } from "@/app/components/assistant/UserMessage";
 import { AssistantMessage } from "@/app/components/assistant/AssistantMessage";
+import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
 import { ChatInput } from "@/app/components/assistant/ChatInput";
 import { ChatInputPrompt } from "@/app/components/assistant/ChatInputPrompt";
 import type { ChatInputHandle } from "@/app/components/assistant/ChatInput";
@@ -415,6 +416,94 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         chatId: activeChatId || undefined,
         projectId,
     });
+
+    // Branch navigation and re-answers (edit prompt / regenerate): leaf moves
+    // happen server-side and the ancestry they select is this page's
+    // transcript, so the reload plus the queued re-answer live here. While a
+    // turn streams the controls stay off — the mutation would race it.
+    const branchActionsEnabled = !isResponseLoading;
+    const { editPrompt, regenerate, branchIntoNewThread, navigateSibling } =
+        useChatBranchActions({
+            chatId: activeChatId,
+            messages,
+            setMessages,
+            handleChat,
+        });
+
+    // The branch actions surface failures through the page's warning popup:
+    // the message rows own no error surface of their own.
+    const handleEditPrompt = useCallback(
+        async (args: { message: Message; content: string }) => {
+            try {
+                await editPrompt(args);
+            } catch (error) {
+                setChatActionError({
+                    title: "Could not save the edit",
+                    message: userFacingApiError(
+                        error,
+                        "The edited message could not be saved. Please try again.",
+                    ),
+                });
+            }
+        },
+        [editPrompt],
+    );
+
+    const handleRegenerate = useCallback(
+        async (args: { assistant: Message; parentUser: Message | null }) => {
+            try {
+                await regenerate(args);
+            } catch (error) {
+                setChatActionError({
+                    title: "Could not regenerate",
+                    message: userFacingApiError(
+                        error,
+                        "A new answer could not be requested. Please try again.",
+                    ),
+                });
+            }
+        },
+        [regenerate],
+    );
+
+    const handleBranchIntoNewThread = useCallback(
+        async (message: Message) => {
+            try {
+                await branchIntoNewThread(message);
+            } catch (error) {
+                setChatActionError({
+                    title: "Could not start a new thread",
+                    message: userFacingApiError(
+                        error,
+                        "A new thread could not be started from this response. Please try again.",
+                    ),
+                });
+            }
+        },
+        [branchIntoNewThread],
+    );
+
+    const handleNavigateSibling = useCallback(
+        async (message: Message, dir: -1 | 1) => {
+            try {
+                await navigateSibling(
+                    message,
+                    message.sibling?.ids ?? null,
+                    dir,
+                );
+            } catch (error) {
+                setChatActionError({
+                    title: "Could not open the branch",
+                    message: userFacingApiError(
+                        error,
+                        "This branch could not be opened. Please try again.",
+                    ),
+                });
+            }
+        },
+        [navigateSibling],
+    );
+
     // The model is what we asked for, so it identifies whose key was rejected.
     const rejectedKeyProvider = rejectedApiKey?.model
         ? getModelProvider(rejectedApiKey.model)
@@ -2227,6 +2316,26 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                         }
                                     >
                                         <UserMessage
+                                            messageId={msg.id}
+                                            sibling={msg.sibling ?? null}
+                                            onEditBranch={
+                                                branchActionsEnabled && msg.id
+                                                    ? (content) =>
+                                                          void handleEditPrompt({
+                                                              message: msg,
+                                                              content,
+                                                          })
+                                                    : undefined
+                                            }
+                                            onNavigateSibling={
+                                                branchActionsEnabled && msg.id
+                                                    ? (dir) =>
+                                                          void handleNavigateSibling(
+                                                              msg,
+                                                              dir,
+                                                          )
+                                                    : undefined
+                                            }
                                             content={msg.content ?? ""}
                                             files={msg.files}
                                             workflow={msg.workflow}
@@ -2245,6 +2354,37 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                 ) : (
                                     <AssistantMessage
                                         key={i}
+                                        messageId={msg.id}
+                                        sibling={msg.sibling ?? null}
+                                        onRegenerate={
+                                            branchActionsEnabled &&
+                                            messages[i - 1]?.role === "user" &&
+                                            messages[i - 1]?.id
+                                                ? () =>
+                                                      void handleRegenerate({
+                                                          assistant: msg,
+                                                          parentUser:
+                                                              messages[i - 1],
+                                                      })
+                                                : undefined
+                                        }
+                                        onBranchIntoNewThread={
+                                            branchActionsEnabled && msg.id
+                                                ? () =>
+                                                      void handleBranchIntoNewThread(
+                                                          msg,
+                                                      )
+                                                : undefined
+                                        }
+                                        onNavigateSibling={
+                                            branchActionsEnabled && msg.id
+                                                ? (dir) =>
+                                                      void handleNavigateSibling(
+                                                          msg,
+                                                          dir,
+                                                      )
+                                                : undefined
+                                        }
                                         events={msg.events}
                                         isStreaming={
                                             i === messages.length - 1 &&

@@ -23,6 +23,7 @@ import { can } from "../../lib/permissions";
 import { resolveEffectiveReasoningLevel } from "../../lib/modelSelection";
 import { beginMemoryConversationTurn, releaseMemoryConversationTurn, type MemoryConversationTurn } from "../../lib/memory/schedule";
 import { getAccessibleChat, validateAccessibleProjectId } from "./chat.access";
+import { resolveLeaf, setLeaf } from "./chat.tree";
 
 // ---------------------------------------------------------------------------
 // Pre-stream preparation for POST /chat (streaming)
@@ -38,6 +39,13 @@ export type PreparedChatStream = {
     chatId: string;
     chatTitle: string | null;
     lastUser: ChatMessage | undefined;
+    /**
+     * The row the turn's user message occupies: the freshly inserted
+     * `inputMessageId`, or the existing prompt reused by a link-only
+     * regenerate. Null for continuations that append to an assistant row.
+     * The assistant reservation must be wired from THIS id.
+     */
+    turnUserMessageId: string | null;
     resolvedProjectId: string | null;
     // Whether the turn that is about to stream has a durable row behind it.
     // An ask_inputs continuation that could not be appended is not durable,
@@ -83,6 +91,14 @@ export async function prepareChatStream(
         // Pre-generated id for the user message this turn persists, so the
         // route can link the reserved assistant row back to it.
         inputMessageId: string | null;
+        /**
+         * Regenerate/re-stream continuation: the id of the EXISTING user
+         * message the new answer should hang from. When set, the resolved
+         * leaf is that message and its stored content matches the payload,
+         * the turn reuses the row instead of inserting a sibling (no new
+         * user row, no leaf move) — see `turnUserMessageId` in the result.
+         */
+        linkOnlyToMessageId?: string | null;
         projectIdProvided: boolean;
         projectId: string | null;
         // Parsed `ask_inputs_response` payload (answers to an ask_inputs
@@ -289,6 +305,11 @@ export async function prepareChatStream(
     let completedTurnPersisted = true;
     let memoryTurn: MemoryConversationTurn | null = null;
     let approvalEvents: McpToolEvent[] = [];
+    // The row this turn's user message occupies (null for continuations that
+    // append to an existing assistant row). Callers wire the assistant
+    // reservation's parent/memory link from this, never from a freshly
+    // generated id that may not have been inserted.
+    let turnUserMessageId: string | null = null;
     if (args.askInputsResponse) {
         const appendResult = await appendAskInputsResponseToAssistantMessage(
             db,
@@ -334,19 +355,73 @@ export async function prepareChatStream(
             userId,
         });
     } else if (lastUser) {
-        const { error: userMessageError } = await db
-            .from("chat_messages")
-            .insert({
-                id: args.inputMessageId,
-                chat_id: chatId,
-                role: "user",
-                content: lastUser.content,
-                files: lastUser.files ?? null,
-                workflow: lastUser.workflow ?? null,
-                author_user_id: userId,
-            });
-        if (userMessageError) {
-            return { ok: false, internal: true, error: userMessageError };
+        // The new user turn hangs off the caller's ACTIVE LEAF, not the
+        // newest row: after branch navigation the leaf is often older than
+        // the latest message, and parenting to the latest row would put the
+        // new turn on the wrong branch. resolveLeaf falls back to the newest
+        // message for a caller who has never branched, and to null in an
+        // empty chat — the tree's first message.
+        const parentMessageId = await resolveLeaf(db, chatId, userId);
+
+        // Regenerate re-streams an existing prompt instead of sending a new
+        // one: when the caller names that prompt (`linkOnlyToMessageId`), the
+        // resolved leaf IS it, and its stored content still matches the
+        // payload, the turn must reuse the existing row. Inserting again
+        // would show the prompt twice and put the new answer on a child row
+        // rather than beside the old one.
+        let reuseLeafRow = false;
+        if (
+            args.linkOnlyToMessageId &&
+            parentMessageId === args.linkOnlyToMessageId
+        ) {
+            const { data: leafRow } = await db
+                .from("chat_messages")
+                .select("role, content")
+                .eq("chat_id", chatId)
+                .eq("id", parentMessageId)
+                .maybeSingle();
+            reuseLeafRow =
+                leafRow?.role === "user" &&
+                JSON.stringify(leafRow.content) ===
+                    JSON.stringify(lastUser.content ?? null);
+        }
+
+        if (reuseLeafRow) {
+            // Row and leaf already exist; the reservation (parented to this
+            // id) completes the turn. The leaf stays where it is.
+            turnUserMessageId = parentMessageId;
+        } else {
+            const { error: userMessageError } = await db
+                .from("chat_messages")
+                .insert({
+                    id: args.inputMessageId,
+                    chat_id: chatId,
+                    role: "user",
+                    content: lastUser.content,
+                    files: lastUser.files ?? null,
+                    workflow: lastUser.workflow ?? null,
+                    author_user_id: userId,
+                    parent_message_id: parentMessageId,
+                });
+            if (userMessageError) {
+                return { ok: false, internal: true, error: userMessageError };
+            }
+            turnUserMessageId = args.inputMessageId;
+
+            // Move the caller's leaf onto the turn they just sent, so the
+            // next message chains from it. Bookkeeping only: the row above
+            // is already durable, so a failed leaf move must not fail the
+            // turn.
+            if (args.inputMessageId) {
+                try {
+                    await setLeaf(db, chatId, userId, args.inputMessageId);
+                } catch (error) {
+                    console.error(
+                        "[chat/stream] failed to move chat leaf",
+                        error,
+                    );
+                }
+            }
         }
     }
 
@@ -428,6 +503,7 @@ export async function prepareChatStream(
                 chatId,
                 chatTitle,
                 lastUser,
+                turnUserMessageId,
                 resolvedProjectId,
                 completedTurnPersisted,
                 approvalEvents,

@@ -90,6 +90,11 @@ interface ServerChatDetailOut {
     is_owner?: boolean;
     access_role?: "owner" | "editor" | "viewer";
     messages: ServerMessage[];
+    /**
+     * Per-message branch position on the caller's active path, keyed by
+     * message id (1-based; totals count every persisted sibling).
+     */
+    siblings?: Record<string, { index: number; total: number }>;
     active_turn?: ActiveAssistantTurn | null;
 }
 
@@ -2233,9 +2238,21 @@ export async function listProjectChats(projectId: string): Promise<Chat[]> {
     return apiRequest<Chat[]>(`/projects/${projectId}/chats`);
 }
 
-export async function getChat(chatId: string): Promise<ChatDetailOut> {
-    const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
-    const messages: Message[] = raw.messages.map((m) => {
+/** The fields every transcript-shaped row carries; branch rows add the tree
+ *  pointers (parent_message_id, created_at), which the client does not render. */
+interface ServerTranscriptRow {
+    id: string;
+    role: "user" | "assistant";
+    content: string | AssistantEvent[] | null;
+    files?: MessageFile[] | null;
+    workflow?: { id: string; title: string } | null;
+    citations?: Citation[] | null;
+}
+
+// One mapping for every transcript-shaped response (GET /chat and the branch
+// endpoints): the wire carries rows, the UI renders Message objects.
+function mapServerMessages(messages: ServerTranscriptRow[]): Message[] {
+    const mapped: Message[] = messages.map((m) => {
         if (m.role === "user") {
             return {
                 id: m.id,
@@ -2245,20 +2262,29 @@ export async function getChat(chatId: string): Promise<ChatDetailOut> {
                 workflow: m.workflow ?? undefined,
             };
         }
-        const events = Array.isArray(m.content)
-            ? (m.content as AssistantEvent[])
-            : undefined;
+        const events = Array.isArray(m.content) ? m.content : undefined;
         return {
             id: m.id,
             role: "assistant",
             content:
                 events
                     ?.filter((e) => e.type === "content")
-                    .map((e) => (e as { type: "content"; text: string }).text)
+                    .map((e) => (e.type === "content" ? e.text : ""))
                     .join("") ?? "",
             citations: m.citations ?? undefined,
             events,
         };
+    });
+    return mapped;
+}
+
+export async function getChat(chatId: string): Promise<ChatDetailOut> {
+    const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
+    const messages = mapServerMessages(raw.messages).map((message) => {
+        // Branch position rides along on the read, so a navigator renders
+        // without one sibling lookup per message.
+        const sibling = message.id ? raw.siblings?.[message.id] : undefined;
+        return sibling ? { ...message, sibling } : message;
     });
     return {
         // Fold the caller's served standing into the row so consumers gate
@@ -2273,6 +2299,104 @@ export async function getChat(chatId: string): Promise<ChatDetailOut> {
         messages,
         active_turn: raw.active_turn ?? null,
     };
+}
+
+/** A branch read's answer: the ancestry a leaf selects, and that leaf. */
+export type ChatBranchPage = {
+    leaf: string | null;
+    messages: Message[];
+};
+
+/** Wire shape of the branch endpoints: the tree columns chat.tree walks. */
+interface ServerBranchRow extends ServerTranscriptRow {
+    parent_message_id: string | null;
+    created_at: string;
+}
+
+interface ServerBranchPathOut {
+    leaf: string | null;
+    path: ServerBranchRow[];
+}
+
+/**
+ * Edit-and-branch: store an edited user message as a new sibling of the
+ * message it was edited from, move the caller's leaf onto it and return the
+ * ancestry it selects. The source message is never rewritten.
+ */
+export async function createBranch(
+    chatId: string,
+    args: {
+        from_message_id: string;
+        content?: string;
+        files?: MessageFile[];
+        workflow?: { id: string; title: string };
+    },
+): Promise<{ id: string } & ChatBranchPage> {
+    const raw = await apiRequest<
+        ServerBranchPathOut & { new_message_id: string }
+    >(`/chat/${chatId}/branches`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(args),
+    });
+    return {
+        id: raw.new_message_id,
+        leaf: raw.leaf ?? raw.new_message_id,
+        messages: mapServerMessages(raw.path),
+    };
+}
+
+/**
+ * Move the caller's leaf — a reading position, not shared content — and
+ * return the ancestry that leaf selects.
+ */
+export async function setChatLeaf(
+    chatId: string,
+    leafId: string,
+): Promise<ChatBranchPage> {
+    const raw = await apiRequest<ServerBranchPathOut>(`/chat/${chatId}/leaf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leaf_message_id: leafId }),
+    });
+    return { leaf: raw.leaf, messages: mapServerMessages(raw.path) };
+}
+
+/**
+ * The ancestry the caller is reading: an explicit leaf, else their stored
+ * leaf, else the chat's newest message.
+ */
+export async function fetchChatPath(
+    chatId: string,
+    leaf?: string,
+): Promise<ChatBranchPage> {
+    const query = leaf ? `?leaf=${encodeURIComponent(leaf)}` : "";
+    const raw = await apiRequest<ServerBranchPathOut>(
+        `/chat/${chatId}/path${query}`,
+    );
+    return { leaf: raw.leaf, messages: mapServerMessages(raw.path) };
+}
+
+export type ChatSiblingNavItem = {
+    id: string;
+    role: "user" | "assistant";
+    created_at: string;
+    preview: string;
+};
+
+/**
+ * The versions of a message sharing its parent (oldest first), with previews
+ * and the message's 1-based position — the data behind "‹ 2/3 ›".
+ */
+export async function fetchSiblings(
+    chatId: string,
+    messageId: string,
+): Promise<{
+    siblings: ChatSiblingNavItem[];
+    index: number;
+    total: number;
+}> {
+    return apiRequest(`/chat/${chatId}/branches/${messageId}/siblings`);
 }
 
 /**
@@ -2448,6 +2572,12 @@ export async function streamChat(payload: {
     model?: string;
     reasoning?: Message["reasoning"];
     ask_inputs_response?: AskInputsResponsePayload;
+    /**
+     * Regenerate: the id of the existing user prompt the new answer should
+     * hang from. Sent only after moving this caller's leaf onto that prompt
+     * (setChatLeaf); the server reuses the row instead of inserting a sibling.
+     */
+    link_only_to_message_id?: string;
     signal?: AbortSignal;
 }): Promise<Response> {
     const { signal, ...body } = payload;
@@ -2478,6 +2608,8 @@ export async function streamProjectChat(payload: {
     displayed_doc?: { filename: string; document_id: string };
     attached_documents?: { filename: string; document_id: string }[];
     ask_inputs_response?: AskInputsResponsePayload;
+    /** Regenerate: the existing prompt row the answer should hang from. */
+    link_only_to_message_id?: string;
     signal?: AbortSignal;
 }): Promise<Response> {
     const { projectId, signal, ...body } = payload;

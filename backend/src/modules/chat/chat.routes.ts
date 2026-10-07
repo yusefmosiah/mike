@@ -13,7 +13,7 @@ import { stopOutcomeFrame } from "../../lib/streamRuns";
 // assistant-message persistence) stays here — its ordering is delicate; the
 // pre-stream preparation lives in chat.service.ts.
 
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
@@ -50,6 +50,14 @@ import {
     releaseMemoryConversationTurn,
     scheduleMemoryConsolidation,
 } from "../../lib/memory/schedule";
+import {
+    chatPath,
+    createBranch,
+    isMessageId,
+    setLeafAndPath,
+    siblingNav,
+    type BranchFailure,
+} from "./chat.branches";
 import {
     createChat,
     deleteChat,
@@ -154,14 +162,18 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
 
-    const messages = await getChatMessages(db, chatId);
+    const transcript = await getChatMessages(db, chatId, userId);
     // access_role/is_owner mirror the project and review detail responses so
     // the client can render per-role affordances instead of re-deriving them.
     res.json({
         chat: access.chat,
         is_owner: access.isCreator,
         access_role: access.projectRole,
-        messages,
+        messages: transcript.messages,
+        // Where the caller's leaf sits and how many versions each visible
+        // message has, so branch navigation renders from one read.
+        siblings: transcript.siblings,
+        leaf: transcript.leaf,
         // A turn still generating into this chat, so a client that has just
         // loaded (a refresh, a second tab) can attach to it instead of
         // showing the hidden reservation as "no answer".
@@ -540,6 +552,17 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: parsedAskInputsResponse.detail });
     }
+    // Regenerate names the existing prompt the new answer hangs from; see
+    // linkOnlyToMessageId in prepareChatStream. Without it a send is a send.
+    const rawLinkOnlyToMessageId = body.link_only_to_message_id;
+    if (rawLinkOnlyToMessageId != null && !isMessageId(rawLinkOnlyToMessageId)) {
+        return void res
+            .status(400)
+            .json({ detail: "link_only_to_message_id must be a message id" });
+    }
+    const linkOnlyToMessageId = isMessageId(rawLinkOnlyToMessageId)
+        ? rawLinkOnlyToMessageId
+        : null;
     const messages = parsedMessages.value;
     const chat_id = parsedChatId.value;
     const project_id = parsedProjectId.value.projectId;
@@ -567,6 +590,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         messages,
         chatId: chat_id ?? null,
         inputMessageId,
+        linkOnlyToMessageId,
         projectIdProvided: parsedProjectId.value.provided,
         projectId: parsedProjectId.value.projectId,
         askInputsResponse,
@@ -585,6 +609,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     const {
         chatId,
         lastUser,
+        turnUserMessageId,
         resolvedProjectId,
         allowDocumentMutation,
         canReadProjectMemory,
@@ -642,7 +667,12 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                 table: "chat_messages",
                 id: assistantMessageId,
                 chatId,
-                inputMessageId: inputMessageId as string,
+                // The row the turn's user message occupies: the reused prompt
+                // when regenerating, otherwise the freshly inserted sibling.
+                // Never the throwaway input uuid — on the reuse path no row
+                // with it exists, and parent_message_id references a row.
+                inputMessageId:
+                    turnUserMessageId ?? (inputMessageId as string),
                 authorUserId: userId,
             });
             if (reserveError) {
@@ -1017,6 +1047,181 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             }
         }
     }
+}));
+
+// Branching (message tree) ---------------------------------------------------
+//
+// These four endpoints operate on the chat's message tree: POST /branches
+// inserts an edited message as a sibling and moves the caller's leaf,
+// POST /leaf moves the caller's leaf, GET /path returns the ancestry a leaf
+// selects, and GET .../siblings returns the versions sharing a parent.
+// Writing (branches) needs the same standing as sending — creator, or
+// content.edit on the project; leaf moves and reads only need visibility,
+// because a leaf is per-reader state and the service can only write the
+// caller's own row.
+function sendBranchFailure(res: Response, failure: BranchFailure): void {
+    if (failure.kind === "error")
+        return void sendInternalError(res, failure.error);
+    if (failure.kind === "not_found")
+        return void res.status(404).json({ detail: failure.detail });
+    return void res.status(400).json({ detail: failure.detail });
+}
+
+// POST /chat/:chatId/branches — edit-and-branch.
+// Stores the edited message as a new sibling of the message it grew out of
+// and moves the caller's leaf to it; the source row is never rewritten.
+chatRouter.post("/:chatId/branches", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    const body =
+        req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? (req.body as Record<string, unknown>)
+            : {};
+    if (!isMessageId(chatId))
+        return void res.status(400).json({ detail: "Invalid chat id" });
+    if (!isMessageId(body.from_message_id))
+        return void res
+            .status(400)
+            .json({ detail: "from_message_id must be a message id" });
+    if (
+        body.content != null &&
+        (typeof body.content !== "string" || !body.content.trim())
+    )
+        return void res
+            .status(400)
+            .json({ detail: "content must be a non-empty string" });
+    // The stored sibling has to be exactly as trustworthy as a streamed user
+    // message, so the optional overrides go through the stream validator.
+    const parsedOverride = parseChatMessages([
+        {
+            role: "user",
+            content: typeof body.content === "string" ? body.content : null,
+            ...(body.files != null ? { files: body.files } : {}),
+            ...(body.workflow != null ? { workflow: body.workflow } : {}),
+        },
+    ]);
+    if (!parsedOverride.ok) {
+        return void res.status(400).json({ detail: parsedOverride.detail });
+    }
+    const override = parsedOverride.value[0];
+
+    const db = createServerSupabase();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+    // Appending a message writes to the chat: member+ only, mirroring the
+    // stream route. Viewers can read this chat but must not branch it.
+    if (!can(access.projectRole, "content.edit"))
+        return void res
+            .status(403)
+            .json({ detail: "You do not have permission to modify this chat" });
+
+    const result = await createBranch(db, {
+        chatId,
+        userId,
+        fromMessageId: body.from_message_id,
+        content: override.content,
+        files: override.files,
+        workflow: override.workflow,
+    });
+    if (!result.ok) return void sendBranchFailure(res, result);
+    res.json({
+        new_message_id: result.newMessageId,
+        leaf: result.newMessageId,
+        path: result.path,
+    });
+}));
+
+// POST /chat/:chatId/leaf — move the caller's leaf.
+// Reading position, not content: visibility is enough, and the service only
+// ever writes the caller's own leaf row, so no other reader's view moves.
+chatRouter.post("/:chatId/leaf", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    const body =
+        req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? (req.body as Record<string, unknown>)
+            : {};
+    if (!isMessageId(chatId))
+        return void res.status(400).json({ detail: "Invalid chat id" });
+    if (!isMessageId(body.leaf_message_id))
+        return void res
+            .status(400)
+            .json({ detail: "leaf_message_id must be a message id" });
+
+    const db = createServerSupabase();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+
+    const result = await setLeafAndPath(db, {
+        chatId,
+        userId,
+        leafId: body.leaf_message_id,
+    });
+    if (!result.ok) return void sendBranchFailure(res, result);
+    res.json({
+        leaf: result.leaf,
+        path: result.path,
+    });
+}));
+
+// GET /chat/:chatId/path?leaf= — the ancestry a leaf selects: the explicit
+// leaf, else the caller's stored leaf, else the newest message.
+chatRouter.get("/:chatId/path", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    const leaf = req.query.leaf;
+    if (!isMessageId(chatId))
+        return void res.status(400).json({ detail: "Invalid chat id" });
+    if (leaf !== undefined && !isMessageId(leaf))
+        return void res
+            .status(400)
+            .json({ detail: "leaf must be a message id" });
+
+    const db = createServerSupabase();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+
+    const result = await chatPath(db, {
+        chatId,
+        userId,
+        leaf: typeof leaf === "string" ? leaf : null,
+    });
+    if (!result.ok) return void sendBranchFailure(res, result);
+    res.json({
+        leaf: result.leaf,
+        path: result.path,
+    });
+}));
+
+// GET /chat/:chatId/branches/:messageId/siblings — the versions sharing the
+// message's parent, oldest first, with previews and the message's position.
+chatRouter.get("/:chatId/branches/:messageId/siblings", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId, messageId } = req.params;
+    if (!isMessageId(chatId))
+        return void res.status(400).json({ detail: "Invalid chat id" });
+    if (!isMessageId(messageId))
+        return void res.status(400).json({ detail: "Invalid message id" });
+
+    const db = createServerSupabase();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+
+    const result = await siblingNav(db, { chatId, messageId });
+    if (!result.ok) return void sendBranchFailure(res, result);
+    res.json({
+        siblings: result.siblings,
+        index: result.index,
+        total: result.total,
+    });
 }));
 
 chatRouter.use(routerErrorHandler("[chat]"));

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAssistantChat } from "@/app/hooks/useAssistantChat";
 import { useChatRoute } from "@/app/hooks/useChatRoute";
+import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { ChatView } from "@/app/components/assistant/ChatView";
 import { loadAssistantChat } from "@/app/lib/assistantTurns";
@@ -46,6 +47,16 @@ export default function AssistantChatPage() {
 
     const hasAutoSent = useRef(false);
     const loadedChatId = useRef<string | null>(null);
+
+    // Branch navigation: leaf moves happen server-side and the ancestry they
+    // select comes back as this page's transcript, so the reload and the
+    // queued re-answer (edit prompt / regenerate) live here, not in the view.
+    const { reloadActivePath, editPrompt, regenerate } = useChatBranchActions({
+        chatId: id,
+        messages,
+        setMessages,
+        handleChat,
+    });
     // Whether the caller may write here, from the standing GET /chat/:id
     // serves. Grant-reachable chats appear in the global sidebar since the
     // parity change, so a project VIEWER can land on this page — dropping
@@ -200,6 +211,9 @@ export default function AssistantChatPage() {
             canSend={canSend}
             accessResolved={accessResolved}
             chatLoading={chatLoading}
+            onBranchChange={reloadActivePath}
+            onEditPrompt={editPrompt}
+            onRegenerate={regenerate}
         />
     );
 }

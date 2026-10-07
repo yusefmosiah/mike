@@ -38,6 +38,11 @@ function makeDb(error: unknown = null) {
                 call.payload = payload;
                 return builder;
             },
+            upsert(payload: Record<string, unknown>) {
+                call.op = "upsert";
+                call.payload = payload;
+                return builder;
+            },
             then(onFulfilled: (result: { error: unknown }) => unknown) {
                 return Promise.resolve({ error }).then(onFulfilled);
             },
@@ -66,21 +71,27 @@ describe("insertAssistantMessage", () => {
         });
 
         expect(result).toEqual({ ok: true });
-        expect(calls).toEqual([
-            {
-                table: "chat_messages",
-                op: "insert",
-                payload: {
-                    id: "assistant-1",
-                    chat_id: "chat-1",
-                    role: "assistant",
-                    content: events,
-                    citations,
-                    author_user_id: "user-1",
-                    memory_input_message_id: "input-1",
-                },
+        expect(calls[0]).toEqual({
+            table: "chat_messages",
+            op: "insert",
+            payload: {
+                id: "assistant-1",
+                chat_id: "chat-1",
+                role: "assistant",
+                content: events,
+                citations,
+                author_user_id: "user-1",
+                memory_input_message_id: "input-1",
+                parent_message_id: "input-1",
             },
-        ]);
+        });
+        expect(calls[1].table).toBe("chat_leaf_state");
+        expect(calls[1].op).toBe("upsert");
+        const leafPayload = calls[1].payload as Record<string, unknown>;
+        expect(leafPayload.chat_id).toBe("chat-1");
+        expect(leafPayload.user_id).toBe("user-1");
+        expect(leafPayload.leaf_message_id).toBe("assistant-1");
+        expect(typeof leafPayload.updated_at).toBe("string");
     });
 
     it("stores NULL rather than an empty array for events and citations", async () => {
@@ -103,6 +114,7 @@ describe("insertAssistantMessage", () => {
             citations: null,
             author_user_id: "user-1",
             memory_input_message_id: "input-1",
+            parent_message_id: "input-1",
         });
     });
 

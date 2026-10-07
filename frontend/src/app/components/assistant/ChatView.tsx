@@ -36,10 +36,11 @@ import type {
     AssistantEvent,
     Chat,
     Citation,
-    EditAnnotation,
     Document,
-    PanelDocument,
+    EditAnnotation,
     Message,
+    MessageSibling,
+    PanelDocument,
 } from "../shared/types";
 import {
     panelDocumentFromCaseEvent,
@@ -69,10 +70,13 @@ import {
 } from "@/app/lib/modelAvailability";
 import { can, roleFrom } from "@/app/lib/permissions";
 import {
-    getDocument,
-    renameProjectDocument,
-    renameLibraryDocument,
+    createBranch,
     deleteDocument,
+    fetchSiblings,
+    getDocument,
+    renameLibraryDocument,
+    renameProjectDocument,
+    setChatLeaf,
 } from "@/app/lib/mikeApi";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 
@@ -133,6 +137,40 @@ interface Props {
     onInitialSubmit?: (message: Message) => void;
     /** Leaves this chat for the new-chat view, without cancelling its answer. */
     onNewChat: () => void;
+    /**
+     * Branch position of each message, keyed by message id, as served by the
+     * tree API. Hosts that already hold this pass it; otherwise the message's
+     * own optional `sibling` field is used. Without either, no branch
+     * controls render.
+     */
+    siblingById?: Record<string, MessageSibling>;
+    /**
+     * Called after a branch mutation — an edited sibling was saved, or the
+     * chat's active leaf moved — so the host reloads the active path.
+     */
+    onBranchChange?: () => void;
+    /**
+     * Regenerates an assistant answer. When provided, the host owns the whole
+     * flow and receives the assistant message to replace plus the user
+     * message that prompted it. Without it, the view falls back to
+     * re-pointing the chat's leaf at the parent user message and asking the
+     * host to reload through `onBranchChange`.
+     */
+    onRegenerate?: (args: {
+        assistant: Message;
+        parentUser: Message | null;
+    }) => void | Promise<void>;
+    /**
+     * Saves an edited prompt as a sibling branch. When provided, the host
+     * owns the whole flow (create the branch, reload the active path, and
+     * stream the re-answer) and receives the original message plus the
+     * edited text. Without it, the view creates the branch itself and asks
+     * the host to reload through `onBranchChange`.
+     */
+    onEditPrompt?: (args: {
+        message: Message;
+        content: string;
+    }) => void | Promise<void>;
 }
 
 const ASSISTANT_PANEL_TRANSITION_MS = 500;
@@ -165,6 +203,10 @@ export function ChatView({
     chatLoading,
     onInitialSubmit,
     onNewChat,
+    siblingById,
+    onBranchChange,
+    onRegenerate,
+    onEditPrompt,
 }: Props) {
     const router = useRouter();
     // The model is what we asked for, so it identifies whose key was rejected.
@@ -233,6 +275,9 @@ export function ChatView({
     const activeTab = tabs.find((tab) => tab.id === activeTabId);
     const activeCitation =
         activeTab?.kind === "citation" ? activeTab.citation : null;
+    // Branch controls mutate stored rows; acting while an answer streams
+    // would race the turn writing into this chat.
+    const branchActionsEnabled = !isResponseLoading;
 
     const showPanel = useCallback(() => {
         if (panelCloseTimerRef.current !== null) {
@@ -466,6 +511,169 @@ export function ChatView({
             });
         },
         [upsertTab],
+    );
+
+    // --- Branching (tree chats) -------------------------------------------------
+    // The message rows own presentation; this view owns the calls: saving an
+    // edited copy as a sibling, moving the chat's leaf, and re-pointing the
+    // leaf at a prompt so a new answer becomes a sibling of the old one.
+    const branchBusyRef = useRef(false);
+
+    /** Moves the caller's leaf and asks the host to reload the active path. */
+    const moveLeaf = useCallback(
+        async (leafMessageId: string) => {
+            if (!chatId) return;
+            await setChatLeaf(chatId, leafMessageId);
+            await onBranchChange?.();
+        },
+        [chatId, onBranchChange],
+    );
+
+    const handleEditBranch = useCallback(
+        async (message: Message, content: string) => {
+            if (onEditPrompt) {
+                try {
+                    await onEditPrompt({ message, content });
+                } catch (error) {
+                    setActionError({
+                        title: "Could not save the edit",
+                        message: userFacingApiError(
+                            error,
+                            "The edited message could not be saved. Please try again.",
+                        ),
+                    });
+                }
+                return;
+            }
+            if (!chatId || !message.id || branchBusyRef.current) return;
+            branchBusyRef.current = true;
+            try {
+                // The new row is a sibling of the edited message, and the
+                // server moves this caller's leaf onto it; the host reload
+                // shows the branch (and starts whatever answers it).
+                await createBranch(chatId, {
+                    from_message_id: message.id,
+                    content,
+                    files: message.files,
+                    workflow: message.workflow,
+                });
+                await onBranchChange?.();
+            } catch (error) {
+                setActionError({
+                    title: "Could not save the edit",
+                    message: userFacingApiError(
+                        error,
+                        "The edited message could not be saved. Please try again.",
+                    ),
+                });
+            } finally {
+                branchBusyRef.current = false;
+            }
+        },
+        [chatId, onBranchChange, onEditPrompt],
+    );
+
+    const handleNavigateSibling = useCallback(
+        async (
+            message: Message,
+            knownIds: Array<string | number> | null,
+            dir: -1 | 1,
+        ) => {
+            if (!chatId || !message.id || branchBusyRef.current) return;
+            branchBusyRef.current = true;
+            try {
+                // Prefer the sibling order the view was handed; the reads that
+                // feed it carry only the position, so usually this asks the
+                // branch API for the ordered ids.
+                let order = knownIds ? knownIds.map(String) : null;
+                let current = order ? order.indexOf(message.id) : -1;
+                if (!order || current < 0) {
+                    const fetched = await fetchSiblings(chatId, message.id);
+                    order = fetched.siblings.map((sibling) => sibling.id);
+                    current =
+                        fetched.index > 0
+                            ? fetched.index - 1
+                            : order.indexOf(message.id);
+                }
+                const target = current < 0 ? undefined : order?.[current + dir];
+                if (target === undefined) return;
+                await moveLeaf(target);
+            } catch (error) {
+                setActionError({
+                    title: "Could not open the branch",
+                    message: userFacingApiError(
+                        error,
+                        "This branch could not be opened. Please try again.",
+                    ),
+                });
+            } finally {
+                branchBusyRef.current = false;
+            }
+        },
+        [chatId, moveLeaf],
+    );
+
+    const handleRegenerate = useCallback(
+        async (assistant: Message, parentUser: Message | null) => {
+            if (onRegenerate) {
+                try {
+                    await onRegenerate({ assistant, parentUser });
+                } catch (error) {
+                    setActionError({
+                        title: "Could not regenerate",
+                        message: userFacingApiError(
+                            error,
+                            "A new answer could not be requested. Please try again.",
+                        ),
+                    });
+                }
+                return;
+            }
+            if (!chatId || !parentUser?.id || branchBusyRef.current) return;
+            branchBusyRef.current = true;
+            try {
+                // Regeneration starts by making the prompt the leaf again, so
+                // the next stored answer lands beside the old one. Starting
+                // that answer is the host's job — it owns the stream — hence
+                // the `onRegenerate` pass-through above.
+                await moveLeaf(parentUser.id);
+            } catch (error) {
+                setActionError({
+                    title: "Could not regenerate",
+                    message: userFacingApiError(
+                        error,
+                        "A new answer could not be requested. Please try again.",
+                    ),
+                });
+            } finally {
+                branchBusyRef.current = false;
+            }
+        },
+        [chatId, moveLeaf, onRegenerate],
+    );
+
+    const handleBranchIntoNewThread = useCallback(
+        async (message: Message) => {
+            if (!chatId || !message.id || branchBusyRef.current) return;
+            branchBusyRef.current = true;
+            try {
+                // The leaf becomes this response, so the next prompt typed
+                // becomes its child; nothing re-streams, the view just shows
+                // where the thread now continues from.
+                await moveLeaf(message.id);
+            } catch (error) {
+                setActionError({
+                    title: "Could not start a new thread",
+                    message: userFacingApiError(
+                        error,
+                        "A new thread could not be started from this response. Please try again.",
+                    ),
+                });
+            } finally {
+                branchBusyRef.current = false;
+            }
+        },
+        [chatId, moveLeaf],
     );
 
     /**
@@ -848,7 +1056,6 @@ export function ChatView({
     const userMessageCount = messages.filter(
         (message) => message.role === "user",
     ).length;
-    /* eslint-disable react-hooks/set-state-in-effect -- visibility is synchronized with completion of the selected chat's DOM positioning */
     useEffect(() => {
         const viewingUnpositionedChat = positionedChatRef.current !== chatId;
         if (chatLoading) {
@@ -1108,117 +1315,209 @@ export function ChatView({
                                         const lastAssistantIndex = messages
                                             .map((m) => m.role)
                                             .lastIndexOf("assistant");
-                                        return messages.map((msg, i) => (
-                                            <div
-                                                key={msg.id ?? i}
-                                                ref={
-                                                    i === lastUserIndex
-                                                        ? latestUserMessageRef
-                                                        : null
-                                                }
-                                            >
-                                                {msg.role === "user" ? (
-                                                    <UserMessage
-                                                        content={msg.content ?? ""}
-                                                        files={msg.files}
-                                                        workflow={msg.workflow}
-                                                        onWorkflowClick={(wf) => {
-                                                            setWorkflowModalInitialId(
-                                                                wf.id,
-                                                            );
-                                                            setWorkflowModalOpen(true);
-                                                        }}
-                                                        onFileClick={(file) => {
-                                                            if (!file.document_id)
-                                                                return;
-                                                            openDocument({
-                                                                documentId:
-                                                                    file.document_id,
-                                                                filename:
-                                                                    file.filename,
-                                                                versionId:
-                                                                    file.version_id ??
-                                                                    null,
-                                                                versionNumber:
-                                                                    file.version_number ??
-                                                                    null,
-                                                            });
-                                                        }}
-                                                    />
-                                                ) : (
-                                                    <AssistantMessage
-                                                        events={msg.events}
-                                                        isStreaming={
-                                                            i === messages.length - 1 &&
-                                                            isResponseLoading
-                                                        }
-                                                        isError={!!msg.error}
-                                                        errorMessage={
-                                                            typeof msg.error ===
-                                                            "string"
-                                                                ? msg.error
-                                                                : undefined
-                                                        }
-                                                        citations={msg.citations}
-                                                        citationStatus={
-                                                            msg.citationStatus
-                                                        }
-                                                        activeCitation={
-                                                            activeCitation
-                                                        }
-                                                        onCitationClick={(citation) => {
-                                                            if (activeCitation === citation && activeTab) {
-                                                                handleCloseAnnotation(activeTab.id);
-                                                            } else {
-                                                                void openCitation(citation);
+                                        return messages.map((msg, i) => {
+                                            const sibling =
+                                                msg.sibling ??
+                                                (msg.id
+                                                    ? siblingById?.[msg.id]
+                                                    : undefined) ??
+                                                null;
+                                            const siblingIds =
+                                                msg.sibling?.ids ??
+                                                (msg.id
+                                                    ? siblingById?.[msg.id]?.ids
+                                                    : undefined);
+                                            // Ordered sibling ids the view was
+                                            // handed, when it has them; the
+                                            // handler asks the branch API
+                                            // otherwise.
+                                            const knownSiblingIds =
+                                                siblingIds &&
+                                                msg.id &&
+                                                siblingIds.length > 1 &&
+                                                siblingIds.some(
+                                                    (id) =>
+                                                        String(id) === msg.id,
+                                                )
+                                                    ? siblingIds
+                                                    : null;
+                                            const previous =
+                                                i > 0 ? messages[i - 1] : null;
+                                            const parentUser =
+                                                msg.role === "assistant" &&
+                                                previous?.role === "user"
+                                                    ? previous
+                                                    : null;
+                                            return (
+                                                <div
+                                                    key={msg.id ?? i}
+                                                    ref={
+                                                        i === lastUserIndex
+                                                            ? latestUserMessageRef
+                                                            : null
+                                                    }
+                                                >
+                                                    {msg.role === "user" ? (
+                                                        <UserMessage
+                                                            messageId={msg.id}
+                                                            sibling={sibling}
+                                                            onEditBranch={
+                                                                branchActionsEnabled &&
+                                                                chatId &&
+                                                                msg.id
+                                                                    ? (content) =>
+                                                                          void handleEditBranch(
+                                                                              msg,
+                                                                              content,
+                                                                          )
+                                                                    : undefined
                                                             }
-                                                        }}
-                                                        onOpenCitationSource={(
-                                                            citation,
-                                                        ) =>
-                                                            void openCitation(
+                                                            onNavigateSibling={
+                                                                branchActionsEnabled &&
+                                                                msg.id
+                                                                    ? (dir) =>
+                                                                          void handleNavigateSibling(
+                                                                              msg,
+                                                                              knownSiblingIds,
+                                                                              dir,
+                                                                          )
+                                                                    : undefined
+                                                            }
+                                                            content={msg.content ?? ""}
+                                                            files={msg.files}
+                                                            workflow={msg.workflow}
+                                                            onWorkflowClick={(wf) => {
+                                                                setWorkflowModalInitialId(
+                                                                    wf.id,
+                                                                );
+                                                                setWorkflowModalOpen(true);
+                                                            }}
+                                                            onFileClick={(file) => {
+                                                                if (!file.document_id)
+                                                                    return;
+                                                                openDocument({
+                                                                    documentId:
+                                                                        file.document_id,
+                                                                    filename:
+                                                                        file.filename,
+                                                                    versionId:
+                                                                        file.version_id ??
+                                                                        null,
+                                                                    versionNumber:
+                                                                        file.version_number ??
+                                                                        null,
+                                                                });
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <AssistantMessage
+                                                            messageId={msg.id}
+                                                            sibling={sibling}
+                                                            onRegenerate={
+                                                                branchActionsEnabled &&
+                                                                (onRegenerate ||
+                                                                    (chatId &&
+                                                                        parentUser?.id))
+                                                                    ? () =>
+                                                                          void handleRegenerate(
+                                                                              msg,
+                                                                              parentUser,
+                                                                          )
+                                                                    : undefined
+                                                            }
+                                                            onNavigateSibling={
+                                                                branchActionsEnabled &&
+                                                                msg.id
+                                                                    ? (dir) =>
+                                                                          void handleNavigateSibling(
+                                                                              msg,
+                                                                              knownSiblingIds,
+                                                                              dir,
+                                                                          )
+                                                                    : undefined
+                                                            }
+                                                            onBranchIntoNewThread={
+                                                                branchActionsEnabled &&
+                                                                msg.id
+                                                                    ? () =>
+                                                                          void handleBranchIntoNewThread(
+                                                                              msg,
+                                                                          )
+                                                                    : undefined
+                                                            }
+                                                            events={msg.events}
+                                                            isStreaming={
+                                                                i === messages.length - 1 &&
+                                                                isResponseLoading
+                                                            }
+                                                            isError={!!msg.error}
+                                                            errorMessage={
+                                                                typeof msg.error ===
+                                                                "string"
+                                                                    ? msg.error
+                                                                    : undefined
+                                                            }
+                                                            citations={msg.citations}
+                                                            citationStatus={
+                                                                msg.citationStatus
+                                                            }
+                                                            activeCitation={
+                                                                activeCitation
+                                                            }
+                                                            onCitationClick={(citation) => {
+                                                                if (activeCitation === citation && activeTab) {
+                                                                    handleCloseAnnotation(activeTab.id);
+                                                                } else {
+                                                                    void openCitation(citation);
+                                                                }
+                                                            }}
+                                                            onOpenCitationSource={(
                                                                 citation,
-                                                                {
-                                                                    showQuotes: false,
-                                                                },
-                                                            )
-                                                        }
-                                                        onCaseClick={(citation) =>
-                                                            openCase(citation)
-                                                        }
-                                                        minHeight={
-                                                            i === lastAssistantIndex
-                                                                ? minHeight
-                                                                : "0px"
-                                                        }
-                                                        onWorkflowClick={(id) => {
-                                                            setWorkflowModalInitialId(
-                                                                id,
-                                                            );
-                                                            setWorkflowModalOpen(true);
-                                                        }}
-                                                        onEditViewClick={openEditor}
-                                                        onOpenDocument={openDocument}
-                                                        onEditResolveStart={
-                                                            handleEditResolveStart
-                                                        }
-                                                        onEditResolved={
-                                                            handleEditResolved
-                                                        }
-                                                        onEditError={handleEditError}
-                                                        isDocReloading={(docId) =>
-                                                            reloadingDocIds.has(docId)
-                                                        }
-                                                        isEditReloading={(editId) =>
-                                                            reloadingEditIds.has(editId)
-                                                        }
-                                                        resolvedEditStatuses={
-                                                            resolvedEditStatuses
-                                                        }
-                                                    />
-                                                )}
-                                            </div>
-                                        ));
+                                                            ) =>
+                                                                void openCitation(
+                                                                    citation,
+                                                                    {
+                                                                        showQuotes: false,
+                                                                    },
+                                                                )
+                                                            }
+                                                            onCaseClick={(citation) =>
+                                                                openCase(citation)
+                                                            }
+                                                            minHeight={
+                                                                i === lastAssistantIndex
+                                                                    ? minHeight
+                                                                    : "0px"
+                                                            }
+                                                            onWorkflowClick={(id) => {
+                                                                setWorkflowModalInitialId(
+                                                                    id,
+                                                                );
+                                                                setWorkflowModalOpen(true);
+                                                            }}
+                                                            onEditViewClick={openEditor}
+                                                            onOpenDocument={openDocument}
+                                                            onEditResolveStart={
+                                                                handleEditResolveStart
+                                                            }
+                                                            onEditResolved={
+                                                                handleEditResolved
+                                                            }
+                                                            onEditError={handleEditError}
+                                                            isDocReloading={(docId) =>
+                                                                reloadingDocIds.has(docId)
+                                                            }
+                                                            isEditReloading={(editId) =>
+                                                                reloadingEditIds.has(editId)
+                                                            }
+                                                            resolvedEditStatuses={
+                                                                resolvedEditStatuses
+                                                            }
+                                                        />
+                                                    )}
+                                                </div>
+                                            );
+                                        });
                                     })()}
                                     <div ref={messagesEndRef} />
                                 </div>

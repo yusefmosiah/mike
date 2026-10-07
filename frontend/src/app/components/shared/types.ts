@@ -356,6 +356,20 @@ export type CaseCitationQuote = {
   verification?: QuoteVerification;
 };
 
+/**
+ * Branch position of a message among the siblings sharing its parent
+ * (tree chats). Served by the chat API and passed through to the message
+ * components; `ids` lets the navigator step between siblings.
+ */
+export interface MessageSibling {
+  /** 1-based position of this message among its siblings. */
+  index: number;
+  /** Total number of siblings sharing this message's parent. */
+  total: number;
+  /** Sibling message ids in display order, when the server provides them. */
+  ids?: Array<string | number>;
+}
+
 export interface Message {
   id?: string;
   role: "user" | "assistant";
@@ -369,6 +383,8 @@ export interface Message {
   events?: AssistantEvent[];
   /** Set when streaming failed; rendered as a red error block. */
   error?: string;
+  /** Branch position when this message has siblings (tree chats). */
+  sibling?: MessageSibling;
 }
 
 export type MessageFile = {

@@ -1966,6 +1966,8 @@ create table if not exists public.chat_messages (
   chat_id uuid not null references public.chats(id) on delete cascade,
   author_user_id uuid references auth.users(id) on delete set null,
   memory_input_message_id uuid,
+  parent_message_id uuid
+    references public.chat_messages(id) on delete set null,
   memory_eligible_at timestamptz,
   memory_app_eligible_at timestamptz,
   role text not null,
@@ -1978,6 +1980,8 @@ create table if not exists public.chat_messages (
 
 create index if not exists chat_messages_chat_created_id_idx
   on public.chat_messages(chat_id, created_at, id);
+create index if not exists chat_messages_chat_parent_idx
+  on public.chat_messages(chat_id, parent_message_id);
 create index if not exists chat_messages_author_idx
   on public.chat_messages(author_user_id) where author_user_id is not null;
 
@@ -2127,6 +2131,38 @@ begin
   return 'appended';
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Chat message tree leaf state
+-- ---------------------------------------------------------------------------
+-- chat_messages is a tree (parent_message_id points at the message a row
+-- answers; null only for a chat's first message). Rows are immutable once
+-- persisted — edits and regenerations insert siblings and move the caller's
+-- leaf pointer instead of updating existing content.
+
+create table if not exists public.chat_leaf_state (
+  chat_id uuid not null references public.chats(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  leaf_message_id uuid not null references public.chat_messages(id) on delete cascade,
+  updated_at timestamptz not null default now(),
+  primary key (chat_id, user_id)
+);
+
+create index if not exists chat_leaf_state_leaf_idx
+  on public.chat_leaf_state(leaf_message_id);
+
+alter table public.chat_leaf_state enable row level security;
+
+drop policy if exists "Users can manage their own chat leaf state" on public.chat_leaf_state;
+create policy "Users can manage their own chat leaf state"
+  on public.chat_leaf_state
+  for all
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.chat_leaf_state to authenticated;
+grant all on public.chat_leaf_state to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Word add-in chats

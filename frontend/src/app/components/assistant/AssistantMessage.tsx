@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, GitFork, RotateCcw } from "lucide-react";
 import type {
     AssistantEvent,
     Citation,
     EditAnnotation,
     PanelDocument,
 } from "../shared/types";
+import { BranchNavigator } from "./BranchNavigator";
 import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
@@ -102,6 +103,23 @@ interface Props {
      * edits flip their per-card UI without per-card clicks.
      */
     resolvedEditStatuses?: Record<string, "accepted" | "rejected">;
+    /** Server id of this message. Set on stored chats; renders as data attr. */
+    messageId?: string;
+    /** Branch position when this response has siblings (tree chats). */
+    sibling?: { index: number; total: number } | null;
+    /**
+     * Re-answers this prompt with a fresh sibling response. When absent, no
+     * regenerate control renders.
+     */
+    onRegenerate?: () => void;
+    /**
+     * Starts a new thread from this response: the caller's leaf moves to this
+     * message so their next prompt becomes its child. When absent, no branch
+     * control renders.
+     */
+    onBranchIntoNewThread?: () => void;
+    /** Steps to the previous (-1) or next (1) sibling branch. */
+    onNavigateSibling?: (dir: -1 | 1) => void;
 }
 
 export function AssistantMessage({
@@ -125,6 +143,11 @@ export function AssistantMessage({
     isDocReloading,
     isEditReloading,
     resolvedEditStatuses,
+    messageId,
+    sibling,
+    onRegenerate,
+    onBranchIntoNewThread,
+    onNavigateSibling,
 }: Props) {
     const contentDivRef = useRef<HTMLDivElement | null>(null);
     const [isCopied, setIsCopied] = useState(false);
@@ -809,7 +832,7 @@ export function AssistantMessage({
     };
 
     return (
-        <div style={{ minHeight }}>
+        <div style={{ minHeight }} data-message-id={messageId}>
             <ResponseStatus status={status} />
             <div className="w-full font-inter relative mt-2">
                 {events && events.length > 0 ? (
@@ -1139,6 +1162,43 @@ export function AssistantMessage({
                                 <Copy className="h-3 w-3" />
                             )}
                         </button>
+                    )}
+                    {!isStreaming && onRegenerate && (
+                        <button
+                            type="button"
+                            aria-label="Regenerate response"
+                            className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                            onClick={onRegenerate}
+                        >
+                            <RotateCcw className="h-3 w-3" />
+                        </button>
+                    )}
+                    {!isStreaming && onBranchIntoNewThread && (
+                        <button
+                            type="button"
+                            aria-label="Branch into new thread"
+                            className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                            onClick={onBranchIntoNewThread}
+                        >
+                            <GitFork className="h-3 w-3" />
+                        </button>
+                    )}
+                    {sibling && sibling.total > 1 && (
+                        <BranchNavigator
+                            index={sibling.index}
+                            total={sibling.total}
+                            label="Response branches"
+                            onPrev={
+                                onNavigateSibling
+                                    ? () => onNavigateSibling(-1)
+                                    : undefined
+                            }
+                            onNext={
+                                onNavigateSibling
+                                    ? () => onNavigateSibling(1)
+                                    : undefined
+                            }
+                        />
                     )}
                 </div>
             </div>
