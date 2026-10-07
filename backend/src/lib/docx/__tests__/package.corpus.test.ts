@@ -55,6 +55,7 @@ describe("DocxPackage on the Word-authored corpus", () => {
     pkg.setText("word/document.xml", doc + " ");
     const out = await JSZip.loadAsync(await pkg.save());
     const orig = await JSZip.loadAsync(bytes);
+    expect(Object.keys(out.files).sort()).toEqual(Object.keys(orig.files).sort());
     for (const name of Object.keys(orig.files)) {
       if (orig.files[name].dir || name === "word/document.xml") continue;
       const a = await orig.file(name)!.async("uint8array");

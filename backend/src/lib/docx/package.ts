@@ -120,7 +120,10 @@ export class DocxPackage {
   async save(): Promise<Buffer> {
     if (!this.isModified()) return this.originalBytes;
     for (const [path, text] of this.modified) {
-      this.zip.file(this.entryNames.get(path)!, encodePart(text, this.encodings.get(path) ?? "utf-8"));
+      // createFolders: false, or JSZip adds directory entries Word never wrote.
+      this.zip.file(this.entryNames.get(path)!, encodePart(text, this.encodings.get(path) ?? "utf-8"), {
+        createFolders: false,
+      });
     }
     return this.zip.generateAsync({
       type: "nodebuffer",

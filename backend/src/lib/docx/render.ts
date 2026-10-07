@@ -239,21 +239,33 @@ export function findSections(doc: DocxDocument, query: string): SectionMatch[] {
   return out;
 }
 
-function depth(p: ParagraphBlock): number | undefined {
-  return p.outlineLevel ?? p.listLevel;
-}
-
+/**
+ * Where a section ends. List levels and outline levels are different scales
+ * (a "5.3" heading can have outline level 2 while its sub-clause "5.3.1" is
+ * at list level 2), so they are never compared with each other:
+ * - a numbered clause ends at the next numbered clause at its list level or
+ *   above, or at an unnumbered heading at its outline level or above;
+ * - an unnumbered heading ends at the next heading at its outline level or above.
+ */
 function sectionEnd(blocks: readonly Block[], start: number): number {
   const head = blocks[start] as ParagraphBlock;
-  const d = depth(head);
-  if (d === undefined) return start + 1;
+  const numbered = head.label !== undefined && head.listLevel !== undefined && !head.isBullet;
+  if (!numbered && head.outlineLevel === undefined) return start + 1;
+  const headOutline = head.outlineLevel ?? 0;
   for (let i = start + 1; i < blocks.length; i++) {
     const b = blocks[i];
     if (b.kind !== "paragraph") continue;
-    const bd = depth(b);
-    if (bd !== undefined && bd <= d && (b.label !== undefined || b.outlineLevel !== undefined)) return i;
+    const bNumbered = b.label !== undefined && b.listLevel !== undefined && !b.isBullet;
+    if (numbered && bNumbered && b.listLevel! <= head.listLevel!) return i;
+    const heading = b.outlineLevel !== undefined && isTitleLike(b) && b.outlineLevel <= headOutline;
+    if (heading && (!numbered || !bNumbered)) return i;
   }
   return blocks.length;
+}
+
+/** Nesting depth used to find the title a section sits under. */
+function depth(p: ParagraphBlock): number | undefined {
+  return p.outlineLevel ?? p.listLevel;
 }
 
 function enclosingTitle(blocks: readonly Block[], index: number): string | undefined {
