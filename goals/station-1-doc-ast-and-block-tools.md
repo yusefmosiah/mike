@@ -71,7 +71,7 @@ boundaries:
     - Modifying client-side OfficeJS add-in logic
 
 now:
-  status: complete
+  status: needs_rework
   slice: docx-ast-core-parser
   source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
   deploy_identity: local-docker-compose
@@ -91,7 +91,7 @@ now:
     edge: missing_oracle
     delta_o: Canonicalized XML diff test against original fixture.
     scope_if_supported: Document editing engine.
-    status: promoted_to_assertion
+    status: active
     evidence_refs: [backend/src/lib/__tests__/docxAST.test.ts, backend/src/modules/chat/engine/tools/__tests__/documentOps.blocks.test.ts]
   decision:
     what: Use fast-xml-parser preserve-order mode in docxAST.ts, extending docxTrackedChanges.ts patterns.
@@ -107,7 +107,7 @@ now:
   next_action: none
 
 receipts:
-  - id: station-1-landed
+  - id: station-1-code-landed
     boundary: terminal
     identity: 3a37928
     proof_refs:
@@ -115,13 +115,10 @@ receipts:
       - backend/src/modules/chat/engine/tools/__tests__/documentOps.blocks.test.ts
     rollback_ref: 9da0200
     disposition: Station 1 landed on main with passing 38-test suite.
-    landing:
-      source_commit: 3a37928
-      ci_ref: local_vitest_38_passed
-      deploy_ref: docker_compose_backend_rebuilt
-      environment_identity: local-docker-compose
-      deployed_acceptance: curl -f http://localhost:3000/health
 ---
+
+> **Status (2026-10-07): needs_rework.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 1: In-Memory Document AST & Block Tools
 

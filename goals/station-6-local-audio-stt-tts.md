@@ -66,7 +66,7 @@ boundaries:
     - Multi-speaker conversational diarization
 
 now:
-  status: complete
+  status: unverified
   slice: local-audio-stt-tts
   source_ref: 743fa26
   deploy_identity: local-docker-compose
@@ -101,7 +101,7 @@ now:
   blocker_or_risk: none
   next_action: Advance spine to Station 7.
 receipts:
-  - id: station-6-complete
+  - id: station-6-code-landed
     boundary: implement
     identity: 743fa26
     proof_refs:
@@ -112,6 +112,9 @@ receipts:
     disposition: Station 6 landed on main; backend audio 25/25, frontend audio 304/304, typechecks clean.
 
 ---
+
+> **Status (2026-10-07): unverified.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 6: Local Audio STT & TTS Proxies
 

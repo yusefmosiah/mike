@@ -23,7 +23,6 @@ import { auditRouter } from "./modules/audit/audit.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { uploadSessionsRouter } from "./modules/uploads/uploads.routes";
 import { audioRouter } from "./modules/audio/audio.routes";
-import { diligenceRouter } from "./modules/diligence/diligence.routes";
 import {
   projectMemoryRouter,
   userMemoryRouter,
@@ -331,7 +330,8 @@ app.use("/documents", sourceDocumentsRouter);
 app.use("/audit", auditRouter);
 app.use("/upload-sessions", uploadSessionsRouter);
 app.use("/audio", audioRouter);
-app.use("/diligence", diligenceRouter);
+// /diligence (RLM deep runs) is not mounted: the work is tabled until its
+// sandbox and model lane are redone (goals/STATUS.md).
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

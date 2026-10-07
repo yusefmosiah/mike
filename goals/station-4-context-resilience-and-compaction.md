@@ -73,7 +73,7 @@ boundaries:
     - Never send image blocks to glm-5.3 or unknown models: fail closed to text summary.
 
 now:
-  status: working
+  status: partial
   slice: context-resilience-and-compaction
   source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
   deploy_identity: local-docker-compose
@@ -110,6 +110,9 @@ now:
 
 receipts: []
 ---
+
+> **Status (2026-10-07): partial.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 4: Context Resilience, In-Band Repair, KV-Cache & Snapcompact
 

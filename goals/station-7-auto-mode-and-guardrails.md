@@ -68,7 +68,7 @@ boundaries:
     - Modifying external connector OAuth scopes
 
 now:
-  status: complete
+  status: partial
   slice: auto-mode-and-guardrails
   source_ref: f0dbb93
   deploy_identity: local-docker-compose
@@ -103,7 +103,7 @@ now:
   blocker_or_risk: none
   next_action: Advance spine to Station 8.
 receipts:
-  - id: station-7-complete
+  - id: station-7-code-landed
     boundary: implement
     identity: f0dbb93
     proof_refs:
@@ -113,6 +113,9 @@ receipts:
     disposition: Station 7 landed on main; guardrails 33/33, automode 16/16, full suite 2930 pass (2 pre-existing openrouter failures).
 
 ---
+
+> **Status (2026-10-07): partial.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 7: Auto Mode & System 1 Guardrails Engine
 

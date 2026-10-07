@@ -65,7 +65,7 @@ boundaries:
     - Developing custom hardware TEE microcode
 
 now:
-  status: complete
+  status: tabled
   slice: private-hardening-and-phala
   source_ref: 6e5b553
   deploy_identity: local-docker-compose
@@ -100,7 +100,7 @@ now:
   blocker_or_risk: none
   next_action: Advance spine to Station 9.
 receipts:
-  - id: station-8-complete
+  - id: station-8-code-landed
     boundary: implement
     identity: 6e5b553
     proof_refs:
@@ -110,6 +110,9 @@ receipts:
     disposition: Station 8 landed on main; attestation + strict suites green, full suite 2973 pass (2 pre-existing openrouter failures).
 
 ---
+
+> **Status (2026-10-07): tabled.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 8: Private Deployment Hardening & Phala TEE Lane
 

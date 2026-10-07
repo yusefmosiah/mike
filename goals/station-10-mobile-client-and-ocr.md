@@ -67,7 +67,7 @@ boundaries:
     - Consumer public App Store distribution (deployment is enterprise MDM/VPN only).
 
 now:
-  status: complete
+  status: tabled
   slice: mobile-client-and-ocr
   source_ref: 7cb661a
   deploy_identity: local-docker-compose
@@ -102,7 +102,7 @@ now:
   blocker_or_risk: none
   next_action: Close spine; audit all stations for goal completion.
 receipts:
-  - id: station-10-complete
+  - id: station-10-code-landed
     boundary: implement
     identity: 7cb661a
     proof_refs:
@@ -112,6 +112,9 @@ receipts:
     disposition: Station 10 landed on main; OCR + retrieval suites green, full suite 3027 pass (2 pre-existing openrouter failures).
 
 ---
+
+> **Status (2026-10-07): tabled.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 10: Native Mobile Client & Deep Ingestion OCR
 

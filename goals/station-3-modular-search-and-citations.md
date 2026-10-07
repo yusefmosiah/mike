@@ -68,7 +68,7 @@ boundaries:
     - Crawling non-public intranet networks without credentials
 
 now:
-  status: complete
+  status: partial
   slice: modular-search-and-web-citations
   source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
   deploy_identity: local-docker-compose
@@ -88,7 +88,7 @@ now:
     edge: resource
     delta_o: Synthetic citation verification test suite.
     scope_if_supported: Assistant research engine.
-    status: promoted_to_assertion
+    status: active
     evidence_refs:
       - backend/src/lib/search/__tests__/search.test.ts
       - backend/src/modules/chat/engine/verifyCitations.test.ts
@@ -106,7 +106,7 @@ now:
   next_action: none
 
 receipts:
-  - id: station-3-landed
+  - id: station-3-code-landed
     boundary: terminal
     identity: 51fb62c
     proof_refs:
@@ -114,13 +114,10 @@ receipts:
       - backend/src/modules/chat/engine/verifyCitations.test.ts
     rollback_ref: 60efb70
     disposition: Station 3 landed on main with passing 84-test suite.
-    landing:
-      source_commit: 51fb62c
-      ci_ref: local_vitest_84_passed
-      deploy_ref: docker_compose_backend_rebuilt
-      environment_identity: local-docker-compose
-      deployed_acceptance: curl -f http://localhost:3000/health
 ---
+
+> **Status (2026-10-07): partial.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 3: Modular Search & Extended Citation Verification
 

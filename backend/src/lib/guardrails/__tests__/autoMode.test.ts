@@ -33,8 +33,6 @@ const T1_NAMES = [
     "read_blocks",
     "read_table_cells",
     "get_diff",
-    "web_search",
-    "fetch_web_page",
     "list_workflows",
     "read_workflow",
     "courtlistener_search_case_law",
@@ -42,7 +40,6 @@ const T1_NAMES = [
     "courtlistener_find_in_case",
     "courtlistener_read_case",
     "courtlistener_verify_citations",
-    "execute_code",
 ];
 
 const T2_NAMES = [
@@ -54,6 +51,9 @@ const T2_NAMES = [
 ];
 
 const T3_NAMES = [
+    "web_search",
+    "fetch_web_page",
+    "execute_code",
     "mcp__github__create_issue",
     "mcp__google_drive__upload_file",
     "google_workspace_send_email",

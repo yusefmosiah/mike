@@ -8,8 +8,11 @@
  *  - Tier 2: document writes the caller is already authorized for (the
  *    `allowDocumentMutation` decision upstream). Allowed, but only while the
  *    call stays inside the turn's own container — see `inScopeForContainer`.
- *  - Tier 3: everything else — connector writes, any write with external
- *    egress, `ask_inputs`, and every tool name this file has never heard of.
+ *  - Tier 3: everything else — connector writes, `web_search` and
+ *    `fetch_web_page` (a query or URL can carry matter text to an arbitrary
+ *    host, so they are never auto-approved), `ask_inputs`, and every tool
+ *    name this file has never heard of. CourtListener reads also leave the
+ *    network but stay Tier 1 for now: they reach one fixed case-law host.
  *    Tier 3 calls go to the on-route classifier (./classifier.ts). An
  *    unrecognized name is never a reason to assume the call is harmless.
  *
@@ -34,9 +37,6 @@ export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   "read_blocks",
   "read_table_cells",
   "get_diff",
-  // Research reads (external egress, but read-only and user-visible).
-  "web_search",
-  "fetch_web_page",
   // Workflow catalog reads.
   "list_workflows",
   "read_workflow",
@@ -46,12 +46,6 @@ export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   "courtlistener_find_in_case",
   "courtlistener_read_case",
   "courtlistener_verify_citations",
-  // Sandboxed computation (lib/sandbox/executeCode.ts): runs model-written
-  // JavaScript with no network, filesystem, environment, or workspace access,
-  // so it neither reads nor mutates anything and needs no judgment. Tier 1 so
-  // Auto Mode (including unattended runs) may execute it freely; the sandbox's
-  // own timeout, code-length, and output caps are the guardrail.
-  "execute_code",
 ]);
 
 /**

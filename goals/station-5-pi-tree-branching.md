@@ -62,7 +62,7 @@ boundaries:
     - Cross-conversation branch merging
 
 now:
-  status: complete
+  status: unverified
   slice: pi-tree-branching
   source_ref: a756ea2
   deploy_identity: local-docker-compose
@@ -98,7 +98,7 @@ now:
   next_action: Advance spine to Station 6.
 
 receipts:
-  - id: station-5-complete
+  - id: station-5-code-landed
     boundary: implement
     identity: a756ea2
     proof_refs:
@@ -108,6 +108,9 @@ receipts:
     rollback_ref: e8a9b1c
     disposition: Station 5 landed on main; backend 2848 pass (2 pre-existing openrouter failures), assistant suite 245/245, pages 44/44, hooks+lib 729/729.
 ---
+
+> **Status (2026-10-07): unverified.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 5: Pi-Style Conversation Tree & Branching UI
 

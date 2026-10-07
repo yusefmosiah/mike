@@ -68,7 +68,7 @@ boundaries:
     - Running untrusted foreign binary executables
 
 now:
-  status: complete
+  status: tabled
   slice: code-execution-and-rlm
   source_ref: b0e80cc
   deploy_identity: local-docker-compose
@@ -103,7 +103,7 @@ now:
   blocker_or_risk: none
   next_action: Advance spine to Station 10.
 receipts:
-  - id: station-9-complete
+  - id: station-9-code-landed
     boundary: implement
     identity: b0e80cc
     proof_refs:
@@ -113,6 +113,9 @@ receipts:
     disposition: Station 9 landed on main; sandbox + diligence suites green, full suite 2997 pass (2 pre-existing openrouter failures).
 
 ---
+
+> **Status (2026-10-07): tabled.** This file was written by the overnight run and
+> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 9: Sandboxed Code Execution & 24/7 TypeScript RLM Diligence
 

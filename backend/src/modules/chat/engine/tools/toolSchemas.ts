@@ -708,30 +708,4 @@ export const TOOLS = [
       },
     },
   },
-  {
-    type: "function",
-    function: {
-      name: "execute_code",
-      description:
-        "Run a short JavaScript computation (financial math, table transforms, validations) in a sandbox with no network, filesystem, or environment access. Returns console output and the final expression value; the output is truncated. Use this for multi-step arithmetic or data reshaping instead of computing by hand.",
-      parameters: {
-        type: "object",
-        properties: {
-          code: {
-            type: "string",
-            description:
-              "JavaScript to run. Plain JavaScript only: no imports/exports, no TypeScript syntax, no network or filesystem APIs, no timers. End with an expression to return its value.",
-          },
-          timeout_ms: {
-            type: "integer",
-            description:
-              "Execution time limit in milliseconds. Default 5000, maximum 30000.",
-            minimum: 1000,
-            maximum: 30000,
-          },
-        },
-        required: ["code"],
-      },
-    },
-  },
 ];

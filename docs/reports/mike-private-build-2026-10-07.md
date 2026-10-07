@@ -1,3 +1,5 @@
+> **Superseded (2026-10-07).** This letter overstates what the overnight run delivered: compaction is not wired in, the linter does not gate activation, attestation is not cryptographic, the code sandbox exposed host secrets, and retrieval has no callers. See [`goals/STATUS.md`](../../goals/STATUS.md).
+
 # Mike is now a firm-owned private intelligence system
 
 October seventh, twenty twenty-six. I am writing this the morning after two days of work that turned your Mike fork into a complete private deployment. Ten stations, one spine, every one of them landed on the main branch.
