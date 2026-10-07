@@ -1275,7 +1275,7 @@ export function ChatView({
                         {/* Scrollable messages */}
                         <div
                             ref={messagesContainerRef}
-                            className="flex-1 w-full overflow-y-auto"
+                            className="flex-1 w-full overflow-x-hidden overflow-y-auto overscroll-x-none"
                             style={{ scrollbarGutter: "stable both-edges" }}
                         >
                             <div
