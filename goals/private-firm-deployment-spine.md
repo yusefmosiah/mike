@@ -53,8 +53,8 @@ metamission:
       depends_on: [station-7-auto-mode-and-guardrails]
     - id: station-9-code-execution-and-rlm
       path: goals/station-9-code-execution-and-rlm.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: complete
       depends_on: [station-8-private-hardening-and-phala]
     - id: station-10-mobile-client-and-ocr
       path: goals/station-10-mobile-client-and-ocr.md
@@ -126,8 +126,8 @@ boundaries:
     - Arbitrary cloud model bypasses under strict private mode
 
   status: working
-  slice: station-9-code-execution-and-rlm
-  source_ref: 6e5b553
+  slice: station-10-mobile-client-and-ocr
+  source_ref: b0e80cc
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 9 (code execution + RLM); Station 8 landed at 6e5b553.
+  next_action: Advance Station 10 (mobile client + OCR); Station 9 landed at b0e80cc.
 
 receipts:
   - id: station-1-complete
@@ -233,6 +233,15 @@ receipts:
       - backend/src/__tests__/integration/strictPrivateMode.test.ts
     rollback_ref: 200c341
     disposition: Station 8 landed on main; attestation + strict suites green, full suite 2973 pass (2 pre-existing openrouter failures).
+  - id: station-9-complete
+    boundary: implement
+    identity: b0e80cc
+    proof_refs:
+      - goals/station-9-code-execution-and-rlm.md
+      - backend/src/lib/sandbox/__tests__/executeCode.test.ts
+      - backend/src/modules/diligence/__tests__/rlmDeepRun.test.ts
+    rollback_ref: b06cf77
+    disposition: Station 9 landed on main; sandbox + diligence suites green, full suite 2997 pass (2 pre-existing openrouter failures).
 
 # Metamission: Private Firm Deployment Spine
 

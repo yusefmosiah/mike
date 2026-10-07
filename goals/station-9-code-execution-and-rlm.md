@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: b0e80cc
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:59:50Z"
+  captured_at: "2026-10-07T06:00:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: b0e80cc
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard b0e80cc
 
 finish:
   deliver: >-
@@ -68,17 +68,17 @@ boundaries:
     - Running untrusted foreign binary executables
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: code-execution-and-rlm
+  source_ref: b0e80cc
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-rlm-done
+    state: ready
+    ref: main
+    base: b06cf77
     digest: none
-    scope: []
+    scope: [backend/src/lib/sandbox/, backend/src/modules/diligence/]
   conjecture:
     id: c-rlm-coverage-scaling
     claim: >-
@@ -88,22 +88,30 @@ now:
     edge: resource
     delta_o: Evaluation run on simulated corporate diligence data room.
     scope_if_supported: Autonomous legal diligence engine.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [b0e80cc]
   decision:
-    what: Build RLM harness in TypeScript/Bun to directly import Mike's compiled domain modules.
+    what: Wave coordinator with execute_code-only toolset over documents facade; no separate SDK package.
     kind: architecture
     status: settled
-    evidence_ref: docs/private-deployment-scoping.md
-    owner_ratification_ref: user-prompt-2026-10-06
+    evidence_ref: user-prompt-2026-10-07
+    owner_ratification_ref: user-prompt-2026-10-07
   belief:
-    believed_state: Dependent on Station 8.
-    main_uncertainty: Subagent coordination latency and reconciliation of non-conflicting findings.
-    next_observation: Testing parallel subagent wave dispatch on local DGX endpoints.
-  blocker_or_risk: Blocked on completion of Station 8.
-  next_action: Await Station 8 completion.
+    believed_state: Station 9 landed at b0e80cc; sandbox + RLM diligence live.
+    main_uncertainty: Coverage quality on a real 5,000-document data room (no such corpus in this env).
+    next_observation: Station 10 mobile client and OCR.
+  blocker_or_risk: none
+  next_action: Advance spine to Station 10.
+receipts:
+  - id: station-9-complete
+    boundary: implement
+    identity: b0e80cc
+    proof_refs:
+      - backend/src/lib/sandbox/__tests__/executeCode.test.ts
+      - backend/src/modules/diligence/__tests__/rlmDeepRun.test.ts
+    rollback_ref: b06cf77
+    disposition: Station 9 landed on main; sandbox + diligence suites green, full suite 2997 pass (2 pre-existing openrouter failures).
 
-receipts: []
 ---
 
 # Station 9: Sandboxed Code Execution & 24/7 TypeScript RLM Diligence
