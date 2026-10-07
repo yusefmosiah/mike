@@ -3488,3 +3488,109 @@ export async function setGoogleWorkspaceToolEnabled(
         },
     );
 }
+
+/**
+ * Audio (speech-to-text / text-to-speech) endpoints.
+ *
+ * The operator's STT/TTS endpoints are reached by the backend only; both
+ * calls below travel over the same authenticated `/api` gateway as every
+ * other request. Recordings are sent as base64 JSON and audio replies come
+ * back as raw bytes — never as URLs to persist.
+ */
+
+const AUDIO_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+    webm: "webm",
+    ogg: "ogg",
+    mp4: "mp4",
+    m4a: "m4a",
+    mpeg: "mp3",
+    mp3: "mp3",
+    wav: "wav",
+    "x-wav": "wav",
+};
+
+/**
+ * The filename the backend forwards to the operator's transcription
+ * endpoint. The extension follows the recorded container (browsers record
+ * webm/opus, mp4, or wav depending on platform) so upstream probes the file
+ * as the right kind of audio.
+ */
+function dictationFilename(mimeType: string): string {
+    const subtype = mimeType
+        .split(";")[0]
+        .trim()
+        .toLowerCase()
+        .replace(/^audio\//, "");
+    return `dictation.${AUDIO_FILE_EXTENSIONS[subtype] ?? "webm"}`;
+}
+
+/** Base64 payload (no data-URL prefix) of a recorded blob. */
+function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = typeof reader.result === "string" ? reader.result : "";
+            // readAsDataURL yields "data:<type>;base64,<payload>".
+            resolve(result.slice(result.indexOf(",") + 1));
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("Could not read the recording."));
+        reader.readAsDataURL(blob);
+    });
+}
+
+/**
+ * Transcribe a recorded audio blob. The backend keeps the bytes in memory
+ * for the length of the upstream request and returns `{ text }`; nothing is
+ * stored on either side.
+ */
+export async function transcribeAudio(blob: Blob): Promise<{ text: string }> {
+    return apiRequest<{ text: string }>("/audio/transcriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            audio_base64: await blobToBase64(blob),
+            mimetype: blob.type || "audio/webm",
+            filename: dictationFilename(blob.type),
+        }),
+    });
+}
+
+export type SpeechFormat = "mp3" | "wav" | "opus";
+
+export interface SynthesizeSpeechOptions {
+    voice?: string;
+    /** 0.5..2.0; the backend applies its default when omitted. */
+    speed?: number;
+    format?: SpeechFormat;
+}
+
+/**
+ * Synthesize speech for the given text. Returns the audio bytes with the
+ * content type of the requested format; the caller owns the blob's lifetime
+ * (an object URL, playback, revocation).
+ */
+export async function synthesizeSpeech(
+    text: string,
+    options?: SynthesizeSpeechOptions,
+): Promise<Blob> {
+    const response = await apiFetch(`${API_BASE}/audio/speech`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+            Accept: "audio/*",
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            text,
+            ...(options?.voice !== undefined ? { voice: options.voice } : {}),
+            ...(options?.speed !== undefined ? { speed: options.speed } : {}),
+            ...(options?.format !== undefined ? { format: options.format } : {}),
+        }),
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, "/audio/speech", "POST");
+    }
+
+    return response.blob();
+}

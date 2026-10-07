@@ -1,7 +1,15 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Check, Copy, GitFork, RotateCcw } from "lucide-react";
+import {
+    Check,
+    Copy,
+    GitFork,
+    Play,
+    RotateCcw,
+    Square,
+    Volume2,
+} from "lucide-react";
 import type {
     AssistantEvent,
     Citation,
@@ -15,6 +23,7 @@ import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
 import { eventErrorMessage, toolCallLabel } from "./message/eventUtils";
 import { preprocessCitations, internalCaseHref } from "./message/citationUtils";
 import { useSmoothedReveal } from "./message/useSmoothedReveal";
+import { READ_ALOUD_SPEEDS, useReadAloud } from "./useReadAloud";
 import { MarkdownContent } from "./message/MarkdownContent";
 import { CitationsBlock, buildCitationAppendix } from "./message/CitationSources";
 import { EditCardsSection } from "./message/EditCardsSection";
@@ -156,6 +165,18 @@ export function AssistantMessage({
     const [resolvedOverrides, setResolvedOverrides] = useState<
         Record<string, string>
     >({});
+
+    // Plain prose of every content event, in order. The read-aloud engine
+    // speaks the raw text — it skips markdown syntax on its own — and
+    // stripping it here would risk eating real punctuation.
+    const readAloudProse = (events ?? [])
+        .filter(
+            (event): event is Extract<AssistantEvent, { type: "content" }> =>
+                event.type === "content",
+        )
+        .map((event) => event.text)
+        .join("\n\n");
+    const readAloud = useReadAloud(readAloudProse);
 
     const handleEditResolved = (args: {
         editId: string;
@@ -1162,6 +1183,78 @@ export function AssistantMessage({
                                 <Copy className="h-3 w-3" />
                             )}
                         </button>
+                    )}
+                    {!isStreaming && readAloud.sentenceCount > 0 && (
+                        <>
+                            {!readAloud.playing && (
+                                <button
+                                    type="button"
+                                    aria-label="Read response aloud"
+                                    className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                    onClick={readAloud.play}
+                                >
+                                    <Volume2 className="h-3 w-3" />
+                                </button>
+                            )}
+                            {readAloud.playing && !readAloud.paused && (
+                                <button
+                                    type="button"
+                                    aria-label="Stop reading"
+                                    className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                    onClick={readAloud.stop}
+                                >
+                                    <Square className="h-3 w-3" />
+                                </button>
+                            )}
+                            {readAloud.playing && readAloud.paused && (
+                                <>
+                                    <button
+                                        type="button"
+                                        aria-label="Resume reading"
+                                        className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                        onClick={readAloud.resume}
+                                    >
+                                        <Play className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-label="Stop reading"
+                                        className="p-1.5 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                        onClick={readAloud.stop}
+                                    >
+                                        <Square className="h-3 w-3" />
+                                    </button>
+                                </>
+                            )}
+                            {readAloud.playing && (
+                                <>
+                                    <select
+                                        aria-label="Reading speed"
+                                        className="text-xs text-gray-500 bg-transparent rounded px-1 py-0.5 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                        value={readAloud.speed}
+                                        onChange={(event) =>
+                                            readAloud.setSpeed(
+                                                Number(event.target.value),
+                                            )
+                                        }
+                                    >
+                                        {READ_ALOUD_SPEEDS.map((speed) => (
+                                            <option key={speed} value={speed}>
+                                                {speed}x
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <span className="text-xs text-gray-500 tabular-nums">
+                                        {`${readAloud.sentenceIndex + 1}/${readAloud.sentenceCount}`}
+                                    </span>
+                                </>
+                            )}
+                            {readAloud.error && (
+                                <span className="text-xs text-red-600">
+                                    {readAloud.error}
+                                </span>
+                            )}
+                        </>
                     )}
                     {!isStreaming && onRegenerate && (
                         <button

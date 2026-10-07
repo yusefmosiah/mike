@@ -15,6 +15,7 @@ import {
     ArrowRight,
     Check,
     Loader2,
+    Mic,
     Square,
     Waypoints,
     X,
@@ -72,6 +73,7 @@ import {
 } from "@/app/lib/documentUploadValidation";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
+import { useDictation } from "./useDictation";
 
 export interface ChatInputHandle {
     addDoc: (doc: Document) => void;
@@ -152,6 +154,14 @@ function placeholderFor({
     return isLoading ? "A response is still arriving…" : "Loading this chat…";
 }
 
+/** Recording length as mm:ss for the dictation indicator. */
+function formatDictationTime(elapsedMs: number): string {
+    const totalSeconds = Math.floor(elapsedMs / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    return `${minutes}:${seconds}`;
+}
+
 function ChatInputForChatImpl(
     {
         onSubmit,
@@ -221,6 +231,11 @@ function ChatInputForChatImpl(
     const apiKeys = apiKeysDegraded ? undefined : profile?.apiKeys;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const controlsRef = useRef<HTMLDivElement>(null);
+    // Capture and transcription live in the hook; this composer only inserts
+    // the finished transcript and shows the recording state. `disabled`
+    // keeps a recording from starting while the composer is closed or a
+    // response is already running.
+    const dictation = useDictation({ disabled: isLoading || !composerOpen });
     const [compactControls, setCompactControls] = useState(false);
     const [docSelectorOpen, setDocSelectorOpen] = useState(false);
     const [docSelectorInitialTab, setDocSelectorInitialTab] =
@@ -339,6 +354,24 @@ function ChatInputForChatImpl(
             cancelled = true;
         };
     }, [slashCommandsLoading]);
+
+    // A finished dictation lands at the caret as ordinary editable text —
+    // the composer never submits it on the user's behalf. The version
+    // counter makes each transcript insert exactly once.
+    const dictatedTranscript = dictation.transcript;
+    const dictatedTranscriptVersion = dictation.transcriptVersion;
+    useEffect(() => {
+        if (dictatedTranscriptVersion === 0 || !dictatedTranscript) return;
+        const el = textareaRef.current;
+        if (!el) return;
+        const caret = el.selectionStart ?? el.value.length;
+        const selectionEnd = el.selectionEnd ?? caret;
+        el.setRangeText(dictatedTranscript, caret, selectionEnd, "end");
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+        setValue(el.value);
+        el.focus();
+    }, [dictatedTranscript, dictatedTranscriptVersion]);
 
     const handleAddDocsFromSelector = useCallback(
         (selectedDocs: Document[]) => {
@@ -893,6 +926,52 @@ function ChatInputForChatImpl(
                                     onReasoningChange={handleReasoningChange}
                                 />
                             )}
+                            {composerOpen &&
+                                (dictation.recording ? (
+                                    <div className="flex h-8 items-center gap-1.5 pl-1.5 pr-0.5">
+                                        <span
+                                            aria-hidden="true"
+                                            className="relative flex h-2 w-2"
+                                        >
+                                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                                            <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                                        </span>
+                                        <span
+                                            aria-label="Dictation time"
+                                            className="text-xs tabular-nums text-gray-600"
+                                        >
+                                            {formatDictationTime(
+                                                dictation.elapsedMs,
+                                            )}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            aria-label="Stop dictation"
+                                            onClick={dictation.toggle}
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-900/5 hover:text-gray-800"
+                                        >
+                                            <Square
+                                                className="h-3.5 w-3.5"
+                                                fill="currentColor"
+                                                strokeWidth={0}
+                                            />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        aria-label="Dictate prompt"
+                                        onClick={dictation.toggle}
+                                        disabled={isLoading || dictation.busy}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 disabled:cursor-default disabled:text-gray-300"
+                                    >
+                                        {dictation.busy ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : (
+                                            <Mic className="h-3.5 w-3.5" />
+                                        )}
+                                    </button>
+                                ))}
                             <button
                                 type="button"
                                 aria-label={
@@ -985,8 +1064,11 @@ function ChatInputForChatImpl(
             />
             <UploadOverlay
                 open={isDraggingFiles}
-                warning={uploadWarning}
-                onWarningClose={() => setUploadWarning(null)}
+                warning={uploadWarning ?? dictation.error}
+                onWarningClose={() => {
+                    setUploadWarning(null);
+                    dictation.clearError();
+                }}
             />
         </>
     );

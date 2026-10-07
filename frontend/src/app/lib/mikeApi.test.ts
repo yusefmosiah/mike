@@ -184,8 +184,10 @@ import {
     streamTabularGeneration,
     streamTabularGenerationResume,
     syncUserPasswordSet,
+    synthesizeSpeech,
     tabularChatSelectionKey,
     parseTabularChatSelectionKey,
+    transcribeAudio,
     updateMcpConnector,
     updateProject,
     updateProjectMemory,
@@ -3311,5 +3313,163 @@ describe("unwrapping and blob wrappers", () => {
         expect(lastFetchCall().url).toBe("/api/user/exports/exp%2F1/download");
         expect(filename).toBe("history.csv");
         expect(await blob.text()).toBe("csv-bytes");
+    });
+});
+
+describe("audio endpoints", () => {
+    /**
+     * jsdom's FileReader only accepts jsdom Blobs, which vitest.setup.ts's
+     * global Blob replacement removes; the platform reader is not what these
+     * tests are about, so this double stands in for it.
+     */
+    class MockFileReader {
+        static dataUrl = "data:audio/webm;base64,QUJD";
+        static failure: Error | null = null;
+        static fireError = false;
+
+        result: string | null = null;
+        error: Error | null = null;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+
+        readAsDataURL() {
+            this.result = MockFileReader.fireError
+                ? null
+                : MockFileReader.dataUrl;
+            this.error = MockFileReader.failure;
+            queueMicrotask(() => {
+                if (MockFileReader.fireError) this.onerror?.();
+                else this.onload?.();
+            });
+        }
+    }
+
+    beforeEach(() => {
+        MockFileReader.dataUrl = "data:audio/webm;base64,QUJD";
+        MockFileReader.failure = null;
+        MockFileReader.fireError = false;
+        vi.stubGlobal("FileReader", MockFileReader);
+    });
+
+    it("transcribes a recording as base64 JSON", async () => {
+        fetchMock.mockResolvedValue(jsonResponse({ text: "hello" }));
+
+        await expect(
+            transcribeAudio(
+                new Blob(["abc"], { type: "audio/webm;codecs=opus" }),
+            ),
+        ).resolves.toEqual({ text: "hello" });
+
+        const { url, init } = lastFetchCall();
+        expect(url).toBe("/api/audio/transcriptions");
+        expect(init.method).toBe("POST");
+        expect(init.headers).toMatchObject({
+            "Content-Type": "application/json",
+        });
+        expect(JSON.parse(init.body as string)).toEqual({
+            audio_base64: "QUJD",
+            mimetype: "audio/webm;codecs=opus",
+            filename: "dictation.webm",
+        });
+    });
+
+    it.each([
+        ["audio/webm", "dictation.webm"],
+        ["audio/mp4;codecs=mp4a.40.2", "dictation.mp4"],
+        ["audio/ogg;codecs=opus", "dictation.ogg"],
+        ["audio/mpeg", "dictation.mp3"],
+        ["audio/x-wav", "dictation.wav"],
+        ["application/octet-stream", "dictation.webm"],
+    ])(
+        "names the forwarded file after the container (%s)",
+        async (type, filename) => {
+            fetchMock.mockResolvedValue(jsonResponse({ text: "" }));
+
+            await transcribeAudio(new Blob(["abc"], { type }));
+
+            const body = JSON.parse(lastFetchCall().init.body as string);
+            expect(body.filename).toBe(filename);
+            expect(body.mimetype).toBe(type);
+        },
+    );
+
+    it("falls back to a webm mimetype for an untyped recording", async () => {
+        fetchMock.mockResolvedValue(jsonResponse({ text: "" }));
+
+        await transcribeAudio(new Blob(["abc"]));
+
+        const body = JSON.parse(lastFetchCall().init.body as string);
+        expect(body.mimetype).toBe("audio/webm");
+        expect(body.filename).toBe("dictation.webm");
+    });
+
+    it("rejects when the recording cannot be read", async () => {
+        MockFileReader.fireError = true;
+        MockFileReader.failure = new Error("reader exploded");
+
+        await expect(transcribeAudio(new Blob(["abc"]))).rejects.toThrow(
+            "reader exploded",
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects with a generic message when the reader reports no error", async () => {
+        MockFileReader.fireError = true;
+
+        await expect(transcribeAudio(new Blob(["abc"]))).rejects.toThrow(
+            "Could not read the recording.",
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("returns speech audio bytes for the requested options", async () => {
+        fetchMock.mockResolvedValue(
+            new Response("RIFF-bytes", {
+                status: 200,
+                headers: { "Content-Type": "audio/wav" },
+            }),
+        );
+
+        const blob = await synthesizeSpeech("Hello world", {
+            voice: "alloy",
+            speed: 1.25,
+            format: "wav",
+        });
+
+        expect(blob.type).toBe("audio/wav");
+        expect(await blob.text()).toBe("RIFF-bytes");
+        const { url, init } = lastFetchCall();
+        expect(url).toBe("/api/audio/speech");
+        expect(init.method).toBe("POST");
+        expect(JSON.parse(init.body as string)).toEqual({
+            text: "Hello world",
+            voice: "alloy",
+            speed: 1.25,
+            format: "wav",
+        });
+    });
+
+    it("omits unset speech options", async () => {
+        fetchMock.mockResolvedValue(
+            new Response("mp3-bytes", { status: 200 }),
+        );
+
+        const blob = await synthesizeSpeech("Hi");
+
+        expect(await blob.text()).toBe("mp3-bytes");
+        expect(JSON.parse(lastFetchCall().init.body as string)).toEqual({
+            text: "Hi",
+        });
+    });
+
+    it("surfaces failed synthesis as an API error", async () => {
+        fetchMock.mockResolvedValue(
+            jsonResponse(
+                { code: "upstream_error", detail: "boom" },
+                { status: 502 },
+            ),
+        );
+
+        await expect(synthesizeSpeech("Hi")).rejects.toThrow(MikeApiError);
     });
 });
