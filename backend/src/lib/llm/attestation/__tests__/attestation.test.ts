@@ -341,14 +341,14 @@ describe("configured-model attestation parsing", () => {
         });
     });
 
-    it("accepts an endpoint without an expected measurement", () => {
+    it("rejects an endpoint without an expected measurement", () => {
         configureModels([
             attestedModelConfig({ endpoint: "https://verifier.test" }),
         ]);
 
-        expect(getConfiguredModel("attested-endpoint")?.attestation).toEqual({
-            endpoint: "https://verifier.test",
-        });
+        // An unpinned lane would accept whatever the endpoint self-reports,
+        // so the declaration is malformed and the whole model is rejected.
+        expect(getConfiguredModel("attested-endpoint")).toBeNull();
     });
 
     it("leaves models without an attestation declaration unchanged", () => {
@@ -399,7 +399,10 @@ describe("attested transport", () => {
                 provider: "openai-compatible",
                 location: "cloud",
                 baseUrl: "https://dgx.test/v1",
-                attestation: { endpoint: "https://verifier.test" },
+                attestation: {
+                    endpoint: "https://verifier.test",
+                    expectedMeasurement: "measurement-1",
+                },
             },
         ]);
         const fetchMock = vi.fn<FetchLike>(async (input) => {

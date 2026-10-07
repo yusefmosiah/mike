@@ -208,7 +208,9 @@ function validBaseUrl(value: string): boolean {
 /**
  * Attestation declarations are all-or-nothing: a malformed record rejects the
  * whole model entry rather than silently dropping the requirement, so a typo
- * can never downgrade an attested endpoint to an unattested one.
+ * can never downgrade an attested endpoint to an unattested one. A missing
+ * expectedMeasurement is malformed for the same reason: a lane that verifies
+ * without a pinned measurement accepts whatever the endpoint self-reports.
  */
 function parseAttestation(
   value: unknown,
@@ -219,11 +221,8 @@ function parseAttestation(
   const endpoint = optionalString(record, "endpoint");
   if (!endpoint || !validBaseUrl(endpoint)) return null;
   const expectedMeasurement = optionalString(record, "expectedMeasurement");
-  if (expectedMeasurement === null) return null;
-  return {
-    endpoint,
-    ...(expectedMeasurement ? { expectedMeasurement } : {}),
-  };
+  if (!expectedMeasurement) return null;
+  return { endpoint, expectedMeasurement };
 }
 
 function parseConfiguredModel(value: unknown): ConfiguredModel | null {

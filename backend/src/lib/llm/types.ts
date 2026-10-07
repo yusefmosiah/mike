@@ -139,13 +139,15 @@ export type ConfiguredModel = {
      * Remote-attestation requirement for this endpoint. When declared, every
      * inference request first verifies the endpoint's attestation document
      * (lib/llm/attestation) and fails closed on any verification error. There
-     * is deliberately no insecure bypass.
+     * is deliberately no insecure bypass. The expected measurement is
+     * required: without a pin the lane would accept whatever the endpoint
+     * self-reports.
      */
     attestation?: {
         /** Base URL of the verifier; the request goes to `{endpoint}/attestation`. */
         endpoint: string;
         /** TEE measurement the endpoint must report; a mismatch fails closed. */
-        expectedMeasurement?: string;
+        expectedMeasurement: string;
     };
     apiKeyEnv?: string;
     apiKeyProvider?: keyof UserApiKeys;
