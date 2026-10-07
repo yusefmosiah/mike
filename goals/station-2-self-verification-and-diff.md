@@ -67,13 +67,13 @@ boundaries:
     - Natural language proofreading checks inside the structural linter
 
 now:
-  status: working
+  status: complete
   slice: get-diff-and-invariant-linter
-  source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
+  source_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
   deploy_identity: local-docker-compose
   candidate:
-    id: candidate-diff-init
-    state: ready
+    id: candidate-diff-landed
+    state: landed
     ref: main
     base: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
     digest: none
@@ -87,8 +87,10 @@ now:
     edge: frame_lock
     delta_o: Benchmark on synthetic document corruption suites.
     scope_if_supported: Document editing pipeline.
-    status: proposed
-    evidence_refs: []
+    status: promoted_to_assertion
+    evidence_refs:
+      - backend/src/lib/__tests__/docxLinter.test.ts
+      - backend/src/modules/chat/engine/tools/__tests__/documentOps.diff.test.ts
   decision:
     what: Enforce get_diff invocation in system prompt and run server-side linter pre-commit.
     kind: architecture
@@ -96,13 +98,27 @@ now:
     evidence_ref: consensus-review-2026-10-06
     owner_ratification_ref: user-prompt-2026-10-06
   belief:
-    believed_state: Dependent on Station 1 in-memory AST and diff generator.
-    main_uncertainty: Token consumption of diffs on large (50+ page) agreements.
-    next_observation: Benchmarking get_diff representation on 13-page contract.
+    believed_state: Self-verification tool get_diff and OpenXML invariant linter verified and live.
+    main_uncertainty: none
+    next_observation: Station 3 modular search and extended citation verification.
   blocker_or_risk: none
-  next_action: Implement backend/src/lib/docxLinter.ts and get_diff tool.
+  next_action: none
 
-receipts: []
+receipts:
+  - id: station-2-landed
+    boundary: terminal
+    identity: 60efb70
+    proof_refs:
+      - backend/src/lib/__tests__/docxLinter.test.ts
+      - backend/src/modules/chat/engine/tools/__tests__/documentOps.diff.test.ts
+    rollback_ref: 335df0c
+    disposition: Station 2 landed on main with passing 46-test suite.
+    landing:
+      source_commit: 60efb70
+      ci_ref: local_vitest_46_passed
+      deploy_ref: docker_compose_backend_rebuilt
+      environment_identity: local-docker-compose
+      deployed_acceptance: curl -f http://localhost:3000/health
 ---
 
 # Station 2: Self-Verification Loop & `get_diff` Tool

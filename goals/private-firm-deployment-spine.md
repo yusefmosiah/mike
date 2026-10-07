@@ -19,12 +19,12 @@ metamission:
     - id: station-2-self-verification-and-diff
       path: goals/station-2-self-verification-and-diff.md
       readiness: executable
-      status: working
+      status: complete
       depends_on: [station-1-doc-ast-and-block-tools]
     - id: station-3-modular-search-and-citations
       path: goals/station-3-modular-search-and-citations.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: working
       depends_on: [station-2-self-verification-and-diff]
     - id: station-4-core-usability-branching-voice
       path: goals/station-4-core-usability-branching-voice.md
@@ -117,8 +117,8 @@ boundaries:
 
 now:
   status: working
-  slice: station-2-self-verification-and-diff
-  source_ref: 3a37928b98b95da8a0d922bbcf16b9cb8523c91a
+  slice: station-3-modular-search-and-citations
+  source_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
   deploy_identity: local-docker-compose
   candidate:
     id: candidate-spine-init
@@ -166,6 +166,15 @@ receipts:
       - backend/src/lib/__tests__/docxAST.test.ts
     rollback_ref: 9da0200
     disposition: Station 1 landed on main with passing 38-test suite.
+  - id: station-2-complete
+    boundary: implement
+    identity: 60efb70
+    proof_refs:
+      - goals/station-2-self-verification-and-diff.md
+      - backend/src/lib/__tests__/docxLinter.test.ts
+      - backend/src/modules/chat/engine/tools/__tests__/documentOps.diff.test.ts
+    rollback_ref: 3a37928
+    disposition: Station 2 landed on main with passing 46-test suite.
 ---
 
 # Metamission: Private Firm Deployment Spine

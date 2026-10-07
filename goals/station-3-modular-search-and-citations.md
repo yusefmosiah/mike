@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: metamission-spine-progression
+  frozen_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T21:35:00Z"
+  captured_at: "2026-10-06T22:50:00Z"
   source:
-    canonical_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+    canonical_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -68,17 +68,17 @@ boundaries:
     - Crawling non-public intranet networks without credentials
 
 now:
-  status: pending
-  slice: none
-  source_ref: e5d6bc8f4f3780f2d90d3d5fba40e0dd1dca2d8a
+  status: working
+  slice: modular-search-and-web-citations
+  source_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-search-init
+    state: ready
+    ref: main
+    base: 60efb702ecfa50ca438b4dfae233cf9704e67d26
     digest: none
-    scope: []
+    scope: [backend/src/lib/search/, backend/src/modules/chat/engine/verifyCitations.ts]
   conjecture:
     id: c-modular-search-grounding
     claim: >-
@@ -100,8 +100,8 @@ now:
     believed_state: verifyCitations.ts already handles document and CourtListener quotes cleanly.
     main_uncertainty: Entailment verifier latency and whether it requires a fast local model or heuristic check.
     next_observation: Testing fast entailment scoring using System 1 classifier.
-  blocker_or_risk: Blocked on completion of Station 2.
-  next_action: Await Station 2 completion.
+  blocker_or_risk: none
+  next_action: Implement backend/src/lib/search/ with Keenable, Tavily, Exa, Parallel and web citation extensions.
 
 receipts: []
 ---

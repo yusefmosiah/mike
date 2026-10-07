@@ -47,3 +47,22 @@ Append-only record of moves, observations, and settlement receipts across the pr
   - Pushed to `origin/main` at commit `3a37928`.
 - **Verdict**: Station 1 conjecture `c-preservation-ast-fidelity` promoted to assertion. Station 1 marked `complete`.
 - **Progression**: Advanced metamission spine `now.slice` to `station-2-self-verification-and-diff`. Station 2 promoted to `readiness: executable`, `now.status: working`.
+
+---
+
+## Pass 3: Station 2 Execution & Settlement (Self-Verification Loop & get_diff)
+- **Timestamp**: 2026-10-06T23:15:00Z
+- **Canonical Ref**: `60efb702ecfa50ca438b4dfae233cf9704e67d26`
+- **Move Type**: `construct` & `settle` (Station 2 landed on main)
+- **Claim**: Giving the model a `get_diff` inspection tool and executing package-level invariant checks pre-activation removes the human as the sole verifier and prevents broken revisions from landing.
+- **Action**:
+  - Implemented `backend/src/lib/docxLinter.ts` checking package structure, dangling footnotes, and unreferenced relationships (with standard separators `-1` and `0` properly exempted).
+  - Implemented unit test suite in `backend/src/lib/__tests__/docxLinter.test.ts` (5/5 passed).
+  - Implemented `runGetDiff` in `documentOps.ts` returning structured diff summaries and linter diagnostics.
+  - Updated `toolSchemas.ts` and `toolDispatcher.ts` with `get_diff` tool.
+  - Updated `prompts.ts` with mandatory self-verification gate instruction.
+  - Added integration tests in `documentOps.diff.test.ts` (3/3 passed).
+  - Rebuilt backend container and verified full 46-test suite.
+  - Pushed to `origin/main` at commit `60efb70`.
+- **Verdict**: Station 2 conjecture `c-self-verification-yield` promoted to assertion. Station 2 marked `complete`.
+- **Progression**: Advanced metamission spine `now.slice` to `station-3-modular-search-and-citations`. Station 3 promoted to `readiness: executable`, `now.status: working`.
