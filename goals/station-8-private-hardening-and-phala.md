@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: 6e5b553
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:59:45Z"
+  captured_at: "2026-10-07T05:00:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: 6e5b553
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard 6e5b553
 
 finish:
   deliver: >-
@@ -65,17 +65,17 @@ boundaries:
     - Developing custom hardware TEE microcode
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: private-hardening-and-phala
+  source_ref: 6e5b553
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-hardening-done
+    state: ready
+    ref: main
+    base: 200c341
     digest: none
-    scope: []
+    scope: [backend/src/lib/privateMode.ts, backend/src/lib/llm/attestation/, backend/src/lib/egress.ts]
   conjecture:
     id: c-tee-attestation-gate
     claim: >-
@@ -85,8 +85,8 @@ now:
     edge: resource
     delta_o: Live attestation benchmark against Phala CVM endpoint.
     scope_if_supported: Confidential inference layer.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [6e5b553]
   decision:
     what: Enforce strict private mode at boot time and record cryptographic receipts per turn.
     kind: safety
@@ -94,13 +94,21 @@ now:
     evidence_ref: user-prompt-2026-10-06
     owner_ratification_ref: user-prompt-2026-10-06
   belief:
-    believed_state: Dependent on Station 7.
-    main_uncertainty: Phala CVM attestation certificate rotation cadence.
-    next_observation: Testing CVM verification against staging Phala testnet.
-  blocker_or_risk: Blocked on completion of Station 7.
-  next_action: Await Station 7 completion.
+    believed_state: Station 8 landed at 6e5b553; strict mode + attested lane + egress lockdown live.
+    main_uncertainty: Live attestation latency against a real Phala CVM (no endpoint configured in this env).
+    next_observation: Station 9 code execution and RLM.
+  blocker_or_risk: none
+  next_action: Advance spine to Station 9.
+receipts:
+  - id: station-8-complete
+    boundary: implement
+    identity: 6e5b553
+    proof_refs:
+      - backend/src/lib/llm/attestation/__tests__/attestation.test.ts
+      - backend/src/__tests__/integration/strictPrivateMode.test.ts
+    rollback_ref: 200c341
+    disposition: Station 8 landed on main; attestation + strict suites green, full suite 2973 pass (2 pre-existing openrouter failures).
 
-receipts: []
 ---
 
 # Station 8: Private Deployment Hardening & Phala TEE Lane

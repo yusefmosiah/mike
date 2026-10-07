@@ -48,8 +48,8 @@ metamission:
       depends_on: [station-6-local-audio-stt-tts]
     - id: station-8-private-hardening-and-phala
       path: goals/station-8-private-hardening-and-phala.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: complete
       depends_on: [station-7-auto-mode-and-guardrails]
     - id: station-9-code-execution-and-rlm
       path: goals/station-9-code-execution-and-rlm.md
@@ -126,8 +126,8 @@ boundaries:
     - Arbitrary cloud model bypasses under strict private mode
 
   status: working
-  slice: station-8-private-hardening-and-phala
-  source_ref: f0dbb93
+  slice: station-9-code-execution-and-rlm
+  source_ref: 6e5b553
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 8 (private hardening + Phala TEE); Station 7 landed at f0dbb93.
+  next_action: Advance Station 9 (code execution + RLM); Station 8 landed at 6e5b553.
 
 receipts:
   - id: station-1-complete
@@ -224,7 +224,15 @@ receipts:
       - backend/src/modules/chat/engine/__tests__/streamingAutoMode.test.ts
     rollback_ref: 6fa23be
     disposition: Station 7 landed on main; guardrails 33/33, automode 16/16, full suite 2930 pass (2 pre-existing openrouter failures).
----
+  - id: station-8-complete
+    boundary: implement
+    identity: 6e5b553
+    proof_refs:
+      - goals/station-8-private-hardening-and-phala.md
+      - backend/src/lib/llm/attestation/__tests__/attestation.test.ts
+      - backend/src/__tests__/integration/strictPrivateMode.test.ts
+    rollback_ref: 200c341
+    disposition: Station 8 landed on main; attestation + strict suites green, full suite 2973 pass (2 pre-existing openrouter failures).
 
 # Metamission: Private Firm Deployment Spine
 
