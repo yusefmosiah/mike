@@ -740,6 +740,7 @@ create table if not exists public.document_versions (
   size_bytes integer,
   page_count integer,
   content_sha256 text,
+  block_ids jsonb,
   deleted_at timestamptz,
   deleted_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),

@@ -1,4 +1,12 @@
-import { createDocumentVersion, activateDocumentVersion, updateDocumentVersion } from "../../../documents/documents.service";
+import {
+  createDocumentVersion,
+  activateDocumentVersion,
+  updateDocumentVersion,
+  docxViewForVersion,
+  saveBlockIds,
+  blockIdsRecord,
+} from "../../../documents/documents.service";
+import { blockIds } from "../../../../lib/docx/blockIds";
 import {
   downloadFile,
   extractedTextKey,
@@ -1344,12 +1352,18 @@ export async function loadCurrentVersionBytes(
   documentId: string,
   db: Db,
   versionId?: string | null,
-): Promise<{ bytes: Buffer; storage_path: string } | null> {
+): Promise<{ bytes: Buffer; storage_path: string; version_id: string } | null> {
   const active = await loadActiveVersion(documentId, db, versionId);
   if (!active) return null;
   const raw = await downloadFile(active.storage_path);
   if (!raw) return null;
-  return { bytes: Buffer.from(raw), storage_path: active.storage_path };
+  return { bytes: Buffer.from(raw), storage_path: active.storage_path, version_id: active.id };
+}
+
+/** The .docx view a reader sees: the version's bytes labelled with its block ids. */
+async function docxView(bytes: Buffer, documentId: string | undefined, db: Db | undefined, versionId: string | undefined): Promise<DocxDocument> {
+  if (documentId && db && versionId) return docxViewForVersion(db, documentId, versionId, bytes);
+  return DocxDocument.load(bytes);
 }
 
 /**
@@ -1404,7 +1418,14 @@ export async function runEditDocument(params: {
 
   // All or nothing: any failed edit, or a result that does not pass the
   // gate, leaves the document and its versions untouched.
-  const applied = await applyEdits(current.bytes, edits, { author });
+  // Edit against the ids the model read (carried across versions).
+  let ids: string[] | undefined;
+  try {
+    ids = blockIds(await docxViewForVersion(db, documentId, current.version_id, current.bytes));
+  } catch {
+    ids = undefined; // not a readable .docx; applyEdits reports it
+  }
+  const applied = await applyEdits(current.bytes, edits, { author, ids });
   if (!applied.ok) {
     const list = applied.errors.map((e) => `Edit ${e.index + 1}: ${e.error}`).join("\n");
     return { ok: false, error: `No changes were made.\n${list}` };
@@ -1442,6 +1463,7 @@ export async function runEditDocument(params: {
     const updated = await updateDocumentVersion(db, documentId, versionRowId, {
       file_type: "docx", size_bytes: editedBytes.byteLength, page_count: null,
       content_sha256: contentSha256(editedBytes), pdf_storage_path: null,
+      block_ids: blockIdsRecord(editedBytes, applied.blockIds),
     });
     if (updated.error || !updated.data) return { ok: false, error: "Failed to update document version." };
   } else {
@@ -1485,6 +1507,7 @@ export async function runEditDocument(params: {
     }
     versionRowId = versionRow.id as string;
     nextVersionNumber = versionRow.version_number;
+    await saveBlockIds(db, documentId, versionRowId, editedBytes, applied.blockIds);
   }
 
   // Insert one row per change
@@ -1510,6 +1533,27 @@ export async function runEditDocument(params: {
 
   if (editsErr || !insertedEdits) {
     return { ok: false, error: "Failed to record edits." };
+  }
+
+  // An edit that typed inside an earlier pending insertion split it: the
+  // earlier card must resolve the new half too.
+  if (applied.splitRevisions.length) {
+    const { data: pending } = await db
+      .from("document_edits")
+      .select("id, del_w_id, ins_w_id, w_ids")
+      .eq("document_id", documentId)
+      .eq("status", "pending");
+    for (const row of (pending ?? []) as { id: string; del_w_id: string | null; ins_w_id: string | null; w_ids: string[] | null }[]) {
+      const owned = new Set([...(row.w_ids ?? []), row.del_w_id, row.ins_w_id].filter((v): v is string => !!v));
+      const added = applied.splitRevisions.filter((sp) => owned.has(sp.from) && !owned.has(sp.to)).map((sp) => sp.to);
+      if (!added.length) continue;
+      const { error } = await db
+        .from("document_edits")
+        .update({ w_ids: [...owned, ...added] })
+        .eq("id", row.id)
+        .eq("document_id", documentId);
+      if (error) return { ok: false, error: "Failed to record edits." };
+    }
   }
 
   const activation = await activateDocumentVersion(db, documentId, versionRowId);
@@ -1564,7 +1608,7 @@ export async function runEditDocument(params: {
 
 export interface DiffChangeItem {
   block_id?: string;
-  op: "delete" | "insert" | "replace";
+  op: "delete" | "insert" | "replace" | "format";
   before: string;
   after: string;
   reason?: string;
@@ -1608,9 +1652,10 @@ export async function runGetDiff(params: {
   if (editsErr) return { ok: false, error: "Could not load the pending edits." };
 
   const changes: DiffChangeItem[] = (editRows ?? []).map((row) => {
-    let op: "delete" | "insert" | "replace" = "replace";
+    let op: DiffChangeItem["op"] = "replace";
     if (!row.deleted_text && row.inserted_text) op = "insert";
     else if (row.deleted_text && !row.inserted_text) op = "delete";
+    else if (row.deleted_text === row.inserted_text) op = "format";
 
     return {
       op,
@@ -1624,7 +1669,7 @@ export async function runGetDiff(params: {
 
   const hasChanges = changes.length > 0;
   const summary = hasChanges
-    ? `${changes.length} change(s) pending: ${changes.filter((c) => c.op === "insert").length} insertion(s), ${changes.filter((c) => c.op === "delete").length} deletion(s), ${changes.filter((c) => c.op === "replace").length} replacement(s).`
+    ? `${changes.length} change(s) pending: ${changes.filter((c) => c.op === "insert").length} insertion(s), ${changes.filter((c) => c.op === "delete").length} deletion(s), ${changes.filter((c) => c.op === "replace").length} replacement(s), ${changes.filter((c) => c.op === "format").length} formatting change(s).`
     : "No pending edits found on active version.";
 
   return {
@@ -1803,7 +1848,7 @@ async function loadDocumentBytes(params: {
   documentId?: string;
   db?: Db;
   versionId?: string | null;
-}): Promise<{ raw: ArrayBuffer; sourcePath: string } | null> {
+}): Promise<{ raw: ArrayBuffer; sourcePath: string; versionId?: string } | null> {
   const { docInfo, documentId, db, versionId } = params;
   if (documentId && db) {
     const current = await loadCurrentVersionBytes(documentId, db, versionId ?? null);
@@ -1817,6 +1862,7 @@ async function loadDocumentBytes(params: {
           current.bytes.byteOffset + current.bytes.byteLength,
         ) as ArrayBuffer,
         sourcePath: current.storage_path,
+        versionId: current.version_id,
       };
     }
     devLog(
@@ -1953,7 +1999,7 @@ export async function readDocumentContent(
       if (!opts?.fullText) {
         // Model-facing read: the addressable document view, segmented.
         try {
-          const view = await DocxDocument.load(Buffer.from(raw));
+          const view = await docxView(Buffer.from(raw), documentId, db, loaded.versionId);
           const result = renderDocxRead(view, opts?.docx ?? {});
           devLog(
             `[read_document] docx view read complete=${result.complete} length=${result.text.length} for filename="${docInfo.filename}"`,
@@ -2257,7 +2303,7 @@ export async function findInDocumentContent(params: {
     let view: DocxDocument | null = null;
     if (loaded) {
       try {
-        view = await DocxDocument.load(Buffer.from(loaded.raw));
+        view = await docxView(Buffer.from(loaded.raw), documentId, db, loaded.versionId);
       } catch (err) {
         devLog(`[find_in_document] docx view failed, using flat text`, err);
       }

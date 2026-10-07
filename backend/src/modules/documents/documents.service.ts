@@ -45,6 +45,8 @@ export {
     resolveEdit,
 } from "./documents.edits";
 
+export { docxViewForVersion, saveBlockIds, blockIdsRecord } from "./documents.blockIds";
+
 export { renameDocument } from "./documents.rename";
 export { deleteCollectionDocuments } from "./documents.cleanup";
 

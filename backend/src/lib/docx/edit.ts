@@ -9,10 +9,22 @@
 import { randomUUID } from "node:crypto";
 import { DocxPackage, MAIN_DOCUMENT_PART } from "./package";
 import { XmlPatch } from "./patch";
+import { carryBlockIds } from "./blockIds";
 import { buildEditModel, type CharUnit, type EditModel, type Slot, type Wrapper } from "./editModel";
-import { DocxDocument, type Block, type ParagraphBlock, type TableBlock } from "./view";
+import { DocxDocument, type Block, type ParagraphBlock, type TableBlock, type TableRow } from "./view";
+import {
+  applyRunFormat,
+  HIGHLIGHT_COLOURS,
+  propItems,
+  propsXml,
+  setProp,
+  type PropItem,
+  type RunFormat,
+} from "./props";
+import { buildInserted, parseRich, plainText, RichTextError, type RichSegment } from "./richText";
 import {
   childElements,
+  documentElement,
   encodeXmlAttr,
   encodeXmlText,
   firstChild,
@@ -36,7 +48,26 @@ export type EditOp =
       style?: string;
       reason?: string;
     }
-  | { op: "delete"; block: string; through?: string; reason?: string };
+  | { op: "delete"; block: string; through?: string; reason?: string }
+  | ({
+      op: "format";
+      block: string;
+      /** Text to format; default the whole paragraph. */
+      find?: string;
+      /** Paragraph style name or id. */
+      style?: string;
+      align?: "left" | "center" | "right" | "justify";
+      reason?: string;
+    } & RunFormat)
+  | {
+      op: "insert_row";
+      /** A paragraph id in the row to insert after (or a table id: after its last row). */
+      after?: string;
+      before?: string;
+      cells: string[];
+      reason?: string;
+    }
+  | { op: "delete_row"; block: string; through?: string; reason?: string };
 
 export interface AppliedChange {
   index: number;
@@ -60,11 +91,24 @@ export interface EditError {
 }
 
 export type ApplyEditsResult =
-  | { ok: true; bytes: Buffer; changes: AppliedChange[] }
+  | {
+      ok: true;
+      bytes: Buffer;
+      changes: AppliedChange[];
+      /**
+       * Existing insertions split around new text: each gains a revision id
+       * (to), which whoever tracks the original id (from) must also resolve.
+       */
+      splitRevisions: { from: string; to: string }[];
+      /** Block ids for the edited document, carried from the ids it was edited with. */
+      blockIds: string[];
+    }
   | { ok: false; errors: EditError[] };
 
 export interface ApplyEditsOptions {
   author: string;
+  /** The document's current block ids (see blockIds.ts); default: the view's own ids. */
+  ids?: readonly string[];
   /** ISO timestamp for the revisions (default now, to the second). */
   date?: string;
 }
@@ -84,6 +128,11 @@ interface ParagraphPlan {
   /** Units deleted per change (chars by node + index, whole nodes by node). */
   deletedChars: Map<XmlElement, Map<number, number>>;
   deletedNodes: Map<XmlElement, number>;
+  /** Units reformatted per change (same keys as deletion). */
+  formatChars: Map<XmlElement, Map<number, number>>;
+  formatNodes: Map<XmlElement, number>;
+  /** Paragraph-property change (style, alignment). */
+  pPrChange?: { change: number; styleId?: string; align?: string };
   insertions: Insertion[];
   /** Change that deletes this paragraph's mark. */
   markDeletedBy?: number;
@@ -93,9 +142,12 @@ interface ParagraphPlan {
 
 type Insertion = {
   change: number;
-  text: string;
+  segments: RichSegment[];
   rPr: string;
   order: number;
+  /** The anchor run sits directly inside another author's w:ins, which is split here. */
+  splitIns?: XmlElement;
+  insideLink?: boolean;
 } & (
   | { at: "unit"; unit: CharUnit | { node: XmlElement; run: XmlElement }; side: "after" | "before" }
   | { at: "element"; el: XmlElement; side: "after" | "before" }
@@ -113,11 +165,14 @@ interface ChangeRecord {
   revisionIds: string[];
   delId?: string;
   insId?: string;
+  /** Descriptions of formatting changes, shown with the reason. */
+  notes: string[];
 }
 
 export async function applyEdits(bytes: Buffer, ops: EditOp[], opts: ApplyEditsOptions): Promise<ApplyEditsResult> {
   const pkg = await DocxPackage.load(bytes);
   const doc = DocxDocument.fromPackage(pkg);
+  if (opts.ids) doc.relabel(opts.ids);
   const editor = new Editor(doc, opts);
   const errors: EditError[] = [];
   ops.forEach((op, index) => {
@@ -131,7 +186,9 @@ export async function applyEdits(bytes: Buffer, ops: EditOp[], opts: ApplyEditsO
   if (ops.length === 0) errors.push({ index: 0, error: "No edits given." });
   if (errors.length) return { ok: false, errors };
   const changes = editor.write();
-  return { ok: true, bytes: await pkg.save(), changes };
+  const out = await pkg.save();
+  const blockIds = carryBlockIds(doc, await DocxDocument.load(out));
+  return { ok: true, bytes: out, changes, splitRevisions: editor.splits, blockIds };
 }
 
 class Editor {
@@ -141,7 +198,11 @@ class Editor {
   private nextId: number;
   private readonly plans = new Map<string, ParagraphPlan>();
   private readonly changes: ChangeRecord[] = [];
-  private readonly elementInserts: { el: XmlElement; part: string; side: "after" | "before"; xml: string; order: number }[] = [];
+  private readonly elementInserts: { el: XmlElement; part: string; side: "after" | "before"; build: () => string; order: number }[] = [];
+  readonly splits: { from: string; to: string }[] = [];
+  /** Run formatting per format region (keyed by index), with its change. */
+  private readonly formatSpecs: { change: number; fmt: RunFormat }[] = [];
+  private readonly patches = new Map<string, XmlPatch>();
   private readonly rowDeletes: { row: XmlElement; part: string; change: number }[] = [];
   /** Paragraph id -> index of the delete operation that removes it. */
   private readonly deletedBy = new Map<string, number>();
@@ -154,11 +215,11 @@ class Editor {
     this.nextId = maxRevisionId(doc.pkg) + 1;
   }
 
-  private newId(change: ChangeRecord, kind: "ins" | "del"): string {
+  private newId(change: ChangeRecord, kind: "ins" | "del" | "fmt"): string {
     const id = String(this.nextId++);
     change.revisionIds.push(id);
     if (kind === "del") change.delId ??= id;
-    else change.insId ??= id;
+    else if (kind === "ins") change.insId ??= id;
     return id;
   }
 
@@ -178,8 +239,16 @@ class Editor {
         return this.planInsert(op, index);
       case "delete":
         return this.planDelete(op, index);
+      case "format":
+        return this.planFormat(op, index);
+      case "insert_row":
+        return this.planInsertRow(op, index);
+      case "delete_row":
+        return this.planDeleteRow(op, index);
       default:
-        fail(`Unknown op ${JSON.stringify((op as { op?: unknown })?.op)}; use "replace", "insert" or "delete".`);
+        fail(
+          `Unknown op ${JSON.stringify((op as { op?: unknown })?.op)}; use "replace", "insert", "delete", "format", "insert_row" or "delete_row".`,
+        );
     }
   }
 
@@ -198,7 +267,15 @@ class Editor {
   private planFor(p: ParagraphBlock): ParagraphPlan {
     let plan = this.plans.get(p.id);
     if (!plan) {
-      plan = { model: buildEditModel(p), deletedChars: new Map(), deletedNodes: new Map(), insertions: [], claimed: [] };
+      plan = {
+        model: buildEditModel(p),
+        deletedChars: new Map(),
+        deletedNodes: new Map(),
+        formatChars: new Map(),
+        formatNodes: new Map(),
+        insertions: [],
+        claimed: [],
+      };
       this.plans.set(p.id, plan);
     }
     return plan;
@@ -214,6 +291,7 @@ class Editor {
       contextBefore: "",
       contextAfter: "",
       revisionIds: [],
+      notes: [],
     };
     this.changes.push(rec);
     return rec;
@@ -258,21 +336,52 @@ class Editor {
     // Only what differs becomes tracked changes: a word-level diff, so
     // tokens kept in both find and replace stay untouched between hunks.
     const hunks = diffHunks(find, replace);
+    if (hunks.length === 0) fail("find and replace read the same; nothing would change.");
+    const parsed = hunks.map((h) => this.parseInserted(replace.slice(h.rs, h.re), p));
     const rec = this.record(op, index, p.id);
     const changeIdx = this.changes.length - 1;
-    for (const h of hunks) checkTypedText(replace.slice(h.rs, h.re));
-    for (const h of hunks) {
-      this.applyRegion(plan, m.map(h.fs), m.map(h.fe), replace.slice(h.rs, h.re), changeIdx, rec);
-    }
+    hunks.forEach((h, k) => {
+      const start = m.map(h.fs);
+      const end = m.map(h.fe);
+      // "**term**" around unchanged words is a formatting change, not new text.
+      const fmt = formatOnly(parsed[k], model.text.slice(start, end));
+      if (fmt) this.applyFormatRegion(plan, start, end, fmt, changeIdx, rec);
+      else this.applyRegion(plan, start, end, parsed[k], changeIdx, rec);
+    });
     const first = m.map(hunks[0].fs);
     const last = m.map(hunks[hunks.length - 1].fe);
     rec.contextBefore = tail(stripMarkup(model.text.slice(0, first)), 40);
     rec.contextAfter = head(stripMarkup(model.text.slice(last)), 40);
   }
 
-  /** Mark [start, end) deleted and `inserted` inserted, for change `changeIdx`. */
-  private applyRegion(plan: ParagraphPlan, start: number, end: number, inserted: string, changeIdx: number, rec: ChangeRecord): void {
-    const model = plan.model;
+  /** Parse and check text an edit inserts. */
+  private parseInserted(text: string, p: { part: string }): RichSegment[] {
+    checkTypedText(text);
+    let segments: RichSegment[];
+    try {
+      segments = parseRich(text);
+    } catch (err) {
+      return fail(err instanceof RichTextError ? err.message : String(err));
+    }
+    const visit = (list: RichSegment[]) => {
+      for (const seg of list) {
+        if (seg.t === "text") {
+          if (/\]\(/.test(seg.text)) fail('New text has broken link markup; write a link as [text](https://…).');
+        } else if (seg.t === "link") {
+          if (!/^(https?:\/\/|mailto:|#)\S+$/i.test(seg.target)) fail(`Link target ${JSON.stringify(seg.target)} must start with https://, http://, mailto: or # (a bookmark).`);
+          if (!seg.target.startsWith("#") && !relationshipPrefix(this.doc.source(p.part))) fail("This part of the document cannot hold new links.");
+          visit(seg.segments);
+        } else {
+          if (p.part !== MAIN_DOCUMENT_PART) fail("A footnote cannot be added inside a footnote or endnote.");
+          visit(seg.segments);
+        }
+      }
+    };
+    visit(segments);
+    return segments;
+  }
+
+  private claim(plan: ParagraphPlan, start: number, end: number, changeIdx: number): void {
     for (const c of plan.claimed) {
       if (c.change === changeIdx) continue;
       const overlaps = start < c.end && c.start < end;
@@ -280,6 +389,37 @@ class Editor {
       if (overlaps || samePoint) fail(`This change overlaps edit ${this.changes[c.change].index + 1} in the same block.`);
     }
     plan.claimed.push({ start, end, change: changeIdx });
+  }
+
+  /** Reformat the text in [start, end) for change `changeIdx` (tracked as w:rPrChange). */
+  private applyFormatRegion(plan: ParagraphPlan, start: number, end: number, fmt: RunFormat, changeIdx: number, rec: ChangeRecord): void {
+    this.claim(plan, start, end, changeIdx);
+    const key = this.formatSpecs.length;
+    this.formatSpecs.push({ change: changeIdx, fmt });
+    let text = "";
+    for (const slot of plan.model.slots) {
+      if (slot.kind !== "text" || slot.start < start || slot.end > end) continue;
+      text += plan.model.text.slice(slot.start, slot.end);
+      if (slot.unit.index === undefined) plan.formatNodes.set(slot.unit.node, key);
+      else {
+        let m = plan.formatChars.get(slot.unit.node);
+        if (!m) {
+          m = new Map();
+          plan.formatChars.set(slot.unit.node, m);
+        }
+        m.set(slot.unit.index, key);
+      }
+    }
+    if (!text) fail("There is no text to format there.");
+    rec.deleted.push(text);
+    rec.inserted.push(text);
+    rec.notes.push(describeFormat(fmt));
+  }
+
+  /** Mark [start, end) deleted and `segments` inserted, for change `changeIdx`. */
+  private applyRegion(plan: ParagraphPlan, start: number, end: number, segments: RichSegment[], changeIdx: number, rec: ChangeRecord): void {
+    const model = plan.model;
+    this.claim(plan, start, end, changeIdx);
 
     // Deletions.
     const deletedText: string[] = [];
@@ -323,9 +463,13 @@ class Editor {
     rec.deleted.push(deletedText.join(""));
 
     // Insertion.
-    if (inserted) {
-      rec.inserted.push(inserted);
-      plan.insertions.push(this.insertionPoint(plan, start, end, inserted, changeIdx));
+    if (segments.length) {
+      rec.inserted.push(cardText(segments));
+      const ins = this.insertionPoint(plan, start, end, segments, changeIdx);
+      const anchorNode = ins.at === "unit" ? ins.unit.node : ins.at === "element" ? ins.el : undefined;
+      ins.insideLink = !!anchorNode && hasAncestor(anchorNode, "w:hyperlink");
+      if (ins.insideLink && segments.some((sg) => sg.t === "link")) fail("A new link cannot go inside an existing link.");
+      plan.insertions.push(ins);
     }
   }
 
@@ -348,12 +492,22 @@ class Editor {
    * "replace selection"). A pure insertion attaches to the text beside it
    * that is not separated from it by link or revision markup.
    */
-  private insertionPoint(plan: ParagraphPlan, start: number, end: number, text: string, change: number): Insertion {
+  private insertionPoint(plan: ParagraphPlan, start: number, end: number, segments: RichSegment[], change: number): Insertion {
     const model = plan.model;
     const slots = model.slots;
     const order = this.insertOrder++;
+    const base = { change, segments, order };
     const isTextLike = (s: Slot | undefined): s is Extract<Slot, { kind: "text" }> => s?.kind === "text";
     const inRevision = (s: Slot) => s.wrappers.some((w) => w.kind === "ins" || w.kind === "del");
+    const innerIns = (s: Slot) => [...s.wrappers].reverse().find((w) => w.kind === "ins");
+    /** Anchor inside another author's insertion: the run must sit directly in it. */
+    const splitAfter = (s: Slot, rev: Wrapper): Insertion => {
+      const run = s.kind === "text" ? s.unit.run : s.kind === "token" ? s.nodes[s.nodes.length - 1]?.parent : undefined;
+      if (!run || run.parent !== rev.el) {
+        fail("New text cannot go at this point of an existing tracked insertion (it is inside a link or field there). Insert it next to the link or field instead.");
+      }
+      return { ...base, rPr: this.rPrNear(plan, s.end, "before"), ...this.anchorAfter(s), splitIns: rev.el };
+    };
 
     if (end > start) {
       // Last slot of the first contiguous deleted stretch in one container.
@@ -365,16 +519,18 @@ class Editor {
         if (sameContainer(s, first) && s.start === last.end) last = s;
         else break;
       }
-      if (inRevision(first) || inRevision(last)) {
-        const rev = [...last.wrappers].reverse().find((w) => w.kind === "ins")!;
-        // Replacing text inside an existing insertion: new text may only follow it.
-        if (rev.end - "++}".length > end) {
-          fail("New text cannot go inside an existing tracked insertion ({++…++}). Delete the whole insertion and insert the new text after it.");
-        }
-        return { change, text, rPr: this.rPrNear(plan, first.start, "after"), order, at: "element", el: rev.el!, side: "after" };
-      }
       const rPr = this.rPrNear(plan, first.start, "after");
-      return { change, text, rPr, order, ...this.anchorAfter(last) };
+      // A link (or content control, or simple field) the change deletes whole:
+      // new text goes after it, not inside it.
+      const covered = last.wrappers.find((w) => w.el && w.kind !== "ins" && w.kind !== "del" && w.start >= start && w.end <= end);
+      if (covered) return { ...base, rPr, at: "element", el: covered.el!, side: "after" };
+      const rev = innerIns(last);
+      if (rev) {
+        // Inside another author's insertion: split it when its text continues after the change.
+        if (rev.end - "++}".length > last.end) return { ...splitAfter(last, rev), rPr };
+        return { ...base, rPr, at: "element", el: outermostAt(last, rev).el!, side: "after" };
+      }
+      return { ...base, rPr, ...this.anchorAfter(last) };
     }
 
     // Pure insertion at `start`.
@@ -384,33 +540,31 @@ class Editor {
     const adjacentAfter = after && after.start === start;
     const rPr = this.rPrNear(plan, start, "before");
     if (adjacentBefore && (isTextLike(before) || before!.kind === "token") && !inRevision(before!)) {
-      return { change, text, rPr, order, ...this.anchorAfter(before!) };
+      return { ...base, rPr, ...this.anchorAfter(before!) };
     }
     if (adjacentAfter && (isTextLike(after) || after!.kind === "token") && !inRevision(after!)) {
-      return { change, text, rPr, order, ...this.anchorBefore(after!) };
+      return { ...base, rPr, ...this.anchorBefore(after!) };
     }
-    // Between markup: step outside the wrapper the markup belongs to.
-    if (adjacentBefore && (before!.kind === "markup" || before!.kind === "frozen")) {
+    // At the edge of a tracked change: step outside it.
+    if (adjacentBefore && (before!.kind === "markup" || before!.kind === "frozen") && before!.owner.kind !== "link") {
       const owner = before!.owner;
-      if (owner.end === start && owner.el) {
-        if (owner.kind === "ins" && after && after.wrappers.includes(owner)) {
-          fail("New text cannot go inside an existing tracked insertion ({++…++}).");
-        }
-        return { change, text, rPr, order, at: "element", el: outermostAt(before!, owner).el!, side: "after" };
-      }
+      if (owner.el && before!.end === owner.end) return { ...base, rPr, at: "element", el: outermostAt(before!, owner).el!, side: "after" };
+      if (owner.el && before!.start === owner.start) return { ...base, rPr, at: "element", el: outermostAt(before!, owner).el!, side: "before" };
     }
-    if (adjacentAfter && (after!.kind === "markup" || after!.kind === "frozen")) {
+    if (adjacentAfter && (after!.kind === "markup" || after!.kind === "frozen") && after!.owner.kind !== "link") {
       const owner = after!.owner;
-      if (owner.start === start && owner.el) {
-        return { change, text, rPr, order, at: "element", el: outermostAt(after!, owner).el!, side: "before" };
-      }
+      if (owner.el && after!.start === owner.start) return { ...base, rPr, at: "element", el: outermostAt(after!, owner).el!, side: "before" };
+      if (owner.el && after!.end === owner.end) return { ...base, rPr, at: "element", el: outermostAt(after!, owner).el!, side: "after" };
     }
-    if (before && inRevision(before) && after && inRevision(after) && sharedRevision(before, after)) {
-      fail("New text cannot go inside an existing tracked insertion ({++…++}).");
+    // Strictly inside another author's insertion: split it.
+    if (before && after && (before.kind === "text" || before.kind === "token")) {
+      const rev = innerIns(before);
+      if (rev && after.wrappers.includes(rev)) return { ...splitAfter(before, rev), rPr };
     }
-    if (!before && !after) return { change, text, rPr, order, at: "end", paragraph: model.paragraph.el };
-    fail("Could not find a place for the new text; include a neighbouring word in find and replace.");
-    return undefined as never;
+    if (!before && !after) return { ...base, rPr, at: "end", paragraph: model.paragraph.el };
+    if (adjacentBefore && (isTextLike(before) || before!.kind === "token")) return { ...base, rPr, ...this.anchorAfter(before!) };
+    if (adjacentAfter && (isTextLike(after) || after!.kind === "token")) return { ...base, rPr, ...this.anchorBefore(after!) };
+    return fail("Could not find a place for the new text; include a neighbouring word in find and replace.");
   }
 
   private anchorAfter(s: Slot): Pick<Extract<Insertion, { at: "unit" }>, "at" | "unit" | "side"> {
@@ -451,25 +605,163 @@ class Editor {
     if ((op.after === undefined) === (op.before === undefined)) fail('Give exactly one of "after" or "before" (a block id).');
     const anchor = this.block(op.after ?? op.before, op.after !== undefined ? "after" : "before");
     const side = op.after !== undefined ? "after" : "before";
-    const paragraphs = Array.isArray(op.paragraphs) ? op.paragraphs.filter((t) => typeof t === "string") : [];
-    if (paragraphs.length === 0) fail("paragraphs is required: a list of paragraph texts to insert.");
-    for (const t of paragraphs) checkTypedText(t);
+    const texts = Array.isArray(op.paragraphs) ? op.paragraphs.filter((t) => typeof t === "string") : [];
+    if (texts.length === 0) fail("paragraphs is required: a list of paragraph texts to insert.");
     if (anchor.kind === "opaque") fail(`Cannot insert next to block ${anchor.id}.`);
+    const paragraphs = texts.map((t) => this.parseInserted(t, anchor));
 
     const like = this.exemplar(anchor, op.style);
     const part = anchor.part;
     const rec = this.record(op, index, anchor.id);
-    let xml = "";
-    for (const text of paragraphs) {
-      const markId = this.newId(rec, "ins");
-      const pPr = like.pPr(`<w:ins${this.revAttrs(markId)}/>`);
-      const runs = text.length ? `<w:ins${this.revAttrs(this.newId(rec, "ins"))}>${runXml(like.rPr, text)}</w:ins>` : "";
-      xml += `<w:p>${pPr}${runs}</w:p>`;
-    }
-    rec.inserted.push(paragraphs.join("\n\n"));
+    const changeIdx = this.changes.length - 1;
+    rec.inserted.push(paragraphs.map(cardText).join("\n\n"));
     rec.contextBefore = anchor.kind === "paragraph" && side === "after" ? tail(anchor.text, 40) : "";
     rec.contextAfter = anchor.kind === "paragraph" && side === "before" ? head(anchor.text, 40) : "";
-    this.elementInserts.push({ el: anchor.el, part, side, xml, order: this.insertOrder++ });
+    this.elementInserts.push({
+      el: anchor.el,
+      part,
+      side,
+      order: this.insertOrder++,
+      build: () =>
+        paragraphs
+          .map((segments) => {
+            const pPr = like.pPr(`<w:ins${this.revAttrs(this.newId(rec, "ins"))}/>`);
+            const runs = segments.length ? this.insertedXml(changeIdx, part, like.rPr, segments) : "";
+            return `<w:p>${pPr}${runs}</w:p>`;
+          })
+          .join(""),
+    });
+  }
+
+  // --- format --------------------------------------------------------------
+
+  private planFormat(op: Extract<EditOp, { op: "format" }>, index: number): void {
+    const block = this.block(op.block, "block");
+    if (block.kind !== "paragraph") fail(`Block ${block.id} is not a paragraph; format the paragraphs inside it by their own ids.`);
+    const p = block as ParagraphBlock;
+    const deletedBy = this.deletedBy.get(p.id);
+    if (deletedBy !== undefined) fail(`Block ${p.id} is deleted by edit ${deletedBy + 1} in this batch.`);
+    const fmt: RunFormat = {};
+    for (const key of ["bold", "italic", "underline", "strike"] as const) {
+      const v = op[key];
+      if (v !== undefined) {
+        if (typeof v !== "boolean") fail(`${key} must be true or false.`);
+        fmt[key] = v;
+      }
+    }
+    if (op.highlight !== undefined) {
+      if (typeof op.highlight !== "string" || !HIGHLIGHT_COLOURS.has(op.highlight)) {
+        fail(`highlight must be one of ${[...HIGHLIGHT_COLOURS].join(", ")}.`);
+      }
+      fmt.highlight = op.highlight;
+    }
+    let styleId: string | undefined;
+    if (op.style !== undefined) {
+      styleId = this.doc.styles.resolveId(String(op.style));
+      if (!styleId) fail(`Unknown paragraph style "${op.style}". Use a style name shown in the document.`);
+    }
+    let align: string | undefined;
+    if (op.align !== undefined) {
+      align = ({ left: "left", center: "center", right: "right", justify: "both" } as Record<string, string>)[String(op.align)];
+      if (!align) fail('align must be "left", "center", "right" or "justify".');
+    }
+    const hasRun = Object.keys(fmt).length > 0;
+    if (!hasRun && !styleId && !align) fail("format needs at least one of bold, italic, underline, strike, highlight, style or align.");
+    if (!hasRun && op.find) fail("style and align apply to the whole paragraph; leave find out, or add a run format such as bold.");
+
+    const plan = this.planFor(p);
+    const rec = this.record(op, index, p.id);
+    const changeIdx = this.changes.length - 1;
+    if (hasRun) {
+      let start = 0;
+      let end = plan.model.text.length;
+      if (op.find) {
+        const found = locate(plan.model.text, op.find);
+        if (found.kind === "none") fail(`Could not find ${JSON.stringify(truncate(op.find, 80))} in block ${p.id}. The block currently reads: ${JSON.stringify(truncate(plan.model.text, 400))}`);
+        if (found.kind === "many") fail(`${JSON.stringify(truncate(op.find, 80))} occurs ${found.count} times in block ${p.id}; include more of the surrounding words.`);
+        const m = found as Extract<ReturnType<typeof locate>, { kind: "one" }>;
+        start = m.map(0);
+        end = m.map(op.find.length);
+      }
+      this.applyFormatRegion(plan, start, end, fmt, changeIdx, rec);
+      rec.contextBefore = tail(stripMarkup(plan.model.text.slice(0, start)), 40);
+      rec.contextAfter = head(stripMarkup(plan.model.text.slice(end)), 40);
+    }
+    if (styleId || align) {
+      if (plan.pPrChange) fail(`Block ${p.id} already has a paragraph format change in this batch (edit ${this.changes[plan.pPrChange.change].index + 1}).`);
+      plan.pPrChange = { change: changeIdx, styleId, align };
+      if (!hasRun) {
+        rec.deleted.push(p.text);
+        rec.inserted.push(p.text);
+      }
+      if (styleId) rec.notes.push(`Style: ${this.doc.styles.displayName(styleId) ?? styleId}`);
+      if (align) rec.notes.push(`Alignment: ${op.align}`);
+    }
+  }
+
+  // --- table rows ------------------------------------------------------------
+
+  private rowOf(b: Block, what: string): { table: TableBlock; row: number } {
+    if (b.kind === "paragraph" && b.cell) return { table: this.doc.byId.get(b.cell.tableId) as TableBlock, row: b.cell.row };
+    return fail(`${what} must be the id of a paragraph inside a table row (shown after rNcM on the row's cell lines).`);
+  }
+
+  private planInsertRow(op: Extract<EditOp, { op: "insert_row" }>, index: number): void {
+    if ((op.after === undefined) === (op.before === undefined)) fail('Give exactly one of "after" or "before" (the id of a paragraph in a row, or a table id).');
+    const side = op.after !== undefined ? "after" : "before";
+    const anchor = this.block(op.after ?? op.before, side);
+    let table: TableBlock;
+    let rowIdx: number;
+    if (anchor.kind === "table") {
+      table = anchor;
+      rowIdx = side === "after" ? table.rows.length - 1 : 0;
+    } else ({ table, row: rowIdx } = this.rowOf(anchor, side));
+    const row = table.rows[rowIdx];
+    const cells = Array.isArray(op.cells) ? op.cells.map((c) => (typeof c === "string" ? c : "")) : [];
+    if (cells.length !== row.cells.length) {
+      fail(`The row has ${row.cells.length} cells; give ${row.cells.length} cell texts in cells (use "" for an empty cell).`);
+    }
+    const segments = cells.map((c) => this.parseInserted(c, table));
+    const rec = this.record(op, index, anchor.id);
+    const changeIdx = this.changes.length - 1;
+    rec.inserted.push(segments.map(cardText).join(" | "));
+    this.elementInserts.push({ el: row.el, part: table.part, side, order: this.insertOrder++, build: () => this.rowXml(table.part, row, segments, changeIdx) });
+  }
+
+  /** A new row shaped like `row` (cell widths, spans, paragraph formatting), as a tracked insertion. */
+  private rowXml(part: string, row: TableRow, cells: RichSegment[][], change: number): string {
+    const src = this.doc.source(part);
+    const rec = this.changes[change];
+    const tblPrEx = firstChild(row.el, "w:tblPrEx");
+    const trItems = propItems(src, firstChild(row.el, "w:trPr")).filter((i) => !/^w:(ins|del|trPrChange)$/.test(i.name));
+    let xml = `<w:tr>${tblPrEx ? sliceOf(src, tblPrEx) : ""}<w:trPr>${trItems.map((i) => i.xml).join("")}<w:ins${this.revAttrs(this.newId(rec, "ins"))}/></w:trPr>`;
+    row.cells.forEach((cell, c) => {
+      const tcItems = propItems(src, firstChild(cell.el, "w:tcPr")).filter((i) => !/^w:(vMerge|cellIns|cellDel|cellMerge|tcPrChange)$/.test(i.name));
+      const para = cell.blocks.find((b): b is ParagraphBlock => b.kind === "paragraph");
+      const pPrItems = para ? propItems(src, firstChild(para.el, "w:pPr")).filter((i) => !/^w:(rPr|sectPr|pPrChange)$/.test(i.name)) : [];
+      const mark = para ? markRPrInner(src, para.el) : "";
+      const pPr = `<w:pPr>${pPrItems.map((i) => i.xml).join("")}<w:rPr><w:ins${this.revAttrs(this.newId(rec, "ins"))}/>${mark}</w:rPr></w:pPr>`;
+      const runs = cells[c].length ? this.insertedXml(change, part, para ? dominantRPr(src, para) : "", cells[c]) : "";
+      xml += `<w:tc>${propsXml("w:tcPr", tcItems)}<w:p>${pPr}${runs}</w:p></w:tc>`;
+    });
+    return `${xml}</w:tr>`;
+  }
+
+  private planDeleteRow(op: Extract<EditOp, { op: "delete_row" }>, index: number): void {
+    const first = this.rowOf(this.block(op.block, "block"), "block");
+    const last = op.through !== undefined ? this.rowOf(this.block(op.through, "through"), "through") : first;
+    if (last.table !== first.table) fail("block and through must be in the same table.");
+    if (last.row < first.row) fail("through comes before block.");
+    const rec = this.record(op, index, op.block);
+    const changeIdx = this.changes.length - 1;
+    const texts: string[] = [];
+    for (let r = first.row; r <= last.row; r++) {
+      const row = first.table.rows[r];
+      if (row.revision === "del") continue;
+      texts.push(this.deleteRow(row, first.table.part, changeIdx, index));
+    }
+    if (texts.length === 0) fail("Those rows are already deleted.");
+    rec.deleted.push(texts.join("\n"));
   }
 
   /** Paragraph and run properties for new paragraphs. */
@@ -573,6 +865,9 @@ class Editor {
     const plan = this.planFor(p);
     const other = plan.claimed.find((c) => c.change !== changeIdx);
     if (other) fail(`Block ${p.id} is changed by edit ${this.changes[other.change].index + 1} in this batch; it cannot also be deleted.`);
+    if (plan.pPrChange && plan.pPrChange.change !== changeIdx) {
+      fail(`Block ${p.id} is reformatted by edit ${this.changes[plan.pPrChange.change].index + 1} in this batch; it cannot also be deleted.`);
+    }
     const model = plan.model;
     // Everything visible except existing deletions; markup goes with its wrapper.
     for (const slot of model.slots) {
@@ -592,22 +887,24 @@ class Editor {
 
   /** Delete every row (Word marks the row and its cell content). */
   private deleteTable(t: TableBlock, changeIdx: number, index: number): string {
-    const texts: string[] = [];
-    for (const row of t.rows) {
-      if (row.revision === "del") continue;
-      this.rowDeletes.push({ row: row.el, part: t.part, change: changeIdx });
-      const cells: string[] = [];
-      for (const cell of row.cells) {
-        const parts: string[] = [];
-        for (const b of cell.blocks) {
-          if (b.kind === "paragraph") parts.push(this.deleteParagraph(b, changeIdx, false, index));
-          else if (b.kind === "table") parts.push(this.deleteTable(b, changeIdx, index));
-        }
-        cells.push(parts.join(" "));
+    return t.rows
+      .filter((row) => row.revision !== "del")
+      .map((row) => this.deleteRow(row, t.part, changeIdx, index))
+      .join("\n");
+  }
+
+  private deleteRow(row: TableRow, part: string, changeIdx: number, index: number): string {
+    this.rowDeletes.push({ row: row.el, part, change: changeIdx });
+    const cells: string[] = [];
+    for (const cell of row.cells) {
+      const parts: string[] = [];
+      for (const b of cell.blocks) {
+        if (b.kind === "paragraph") parts.push(this.deleteParagraph(b, changeIdx, false, index));
+        else if (b.kind === "table") parts.push(this.deleteTable(b, changeIdx, index));
       }
-      texts.push(cells.join(" | "));
+      cells.push(parts.join(" "));
     }
-    return texts.join("\n");
+    return cells.join(" | ");
   }
 
   // -------------------------------------------------------------------------
@@ -615,24 +912,14 @@ class Editor {
   // -------------------------------------------------------------------------
 
   write(): AppliedChange[] {
-    const patches = new Map<string, XmlPatch>();
-    const patchFor = (part: string) => {
-      let p = patches.get(part);
-      if (!p) {
-        p = new XmlPatch(this.doc.source(part));
-        patches.set(part, p);
-      }
-      return p;
-    };
-
-    // Revision ids are allocated in document order.
+    // Revision ids are allocated in document order for edits inside paragraphs.
     for (const [, plan] of [...this.plans].sort(([, a], [, b]) => a.model.paragraph.el.start - b.model.paragraph.el.start)) {
-      this.writeParagraph(plan, patchFor(plan.model.paragraph.part));
+      this.writeParagraph(plan, this.patchFor(plan.model.paragraph.part));
     }
     for (const r of this.rowDeletes) {
       const rec = this.changes[r.change];
       const marker = `<w:del${this.revAttrs(this.newId(rec, "del"))}/>`;
-      const patch = patchFor(r.part);
+      const patch = this.patchFor(r.part);
       const trPr = firstChild(r.row, "w:trPr");
       if (trPr) {
         const change = firstChild(trPr, "w:trPrChange");
@@ -646,11 +933,12 @@ class Editor {
       }
     }
     for (const ins of this.elementInserts.sort((a, b) => a.order - b.order)) {
-      const patch = patchFor(ins.part);
-      if (ins.side === "after") patch.insertAfter(ins.el, ins.xml);
-      else patch.insertBefore(ins.el, ins.xml);
+      const patch = this.patchFor(ins.part);
+      const xml = ins.build();
+      if (ins.side === "after") patch.insertAfter(ins.el, xml);
+      else patch.insertBefore(ins.el, xml);
     }
-    for (const [part, patch] of patches) {
+    for (const [part, patch] of this.patches) {
       if (!patch.isEmpty) this.doc.pkg.setText(part, patch.toString());
     }
 
@@ -665,16 +953,136 @@ class Editor {
       contextBefore: c.contextBefore,
       contextAfter: c.contextAfter,
       block: c.block,
-      reason: c.op.reason,
+      reason: [c.op.reason, ...c.notes].filter(Boolean).join(" — ") || undefined,
     }));
   }
+
+  private patchFor(part: string): XmlPatch {
+    let p = this.patches.get(part);
+    if (!p) {
+      p = new XmlPatch(this.doc.source(part));
+      this.patches.set(part, p);
+    }
+    return p;
+  }
+
+  // --- new content -----------------------------------------------------------
+
+  /** Inserted content for a change, as tracked-insertion XML in `part`. */
+  private insertedXml(change: number, part: string, rPr: string, segments: RichSegment[], insideLink = false): string {
+    const rec = this.changes[change];
+    return buildInserted(segments, {
+      rPr,
+      openIns: () => `<w:ins${this.revAttrs(this.newId(rec, "ins"))}>`,
+      link: (target) => this.linkAttrs(part, target),
+      linkStyle: (items) => this.linkStyle(items),
+      footnote: (segs) => this.newFootnote(change, segs),
+      noteRefRPr: this.noteRefRPr(),
+      insideLink,
+    });
+  }
+
+  private emitInsertion(ins: Insertion, part: string): string {
+    const body = this.insertedXml(ins.change, part, ins.rPr, ins.segments, ins.insideLink);
+    if (!ins.splitIns) return body;
+    // Close the other author's insertion, add ours, and reopen theirs with a new id.
+    const to = String(this.nextId++);
+    const from = ins.splitIns.attrs["w:id"];
+    if (from !== undefined) this.splits.push({ from, to });
+    const attrs = Object.entries(ins.splitIns.attrs)
+      .map(([k, v]) => ` ${k}="${encodeXmlAttr(k === "w:id" ? to : v)}"`)
+      .join("");
+    return `</${ins.splitIns.name}>${body}<${ins.splitIns.name}${attrs}>`;
+  }
+
+  private linkAttrs(part: string, target: string): string {
+    if (target.startsWith("#")) return `w:anchor="${encodeXmlAttr(target.slice(1))}" w:history="1"`;
+    const prefix = relationshipPrefix(this.doc.source(part))!;
+    const id = this.doc.pkg.addRelationship(part, HYPERLINK_REL, target, true);
+    return `${prefix}:id="${encodeXmlAttr(id)}" w:history="1"`;
+  }
+
+  private linkStyleId?: string | null;
+
+  private linkStyle(items: PropItem[]): PropItem[] {
+    if (this.linkStyleId === undefined) this.linkStyleId = characterStyleId(this.doc, "hyperlink") ?? null;
+    if (this.linkStyleId) {
+      const cleared = items.filter((i) => !/^w:(color|u)$/.test(i.name));
+      return setProp(cleared, ["w:rStyle"], `<w:rStyle w:val="${encodeXmlAttr(this.linkStyleId)}"/>`, "r");
+    }
+    return setProp(setProp(items, ["w:color"], '<w:color w:val="0563C1"/>', "r"), ["w:u"], '<w:u w:val="single"/>', "r");
+  }
+
+  private noteFormat?: { refRPr: string; markRPr: string; pPr: string; textRPr: string };
+
+  /** How footnote marks and text look in this document (copied from an existing footnote when there is one). */
+  private footnoteFormat(): { refRPr: string; markRPr: string; pPr: string; textRPr: string } {
+    if (this.noteFormat) return this.noteFormat;
+    const main = this.doc.source();
+    const refRun = findElement(documentElement(main), (el) => el.name === "w:r" && !!firstChild(el, "w:footnoteReference"));
+    const refRPrEl = refRun && firstChild(refRun, "w:rPr");
+    const note = [...this.doc.footnotes.values()][0];
+    const notePara = note?.paragraphs[0];
+    const noteSrc = notePara ? this.doc.source(notePara.part) : undefined;
+    const markRun = notePara && findElement(notePara.el, (el) => el.name === "w:r" && !!firstChild(el, "w:footnoteRef"));
+    const markRPrEl = markRun && firstChild(markRun, "w:rPr");
+    const refStyle = characterStyleId(this.doc, "footnote reference");
+    const textStyle = this.doc.styles.resolveId("footnote text");
+    const superscript = refStyle ? `<w:rPr><w:rStyle w:val="${encodeXmlAttr(refStyle)}"/></w:rPr>` : '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>';
+    const notePPr = notePara && noteSrc ? firstChild(notePara.el, "w:pPr") : undefined;
+    this.noteFormat = {
+      refRPr: refRPrEl ? cleanRPr(main, refRPrEl) : superscript,
+      markRPr: markRPrEl && noteSrc ? cleanRPr(noteSrc, markRPrEl) : superscript,
+      pPr: notePPr && noteSrc
+        ? propsXml("w:pPr", propItems(noteSrc, notePPr).filter((i) => !/^w:(rPr|sectPr|pPrChange)$/.test(i.name)))
+        : textStyle
+          ? `<w:pPr><w:pStyle w:val="${encodeXmlAttr(textStyle)}"/></w:pPr>`
+          : "",
+      textRPr: notePara && noteSrc ? dominantRPr(noteSrc, notePara) : textStyle ? "" : '<w:rPr><w:sz w:val="20"/></w:rPr>',
+    };
+    return this.noteFormat;
+  }
+
+  private noteRefRPr(): string {
+    return this.footnoteFormat().refRPr;
+  }
+
+  private nextFootnoteId?: number;
+
+  /** Write a new footnote (its text as a tracked insertion) and return its id. */
+  private newFootnote(change: number, segments: RichSegment[]): string {
+    const pkg = this.doc.pkg;
+    let part = pkg.relatedPart(MAIN_DOCUMENT_PART, "/footnotes");
+    if (!part) {
+      part = "word/footnotes.xml";
+      pkg.addPart(part, EMPTY_FOOTNOTES, FOOTNOTES_CONTENT_TYPE);
+      pkg.addRelationship(MAIN_DOCUMENT_PART, FOOTNOTES_REL, "footnotes.xml", false);
+    }
+    if (this.nextFootnoteId === undefined) {
+      let max = 0;
+      for (const m of (pkg.text(part) ?? "").matchAll(/<w:footnote\b[^>]*?\bw:id="(-?\d+)"/g)) max = Math.max(max, parseInt(m[1], 10));
+      this.nextFootnoteId = max + 1;
+    }
+    const id = String(this.nextFootnoteId++);
+    const fmt = this.footnoteFormat();
+    const rec = this.changes[change];
+    // The note mark and a space lead the note's first inserted run group.
+    const markRuns = `<w:r>${fmt.markRPr}<w:footnoteRef/></w:r><w:r>${fmt.textRPr}<w:t xml:space="preserve"> </w:t></w:r>`;
+    let text = this.insertedXml(change, part, fmt.textRPr, segments);
+    text = text.startsWith("<w:ins ")
+      ? text.replace(/^(<w:ins [^>]*>)/, `$1${markRuns}`)
+      : `<w:ins${this.revAttrs(this.newId(rec, "ins"))}>${markRuns}</w:ins>${text}`;
+    const xml = `<w:footnote w:id="${id}"><w:p>${fmt.pPr}${text}</w:p></w:footnote>`;
+    this.patchFor(part).append(documentElement(this.doc.source(part)), xml);
+    return id;
+  }
+
+  // --- paragraphs --------------------------------------------------------------
 
   private writeParagraph(plan: ParagraphPlan, patch: XmlPatch): void {
     const p = plan.model.paragraph;
     const src = this.doc.source(p.part);
 
-    // Group affected runs by their parent so deletions of adjacent runs
-    // share one w:del.
     const unitInsertions = new Map<XmlElement, Insertion[]>();
     for (const ins of plan.insertions) {
       if (ins.at === "unit") {
@@ -684,8 +1092,8 @@ class Editor {
       }
     }
     const affectedRuns = new Set<XmlElement>(unitInsertions.keys());
-    for (const node of plan.deletedChars.keys()) affectedRuns.add(node.parent!);
-    for (const node of plan.deletedNodes.keys()) {
+    for (const node of [...plan.deletedChars.keys(), ...plan.formatChars.keys()]) affectedRuns.add(node.parent!);
+    for (const node of [...plan.deletedNodes.keys(), ...plan.formatNodes.keys()]) {
       if (node.parent?.name === "w:r") affectedRuns.add(node.parent);
     }
 
@@ -694,6 +1102,8 @@ class Editor {
       pieces.set(run, this.splitRun(run, src, plan, unitInsertions.get(run) ?? []));
     }
 
+    // Group affected runs by their parent so deletions of adjacent runs
+    // share one w:del.
     const byParent = new Map<XmlElement, XmlElement[]>();
     for (const run of affectedRuns) {
       const list = byParent.get(run.parent!) ?? [];
@@ -738,7 +1148,7 @@ class Editor {
               xml += "</w:del>";
               open = undefined;
             }
-            xml += piece.kind === "ins" ? `<w:ins${this.revAttrs(this.newId(this.changes[piece.change], "ins"))}>${piece.xml}</w:ins>` : piece.xml;
+            xml += piece.kind === "ins" ? this.emitInsertion(piece.ins, p.part) : piece.xml;
           }
         }
         if (open !== undefined && !continues(k)) {
@@ -752,7 +1162,7 @@ class Editor {
     // Insertions anchored to wrapper elements or the paragraph end.
     for (const ins of plan.insertions.sort((a, b) => a.order - b.order)) {
       if (ins.at === "unit") continue;
-      const xml = `<w:ins${this.revAttrs(this.newId(this.changes[ins.change], "ins"))}>${runXml(ins.rPr, ins.text)}</w:ins>`;
+      const xml = this.emitInsertion(ins, p.part);
       if (ins.at === "element") {
         if (ins.side === "after") patch.insertAfter(ins.el, xml);
         else patch.insertBefore(ins.el, xml);
@@ -761,62 +1171,106 @@ class Editor {
       }
     }
 
+    if (plan.pPrChange) {
+      // Paragraph style / alignment, recorded as w:pPrChange.
+      const { change, styleId, align } = plan.pPrChange;
+      const pPr = firstChild(p.el, "w:pPr");
+      const items = propItems(src, pPr);
+      const props = items.filter((i) => !/^w:(rPr|sectPr|pPrChange)$/.test(i.name));
+      const keep = items.filter((i) => i.name === "w:rPr" || i.name === "w:sectPr");
+      const prior = pPr && firstChild(pPr, "w:pPrChange");
+      const priorOld = prior && firstChild(prior, "w:pPr");
+      const old = priorOld ? innerXml(src, priorOld) : props.map((i) => i.xml).join("");
+      let next = props;
+      if (styleId) next = setProp(next, ["w:pStyle"], `<w:pStyle w:val="${encodeXmlAttr(styleId)}"/>`, "p");
+      if (align) next = setProp(next, ["w:jc"], `<w:jc w:val="${align}"/>`, "p");
+      const record = `<w:pPrChange${this.revAttrs(this.newId(this.changes[change], "fmt"))}><w:pPr>${old}</w:pPr></w:pPrChange>`;
+      const xml = propsXml("w:pPr", [...next, ...keep, { name: "w:pPrChange", xml: record }]);
+      if (pPr) patch.replace(pPr, xml);
+      else patch.prepend(p.el, xml);
+    }
+
     if (plan.markDeletedBy !== undefined) {
       const marker = `<w:del${this.revAttrs(this.newId(this.changes[plan.markDeletedBy], "del"))}/>`;
       addMarkMarker(patch, p.el, marker);
     }
   }
 
-  /** Split one run into kept, deleted and inserted pieces. */
+  /** Run properties for a reformatted piece: the new formatting plus a w:rPrChange recording the old. */
+  private formattedRPr(src: XmlSource, rPrEl: XmlElement | undefined, key: number): string {
+    const spec = this.formatSpecs[key];
+    const items = propItems(src, rPrEl);
+    const base = items.filter((i) => i.name !== "w:rPrChange");
+    const next = applyRunFormat(base, spec.fmt);
+    const same = (a: PropItem[], b: PropItem[]) => a.map((i) => i.xml).join("") === b.map((i) => i.xml).join("");
+    if (same(base, next)) return rPrEl ? sliceOf(src, rPrEl) : "";
+    // A run already reformatted keeps its original properties as the old state.
+    const prior = rPrEl && firstChild(rPrEl, "w:rPrChange");
+    const priorOld = prior && firstChild(prior, "w:rPr");
+    const old = priorOld ? innerXml(src, priorOld) : base.map((i) => i.xml).join("");
+    const record = `<w:rPrChange${this.revAttrs(this.newId(this.changes[spec.change], "fmt"))}><w:rPr>${old}</w:rPr></w:rPrChange>`;
+    return propsXml("w:rPr", [...next, { name: "w:rPrChange", xml: record }]);
+  }
+
+  /** Split one run into kept, reformatted, deleted and inserted pieces. */
   private splitRun(run: XmlElement, src: XmlSource, plan: ParagraphPlan, insertions: Insertion[]): Piece[] {
     const rPrEl = firstChild(run, "w:rPr");
     const rPr = rPrEl ? sliceOf(src, rPrEl) : "";
     const startTag = run.contentStart === run.end ? "<w:r>" : src.source.slice(run.start, run.contentStart);
-    type Unit = { state: number; xml: string; delXml: string; zeroWidth: boolean; node?: XmlElement; index?: number };
+    type Unit = { state: number; fmt: number; xml: string; delXml: string; zeroWidth: boolean; node?: XmlElement; index?: number };
     const units: Unit[] = [];
     for (const c of run.children) {
       if (c.kind !== "element" || c === rPrEl) continue;
       if (c.name === "w:t") {
         const chars = plan.deletedChars.get(c);
         const whole = plan.deletedNodes.get(c);
+        const fmts = plan.formatChars.get(c);
         const text = decodeText(src, c);
         for (let i = 0; i < text.length; i++) {
           const state = chars?.get(i) ?? whole ?? -1;
-          units.push({ state, xml: text[i], delXml: text[i], zeroWidth: false, node: c, index: i });
+          units.push({ state, fmt: fmts?.get(i) ?? -1, xml: text[i], delXml: text[i], zeroWidth: false, node: c, index: i });
         }
-        if (text.length === 0) units.push({ state: -1, xml: "", delXml: "", zeroWidth: true, node: c });
+        if (text.length === 0) units.push({ state: -1, fmt: -1, xml: "", delXml: "", zeroWidth: true, node: c });
         continue;
       }
       const deleted = plan.deletedNodes.get(c);
       const xml = sliceOf(src, c);
       const delXml = c.name === "w:instrText" ? xml.replace(/^<w:instrText\b/, "<w:delInstrText").replace(/<\/w:instrText>$/, "</w:delInstrText>") : xml;
       const known = deleted !== undefined || isVisibleRunChild(c.name);
-      units.push({ state: deleted ?? -1, xml, delXml, zeroWidth: !known, node: c });
+      units.push({ state: deleted ?? -1, fmt: plan.formatNodes.get(c) ?? -1, xml, delXml, zeroWidth: !known, node: c });
     }
-    // Invisible run children take the state of the deletion around them.
+    // Invisible run children take the state of the change around them.
     for (let k = 0; k < units.length; k++) {
       const u = units[k];
-      if (!u.zeroWidth || u.state !== -1) continue;
+      if (!u.zeroWidth || u.state !== -1 || u.fmt !== -1) continue;
       if (u.node && /^w:(fldChar|instrText)$/.test(u.node.name)) continue;
       const prev = units.slice(0, k).reverse().find((x) => !x.zeroWidth);
       const next = units.slice(k + 1).find((x) => !x.zeroWidth);
-      if (prev && next && prev.state !== -1 && prev.state === next.state) u.state = prev.state;
+      if (prev && next && prev.state === next.state && prev.fmt === next.fmt) {
+        u.state = prev.state;
+        u.fmt = prev.fmt;
+      }
     }
 
     const pieces: Piece[] = [];
-    let cur: { state: number; parts: string[]; text: string } | undefined;
+    let cur: { state: number; fmt: number; parts: string[]; text: string } | undefined;
     const flush = () => {
       if (!cur) return;
-      const body = cur.parts.join("") + textElement(cur.text, cur.state !== -1);
+      const deleted = cur.state !== -1;
+      const body = cur.parts.join("") + textElement(cur.text, deleted);
       if (body) {
-        pieces.push(cur.state === -1 ? { kind: "keep", xml: `${startTag}${rPr}${body}</w:r>` } : { kind: "del", change: cur.state, xml: `${startTag}${rPr}${body}</w:r>` });
+        if (deleted) pieces.push({ kind: "del", change: cur.state, xml: `${startTag}${rPr}${body}</w:r>` });
+        else {
+          const props = cur.fmt === -1 ? rPr : this.formattedRPr(src, rPrEl, cur.fmt);
+          pieces.push({ kind: "keep", xml: `${startTag}${props}${body}</w:r>` });
+        }
       }
       cur = undefined;
     };
     const add = (u: Unit) => {
-      if (!cur || cur.state !== u.state) {
+      if (!cur || cur.state !== u.state || cur.fmt !== u.fmt) {
         flush();
-        cur = { state: u.state, parts: [], text: "" };
+        cur = { state: u.state, fmt: u.fmt, parts: [], text: "" };
       }
       if (u.index !== undefined) cur.text += u.xml;
       else {
@@ -830,9 +1284,7 @@ class Editor {
     const insertHere = (list: Insertion[]) => {
       if (!list.length) return;
       flush();
-      for (const ins of list.sort((a, b) => a.order - b.order)) {
-        pieces.push({ kind: "ins", change: ins.change, xml: runXml(ins.rPr, ins.text) });
-      }
+      for (const ins of list.sort((a, b) => a.order - b.order)) pieces.push({ kind: "ins", change: ins.change, ins });
     };
     const matches = (ins: Insertion, u: Unit, side: "after" | "before") =>
       ins.at === "unit" && ins.side === side && ins.unit.node === u.node && (ins.unit as CharUnit).index === u.index;
@@ -847,7 +1299,7 @@ class Editor {
   }
 }
 
-type Piece = { kind: "keep"; xml: string } | { kind: "del"; change: number; xml: string } | { kind: "ins"; change: number; xml: string };
+type Piece = { kind: "keep"; xml: string } | { kind: "del"; change: number; xml: string } | { kind: "ins"; change: number; ins: Insertion };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -914,25 +1366,87 @@ function textElement(text: string, deleted: boolean): string {
   return `<${tag} xml:space="preserve">${encodeXmlText(text)}</${tag}>`;
 }
 
-/** Runs for new text: tabs and line breaks become w:tab and w:br. */
-export function runXml(rPr: string, text: string): string {
-  let body = "";
-  let buf = "";
-  const flush = () => {
-    if (buf) body += `<w:t xml:space="preserve">${encodeXmlText(buf)}</w:t>`;
-    buf = "";
-  };
-  for (const ch of text) {
-    if (ch === "\t") {
-      flush();
-      body += "<w:tab/>";
-    } else if (ch === "\n") {
-      flush();
-      body += "<w:br/>";
-    } else buf += ch;
+const HYPERLINK_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const FOOTNOTES_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes";
+const FOOTNOTES_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml";
+const RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+/** A footnotes part with Word's separator notes, for documents that have none. */
+const EMPTY_FOOTNOTES =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+  `<w:footnotes xmlns:w="${W_NS}" xmlns:r="${RELATIONSHIPS_NS}">` +
+  `<w:footnote w:type="separator" w:id="-1"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:separator/></w:r></w:p></w:footnote>` +
+  `<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>` +
+  `</w:footnotes>`;
+
+/** The namespace prefix a part's root declares for relationship ids ("r" in Word's files). */
+function relationshipPrefix(src: XmlSource): string | undefined {
+  for (const [k, v] of Object.entries(documentElement(src).attrs)) {
+    if (k.startsWith("xmlns:") && v === RELATIONSHIPS_NS) return k.slice(6);
   }
-  flush();
-  return `<w:r>${rPr}${body}</w:r>`;
+  return undefined;
+}
+
+/** A character style's id by display name (case-insensitive), e.g. "Hyperlink". */
+function characterStyleId(doc: DocxDocument, name: string): string | undefined {
+  const part = doc.pkg.relatedPart(MAIN_DOCUMENT_PART, "/styles");
+  const xml = part ? doc.pkg.xml(part) : undefined;
+  if (!xml) return undefined;
+  for (const style of childElements(documentElement(xml), "w:style")) {
+    if (style.attrs["w:type"] !== "character") continue;
+    const n = firstChild(style, "w:name")?.attrs["w:val"]?.toLowerCase();
+    if (n === name || style.attrs["w:styleId"]?.toLowerCase() === name.replace(/\s+/g, "")) return style.attrs["w:styleId"];
+  }
+  return undefined;
+}
+
+function findElement(root: XmlElement, test: (el: XmlElement) => boolean): XmlElement | undefined {
+  for (const c of root.children) {
+    if (c.kind !== "element") continue;
+    if (test(c)) return c;
+    const hit = findElement(c, test);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+function hasAncestor(el: XmlElement, name: string): boolean {
+  for (let e = el.parent; e; e = e.parent) if (e.name === name) return true;
+  return false;
+}
+
+function innerXml(src: XmlSource, el: XmlElement): string {
+  return el.contentStart === el.end ? "" : src.source.slice(el.contentStart, el.contentEnd);
+}
+
+/** A replace hunk that only wraps the same words in **…** or *…*: a formatting change. */
+function formatOnly(segments: RichSegment[], deleted: string): RunFormat | undefined {
+  if (segments.length !== 1 || segments[0].t !== "text") return undefined;
+  const seg = segments[0];
+  if (!seg.bold && !seg.italic) return undefined;
+  if (!deleted || normalize(seg.text).norm !== normalize(deleted).norm) return undefined;
+  return { bold: seg.bold || undefined, italic: seg.italic || undefined };
+}
+
+function describeFormat(fmt: RunFormat): string {
+  const parts: string[] = [];
+  const on = (v: boolean | undefined, name: string) => {
+    if (v !== undefined) parts.push(v ? name : `not ${name}`);
+  };
+  on(fmt.bold, "bold");
+  on(fmt.italic, "italic");
+  on(fmt.underline, "underlined");
+  on(fmt.strike, "struck through");
+  if (fmt.highlight !== undefined) parts.push(fmt.highlight === "none" ? "no highlight" : `${fmt.highlight} highlight`);
+  return `Formatting: ${parts.join(", ")}`;
+}
+
+/** Inserted content as a card shows it. */
+function cardText(segments: RichSegment[]): string {
+  return segments
+    .map((s) => (s.t === "text" ? s.text : s.t === "link" ? `${plainText(s.segments)} <${s.target}>` : ` [footnote: ${plainText(s.segments)}]`))
+    .join("");
 }
 
 const REVISION_IN_RPR = /^w:(ins|del|moveFrom|moveTo|rPrChange)$/;
@@ -1029,10 +1543,6 @@ function sameContainer(a: Slot, b: Slot): boolean {
   return ca !== undefined && ca === cb;
 }
 
-function sharedRevision(a: Slot, b: Slot): boolean {
-  return a.wrappers.some((w) => (w.kind === "ins" || w.kind === "del") && b.wrappers.includes(w));
-}
-
 /** The outermost wrapper of `slot` that starts/ends where `owner` does. */
 function outermostAt(slot: Slot, owner: Wrapper): Wrapper {
   const i = slot.wrappers.indexOf(owner);
@@ -1045,13 +1555,13 @@ function outermostAt(slot: Slot, owner: Wrapper): Wrapper {
   return out;
 }
 
-const TOKEN_SYNTAX = /\[\^e?\d+\]|\{(?:ref |image\}|equation\}|comment \d|page break\}|section break\}|textbox|symbol |embedded object\})|\{\+\+|\+\+\}|\{--|--\}|\]\((?:https?|mailto):/;
+const TOKEN_SYNTAX = /\[\^e?\d+\]|\{(?:ref |image\}|equation\}|comment \d|page break\}|section break\}|textbox|symbol |embedded object\})|\{\+\+|\+\+\}|\{--|--\}/;
 
 function checkTypedText(text: string): void {
   const m = text.match(TOKEN_SYNTAX);
   if (m) {
     fail(
-      `New text contains ${JSON.stringify(m[0])}, which is read_document notation, not document text. Footnote references, cross-references, links, images and tracked changes cannot be typed; keep existing ones by leaving them unchanged in find and replace.`,
+      `New text contains ${JSON.stringify(m[0])}, which is read_document notation, not document text. Existing footnote references, cross-references, images and tracked changes cannot be typed; keep them by leaving them unchanged in find and replace. New footnotes are written {footnote: text} and new links [text](https://…).`,
     );
   }
 }
@@ -1154,11 +1664,34 @@ function locate(line: string, find: string): Located {
 /** Notation tokens as read_document writes them; each diffs as one unit. */
 const NOTATION = /\[\^e?\d+\]|\{ref [^}]*\}|\{(?:image|equation|embedded object|page break|section break)\}|\{comment \d+\}|\{symbol [^}]*\}|\{textbox[^}]*\}|\{\+\+|\+\+\}|\{--[\s\S]*?--\}|\]\([^)\s]*\)/y;
 
-/** Split text into diff units: notation tokens, words, whitespace runs, single other characters. */
-function diffUnits(s: string): { text: string; start: number; kind: "token" | "word" | "space" | "punct" }[] {
+/** New-content markup that diffs as one unit: a footnote, bold or italic span. */
+const NEW_MARKUP = /\{footnote:[^{}]*\}|\*\*[^*\n]+\*\*|\*(?![\s*])[^*\n]+?\*(?!\*)/y;
+const FULL_LINK = /\[[^\]\n]+\]\(([^)\s]+)\)/y;
+
+/**
+ * Split text into diff units: notation tokens, words, whitespace runs, single
+ * other characters. A complete link whose target the other side does not
+ * have is one unit (a new or retargeted link replaces the old one whole);
+ * a link both sides share diffs word by word, so its text can be edited.
+ */
+function diffUnits(s: string, other = ""): { text: string; start: number; kind: "token" | "word" | "space" | "punct" }[] {
   const out: { text: string; start: number; kind: "token" | "word" | "space" | "punct" }[] = [];
   let i = 0;
   while (i < s.length) {
+    NEW_MARKUP.lastIndex = i;
+    const nm = NEW_MARKUP.exec(s);
+    if (nm) {
+      out.push({ text: nm[0], start: i, kind: "token" });
+      i += nm[0].length;
+      continue;
+    }
+    FULL_LINK.lastIndex = i;
+    const fl = FULL_LINK.exec(s);
+    if (fl && !other.includes(`](${fl[1]})`)) {
+      out.push({ text: fl[0], start: i, kind: "token" });
+      i += fl[0].length;
+      continue;
+    }
     NOTATION.lastIndex = i;
     const t = NOTATION.exec(s);
     if (t) {
@@ -1200,8 +1733,8 @@ interface Hunk {
  * merged across a notation token, which must stay untouched.
  */
 function diffHunks(find: string, replace: string): Hunk[] {
-  const a = diffUnits(find);
-  const b = diffUnits(replace);
+  const a = diffUnits(find, replace);
+  const b = diffUnits(replace, find);
   const same = (x: { text: string }, y: { text: string }) => normalize(x.text).norm === normalize(y.text).norm;
   // Trim the common prefix and suffix, then LCS on the middle.
   let pre = 0;
@@ -1318,6 +1851,27 @@ export function parseEditOps(raw: unknown): EditOp[] {
       return { op, after: str(e.after), before: str(e.before), paragraphs, style: str(e.style), reason };
     }
     if (op === "delete") return { op, block: block!, through: str(e.through), reason };
+    if (op === "delete_row") return { op, block: block!, through: str(e.through), reason };
+    if (op === "insert_row") {
+      const cells = Array.isArray(e.cells) ? e.cells.map((c) => str(c) ?? "") : [];
+      return { op, after: str(e.after), before: str(e.before), cells, reason };
+    }
+    if (op === "format") {
+      const bool = (v: unknown) => (typeof v === "boolean" ? v : v === "true" ? true : v === "false" ? false : v === undefined ? undefined : (v as boolean));
+      return {
+        op,
+        block: block!,
+        find: str(e.find),
+        bold: bool(e.bold),
+        italic: bool(e.italic),
+        underline: bool(e.underline),
+        strike: bool(e.strike),
+        highlight: str(e.highlight),
+        style: str(e.style),
+        align: str(e.align) as "left" | "center" | "right" | "justify" | undefined,
+        reason,
+      };
+    }
     if (op === "replace") return { op, block: block!, find: str(e.find)!, replace: str(e.replace)!, reason };
     return { op } as unknown as EditOp;
   });

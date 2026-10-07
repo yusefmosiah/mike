@@ -72,8 +72,12 @@ DOCUMENT EDITING:
   - replace: change words inside one paragraph. Copy find from the line with enough surrounding words to occur once in that paragraph, and change only what needs changing.
   - insert: add whole new paragraphs after or before a block.
   - delete: remove whole blocks (paragraphs, empty paragraphs, tables), alone or as a range with through.
+  - format: make words bold, italic, underlined, struck through or highlighted (or undo that), or change a paragraph's style or alignment.
+  - insert_row / delete_row: add a table row (one text per cell) or remove rows.
+  New text may use **bold**, *italic*, [text](https://…) for a new link and {footnote: text} for a new footnote. To edit an existing footnote's text, use the block id shown with it after the window.
+  Block ids stay valid across versions of the document: an id you read earlier still names the same paragraph after edits are accepted or rejected.
   Put all the edits for one request in one call: the ids you read stay valid for every edit in it. If the call reports errors, nothing was changed; fix the listed edits and send the whole set again.
-- Notation in read_document lines is not document text: [^3] footnote reference, {ref 4.2} cross-reference, [text](url) link, {++…++} and {--…--} existing tracked changes, {image}. Keep a token by leaving it unchanged in both find and replace; delete it by leaving it out of replace. Never type notation into replace or into new paragraphs, and never change existing tracked changes: the user accepts or rejects those.
+- Notation in read_document lines is not document text: [^3] footnote reference, {ref 4.2} cross-reference, [text](url) link, {++…++} and {--…--} existing tracked changes, {image}. Keep a token by leaving it unchanged in both find and replace; delete it by leaving it out of replace. Never type existing-content notation ([^3], {ref …}, {image}, {++…++}) into new text. You may edit inside someone else's pending insertion ({++…++}), but never accept or reject existing tracked changes: the user does that.
 - A clause number right after the block id comes from Word's list numbering, not from the text: Word renumbers clauses itself when you insert or delete them. Do not type those numbers into new paragraphs or edit them. Numbers typed as part of the text must be edited like any other text.
 When edit_document adds, deletes, moves, or reorders a numbered clause, section, schedule, exhibit, or list item:
 - Find the affected cross-references with find_in_document. {ref …} cross-references update themselves in Word; plain-text references (such as "Clause 12.3") need a replace edit.

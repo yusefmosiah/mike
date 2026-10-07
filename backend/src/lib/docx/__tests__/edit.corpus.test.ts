@@ -12,7 +12,7 @@ import { buildEditModel } from "../editModel";
 import { DocxPackage, MAIN_DOCUMENT_PART } from "../package";
 import { renderInlines } from "../render";
 import { resolveRevisions } from "../revisions";
-import { DocxDocument, type ParagraphBlock } from "../view";
+import { DocxDocument, type ParagraphBlock, type TableBlock } from "../view";
 import { childElements, documentElement, firstChild, scanXml, sliceOf } from "../xmlSource";
 
 const AUTHOR = "Mike Test";
@@ -35,13 +35,20 @@ const TRACKED = "powertools/features/TestFiles__RA001-Tracked-Revisions-01.docx"
  * "empty-paragraph-before-table": accepting a deleted paragraph that sits
  * directly before a table, LibreOffice keeps it as an empty paragraph;
  * Word (and our engine) remove it.
+ * "style-change-not-rejected": LibreOffice's Reject All does not restore a
+ * paragraph style recorded in w:pPrChange (it does restore numbering
+ * there); Word and our engine do.
+ * "footnote-in-inserted-paragraph": rejecting an inserted paragraph that
+ * holds a footnote reference, LibreOffice keeps it as an empty paragraph;
+ * Word and our engine remove it.
  */
-type LibreOfficeNote = "empty-paragraph-before-table";
+type LibreOfficeNote = "empty-paragraph-before-table" | "style-change-not-rejected" | "footnote-in-inserted-paragraph";
 
 /** Edited documents, checked again by LibreOffice at the end. */
-const forLibreOffice: { name: string; original: Buffer; edited: Buffer; note?: LibreOfficeNote }[] = [];
+const forLibreOffice: { name: string; file: string; original: Buffer; edited: Buffer; note?: LibreOfficeNote }[] = [];
 
 interface Edited {
+  splitRevisions: { from: string; to: string }[];
   original: Buffer;
   edited: Buffer;
   before: DocxDocument;
@@ -63,15 +70,22 @@ async function edit(file: string, ops: EditOp[], touched: string[], note?: Libre
   if (!res.ok) throw new Error(`edit failed: ${JSON.stringify(res.errors)}`);
   const edited = res.bytes;
 
-  // Package: only document.xml / notes may change.
+  // Package: only the story parts may change; relationship and content-type
+  // lists may only gain entries (new links, a new footnotes part).
   const a = await JSZip.loadAsync(original);
   const b = await JSZip.loadAsync(edited);
-  expect(Object.keys(b.files).sort()).toEqual(Object.keys(a.files).sort());
+  const added = Object.keys(b.files).filter((n) => !a.files[n]);
+  expect(Object.keys(a.files).every((n) => b.files[n])).toBe(true);
+  for (const n of added) expect(n).toMatch(/^word\/(footnotes\.xml|_rels\/footnotes\.xml\.rels)$/);
   for (const name of Object.keys(a.files)) {
     if (a.files[name].dir) continue;
     const x = await a.file(name)!.async("nodebuffer");
     const y = await b.file(name)!.async("nodebuffer");
-    if (!x.equals(y)) expect(name).toMatch(/^word\/(document|footnotes|endnotes)\.xml$/);
+    if (x.equals(y)) continue;
+    if (/^(\[Content_Types\]\.xml|word\/_rels\/(document|footnotes|endnotes)\.xml\.rels)$/.test(name)) {
+      const before = x.toString("utf8");
+      expect(y.toString("utf8").startsWith(before.slice(0, before.lastIndexOf("</"))), `${name} only gains entries`).toBe(true);
+    } else expect(name).toMatch(/^word\/(document|footnotes|endnotes)\.xml$/);
   }
 
   // Main part: untouched top-level elements appear verbatim, in order.
@@ -100,8 +114,9 @@ async function edit(file: string, ops: EditOp[], touched: string[], note?: Libre
   const rejectedBefore = await canonicalDocx((await resolveRevisions(original, "reject")).bytes);
   expect(rejectedAfter).toEqual(rejectedBefore);
 
-  forLibreOffice.push({ name: `${path.basename(file, ".docx")}-${forLibreOffice.length}`, original, edited, note });
+  forLibreOffice.push({ name: `${path.basename(file, ".docx")}-${forLibreOffice.length}`, file, original, edited, note });
   return {
+    splitRevisions: res.splitRevisions,
     original,
     edited,
     before,
@@ -467,6 +482,229 @@ describe("delete", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+const acceptedBytes = async (e: Edited) => (await resolveRevisions(e.edited, "accept")).bytes;
+const originalAccepted = async (e: Edited) => (await resolveRevisions(e.original, "accept")).bytes;
+
+/** Run properties of each character of `text` in paragraph `id` (text must occur once). */
+async function formatOf(bytes: Buffer, id: string, text: string): Promise<string[]> {
+  const chars = await formatted(bytes, id);
+  const plain = chars.map((c) => c.ch).join("");
+  const at = plain.indexOf(text);
+  expect(at, `"${text}" in ${id}`).toBeGreaterThanOrEqual(0);
+  return chars.slice(at, at + text.length).map((c) => c.fmt);
+}
+
+describe("format", () => {
+  it("bolds words as a tracked formatting change; everything else keeps its formatting", async () => {
+    const id = "0000011B";
+    const e = await edit(MSC, [{ op: "format", block: id, find: "the Services", bold: true }], [id]);
+    expect((await DocxPackage.load(e.edited)).text(MAIN_DOCUMENT_PART)).toContain("<w:rPrChange");
+    expect(body(e.acceptedAfter, id)).toBe(body(e.acceptedBefore, id));
+    for (const f of await formatOf(await acceptedBytes(e), id, "the Services")) expect(f).toContain("<w:b/>");
+    const was = await formatted(await originalAccepted(e), id);
+    const now = await formatted(await acceptedBytes(e), id);
+    const at = was.map((c) => c.ch).join("").indexOf("the Services");
+    expect(now.slice(0, at)).toEqual(was.slice(0, at));
+    expect(now.slice(at + "the Services".length)).toEqual(was.slice(at + "the Services".length));
+    await expectOthersUnchanged(e, [id]);
+  });
+
+  it("reads **term** around unchanged words as formatting, not new text", async () => {
+    const id = "0000011E";
+    const e = await edit(MSC, [{ op: "replace", block: id, find: "the Standards", replace: "the **Standards**" }], [id]);
+    expect(body(e.after, id)).toBe(body(e.before, id));
+    for (const f of await formatOf(await acceptedBytes(e), id, "Standards")) expect(f).toContain("<w:b/>");
+  });
+
+  it("removes bold and highlight from a placeholder", async () => {
+    const id = "p19";
+    const e = await edit(ACADEMY, [{ op: "format", block: id, find: "[Insert name of Local Authority]", bold: false, highlight: "none" }], [id]);
+    for (const f of await formatOf(await acceptedBytes(e), id, "[Insert name of Local Authority]")) {
+      expect(f).not.toMatch(/<w:b\/>|w:highlight/);
+    }
+  });
+
+  it("changes a paragraph's style and alignment", async () => {
+    const id = "00000124";
+    const e = await edit(MSC, [{ op: "format", block: id, style: "Numbered 1.1", align: "center" }], [id], "style-change-not-rejected");
+    const p = para(e.acceptedAfter, id);
+    expect(p.styleId).toBe("Numbered11");
+    const pPr = firstChild(p.el, "w:pPr")!;
+    expect(firstChild(pPr, "w:jc")?.attrs["w:val"]).toBe("center");
+    expect(para(e.after, id).styleId).toBe("Numbered11");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------
+
+describe("links", () => {
+  it("turns existing words into a new link", async () => {
+    const id = "0000011C";
+    const e = await edit(MSC, [{ op: "replace", block: id, find: "all applicable Law;", replace: "all applicable [Law](https://www.legislation.gov.uk);" }], [id]);
+    expect(body(e.acceptedAfter, id)).toBe("all applicable [Law](https://www.legislation.gov.uk);");
+    const rels = (await DocxPackage.load(e.edited)).text("word/_rels/document.xml.rels")!;
+    expect(rels).toContain('Target="https://www.legislation.gov.uk" TargetMode="External"');
+  });
+
+  it("retargets an existing link", async () => {
+    const id = "0000000F";
+    const old = "[modelservicescontract@cabinetoffice.gov.uk](mailto:modelservicescontract@cabinetoffice.gov.uk)";
+    const e = await edit(MSC, [{ op: "replace", block: id, find: old, replace: "[the MSC team](mailto:msc@cabinetoffice.gov.uk)" }], [id]);
+    expect(body(e.acceptedAfter, id)).toContain("[the MSC team](mailto:msc@cabinetoffice.gov.uk)");
+    expect(body(e.acceptedAfter, id)).not.toContain("mailto:modelservicescontract");
+  });
+
+  it("rejecting a new link leaves no empty link behind", async () => {
+    const id = "0000011C";
+    const e = await edit(MSC, [{ op: "replace", block: id, find: "all applicable Law;", replace: "all applicable Law, as [published](https://www.legislation.gov.uk);" }], [id]);
+    const count = (xml: string) => (xml.match(/<w:hyperlink\b/g) ?? []).length;
+    const rejected = (await DocxPackage.load((await resolveRevisions(e.edited, "reject")).bytes)).text(MAIN_DOCUMENT_PART)!;
+    expect(count(rejected)).toBe(count((await DocxPackage.load(e.original)).text(MAIN_DOCUMENT_PART)!));
+  });
+
+  it("refuses a new link inside an existing link, and unsafe targets", async () => {
+    expect((await rejected(MSC, [{ op: "replace", block: "0000000F", find: "Team at [modelservicescontract", replace: "Team at [[x](https://a.example) modelservicescontract" }]))[0].error).toMatch(/inside an existing link|break a link/);
+    expect((await rejected(MSC, [{ op: "replace", block: "0000011C", find: "all applicable Law;", replace: "all applicable [Law](javascript:alert(1));" }]))[0].error).toMatch(/must start with https/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Footnotes
+// ---------------------------------------------------------------------------
+
+describe("new footnotes", () => {
+  it("adds a footnote, with a link and italics in its text, to a document that has footnotes", async () => {
+    const id = "359E3AF6";
+    const e = await edit(
+      COMPLICATED,
+      [{ op: "replace", block: id, find: "prove your point.", replace: "prove your point.{footnote: See *Smith* at [page 4](https://example.com/smith).}" }],
+      [id],
+    );
+    expect(e.acceptedAfter.footnotes.size).toBe(e.acceptedBefore.footnotes.size + 1);
+    const line = body(e.acceptedAfter, id);
+    const mark = line.match(/prove your point\.\[\^(\d+)\]/)![1];
+    const note = [...e.acceptedAfter.footnotes.values()].find((n) => n.mark === mark)!;
+    expect(renderInlines(note.paragraphs[0].inlines).trim()).toBe("See Smith at [page 4](https://example.com/smith).");
+    // Rejected, the note itself is gone, not just its reference.
+    const rejectedNotes = (await DocxPackage.load((await resolveRevisions(e.edited, "reject")).bytes)).text("word/footnotes.xml")!;
+    expect(rejectedNotes).toBe((await DocxPackage.load(e.original)).text("word/footnotes.xml"));
+  });
+
+  it("adds the first footnote to a document without a footnotes part", async () => {
+    const id = "p28";
+    const e = await edit(ACADEMY, [{ op: "replace", block: id, find: "proposed name", replace: "proposed name{footnote: To be confirmed by the Secretary of State.}" }], [id]);
+    const pkg = await DocxPackage.load(e.edited);
+    expect(pkg.has("word/footnotes.xml")).toBe(true);
+    expect(pkg.text("[Content_Types].xml")).toContain('PartName="/word/footnotes.xml"');
+    expect(pkg.relatedPart(MAIN_DOCUMENT_PART, "/footnotes")).toBe("word/footnotes.xml");
+    expect(e.acceptedAfter.footnotes.size).toBe(1);
+    expect(renderInlines([...e.acceptedAfter.footnotes.values()][0].paragraphs[0].inlines).trim()).toBe("To be confirmed by the Secretary of State.");
+  });
+
+  it("adds a footnote inside an inserted paragraph", async () => {
+    const e = await edit(
+      MSC,
+      [{ op: "insert", after: "00000124", paragraphs: ["report **monthly** to the Authority.{footnote: Reports follow Schedule 2.2.}"] }],
+      [],
+      "footnote-in-inserted-paragraph",
+    );
+    const p = para(e.after, "00000124+1");
+    expect(renderInlines(p.inlines)).toMatch(/^\{\+\+report monthly to the Authority\.\[\^\d+\]\+\+\}$/);
+    for (const f of await formatOf(await acceptedBytes(e), e.acceptedAfter.paragraphs.find((x) => x.text.startsWith("report monthly"))!.id, "monthly")) {
+      expect(f).toContain("<w:b/>");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Table rows
+// ---------------------------------------------------------------------------
+
+describe("table rows", () => {
+  const tableOf = (doc: DocxDocument, id: string) => doc.byId.get(para(doc, id).cell!.tableId) as TableBlock;
+
+  it("inserts a row shaped like its neighbour; accepting adds it, rejecting removes it", async () => {
+    const doc = await DocxDocument.load(readCorpusFile(MSC));
+    const table = tableOf(doc, "00000021");
+    const n = table.rows[para(doc, "00000021").cell!.row].cells.length;
+    const cells = Array.from({ length: n }, (_, i) => `new ${i + 1}`);
+    const e = await edit(MSC, [{ op: "insert_row", after: "00000021", cells }], [table.id]);
+    const after = e.after.byId.get(table.id) as TableBlock;
+    expect(after.rows.length).toBe(table.rows.length + 1);
+    const row = after.rows[para(doc, "00000021").cell!.row + 1];
+    expect(row.revision).toBe("ins");
+    expect(row.cells.map((c) => (c.blocks[0] as ParagraphBlock).text)).toEqual(cells);
+    const accepted = e.acceptedAfter.blocks.find((b) => b.kind === "table" && b.rows.length === table.rows.length + 1);
+    expect(accepted).toBeDefined();
+  });
+
+  it("inserts a row before the first row of a table by table id", async () => {
+    const doc = await DocxDocument.load(readCorpusFile(MSC));
+    const table = tableOf(doc, "00000021");
+    const cells = table.rows[0].cells.map(() => "header");
+    const e = await edit(MSC, [{ op: "insert_row", before: table.id, cells }], [table.id]);
+    expect((e.after.byId.get(table.id) as TableBlock).rows[0].revision).toBe("ins");
+  });
+
+  it("deletes a range of rows", async () => {
+    const doc = await DocxDocument.load(readCorpusFile(MSC));
+    const table = tableOf(doc, "00000021");
+    const r = para(doc, "00000021").cell!.row;
+    const first = (table.rows[r].cells[0].blocks[0] as ParagraphBlock).id;
+    const last = (table.rows[r + 1].cells[0].blocks[0] as ParagraphBlock).id;
+    const e = await edit(MSC, [{ op: "delete_row", block: first, through: last }], [table.id]);
+    const after = e.after.byId.get(table.id) as TableBlock;
+    expect(after.rows[r].revision).toBe("del");
+    expect(after.rows[r + 1].revision).toBe("del");
+    const tables = (d: DocxDocument) => d.blocks.filter((b): b is TableBlock => b.kind === "table").map((t) => t.rows.length);
+    const was = tables(e.acceptedBefore);
+    const now = tables(e.acceptedAfter);
+    expect(now.reduce((a, b) => a + b, 0)).toBe(was.reduce((a, b) => a + b, 0) - 2);
+  });
+
+  it("asks for one text per cell", async () => {
+    expect((await rejected(MSC, [{ op: "insert_row", after: "00000021", cells: ["only one"] }]))[0].error).toMatch(/give \d+ cell texts/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inside another author's insertion
+// ---------------------------------------------------------------------------
+
+describe("inside another author's insertion", () => {
+  const target = async () => {
+    const doc = await DocxDocument.load(readCorpusFile(TRACKED));
+    return doc.paragraphs.find((x) => renderInlines(x.inlines) === "{++Order of injection:++}")!.id;
+  };
+
+  it("types into it by splitting it, as Word does", async () => {
+    const id = await target();
+    const e = await edit(TRACKED, [{ op: "replace", block: id, find: "{++Order of injection:++}", replace: "{++Order of sample injection:++}" }], [id]);
+    expect(body(e.after, id)).toBe("{++Order of ++}{++sample ++}{++injection:++}");
+    expect(e.splitRevisions).toHaveLength(1);
+    const count = (d: DocxDocument, text: string) => d.paragraphs.filter((x) => x.text === text).length;
+    expect(count(e.acceptedAfter, "Order of sample injection:")).toBe(1);
+    // Accepting only the other author's insertion (its original id and the split one) leaves ours pending.
+    const { from, to } = e.splitRevisions[0];
+    const theirs = await DocxDocument.load((await resolveRevisions(e.edited, "accept", [from, to])).bytes);
+    expect(theirs.paragraphs.some((x) => renderInlines(x.inlines) === "Order of {++sample ++}injection:")).toBe(true);
+  });
+
+  it("replaces words inside it", async () => {
+    const id = await target();
+    const e = await edit(TRACKED, [{ op: "replace", block: id, find: "{++Order of injection:++}", replace: "{++Sequence of injection:++}" }], [id]);
+    expect(body(e.after, id)).toBe("{++{--Order--}++}{++Sequence++}{++ of injection:++}");
+    const count = (d: DocxDocument, text: string) => d.paragraphs.filter((x) => x.text === text).length;
+    expect(count(e.acceptedAfter, "Sequence of injection:")).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Batches
 // ---------------------------------------------------------------------------
 
@@ -539,15 +777,15 @@ describe.skipIf(!runLibreOffice)("LibreOffice", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "docx-lo-"));
     type Job = { in: string; mode: string; out: string };
     const groups: Job[][] = [];
-    const originals = new Map<Buffer, string>();
+    const originals = new Map<string, string>();
     const cases = [];
     for (const f of forLibreOffice) {
-      let orig = originals.get(f.original);
+      let orig = originals.get(f.file);
       if (!orig) {
         orig = path.join(dir, `original-${originals.size}.docx`);
         writeFileSync(orig, f.original);
         writeFileSync(`${orig}.ours-accepted.docx`, (await resolveRevisions(f.original, "accept")).bytes);
-        originals.set(f.original, orig);
+        originals.set(f.file, orig);
         groups.push([
           { in: orig, mode: "reject", out: `${orig}.rejected.txt` },
           { in: orig, mode: "accept", out: `${orig}.accepted.txt` },
@@ -588,7 +826,18 @@ describe.skipIf(!runLibreOffice)("LibreOffice", () => {
       return { removed: x.slice(pre, x.length - suf), added: y.slice(pre, y.length - suf) };
     };
     for (const c of cases) {
-      expect(read(`${c.edited}.rejected.txt`), `${c.name}: LibreOffice reject-all`).toBe(read(`${c.orig}.rejected.txt`));
+      if (c.note === "footnote-in-inserted-paragraph") {
+        // Exactly one extra empty (label-only) line; removing it, everything agrees.
+        const lo = read(`${c.edited}.rejected.txt`).split("\n");
+        const want = read(`${c.orig}.rejected.txt`);
+        expect(lo.join("\n"), `${c.name}: the noted LibreOffice difference still occurs`).not.toBe(want);
+        const extra = lo.findIndex((l, i) => /^\s*[\w.()]+\s*$/.test(l) && [...lo.slice(0, i), ...lo.slice(i + 1)].join("\n") === want);
+        expect(extra, `${c.name}: LibreOffice reject-all differs only by one empty paragraph`).toBeGreaterThanOrEqual(0);
+      } else if (c.note === "style-change-not-rejected") {
+        expect(read(`${c.edited}.rejected.txt`), `${c.name}: the noted LibreOffice difference still occurs`).not.toBe(read(`${c.orig}.rejected.txt`));
+      } else {
+        expect(read(`${c.edited}.rejected.txt`), `${c.name}: LibreOffice reject-all`).toBe(read(`${c.orig}.rejected.txt`));
+      }
       // Accept-all: the edit changes LibreOffice's result exactly as it changes ours.
       // (Where the original already has tracked changes the two engines may
       // resolve those differently; see the RA001 note in the mission receipt.)

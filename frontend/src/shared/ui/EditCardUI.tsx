@@ -73,6 +73,9 @@ export function EditCardUI({
     const hasReplacement =
         replacementText !== undefined && replacementText !== "";
     const hasOriginal = originalText !== undefined && originalText !== "";
+    // A formatting change keeps the words and changes how they look: show
+    // them once, unmarked; the reason line says what changed.
+    const formatOnly = hasOriginal && hasReplacement && originalText === replacementText;
     const resolved = status === "accepted" || status === "rejected";
     const controlsDisabled = actionsDisabled || busyAction !== undefined;
     const showApply = !!onApply || busyAction === "apply";
@@ -120,6 +123,8 @@ export function EditCardUI({
                 >
                     {previewContent !== undefined ? (
                         previewContent
+                    ) : formatOnly ? (
+                        <span className="text-gray-700">{originalText}</span>
                     ) : (
                         <>
                             {hasReplacement && (

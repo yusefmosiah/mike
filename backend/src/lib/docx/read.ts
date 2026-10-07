@@ -37,7 +37,7 @@ const OUTLINE_MAX_ENTRIES = 200;
 
 export const DOCX_READ_LEGEND =
   "Format: one block per line, [id] first. Labels are clause numbers. " +
-  "[^n] footnote (text after the window), {ref 4.2} live cross-reference, " +
+  "[^n] footnote (its text after the window, with its own block id), {ref 4.2} live cross-reference, " +
   "[text](url) link, {++text++}/{--text--} tracked insertion/deletion, " +
   "{image}/{equation}/{textbox: …} non-text content, " +
   "rNcM table cell. Tokens are not document text.";

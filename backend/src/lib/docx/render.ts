@@ -325,7 +325,12 @@ export function renderWindow(doc: DocxDocument, req: WindowRequest = {}): Render
   if (notes.length) {
     lines.push("");
     for (const n of notes) {
-      const body = n.paragraphs.map((p) => renderInlines(p.inlines, opts).trim()).filter(Boolean).join(" / ");
+      // Each note paragraph carries its block id, so its text can be edited.
+      const body = n.paragraphs
+        .map((p) => ({ p, text: renderInlines(p.inlines, opts).trim() }))
+        .filter((x) => x.text)
+        .map((x) => `[${x.p.id}] ${x.text}`)
+        .join(" / ");
       lines.push(`[^${n.kind === "endnote" ? "e" : ""}${n.mark}]: ${body}`);
     }
   }

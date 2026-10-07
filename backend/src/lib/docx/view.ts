@@ -252,6 +252,41 @@ export class DocxDocument {
     return new DocxDocument(pkg);
   }
 
+  /**
+   * Replace the default ids of the id-bearing blocks (body and cell
+   * paragraphs and tables, in document order) with `ids`, e.g. ids carried
+   * from an earlier version. Returns false, changing nothing, when the list
+   * does not fit this document.
+   */
+  relabel(ids: readonly string[]): boolean {
+    const slots: Block[] = [];
+    const visit = (list: readonly Block[]) => {
+      for (const b of list) {
+        if (b.kind === "paragraph") slots.push(b);
+        else if (b.kind === "table") {
+          slots.push(b);
+          for (const row of b.rows) for (const cell of row.cells) visit(cell.blocks);
+        }
+      }
+    };
+    visit(this.blocks);
+    if (ids.length !== slots.length || new Set(ids).size !== ids.length) return false;
+    const others = new Set([...this.byId.keys()].filter((id) => !slots.some((b) => b.id === id)));
+    if (ids.some((id) => others.has(id))) return false;
+    const renamed = new Map<string, string>();
+    slots.forEach((b, i) => {
+      renamed.set(b.id, ids[i]);
+      this.byId.delete(b.id);
+    });
+    slots.forEach((b, i) => {
+      b.id = ids[i];
+      this.byId.set(b.id, b);
+    });
+    for (const p of this.paragraphs) if (p.cell) p.cell = { ...p.cell, tableId: renamed.get(p.cell.tableId) ?? p.cell.tableId };
+    for (const [name, id] of this.bookmarks) this.bookmarks.set(name, renamed.get(id) ?? id);
+    return true;
+  }
+
   source(part: string = MAIN_DOCUMENT_PART): XmlSource {
     return this.pkg.xml(part)!;
   }
@@ -356,6 +391,22 @@ export class DocxDocument {
     return table;
   }
 
+  private readonly partLinks = new Map<string, Map<string, string>>();
+
+  /** Hyperlink targets by relationship id, for the part a link sits in. */
+  private linkTargets(part: string): Map<string, string> {
+    if (part === MAIN_DOCUMENT_PART) return this.hyperlinks;
+    let map = this.partLinks.get(part);
+    if (!map) {
+      map = new Map();
+      for (const rel of this.pkg.relationships(part).values()) {
+        if (rel.type.endsWith(REL.hyperlink)) map.set(rel.id, rel.target);
+      }
+      this.partLinks.set(part, map);
+    }
+    return map;
+  }
+
   /**
    * Word's w14:paraId when present and unique. Otherwise an ordinal counted
    * over paragraphs whose mark is not a tracked insertion; an inserted
@@ -454,7 +505,7 @@ export class DocxDocument {
         const rid = child.attrs["r:id"];
         out.push({
           t: "link",
-          target: rid ? this.hyperlinks.get(rid) : undefined,
+          target: rid ? this.linkTargets(part).get(rid) : undefined,
           anchor: child.attrs["w:anchor"],
           content: this.readInlines(child, bookmarks, part) as Inline[],
           el: child,

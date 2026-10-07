@@ -4,6 +4,21 @@ import { describe, expect, it, vi } from "vitest";
 import { EditCardUI } from "./EditCardUI";
 
 describe("EditCardUI", () => {
+    it("shows a formatting change's words once, unmarked", () => {
+        render(
+            <EditCardUI
+                originalText="the Services"
+                replacementText="the Services"
+                reason="Formatting: bold"
+                status="pending"
+            />,
+        );
+        expect(screen.getAllByText("the Services")).toHaveLength(1);
+        expect(screen.getByText("the Services")).not.toHaveClass("line-through");
+        expect(screen.getByText("the Services")).not.toHaveClass("text-green-700");
+        expect(screen.getByText("Formatting: bold")).toBeInTheDocument();
+    });
+
     it("renders normalized edit content and delegates every action", async () => {
         const user = userEvent.setup();
         const onView = vi.fn();

@@ -68,8 +68,7 @@ boundaries:
     - Per-turn version reuse, read guards, and the edit card flow in the UI.
     - Authorization and project-sharing checks on accept/reject.
   excluded:
-    - Carrying block IDs across versions (Mission 1c). IDs are stable within a batch and across the batches of one turn.
-    - Formatting changes (bold, styles) as edits; table row/column insertion; moves.
+    - Table column insertion; moves.
     - Headers, footers and text boxes as edit targets.
     - The Word add-in edit path (word_document_edits).
 
@@ -86,11 +85,11 @@ receipts:
   - action: npm test --prefix backend -- src/lib/docx/__tests__/revisions.oracle.test.ts
     result: "107 passed (107). 101 references match exactly; 6 listed before the run as known differences, each a reference defect confirmed by inspection (empty tables, moved-paragraph marks, cell gridSpan, a reject twin from another source)."
   - action: MIKE_LIBREOFFICE_TESTS=1 npm test --prefix backend -- src/lib/docx/__tests__/edit.corpus.test.ts
-    result: "34 passed (34): 7 edit-model invariants over every paragraph of 7 documents, 24 edits on Word-authored files (MSC core terms and schedules, EPA CRADA, academy transfer agreement, PowerTools footnote/tracked-revision files), 3 batch/atomicity checks, and LibreOffice's own accept-all/reject-all of all 24 edited documents."
+    result: "51 passed (51): edit-model invariants over every paragraph of 7 documents; 38 edited Word-authored documents (replace, insert, delete, format, new links and footnotes, table rows, edits inside another author's insertion) each checked for byte preservation, reject-all equal to the original, and accept-all equal to the requested change; batch/atomicity checks; and LibreOffice's own accept-all/reject-all of every edited document, with four LibreOffice differences noted (see below)."
   - action: cd backend && npx tsx scripts/probe-docx-editing.ts (local stack: docker compose up -d db auth rest gateway db-init mailpit storage createbucket)
-    result: "PROBE PASSED: 15/15 checks. One edit_document batch (replace, insert, range delete across a table, empty-paragraph delete) through runToolCalls on uk-msc-core-terms-v2.2a.docx; get_diff listed 4 changes, lint valid; accept and reject through documents.service; a batch with one bad block id created no version."
+    result: "PROBE PASSED: 26/26 checks. One edit_document batch with every kind of edit (replace, insert, range delete across a table, empty-paragraph delete, bold, new footnote, new link, new table row) through runToolCalls; get_diff lists all 8, lint valid; a second turn types inside the first turn's pending insertion and the earlier card gains the split id; accept/reject through documents.service; a batch with one bad block id creates no version; block ids stable across an accepted insert (1c)."
   - action: npm test --prefix backend
-    result: "4215 passed, 51 skipped, 0 failed."
+    result: "4240 passed, 51 skipped, 0 failed."
 ---
 
 # Mission 1b: Tracked-Change Editing
@@ -149,20 +148,41 @@ Part of Mission 1 in [`goals/STATUS.md`](STATUS.md). Builds on
 - **Byte preservation:** for every edit, unedited parts are byte-identical
   and every top-level element outside the edited blocks appears verbatim.
 
+## Added after the first review
+
+The owner asked for these before moving on; they are built and verified the
+same way (corpus tests, LibreOffice, the stack probe):
+
+- **format** op: bold, italic, underline, strike and highlight on words
+  (tracked as w:rPrChange), paragraph style and alignment (w:pPrChange).
+  `**term**` around unchanged words in a replace is a formatting change.
+- **New links and footnotes** in inserted text: `[text](https://…)` and
+  `{footnote: text}`, with **bold** and *italic*. A new footnotes part,
+  relationship and content type are created when a document has none.
+  Rejecting removes the note or the emptied link, not just the reference.
+  Footnote text is listed with its own block ids, so it can be edited.
+- **insert_row / delete_row**: tracked table rows, shaped like the
+  neighbouring row (widths, spans, paragraph formatting).
+- **Typing inside another author's pending insertion**: the insertion is
+  split around the new text, as Word does; the split half gets a new
+  revision id, which is added to any card that owned the original.
+- **Block ids across versions**: Mission 1c,
+  [`mission-1c-block-ids.md`](mission-1c-block-ids.md).
+
 ## Known differences and limits
 
-- LibreOffice keeps an empty paragraph when a deleted paragraph sits directly
-  before a table; Word and our engine remove it. LibreOffice also keeps the
-  text of RA001's own deleted table rows after Accept All. Both are noted in
-  the test, which checks that the rest of the result agrees.
-- Not supported yet: formatting changes (bold, style changes on existing
-  text), new footnotes or links, table row/column insertion, moves, typing
-  inside another author's pending insertion (deleting inside one works, as
-  Word does it), deleting a w:fldSimple field (its shell remains), and block
-  ids carried across versions (1c).
+- LibreOffice differs from Word in four places, each noted in the test,
+  which checks that the rest of the result agrees: it keeps an empty
+  paragraph when a deleted paragraph sits directly before a table; it keeps
+  the text of RA001's own deleted table rows after Accept All; its Reject
+  All does not restore a paragraph style recorded in w:pPrChange (it does
+  restore numbering there); and rejecting an inserted paragraph that holds
+  a footnote reference leaves an empty paragraph.
+- Not supported: table column insertion, moves, deleting a w:fldSimple
+  field (its shell remains), new comments.
 - Inserted text takes the formatting of the text it replaces (Word's rule),
-  so filling a highlighted placeholder keeps the highlight. Quotes are typed
-  as the model sends them; the document's curly quotes are not imposed.
+  so filling a highlighted placeholder keeps the highlight unless a format
+  edit removes it. Quotes are typed as the model sends them.
 
 ## Fixed along the way
 

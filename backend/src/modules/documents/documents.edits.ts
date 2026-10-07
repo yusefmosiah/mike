@@ -5,6 +5,9 @@ import { randomUUID } from "node:crypto";
 import { downloadFile, uploadFile, deleteFileBestEffort, versionStorageKey } from "../../lib/storage";
 import { extractTrackedChangeIds } from "../../lib/docxTrackedChanges";
 import { resolveRevisions } from "../../lib/docx/revisions";
+import { carryBlockIds } from "../../lib/docx/blockIds";
+import { DocxDocument } from "../../lib/docx/view";
+import { blockIdsRecord, docxViewForVersion, type StoredBlockIds } from "./documents.blockIds";
 import { buildDownloadUrl } from "../../lib/downloadTokens";
 import { contentSha256, loadActiveVersion } from "../../lib/documentVersions";
 import { ensureDocAccess } from "../../lib/access";
@@ -202,6 +205,14 @@ export async function resolveEdit(
         resolvedBytes.byteOffset,
         resolvedBytes.byteOffset + resolvedBytes.byteLength,
     ) as ArrayBuffer;
+    // The version keeps naming its paragraphs by the same block ids.
+    let blockIds: StoredBlockIds | undefined;
+    try {
+        const before = await docxViewForVersion(db, documentId, active.id, Buffer.from(raw));
+        blockIds = blockIdsRecord(resolvedBytes, carryBlockIds(before, await DocxDocument.load(resolvedBytes)));
+    } catch {
+        blockIds = undefined; // re-derived on the next read
+    }
     const nextPath = versionStorageKey(userId, documentId, randomUUID(), active?.filename || "document.docx");
     await uploadFile(nextPath, ab, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     const { data: updated, error: versionErr } = await updateDocumentVersion(
@@ -213,6 +224,7 @@ export async function resolveEdit(
             content_sha256: contentSha256(ab),
             pdf_storage_path: null,
             size_bytes: ab.byteLength,
+            ...(blockIds ? { block_ids: blockIds } : {}),
         },
         { expectedStoragePath: latestPath },
     );

@@ -75,6 +75,8 @@ export type DocumentVersionPatch = Partial<
 > & {
   content_sha256?: string | null;
   created_at?: string;
+  /** Block ids for these bytes (see documents.blockIds.ts). */
+  block_ids?: { sha256: string; ids: string[] } | null;
 };
 
 /** Only live versions within the authorized document can be replaced. */

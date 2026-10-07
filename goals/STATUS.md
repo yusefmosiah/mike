@@ -20,7 +20,7 @@ disagrees, this file wins.
 
 | # | Station | State | What is actually there |
 |---|---|---|---|
-| 1 | Document AST and block tools | awaiting owner review | Rebuilt as Mission 1a (document model, segmented reading) and 1b (tracked-change editing). The old block tools are removed. Edits address blocks by id, split only the runs they touch, keep formatting, footnote references, links and fields, and resolve against the document as read; batches are all-or-nothing. See [`mission-1b-docx-editing.md`](mission-1b-docx-editing.md). Block ids across versions is 1c. |
+| 1 | Document AST and block tools | awaiting owner review | Rebuilt as Mission 1a (document model, segmented reading) and 1b (tracked-change editing). The old block tools are removed. Edits address blocks by id, split only the runs they touch, keep formatting, footnote references, links and fields, and resolve against the document as read; batches are all-or-nothing. Formatting, new links and footnotes, table rows and edits inside pending insertions are tracked changes too, and block ids carry across versions. See [`mission-1b-docx-editing.md`](mission-1b-docx-editing.md) and [`mission-1c-block-ids.md`](mission-1c-block-ids.md). |
 | 2 | `get_diff` and linter | awaiting owner review | The linter (now with revision-structure checks) gates every edit before a version is created or overwritten. `get_diff` queried a column that does not exist and always reported no edits against a real database; fixed and pinned by a test. |
 | 3 | Search and citations | partial | Four search adapters and `fetchPage` work. Citation checking is substring matching only; snapshots live in a process-wide in-memory map (unbounded, lost on restart). `fetchPage` follows redirects and checks DNS before, not at, connect time. Search API calls have no strict-mode gate. |
 | 4 | Context resilience and compaction | partial | JSON repair and paginated `read_document` are real. Compaction is never called from the chat engine. The Snapcompact font is ASCII-only (`§`, curly quotes and dashes render as `?`). |
@@ -53,9 +53,10 @@ One mission at a time. A mission is done only when the owner accepts it.
    - Acceptance: real human-authored `.docx` fixtures (13+ pages, tables,
      footnotes, mixed formatting, existing tracked changes). Untouched parts
      unchanged; accept-all and reject-all in Word give the right documents.
-   - Progress: 1a (document model, segmented reading) and 1b (editing,
-     gate, tools and prompt) are built and awaiting owner review; 1c (block
-     ids across versions) is next.
+   - Progress: 1a (document model, segmented reading), 1b (editing, gate,
+     tools and prompt, plus formatting, new links and footnotes, table rows
+     and edits inside pending insertions) and 1c (block ids across versions)
+     are built and awaiting owner review.
 2. **Compaction that triggers**
    - Wire the policy into the streaming loop: post-turn, at tool-loop
      boundaries, and on overflow recovery.

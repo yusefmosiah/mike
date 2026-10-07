@@ -6,9 +6,9 @@
 // property changes (rPrChange, pPrChange, ...). Each part is rewritten
 // through XmlPatch, so XML that holds no affected revision is unchanged.
 
-import { DocxPackage } from "./package";
+import { DocxPackage, MAIN_DOCUMENT_PART, REL } from "./package";
 import { XmlPatch } from "./patch";
-import { documentElement, type XmlElement, type XmlSource } from "./xmlSource";
+import { childElements, documentElement, type XmlElement, type XmlSource } from "./xmlSource";
 
 export type RevisionMode = "accept" | "reject";
 
@@ -75,11 +75,40 @@ export async function resolveRevisions(
 export function resolveInPackage(pkg: DocxPackage, mode: RevisionMode, ids?: Iterable<string>): Set<string> {
   const selected = ids === undefined ? undefined : new Set([...ids].map(String));
   const found = new Set<string>();
+  const refsBefore = { footnote: noteRefs(pkg, "footnote"), endnote: noteRefs(pkg, "endnote") };
   for (const part of revisionParts(pkg)) {
     const text = resolveInPart(pkg.xml(part)!, mode, selected, found);
     if (text !== undefined) pkg.setText(part, text);
   }
+  // A note whose reference went away with a resolved change goes too, as in Word.
+  for (const kind of ["footnote", "endnote"] as const) {
+    const after = noteRefs(pkg, kind);
+    const gone = [...refsBefore[kind]].filter((id) => !after.has(id));
+    if (gone.length) removeNotes(pkg, kind, new Set(gone));
+  }
   return found;
+}
+
+function noteRefs(pkg: DocxPackage, kind: "footnote" | "endnote"): Set<string> {
+  const out = new Set<string>();
+  const re = new RegExp(`<w:${kind}Reference\\b[^>]*?\\bw:id="(-?\\d+)"`, "g");
+  for (const part of pkg.partNames()) {
+    if (!/^word\/[^/]+\.xml$/i.test(part)) continue;
+    for (const m of (pkg.text(part) ?? "").matchAll(re)) out.add(m[1]);
+  }
+  return out;
+}
+
+function removeNotes(pkg: DocxPackage, kind: "footnote" | "endnote", ids: Set<string>): void {
+  const part = pkg.relatedPart(MAIN_DOCUMENT_PART, kind === "footnote" ? REL.footnotes : REL.endnotes);
+  const xml = part ? pkg.xml(part) : undefined;
+  if (!part || !xml) return;
+  const patch = new XmlPatch(xml);
+  for (const note of childElements(documentElement(xml), `w:${kind}`)) {
+    if (note.attrs["w:type"]) continue; // separators
+    if (ids.has(note.attrs["w:id"] ?? "")) patch.remove(note);
+  }
+  if (!patch.isEmpty) pkg.setText(part, patch.toString());
 }
 
 /** Returns the rewritten part, or undefined when nothing in it was selected. */
@@ -202,6 +231,18 @@ export function resolveInPart(
   for (const t of tables) {
     if (rowsOf(t).every((r) => patch.isGone(r))) patch.remove(t);
   }
+
+  // Hyperlinks whose runs all went away go too.
+  const runs = (el: XmlElement, live: boolean): boolean =>
+    el.children.some((c) => c.kind === "element" && (live && patch.isGone(c) ? false : c.name === "w:r" || runs(c, live)));
+  const links = (el: XmlElement) => {
+    for (const c of el.children) {
+      if (c.kind !== "element") continue;
+      if (c.name === "w:hyperlink" && !patch.isGone(c) && runs(c, false) && !runs(c, true)) patch.remove(c);
+      else links(c);
+    }
+  };
+  links(documentElement(doc));
 
   // Paragraph merges, in document order so chains resolve front to back.
   removedMarks.sort((a, b) => a.start - b.start);

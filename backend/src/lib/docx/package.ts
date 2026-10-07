@@ -5,7 +5,7 @@
 // back and every other entry keeps its original content.
 
 import JSZip from "jszip";
-import { childElements, documentElement, scanXml, type XmlSource } from "./xmlSource";
+import { childElements, documentElement, encodeXmlAttr, scanXml, type XmlSource } from "./xmlSource";
 
 export const MAIN_DOCUMENT_PART = "word/document.xml";
 
@@ -113,6 +113,46 @@ export class DocxPackage {
     else this.modified.set(path, text);
   }
 
+  /** Add a new XML part (and its content-type override). */
+  addPart(path: string, text: string, contentType: string): void {
+    if (this.has(path)) throw new DocxPackageError(`Part ${path} already exists`);
+    this.entryNames.set(path, path);
+    this.texts.set(path, "");
+    this.encodings.set(path, "utf-8");
+    this.modified.set(path, text);
+    const types = this.text(CONTENT_TYPES_PART);
+    if (types !== undefined && !types.includes(`PartName="/${path}"`)) {
+      this.setText(
+        CONTENT_TYPES_PART,
+        types.replace(/<\/Types>\s*$/, `<Override PartName="/${encodeXmlAttr(path)}" ContentType="${encodeXmlAttr(contentType)}"/></Types>`),
+      );
+    }
+  }
+
+  /**
+   * Add a relationship from a part and return its id. Creates the part's
+   * .rels file if it has none.
+   */
+  addRelationship(fromPart: string, type: string, target: string, external: boolean): string {
+    const relsPath = relsPathFor(fromPart);
+    const existing = this.relationships(fromPart);
+    let n = existing.size + 1;
+    while (existing.has(`rId${n}`)) n++;
+    const id = `rId${n}`;
+    const rel = `<Relationship Id="${id}" Type="${encodeXmlAttr(type)}" Target="${encodeXmlAttr(target)}"${external ? ' TargetMode="External"' : ""}/>`;
+    const text = this.text(relsPath);
+    if (text === undefined) {
+      this.addPart(
+        relsPath,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rel}</Relationships>`,
+        "application/vnd.openxmlformats-package.relationships+xml",
+      );
+    } else {
+      this.setText(relsPath, text.replace(/<\/Relationships>\s*$/, `${rel}</Relationships>`));
+    }
+    return id;
+  }
+
   isModified(): boolean {
     return this.modified.size > 0;
   }
@@ -134,8 +174,7 @@ export class DocxPackage {
 
   /** Relationships of a part, e.g. word/document.xml -> word/_rels/document.xml.rels. */
   relationships(partPath: string): Map<string, Relationship> {
-    const slash = partPath.lastIndexOf("/");
-    const relsPath = `${partPath.slice(0, slash + 1)}_rels/${partPath.slice(slash + 1)}.rels`;
+    const relsPath = relsPathFor(partPath);
     const out = new Map<string, Relationship>();
     const rels = this.xml(relsPath);
     if (!rels) return out;
@@ -160,6 +199,14 @@ export class DocxPackage {
     }
     return undefined;
   }
+}
+
+export const CONTENT_TYPES_PART = "[Content_Types].xml";
+
+/** word/document.xml -> word/_rels/document.xml.rels */
+export function relsPathFor(partPath: string): string {
+  const slash = partPath.lastIndexOf("/");
+  return `${partPath.slice(0, slash + 1)}_rels/${partPath.slice(slash + 1)}.rels`;
 }
 
 export function resolvePartPath(fromPart: string, target: string): string {

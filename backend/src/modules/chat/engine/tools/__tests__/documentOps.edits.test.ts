@@ -7,6 +7,12 @@ const mocks = vi.hoisted(() => ({
   uploadFile: vi.fn(),
   apply: vi.fn(),
   gate: vi.fn(),
+  saveBlockIds: vi.fn(),
+}));
+vi.mock("../../../../documents/documents.service", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  docxViewForVersion: vi.fn(async () => ({ blocks: [] })),
+  saveBlockIds: mocks.saveBlockIds,
 }));
 vi.mock("../../../../../lib/documentVersions", () => ({
   loadActiveVersion: mocks.active,
@@ -59,6 +65,8 @@ beforeEach(() => {
     ok: true,
     bytes: Buffer.from("edited"),
     changes: [change],
+    splitRevisions: [],
+    blockIds: ["p1", "p1+1"],
   });
   mocks.gate.mockResolvedValue({ ok: true });
 });
@@ -158,8 +166,41 @@ describe("assistant document-edit lifecycle", () => {
         w_ids: ["del", "ins", "mark"],
       }),
     ]);
+    // The new version stores the block ids carried from the one it was edited from.
+    expect(mocks.saveBlockIds).toHaveBeenCalledWith(fake.db, "doc", "version", Buffer.from("edited"), ["p1", "p1+1"]);
     fake.done();
   });
+  it("gives an earlier card the new id when an edit splits its insertion", async () => {
+    mocks.apply.mockResolvedValue({
+      ok: true,
+      bytes: Buffer.from("edited"),
+      changes: [change],
+      splitRevisions: [{ from: "7", to: "99" }],
+      blockIds: [],
+    });
+    const fake = scriptedDb([
+      ...initial(),
+      { table: "document_versions", data: { filename: "Renamed.docx" } },
+      { table: "document_edits", op: "insert", data: [editRow] },
+      {
+        table: "document_edits",
+        data: [
+          { id: "earlier", del_w_id: null, ins_w_id: "7", w_ids: ["7"] },
+          { id: "unrelated", del_w_id: "3", ins_w_id: null, w_ids: ["3"] },
+        ],
+      },
+      { table: "document_edits", op: "update" },
+    ]);
+    const rpc = vi.fn(async (name: string) =>
+      name === "create_document_version" ? { data: { id: "version", version_number: 9 }, error: null } : { data: true, error: null },
+    );
+    expect((await run({ ...fake.db, rpc } as unknown as Db)).ok).toBe(true);
+    const update = fake.calls.find((c) => c.table === "document_edits" && c.op === "update")!;
+    expect(update.payload).toEqual({ w_ids: ["7", "99"] });
+    expect(update.filters).toContainEqual(["eq", "id", "earlier"]);
+    fake.done();
+  });
+
   it("changes nothing when an edit fails, and lists every failure", async () => {
     mocks.apply.mockResolvedValue({
       ok: false,

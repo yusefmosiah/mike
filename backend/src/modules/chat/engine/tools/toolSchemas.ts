@@ -515,7 +515,7 @@ export const TOOLS = [
     function: {
       name: "edit_document",
       description:
-        "Propose edits to a user-attached .docx as tracked changes the user can accept or reject, in Mike or in Word. Edits target blocks by the ids read_document and find_in_document show. All edits in one call are checked against the document as you read it, so ids stay valid throughout the call; if any edit fails, nothing is changed and every problem is reported. Formatting, footnote references, links and cross-references outside the changed words are kept. Returns one Accept/Reject card per edit.",
+        "Propose edits to a user-attached .docx as tracked changes the user can accept or reject, in Mike or in Word. Edits target blocks by the ids read_document and find_in_document show; ids stay valid across versions, so an id read earlier still names the same paragraph. All edits in one call are checked against the document as you read it; if any edit fails, nothing is changed and every problem is reported. Formatting, footnotes, links and cross-references outside the changed words are kept. Returns one Accept/Reject card per edit.",
       parameters: {
         type: "object",
         properties: {
@@ -526,36 +526,36 @@ export const TOOLS = [
           edits: {
             type: "array",
             description:
-              "The edits, each one of: replace (change words inside one paragraph), insert (add new paragraphs), delete (remove whole blocks: paragraphs, empty paragraphs, tables, or a range of them).",
+              "The edits, each one of: replace (change words inside one paragraph), insert (add new paragraphs), delete (remove whole blocks: paragraphs, empty paragraphs, tables, or a range of them), format (bold/italic/underline/strike/highlight on words, or a paragraph's style or alignment), insert_row / delete_row (table rows). New text in replace, insert and insert_row may use **bold**, *italic*, [link text](https://…) for a new link, and {footnote: note text} for a new footnote at that point; write \\* for a literal asterisk.",
             items: {
               type: "object",
               properties: {
                 op: {
                   type: "string",
-                  enum: ["replace", "insert", "delete"],
+                  enum: ["replace", "insert", "delete", "format", "insert_row", "delete_row"],
                 },
                 block: {
                   type: "string",
                   description:
-                    "replace, delete: the target block id, e.g. '0000029F'. For text in a table, use the id of the paragraph inside the cell.",
+                    "replace, delete, format, delete_row: the target block id, e.g. '0000029F'. For text in a table, or a table row, use the id of a paragraph inside the cell. Footnote text has its own ids, shown after the window.",
                 },
                 find: {
                   type: "string",
                   description:
-                    "replace: the words to change, copied from the block's line, with enough around them to occur once in that block. Only what differs between find and replace becomes a tracked change. Tokens such as [^3], {ref 4.2} or [text](url) may be included; keep them unchanged in replace, or leave them out of replace to delete them.",
+                    "replace: the words to change, copied from the block's line, with enough around them to occur once in that block. Only what differs between find and replace becomes a tracked change. Tokens such as [^3], {ref 4.2} or [text](url) may be included; keep them unchanged in replace, or leave them out of replace to delete them. format: the words to format (default: the whole paragraph).",
                 },
                 replace: {
                   type: "string",
                   description:
-                    "replace: the new text for find. An empty string deletes find. Plain text only; read_document notation cannot be typed.",
+                    "replace: the new text for find. An empty string deletes find. Wrapping unchanged words in **…** or *…* makes them bold or italic as a formatting change.",
                 },
                 after: {
                   type: "string",
-                  description: "insert: block id to insert after.",
+                  description: "insert: block id to insert after. insert_row: id of a paragraph in the row to insert after, or a table id (after its last row).",
                 },
                 before: {
                   type: "string",
-                  description: "insert: block id to insert before (instead of after).",
+                  description: "insert, insert_row: as after, but before.",
                 },
                 paragraphs: {
                   type: "array",
@@ -563,15 +563,33 @@ export const TOOLS = [
                   description:
                     "insert: the new paragraphs' text, one string per paragraph. Do not type clause numbers that the document's list numbering provides.",
                 },
+                cells: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "insert_row: one text per cell of the neighbouring row (\"\" for an empty cell).",
+                },
                 style: {
                   type: "string",
                   description:
-                    "insert: paragraph style name for the new paragraphs. Default: formatted like the anchor paragraph.",
+                    "insert: paragraph style name for the new paragraphs (default: like the anchor paragraph). format: the new paragraph style.",
+                },
+                bold: { type: "boolean", description: "format: make the words bold (true) or not bold (false)." },
+                italic: { type: "boolean", description: "format: italic on or off." },
+                underline: { type: "boolean", description: "format: underline on or off." },
+                strike: { type: "boolean", description: "format: strikethrough on or off." },
+                highlight: {
+                  type: "string",
+                  description: "format: highlight colour (yellow, green, cyan, magenta, blue, red, darkBlue, darkCyan, darkGreen, darkMagenta, darkRed, darkYellow, darkGray, lightGray, black, white), or none to remove it.",
+                },
+                align: {
+                  type: "string",
+                  enum: ["left", "center", "right", "justify"],
+                  description: "format: paragraph alignment.",
                 },
                 through: {
                   type: "string",
                   description:
-                    "delete: last block id of a range to delete, in the same body, table cell or note as block.",
+                    "delete: last block id of a range to delete, in the same body, table cell or note as block. delete_row: a paragraph in the last row to delete.",
                 },
                 reason: {
                   type: "string",
