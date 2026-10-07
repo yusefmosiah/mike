@@ -68,13 +68,13 @@ boundaries:
     - Crawling non-public intranet networks without credentials
 
 now:
-  status: working
+  status: complete
   slice: modular-search-and-web-citations
-  source_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
+  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
   deploy_identity: local-docker-compose
   candidate:
-    id: candidate-search-init
-    state: ready
+    id: candidate-search-landed
+    state: landed
     ref: main
     base: 60efb702ecfa50ca438b4dfae233cf9704e67d26
     digest: none
@@ -88,8 +88,10 @@ now:
     edge: resource
     delta_o: Synthetic citation verification test suite.
     scope_if_supported: Assistant research engine.
-    status: proposed
-    evidence_refs: []
+    status: promoted_to_assertion
+    evidence_refs:
+      - backend/src/lib/search/__tests__/search.test.ts
+      - backend/src/modules/chat/engine/verifyCitations.test.ts
   decision:
     what: Support Keenable as primary search provider with Tavily, Exa, and Parallel adapters.
     kind: operational
@@ -97,13 +99,27 @@ now:
     evidence_ref: user-prompt-2026-10-06
     owner_ratification_ref: user-prompt-2026-10-06
   belief:
-    believed_state: verifyCitations.ts already handles document and CourtListener quotes cleanly.
-    main_uncertainty: Entailment verifier latency and whether it requires a fast local model or heuristic check.
-    next_observation: Testing fast entailment scoring using System 1 classifier.
+    believed_state: Modular search and web citation verification operational and verified on main.
+    main_uncertainty: none
+    next_observation: Station 4 core usability upgrades (Pi-tree branching and local audio).
   blocker_or_risk: none
-  next_action: Implement backend/src/lib/search/ with Keenable, Tavily, Exa, Parallel and web citation extensions.
+  next_action: none
 
-receipts: []
+receipts:
+  - id: station-3-landed
+    boundary: terminal
+    identity: 51fb62c
+    proof_refs:
+      - backend/src/lib/search/__tests__/search.test.ts
+      - backend/src/modules/chat/engine/verifyCitations.test.ts
+    rollback_ref: 60efb70
+    disposition: Station 3 landed on main with passing 84-test suite.
+    landing:
+      source_commit: 51fb62c
+      ci_ref: local_vitest_84_passed
+      deploy_ref: docker_compose_backend_rebuilt
+      environment_identity: local-docker-compose
+      deployed_acceptance: curl -f http://localhost:3000/health
 ---
 
 # Station 3: Modular Search & Extended Citation Verification

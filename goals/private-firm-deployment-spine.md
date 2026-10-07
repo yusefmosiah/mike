@@ -24,12 +24,12 @@ metamission:
     - id: station-3-modular-search-and-citations
       path: goals/station-3-modular-search-and-citations.md
       readiness: executable
-      status: working
+      status: complete
       depends_on: [station-2-self-verification-and-diff]
     - id: station-4-core-usability-branching-voice
       path: goals/station-4-core-usability-branching-voice.md
-      readiness: drafted
-      status: pending
+      readiness: executable
+      status: working
       depends_on: [station-3-modular-search-and-citations]
     - id: station-5-auto-mode-and-guardrails
       path: goals/station-5-auto-mode-and-guardrails.md
@@ -117,8 +117,8 @@ boundaries:
 
 now:
   status: working
-  slice: station-3-modular-search-and-citations
-  source_ref: 60efb702ecfa50ca438b4dfae233cf9704e67d26
+  slice: station-4-core-usability-branching-voice
+  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
   deploy_identity: local-docker-compose
   candidate:
     id: candidate-spine-init
@@ -175,6 +175,15 @@ receipts:
       - backend/src/modules/chat/engine/tools/__tests__/documentOps.diff.test.ts
     rollback_ref: 3a37928
     disposition: Station 2 landed on main with passing 46-test suite.
+  - id: station-3-complete
+    boundary: implement
+    identity: 51fb62c
+    proof_refs:
+      - goals/station-3-modular-search-and-citations.md
+      - backend/src/lib/search/__tests__/search.test.ts
+      - backend/src/modules/chat/engine/verifyCitations.test.ts
+    rollback_ref: 60efb70
+    disposition: Station 3 landed on main with passing 84-test suite.
 ---
 
 # Metamission: Private Firm Deployment Spine

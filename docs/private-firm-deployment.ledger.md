@@ -66,3 +66,21 @@ Append-only record of moves, observations, and settlement receipts across the pr
   - Pushed to `origin/main` at commit `60efb70`.
 - **Verdict**: Station 2 conjecture `c-self-verification-yield` promoted to assertion. Station 2 marked `complete`.
 - **Progression**: Advanced metamission spine `now.slice` to `station-3-modular-search-and-citations`. Station 3 promoted to `readiness: executable`, `now.status: working`.
+
+---
+
+## Pass 4: Station 3 Execution & Settlement (Modular Search & Web Citations)
+- **Timestamp**: 2026-10-06T23:45:00Z
+- **Canonical Ref**: `51fb62c64ee3e60dd66b885ad6c30f40ce72fae5`
+- **Move Type**: `construct` & `settle` (Station 3 landed on main)
+- **Claim**: Modular search architecture supporting Keenable, Tavily, Exa, and Parallel with SSRF guards and snapshot quote verification eliminates hallucinated web citations while preventing unauthorized network egress.
+- **Action**:
+  - Implemented `backend/src/lib/search/` with `assertSafeEgressUrl` (SSRF/private mode guards) and adapters for Keenable, Tavily, Exa, and Parallel.
+  - Implemented `fetchPage` snapshot cache hashing and storing fetched HTML/text for immutable quote verification.
+  - Extended `backend/src/modules/chat/engine/verifyCitations.ts` with `verifyWebCitationAnnotation` validating web quotes against cached snapshots.
+  - Exposed `web_search` and `fetch_web_page` in `toolSchemas.ts` and `toolDispatcher.ts`.
+  - Added unit test suite in `backend/src/lib/search/__tests__/search.test.ts` (6/6 passed) and extended `verifyCitations.test.ts` (32/32 passed).
+  - Rebuilt backend container and verified full 84-test suite.
+  - Pushed to `origin/main` at commit `51fb62c`.
+- **Verdict**: Station 3 conjecture `c-modular-search-grounding` promoted to assertion. Station 3 marked `complete`.
+- **Progression**: Advanced metamission spine `now.slice` to `station-4-core-usability-branching-voice`. Station 4 promoted to `readiness: executable`, `now.status: working`.
