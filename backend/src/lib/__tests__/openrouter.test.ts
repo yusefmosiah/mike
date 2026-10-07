@@ -680,6 +680,11 @@ describe("OpenCode Go LLM adapter", () => {
     });
 
     it("names OpenCode Go when no key is configured", async () => {
+        // The adapter also reads ambient OPENCODE_API_KEY /
+        // OPENCODE_GO_API_KEY; a developer shell with either set would
+        // take the request path instead of the no-key error.
+        vi.stubEnv("OPENCODE_API_KEY", "");
+        vi.stubEnv("OPENCODE_GO_API_KEY", "");
         await expect(
             completeWithProvider({
                 model: "opencode-go/glm-5",
@@ -688,6 +693,7 @@ describe("OpenCode Go LLM adapter", () => {
         ).rejects.toThrow(
             "OpenCode Go API key is not configured. Set OPENCODE_API_KEY",
         );
+        vi.unstubAllEnvs();
     });
 
     it("uses the Messages endpoint for Qwen and MiniMax models", async () => {
