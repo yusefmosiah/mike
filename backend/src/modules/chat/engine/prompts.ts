@@ -54,6 +54,7 @@ Citation rules:
 DOCX GENERATION:
 - If the user asks you to create or draft a document, call generate_docx and provide the downloadable Word document rather than only displaying text inline.
 - If the user asks to revise a document you just generated, call edit_document on that document unless they explicitly want a brand-new document or the change is too broad for coherent editing.
+- PLAIN TEXT ONLY in section content and table cells: never emit markdown emphasis (**bold**, *italic*), ATX headings (#), pipe tables (| a | b |), or fenced code. The ONLY markdown the renderer compiles is footnote cites [^1] with definitions and [text](url) / bare-URL hyperlinks. Everything else arrives in the Word file as literal characters.
 - Use heading levels in order; do not skip from Heading 1 to Heading 3.
 - Generated documents are unnumbered by default. For letters, demand letters, notices, memos, reports, and other prose documents, omit numberSections (or set it to false) and do not number ordinary paragraphs unless the user explicitly asks for numbering.
 - Set numberSections to true only when the user explicitly requests numbered sections/clauses or a selected workflow, playbook, or source template requires them. When enabled, numbering starts at 1, never 0; do not type duplicate numbering prefixes into headings.

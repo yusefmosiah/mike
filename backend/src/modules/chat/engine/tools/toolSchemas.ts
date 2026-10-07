@@ -558,12 +558,12 @@ export const TOOLS = [
                 start_id: {
                   type: "string",
                   description:
-                    "Starting block ID for delete_blocks (e.g. 'p_10').",
+                    "Starting block ID for delete_blocks (e.g. 'p_10'). Accepts startId spelling.",
                 },
                 end_id: {
                   type: "string",
                   description:
-                    "Ending block ID for delete_blocks (e.g. 'p_70').",
+                    "Ending block ID for delete_blocks (e.g. 'p_70'). Accepts endId spelling.",
                 },
                 scope: {
                   type: "string",
@@ -573,7 +573,7 @@ export const TOOLS = [
                 after_id: {
                   type: "string",
                   description:
-                    "Block ID to insert after for insert_block (null/omitted = insert at top of document).",
+                    "Block ID to insert after for insert_block (null/omitted = insert at top of document). Accepts afterId spelling.",
                 },
                 content: {
                   type: "string",
@@ -586,23 +586,24 @@ export const TOOLS = [
                 },
                 block_id: {
                   type: "string",
-                  description: "Target block ID for replace_block (e.g. 'p_5').",
+                  description:
+                    "Target block ID for replace_block (e.g. 'p_5'). Accepts blockId spelling.",
                 },
                 new_content: {
                   type: "string",
-                  description: "New text content for replace_block.",
+                  description:
+                    "New text content for replace_block. Accepts newContent spelling.",
                 },
                 expected_content: {
                   type: "string",
                   description:
-                    "Precondition check for replace_block: fails closed if actual block text does not match.",
+                    "Precondition check for replace_block: fails closed if actual block text does not match. Accepts expectedContent spelling.",
                 },
                 reason: {
                   type: "string",
                   description: "Short explanation shown to the user on the card.",
                 },
               },
-              required: ["op"],
             },
           },
           edits: {

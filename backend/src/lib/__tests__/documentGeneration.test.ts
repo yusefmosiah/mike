@@ -339,3 +339,24 @@ describe("generateDocx hyperlinks", () => {
     );
   });
 });
+
+describe("generateDocx emphasis", () => {
+  it("compiles markdown bold and italic into native runs, not literal markers", async () => {
+    const { documentXml } = await generatedXml({
+      sections: [
+        {
+          heading: "Findings",
+          content:
+            "The **purchase price** is final and the *closing date* is fixed.",
+        },
+      ],
+    });
+
+    const price = paragraphContaining(documentXml, "purchase price");
+    expect(price).toContain("<w:b/>");
+    expect(price).not.toContain("**");
+    const closing = paragraphContaining(documentXml, "closing date");
+    expect(closing).toContain("<w:i/>");
+    expect(closing).not.toContain("*closing date*");
+  });
+});

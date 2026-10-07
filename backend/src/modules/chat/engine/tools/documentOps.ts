@@ -173,6 +173,46 @@ export async function generateDocx(
     const LINK_REGEX =
       /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)|(https?:\/\/[^\s,;\)\]\>]+)/g;
 
+    // Inline emphasis the model emits despite the plain-text contract:
+    // **bold**, *italic*, __bold__, _italic_. Compiled to native runs;
+    // anything else markdown stays literal (see DOCX GENERATION prompt).
+    const parseRunsWithEmphasis = (
+      inputText: string,
+      font: string = FONT,
+      size: number = SIZE,
+    ): InstanceType<typeof TextRun>[] => {
+      const runs: InstanceType<typeof TextRun>[] = [];
+      const regex = /(\*\*.+?\*\*|\*[^*]+?\*|__.+?__|\b_[^_]+?_\b)/g;
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(inputText)) !== null) {
+        if (match.index > lastIndex) {
+          runs.push(
+            new TextRun({
+              text: inputText.substring(lastIndex, match.index),
+              font,
+              size,
+            }),
+          );
+        }
+        const token = match[0];
+        const bold = token.startsWith("**") || token.startsWith("__");
+        const inner = bold ? token.slice(2, -2) : token.slice(1, -1);
+        runs.push(
+          new TextRun({ text: inner, font, size, bold, italics: !bold }),
+        );
+        lastIndex = regex.lastIndex;
+      }
+      if (lastIndex < inputText.length) {
+        runs.push(
+          new TextRun({ text: inputText.substring(lastIndex), font, size }),
+        );
+      }
+      return runs.length > 0
+        ? runs
+        : [new TextRun({ text: inputText, font, size })];
+    };
+
     const parseRunsWithLinks = (
       inputText: string,
       font: string = FONT,
@@ -190,11 +230,11 @@ export async function generateDocx(
       while ((match = LINK_REGEX.exec(inputText)) !== null) {
         if (match.index > lastIndex) {
           runs.push(
-            new TextRun({
-              text: inputText.substring(lastIndex, match.index),
+            ...parseRunsWithEmphasis(
+              inputText.substring(lastIndex, match.index),
               font,
               size,
-            }),
+            ),
           );
         }
         if (match[1]) {
@@ -242,11 +282,11 @@ export async function generateDocx(
       }
       if (lastIndex < inputText.length) {
         runs.push(
-          new TextRun({
-            text: inputText.substring(lastIndex),
+          ...parseRunsWithEmphasis(
+            inputText.substring(lastIndex),
             font,
             size,
-          }),
+          ),
         );
       }
       return runs.length > 0

@@ -1523,7 +1523,36 @@ export async function runToolCalls(
             }))
           : undefined;
         const operations = Array.isArray(args.operations)
-          ? (args.operations as BlockOperation[])
+          ? (args.operations as Record<string, unknown>[]).map(
+              (op): BlockOperation => {
+                // The schema advertises snake_case; the AST speaks camelCase.
+                // Accept either spelling, snake first, so models send one key.
+                const pick = (...keys: string[]): string | undefined => {
+                  for (const key of keys) {
+                    const value = op[key];
+                    if (typeof value === "string" && value) return value;
+                  }
+                  return undefined;
+                };
+                const base = { ...op, op: op.op } as Record<string, unknown>;
+                const startId = pick("start_id", "startId");
+                const endId = pick("end_id", "endId");
+                const afterId = pick("after_id", "afterId");
+                const blockId = pick("block_id", "blockId");
+                const newContent = pick("new_content", "newContent");
+                const expectedContent = pick("expected_content", "expectedContent");
+                if (startId !== undefined) base.startId = startId;
+                if (endId !== undefined) base.endId = endId;
+                if (afterId !== undefined) base.afterId = afterId;
+                if (blockId !== undefined) base.blockId = blockId;
+                if (newContent !== undefined) base.newContent = newContent;
+                if (expectedContent !== undefined)
+                  base.expectedContent = expectedContent;
+                if (typeof base.content !== "string" && newContent !== undefined)
+                  base.content = newContent;
+                return base as unknown as BlockOperation;
+              },
+            )
           : undefined;
         const reuseVersion = turnEditState?.get(indexed.document_id);
         const result = await runEditDocument({
@@ -1635,10 +1664,22 @@ export async function runToolCalls(
           }),
         });
       } else {
-        const startId = args.start_id ? String(args.start_id) : undefined;
-        const endId = args.end_id ? String(args.end_id) : undefined;
+        const pickId = (...keys: string[]): string | undefined => {
+          for (const key of keys) {
+            const value = args[key];
+            if (typeof value === "string" && value) return value;
+          }
+          return undefined;
+        };
+        const startId = pickId("start_id", "startId");
+        const endId = pickId("end_id", "endId");
         const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const includeEmpty = Boolean(args.include_empty);
+        const includeEmpty =
+          typeof args.include_empty === "boolean"
+            ? args.include_empty
+            : typeof args.includeEmpty === "boolean"
+              ? args.includeEmpty
+              : false;
         const result = await runReadBlocks({
           documentId: indexed.document_id,
           db,
