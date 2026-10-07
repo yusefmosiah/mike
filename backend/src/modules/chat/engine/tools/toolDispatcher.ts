@@ -57,7 +57,6 @@ import {
   findInDocumentContent,
   findTextMatches,
   runEditDocument,
-  runReadBlocks,
   runGetDiff,
   safeGeneratedFilename,
   type DocEditedResult,
@@ -67,7 +66,6 @@ import {
   type DocReplicatedResult,
   type TextMatch,
 } from "./documentOps";
-import type { BlockOperation } from "../../../../lib/docxAST";
 import {
   search as webSearch,
   fetchPage as webFetchPage,
@@ -1514,10 +1512,10 @@ export async function runToolCalls(
           content: JSON.stringify({ error: err }),
         });
       } else if (
-        (!Array.isArray(editsRaw) || editsRaw.length === 0) &&
-        (!Array.isArray(args.operations) || (args.operations as unknown[]).length === 0)
+        !Array.isArray(editsRaw) ||
+        editsRaw.length === 0
       ) {
-        const err = "Either operations or edits array is required and must not be empty.";
+        const err = "edits array is required and must not be empty.";
         emitEditError(docInfo.filename, indexed.document_id, err);
         toolResults.push({
           role: "tool",
@@ -1539,53 +1537,20 @@ export async function runToolCalls(
             filename: docInfo.filename,
           })}\n\n`,
         );
-        const edits: EditInput[] | undefined = Array.isArray(editsRaw)
-          ? (editsRaw as Record<string, unknown>[]).map((e) => ({
-              find: String(e.find ?? ""),
-              replace: String(e.replace ?? ""),
-              context_before: String(e.context_before ?? ""),
-              context_after: String(e.context_after ?? ""),
-              reason: e.reason ? String(e.reason) : undefined,
-            }))
-          : undefined;
-        const operations = Array.isArray(args.operations)
-          ? (args.operations as Record<string, unknown>[]).map(
-              (op): BlockOperation => {
-                // The schema advertises snake_case; the AST speaks camelCase.
-                // Accept either spelling, snake first, so models send one key.
-                const pick = (...keys: string[]): string | undefined => {
-                  for (const key of keys) {
-                    const value = op[key];
-                    if (typeof value === "string" && value) return value;
-                  }
-                  return undefined;
-                };
-                const base = { ...op, op: op.op } as Record<string, unknown>;
-                const startId = pick("start_id", "startId");
-                const endId = pick("end_id", "endId");
-                const afterId = pick("after_id", "afterId");
-                const blockId = pick("block_id", "blockId");
-                const newContent = pick("new_content", "newContent");
-                const expectedContent = pick("expected_content", "expectedContent");
-                if (startId !== undefined) base.startId = startId;
-                if (endId !== undefined) base.endId = endId;
-                if (afterId !== undefined) base.afterId = afterId;
-                if (blockId !== undefined) base.blockId = blockId;
-                if (newContent !== undefined) base.newContent = newContent;
-                if (expectedContent !== undefined)
-                  base.expectedContent = expectedContent;
-                if (typeof base.content !== "string" && newContent !== undefined)
-                  base.content = newContent;
-                return base as unknown as BlockOperation;
-              },
-            )
-          : undefined;
+        const edits: EditInput[] = (editsRaw as Record<string, unknown>[]).map(
+          (e) => ({
+            find: String(e.find ?? ""),
+            replace: String(e.replace ?? ""),
+            context_before: String(e.context_before ?? ""),
+            context_after: String(e.context_after ?? ""),
+            reason: e.reason ? String(e.reason) : undefined,
+          }),
+        );
         const reuseVersion = turnEditState?.get(indexed.document_id);
         const result = await runEditDocument({
           documentId: indexed.document_id,
           userId,
           edits,
-          operations,
           db,
           reuseVersion,
         });
@@ -1669,56 +1634,6 @@ export async function runToolCalls(
             }),
           });
         }
-      }
-    } else if (tc.function.name === "read_blocks" && docIndex) {
-      const rawDocId = args.doc_id as string;
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
-      const docInfo = docStore.get(docId);
-      const indexed = docIndex?.[docId];
-      if (!docInfo || !indexed) {
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: `Document '${docId}' not found.` }),
-        });
-      } else if (docInfo.file_type !== "docx") {
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({
-            error: "read_blocks only supports .docx files.",
-          }),
-        });
-      } else {
-        const pickId = (...keys: string[]): string | undefined => {
-          for (const key of keys) {
-            const value = args[key];
-            if (typeof value === "string" && value) return value;
-          }
-          return undefined;
-        };
-        const startId = pickId("start_id", "startId");
-        const endId = pickId("end_id", "endId");
-        const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const includeEmpty =
-          typeof args.include_empty === "boolean"
-            ? args.include_empty
-            : typeof args.includeEmpty === "boolean"
-              ? args.includeEmpty
-              : false;
-        const result = await runReadBlocks({
-          documentId: indexed.document_id,
-          db,
-          startId,
-          endId,
-          limit,
-          includeEmpty,
-        });
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(result),
-        });
       }
     } else if (tc.function.name === "get_diff" && docIndex) {
       const rawDocId = args.doc_id as string;

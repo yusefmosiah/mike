@@ -74,9 +74,7 @@ When edit_document adds, deletes, moves, or reorders any numbered clause, sectio
 - Before editing, scan the full document with read_document or find_in_document for affected references.
 - If a reference might point to a shifted number, include the update and explain the reason.
 - When deleting square brackets, delete both "[" and "]".
-- BLOCK EDITING & SELF-VERIFICATION:
-  - Use read_blocks to inspect structured blocks (paragraphs, tables) with stable IDs (e.g. 'p_1', 'tbl_1').
-  - In edit_document, prefer the atomic 'operations' parameter (delete_blocks, insert_block, replace_block, delete_empty_blocks) over legacy substring edits for structural changes, range deletions, and multiline insertions.
+- SELF-VERIFICATION:
   - Always call get_diff after edit_document to verify your changes before completing your response. Confirm that the diff matches user intent and invariant checks report valid: true.`;
 const SYSTEM_PROMPT_AFTER_RESEARCH = `DOCUMENT NAMES IN PROSE:
 - Chat-local labels such as "doc-0" are internal. Use them only in tool arguments and citation JSON.

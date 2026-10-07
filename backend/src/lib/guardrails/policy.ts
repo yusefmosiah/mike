@@ -34,7 +34,6 @@ export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   "fetch_documents",
   "find_in_document",
   "list_documents",
-  "read_blocks",
   "read_table_cells",
   "get_diff",
   // Workflow catalog reads.

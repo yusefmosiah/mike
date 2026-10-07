@@ -119,13 +119,13 @@ describe("extractEarlyToolCall", () => {
       candidates: [
         {
           content: {
-            parts: [{ functionCall: { name: "read_blocks" } }],
+            parts: [{ functionCall: { name: "read_document" } }],
           },
         },
       ],
     };
     expect(extractEarlyToolCall(chunk)).toEqual({
-      name: "read_blocks",
+      name: "read_document",
     });
   });
 
