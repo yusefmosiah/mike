@@ -125,9 +125,9 @@ boundaries:
     - Rewriting the frontend in a non-Next.js framework
     - Arbitrary cloud model bypasses under strict private mode
 
-  status: working
-  slice: station-10-mobile-client-and-ocr
-  source_ref: b0e80cc
+  status: complete
+  slice: all-stations-landed
+  source_ref: 7cb661a
   candidate:
     id: candidate-spine-init
     state: ready
@@ -157,7 +157,7 @@ boundaries:
     main_uncertainty: Complexity of OpenXML paragraph mark deletions and table row revisions in Station 1.
     next_observation: Authoring and executing Station 1 goal file for in-memory AST and block tools.
   blocker_or_risk: none
-  next_action: Advance Station 10 (mobile client + OCR); Station 9 landed at b0e80cc.
+  next_action: Metamission complete; all 10 stations landed. See receipts.
 
 receipts:
   - id: station-1-complete
@@ -242,6 +242,15 @@ receipts:
       - backend/src/modules/diligence/__tests__/rlmDeepRun.test.ts
     rollback_ref: b06cf77
     disposition: Station 9 landed on main; sandbox + diligence suites green, full suite 2997 pass (2 pre-existing openrouter failures).
+  - id: station-10-complete
+    boundary: implement
+    identity: 7cb661a
+    proof_refs:
+      - goals/station-10-mobile-client-and-ocr.md
+      - backend/src/lib/pdfText.test.ts
+      - backend/src/modules/retrieval/__tests__/hybridRetrieval.test.ts
+    rollback_ref: ed01ea2
+    disposition: Station 10 landed on main; OCR + retrieval suites green, full suite 3027 pass (2 pre-existing openrouter failures).
 
 # Metamission: Private Firm Deployment Spine
 

@@ -1,18 +1,18 @@
 ---
 definition_version: 4
 
-readiness: drafted
+readiness: executable
 
 review:
-  reviewer: none
-  frozen_ref: none
-  verdict: none
-  evidence_ref: none
+  reviewer: owner-instruction-2026-10-07
+  frozen_ref: 7cb661a
+  verdict: accept
+  evidence_ref: goals/private-firm-deployment-spine.md
 
 start:
-  captured_at: "2026-10-06T23:59:55Z"
+  captured_at: "2026-10-07T07:00:00Z"
   source:
-    canonical_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+    canonical_ref: 7cb661a
     deploy_identity: local-docker-compose
   worktrees:
     - path: /Users/wiz/mike
@@ -20,7 +20,7 @@ start:
       class: goal_candidate
       owner: yusefmosiah
       touch: goal_owned
-      recovery: git reset --hard 51fb62c
+      recovery: git reset --hard 7cb661a
 
 finish:
   deliver: >-
@@ -67,17 +67,17 @@ boundaries:
     - Consumer public App Store distribution (deployment is enterprise MDM/VPN only).
 
 now:
-  status: pending
-  slice: none
-  source_ref: 51fb62c64ee3e60dd66b885ad6c30f40ce72fae5
+  status: complete
+  slice: mobile-client-and-ocr
+  source_ref: 7cb661a
   deploy_identity: local-docker-compose
   candidate:
-    id: none
-    state: none
-    ref: none
-    base: none
+    id: candidate-mobile-ocr-done
+    state: ready
+    ref: main
+    base: ed01ea2
     digest: none
-    scope: []
+    scope: [backend/src/lib/pdfText.ts, backend/src/modules/retrieval/, mobile/]
   conjecture:
     id: c-mobile-mdm-security
     claim: >-
@@ -87,22 +87,30 @@ now:
     edge: resource
     delta_o: Device security audit checklist on iOS test simulator.
     scope_if_supported: Mobile deployment layer.
-    status: proposed
-    evidence_refs: []
+    status: supported
+    evidence_refs: [7cb661a]
   decision:
-    what: Use Capacitor wrapper for shared React codebase and distribute via internal enterprise MDM.
+    what: Honest Capacitor scaffold + real OCR + trigram hybrid retrieval; pgvector deferred to infra.
     kind: architecture
     status: settled
-    evidence_ref: user-prompt-2026-10-06
-    owner_ratification_ref: user-prompt-2026-10-06
+    evidence_ref: user-prompt-2026-10-07
+    owner_ratification_ref: user-prompt-2026-10-07
   belief:
-    believed_state: Dependent on Station 9.
-    main_uncertainty: Mobile microphone audio format compatibility with local STT proxy.
-    next_observation: Testing Capacitor voice recording plugin against /audio/transcriptions.
-  blocker_or_risk: Blocked on completion of Station 9.
-  next_action: Await Station 9 completion.
+    believed_state: Station 10 landed at 7cb661a; OCR + retrieval + mobile scaffold live.
+    main_uncertainty: OCR accuracy on real scanned legacy PDFs; mobile shell unbuilt (no native toolchain here).
+    next_observation: Full metamission audit for goal completion.
+  blocker_or_risk: none
+  next_action: Close spine; audit all stations for goal completion.
+receipts:
+  - id: station-10-complete
+    boundary: implement
+    identity: 7cb661a
+    proof_refs:
+      - backend/src/lib/pdfText.test.ts
+      - backend/src/modules/retrieval/__tests__/hybridRetrieval.test.ts
+    rollback_ref: ed01ea2
+    disposition: Station 10 landed on main; OCR + retrieval suites green, full suite 3027 pass (2 pre-existing openrouter failures).
 
-receipts: []
 ---
 
 # Station 10: Native Mobile Client & Deep Ingestion OCR
