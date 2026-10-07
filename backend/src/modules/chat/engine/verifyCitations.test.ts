@@ -13,9 +13,9 @@ import {
   verifyQuoteAgainstSource,
   verifyCaseCitationAnnotation,
   verifyDocumentCitationAnnotation,
+  verifyWebCitationAnnotation,
   verifyCitations,
 } from "./verifyCitations";
-
 // Deterministic in-memory source text — no storage/model/network. Proves
 // verification only reads bytes handed to it (air-gap safe).
 const SOURCE = [
@@ -420,5 +420,38 @@ describe("verifyCitations (batch)", () => {
       async () => [{ opinion_id: 3, text: "Binding case text" }],
     );
     expect(out[0]).toMatchObject({ verified: true });
+  });
+});
+describe("verifyWebCitationAnnotation", () => {
+  it("verifies web citation when quote appears in cached web snapshot", async () => {
+    const webAnn = {
+      type: "citation_data",
+      kind: "web",
+      url: "https://reuters.com/deal-news",
+      quotes: [{ quote: "Company acquired for 5 billion dollars." }],
+    };
+
+    const out = (await verifyWebCitationAnnotation(
+      webAnn,
+      async (url) => "Yesterday, the Company acquired for 5 billion dollars in cash.",
+    )) as Record<string, unknown>;
+
+    expect(out.verified).toBe(true);
+  });
+
+  it("marks unverified when quote does not appear in web page content", async () => {
+    const webAnn = {
+      type: "citation_data",
+      kind: "web",
+      url: "https://reuters.com/deal-news",
+      quotes: [{ quote: "Completely fabricated hallucination." }],
+    };
+
+    const out = (await verifyWebCitationAnnotation(
+      webAnn,
+      async () => "Real article content.",
+    )) as Record<string, unknown>;
+
+    expect(out.verified).toBe(false);
   });
 });

@@ -69,6 +69,11 @@ import {
 } from "./documentOps";
 import type { BlockOperation } from "../../../../lib/docxAST";
 import {
+  search as webSearch,
+  fetchPage as webFetchPage,
+  type SearchProvider,
+} from "../../../../lib/search/index";
+import {
   spotlight,
   spotlightFilename,
   spotlightWorkflow,
@@ -1657,6 +1662,48 @@ export async function runToolCalls(
           role: "tool",
           tool_call_id: tc.id,
           content: JSON.stringify(result),
+        });
+      }
+    } else if (tc.function.name === "web_search") {
+      const query = String(args.query ?? "").trim();
+      const limit = typeof args.limit === "number" ? args.limit : 5;
+      const provider = args.provider as SearchProvider | undefined;
+      try {
+        const results = await webSearch(query, { limit, provider });
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ results, count: results.length }),
+        });
+      } catch (err) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        });
+      }
+    } else if (tc.function.name === "fetch_web_page") {
+      const url = String(args.url ?? "").trim();
+      try {
+        const page = await webFetchPage(url);
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            url: page.url,
+            content: page.content.slice(0, 8000),
+            sha256: page.contentSha256,
+          }),
+        });
+      } catch (err) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: err instanceof Error ? err.message : String(err),
+          }),
         });
       }
     } else if (tc.function.name === "replicate_document" && docIndex) {

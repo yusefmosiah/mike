@@ -649,4 +649,49 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "Search the web for legal authorities, regulatory updates, company filings, or current market facts. Returns ranked results with title, URL, and snippet.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The search query.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of results to return (default: 5).",
+          },
+          provider: {
+            type: "string",
+            enum: ["keenable", "tavily", "exa", "parallel"],
+            description: "Optional specific search provider override.",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "fetch_web_page",
+      description:
+        "Fetch the full content of an external web page or article. Extracts clean text, caches the content snapshot for verified citations, and enforces SSRF/private-mode egress guards.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The full HTTP/HTTPS URL of the web page to fetch.",
+          },
+        },
+        required: ["url"],
+      },
+    },
+  },
 ];

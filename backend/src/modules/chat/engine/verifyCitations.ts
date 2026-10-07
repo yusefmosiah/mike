@@ -1,6 +1,6 @@
 import type { QuoteVerification } from "./types";
 import { normalizeWithMap } from "./tools/documentOps";
-
+import { getWebSnapshot } from "../../../lib/search/engine";
 // Mirrors the frontend: cross-page quotes join two page segments with this
 // sentinel (see expandDocumentQuoteEntry in
 // frontend/src/app/components/shared/types.ts).
@@ -364,6 +364,46 @@ export async function verifyCaseCitationAnnotation(
     ...(verifiedDocument ? { document: verifiedDocument } : {}),
   };
 }
+/**
+ * Match each web citation quote against the web page text cached during the
+ * web_search / web_fetch call.
+ */
+export async function verifyWebCitationAnnotation(
+  annotation: unknown,
+  getWebSnapshotFn: (url: string) => Promise<string | null>,
+): Promise<unknown> {
+  const a = record(annotation);
+  if (!a || (a.kind !== "web" && !a.url)) return annotation;
+  const url = typeof a.url === "string" ? a.url : null;
+  if (!url) return annotation;
+
+  const entries = Array.isArray(a.quotes)
+    ? a.quotes
+        .map((value) => record(value))
+        .filter(
+          (value): value is Record<string, unknown> & { quote: string } =>
+            !!value && typeof value.quote === "string" && !!value.quote,
+        )
+    : [];
+  if (!entries.length) return annotation;
+
+  const pageText = (await getWebSnapshotFn(url)) ?? "";
+  const verifiedQuotes = entries.map((entry) => {
+    const result = verifyQuoteAgainstSource(pageText, entry.quote);
+    const { needs_correction, ...verification } = result;
+    const quote =
+      needs_correction && verification.source_excerpt
+        ? verification.source_excerpt
+        : entry.quote;
+    return { ...entry, quote, verification };
+  });
+
+  return {
+    ...a,
+    quotes: verifiedQuotes,
+    verified: verifiedQuotes.every((quote) => quote.verification.verified),
+  };
+}
 
 /**
  * Attach server-side verification to one document citation annotation.
@@ -379,7 +419,7 @@ export async function verifyDocumentCitationAnnotation(
 ): Promise<unknown> {
   if (!annotation || typeof annotation !== "object") return annotation;
   const a = annotation as Record<string, unknown>;
-  if (a.kind === "case") return annotation;
+  if (a.kind === "case" || a.kind === "web") return annotation;
   const docId = typeof a.doc_id === "string" ? a.doc_id : null;
   if (!docId) return annotation;
 
@@ -435,13 +475,21 @@ export async function verifyCitations(
   annotations: unknown[],
   getSourceText: (docId: string) => Promise<string>,
   getCaseOpinions: (clusterId: number) => Promise<CaseOpinionSource[]>,
+  getWebSnapshotFn?: (url: string) => Promise<string | null>,
 ): Promise<unknown[]> {
+  const resolveWebText =
+    getWebSnapshotFn ?? (async (u: string) => getWebSnapshot(u)?.content ?? null);
+
   return Promise.all(
     annotations.map((annotation) => {
       const value = record(annotation);
-      return value?.kind === "case"
-        ? verifyCaseCitationAnnotation(annotation, getCaseOpinions)
-        : verifyDocumentCitationAnnotation(annotation, getSourceText);
+      if (value?.kind === "case") {
+        return verifyCaseCitationAnnotation(annotation, getCaseOpinions);
+      }
+      if (value?.kind === "web" || (value?.url && typeof value.url === "string")) {
+        return verifyWebCitationAnnotation(annotation, resolveWebText);
+      }
+      return verifyDocumentCitationAnnotation(annotation, getSourceText);
     }),
   );
 }
