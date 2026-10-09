@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import mammoth from "mammoth";
 import { corpusFiles, readCorpusFile } from "../../../__tests__/helpers/docxCorpus";
 import { DocxDocument, type Block, type Inline } from "../view";
 import { MAIN_DOCUMENT_PART } from "../package";
 import { documentElement, firstChild, type XmlElement } from "../xmlSource";
+
+// Whole-document oracle checks on real contracts (one 12,600-paragraph
+// schedule among them) take up to ~8 s a test alone and timed out under the
+// full parallel run's CPU contention at the 20 s default. Speed is guarded
+// separately (blockIds.test.ts "aligns ... quickly"); here only correctness is.
+vi.setConfig({ testTimeout: 60_000 });
 
 const PROPERTY_PARENTS = new Set(["w:rPr", "w:pPr", "w:trPr", "w:tcPr", "w:tblPr", "w:sectPr", "w:numPr"]);
 

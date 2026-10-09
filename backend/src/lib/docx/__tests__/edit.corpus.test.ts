@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +14,12 @@ import { renderInlines } from "../render";
 import { resolveRevisions } from "../revisions";
 import { DocxDocument, type ParagraphBlock, type TableBlock } from "../view";
 import { childElements, documentElement, firstChild, scanXml, sliceOf } from "../xmlSource";
+
+// Whole-document oracle checks on real contracts (one 12,600-paragraph
+// schedule among them) take up to ~8 s a test alone and timed out under the
+// full parallel run's CPU contention at the 20 s default. Speed is guarded
+// separately (blockIds.test.ts "aligns ... quickly"); here only correctness is.
+vi.setConfig({ testTimeout: 60_000 });
 
 const AUTHOR = "Mike Test";
 const DATE = "2026-10-07T12:00:00Z";

@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { corpusFiles, readCorpusFile } from "../../../__tests__/helpers/docxCorpus";
 import { DocxPackage } from "../package";
 import { type XmlElement, type XmlSource } from "../xmlSource";
+
+// Whole-document oracle checks on real contracts (one 12,600-paragraph
+// schedule among them) take up to ~8 s a test alone and timed out under the
+// full parallel run's CPU contention at the 20 s default. Speed is guarded
+// separately (blockIds.test.ts "aligns ... quickly"); here only correctness is.
+vi.setConfig({ testTimeout: 60_000 });
 
 function checkRanges(doc: XmlSource, el: XmlElement): number {
   let count = 0;
