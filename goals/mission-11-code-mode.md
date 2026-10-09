@@ -56,3 +56,19 @@ Receipt (run from `backend/`):
 $ npx vitest run src/lib/codemode src/modules/chat/engine/__tests__/streamingCodeMode.test.ts
       Tests  18 passed (18)
 ```
+
+Live receipt, 2026-10-09: isolated local backend (`scripts/e2e-local-stack.sh
+--serve-backend`, port 3201, `CODE_MODE_ENABLED=true`), a fresh generated
+account, model `opencode-go/deepseek-v4.1-flash`; the probe script records
+which tools each turn started and the backend's `[code-mode]` log line.
+
+| prompt | tools the model started | `[code-mode]` log |
+|---|---|---|
+| table of every workflow's title and column/step count (4 workflows) | `list_workflows`, 4 × `read_workflow` (no script) | none |
+| "Use the run_script tool: ... list my workflows, read every one of them in parallel ..." | `run_script` (3 scripts) | `tool_calls: 5, duration_ms: 36`; `2, 4`; `5, 5` |
+| "Search the web separately for the 2025 population of each of these ten cities ... Rank them" | `run_script` only | `ok: true, tool_calls: 10, duration_ms: 585` |
+
+On the third prompt the model chose a script without being told to, ran the
+ten searches in it, and answered with a ranked, sourced table. With only
+four workflows, the first prompt was small enough that it called the tools
+directly.
