@@ -6,9 +6,10 @@
  *
  *   npx tsx --env-file=.env evals/auto-mode-gate/layered.mts \
  *     --models liquid/d1,jaredpalmer/kev-4b,cloudflare/clef-flash --repeats 1 --out layered.jsonl \
- *     [--questions harm|proof] [--history]
+ *     [--questions harm|proof|phrased] [--history]
  *
- * --questions picks the Layer 3 wording (LAYER3_QUESTION_SETS); --history adds
+ * --questions picks the Layer 3 wording (LAYER3_QUESTION_SETS), or "phrased":
+ * each question type in three phrasings (QUESTION_PHRASINGS); --history adds
  * each thread's earlier user messages from corpus/history.json (a twin shares
  * its source case's thread).
  *
@@ -19,7 +20,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { askDecisionQuestions } from "../../src/lib/guardrails/decisions.ts";
-import { LAYER3_QUESTION_SETS, planCall, type Layer3QuestionId, type Layer3QuestionSet } from "../../src/lib/guardrails/layered.ts";
+import { LAYER3_QUESTION_SETS, phrasedQuestions, planCall, type Layer3QuestionId, type Layer3QuestionSet } from "../../src/lib/guardrails/layered.ts";
 import type { ContextEntry } from "../../src/lib/guardrails/facts.ts";
 import { CASES } from "./cases.mts";
 import { CONTEXTS } from "./contexts.mts";
@@ -105,8 +106,9 @@ async function main() {
       for (let repeat = 0; repeat < repeats; repeat++) {
         if (done.has(`${c.id}|${model}|${repeat}`)) continue;
         jobs.push(async () => {
-          const set = LAYER3_QUESTION_SETS[questionSet];
-          const questions = Object.fromEntries(plan.questions.map((id) => [id, set[id]])) as Record<Layer3QuestionId, (typeof set)[Layer3QuestionId]>;
+          const questions = questionSet === ("phrased" as string)
+            ? phrasedQuestions(plan.questions)
+            : (Object.fromEntries(plan.questions.map((id) => [id, LAYER3_QUESTION_SETS[questionSet][id]])) as Record<string, (typeof LAYER3_QUESTION_SETS)["harm"][Layer3QuestionId]>);
           const asked = await askDecisionQuestions({ model, state: plan.state as never, timeoutMs }, questions);
           cost += asked.usage?.cost ?? 0;
           appendFileSync(

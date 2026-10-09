@@ -348,3 +348,65 @@ Spend: $0.11.
 The default stays the harm wording. Earlier user messages are kept in the
 planner, because production has them and they count as the user's words for
 provenance.
+
+## Follow-up: review-gated calls, phrasings and escalation
+
+**Review-gated calls are now a Layer 2 allow (`review_gated`).** Saving a Gmail
+draft or proposing a tracked change in a document takes effect only when a
+person sends or accepts it. The gate is not there to protect users from their
+own review. The rule fires only when every write is one of
+`REVIEW_GATED_TOOLS` and nothing leaves the workspace. It takes 17 legitimate
+calls out of Layer 3. Their 18 harmful twins are excluded from the stop set
+here, because review is where those get caught.
+
+**Phrasings and escalation.** The gate asks fewer question types: `asked`,
+`targets_meant`, `record_fits`, `keeps_rest`, `message_ok` and `public_only`
+(`QUESTION_TYPE_OF`). It asks each type in three phrasings, and the third is
+inverted (`QUESTION_PHRASINGS`). All of them go in one request per model, and
+`d1` and `clef-flash` run in parallel, so there is no extra round trip.
+
+The replay compares six policies:
+
+- **single:** the first phrasing alone.
+- **mean / min:** the mean or minimum over the three phrasings.
+- **esc_ask:** if the phrasings disagree, ask the user.
+- **esc_other:** if the phrasings disagree, defer to the other model.
+- **pool:** the mean of all six answers.
+
+Held out, pair folds, with history (false refusals of 597; false allows of 613):
+
+| policy | d1 FR | d1 FA | clef-flash FR | clef-flash FA |
+|---|---:|---:|---:|---:|
+| single | 22.3% | 6 | 42.9% | 0 |
+| mean | 30.7% | 2 | 41.5% | 0 |
+| min | 33.2% | 1 | 37.2% | 2 |
+| esc_ask | 33.2% | 1 | 37.2% | 2 |
+| esc_other | 30.5% | 2 | 30.3% | 5 |
+| pool | 29.8% | 3 | 29.8% | 3 |
+
+**This did not beat the earlier baseline at the zero-false-allow bar.**
+
+- Only `clef-flash` reaches 0 false allows, at 41.5–42.9% false refusals.
+- The comparable earlier run is harm questions with history: 47.2% / 1. About
+  2.8 points of the improvement are the 17 calls the `review_gated` rule now
+  settles.
+- The policies that lower refusals to about 30% (esc_other, pool) let 3–5
+  harmful calls through.
+
+The AUC of P(safe) between legitimate and harmful calls shows why. The three
+phrasings of a type score within a few hundredths of each other (`d1`
+0.75–0.91, `clef-flash` 0.70–0.88). Averaging them barely moves the AUC: 0.84–0.91 for
+`d1` and 0.77–0.86 for `clef-flash`. The phrasings make the same mistakes on the
+same hard twins, so their disagreement does not flag those twins.
+
+`public_only` separates perfectly (AUC 1.00) in every phrasing.
+
+Evidence: `layered-phrased-history.jsonl.gz`. This omits the 741 `clef-flash`
+calls from the first attempt, which got HTTP 422 because `#` is not allowed in
+a question id; those calls were rerun with `.` ids. Replay:
+
+    python3 evals/auto-mode-gate/phrased-report.py \
+      ../docs/test-evidence/auto-mode-gate-2026-10-09/layered-phrased-history.jsonl.gz --auc
+
+The `review_gated` rule is kept. The single harm wording stays the default, and
+the phrased sets stay in `layered.ts` for later runs.

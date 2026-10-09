@@ -10,7 +10,7 @@ import {
   provenanceOf,
   type ContextEntry,
 } from "../facts";
-import { decideLayered, planCall, scoreLayer3 } from "../layered";
+import { decideLayered, judgeType, phrasedQuestions, planCall, safeProbabilities, scoreLayer3 } from "../layered";
 
 const INBOX: ContextEntry = {
   tool: "gmail_search",
@@ -120,8 +120,11 @@ describe("planCall (Layers 1–2)", () => {
   });
 
   it("checks a draft's text, and a bulk loop's scope", () => {
+    // A draft takes effect only when the user sends it: the gate does not step in.
     const draft = plan("draft a note to dana@corvidtech.com", "gmail_save_draft", { to: ["dana@corvidtech.com"], subject: "NDA", body: "We accept $1.4M." });
-    expect(draft).toMatchObject({ decided: false, questions: ["message_ok", "adds_ok"], state: { message_adds: "$1.4M" } });
+    expect(draft).toMatchObject({ decided: true, outcome: "allow", rule: "review_gated" });
+    const send = plan("email dana@corvidtech.com about the NDA", "gmail_send", { to: ["dana@corvidtech.com"], subject: "NDA", body: "We accept $1.4M." });
+    expect(send).toMatchObject({ decided: false, state: { message_adds: "$1.4M" } });
     const loop = plan("trash both invoices", "run_code", { code: "for (const id of ['18e7b8c1f0d3a296', '18e7b8c1f0d3a297']) await tools.gmail_trash({ message_id: id });" }, [INBOX]);
     expect(loop.decided).toBe(false);
     if (!loop.decided) expect(loop.questions).toContain("bulk_scope");
@@ -163,5 +166,19 @@ describe("scoreLayer3 and decideLayered", () => {
     const down = vi.fn(async () => new Response("", { status: 503 }));
     await expect(decideLayered({ ...input, fetchImpl: down as unknown as typeof fetch })).resolves.toMatchObject({ verdict: "deny", outcome: "ask", rule: "layer3_unavailable" });
     vi.unstubAllEnvs();
+  });
+});
+
+describe("phrased question types", () => {
+  it("asks every phrasing of each planned type once, folding rare questions into their type", () => {
+    expect(Object.keys(phrasedQuestions(["asked", "bulk_scope", "adds_ok"])).sort()).toEqual(["asked.0", "asked.1", "asked.2", "message_ok.0", "message_ok.1", "message_ok.2"]);
+  });
+
+  it("flips inverted phrasings to P(safe), and escalates when phrasings disagree", () => {
+    expect(safeProbabilities("asked", { "asked.0": 0.9, "asked.1": 0.8, "asked.2": 0.1 })).toEqual([0.9, 0.8, 0.9]);
+    expect(judgeType([0.95, 0.97, 0.96], 0.9, 0.2)).toBe("pass");
+    expect(judgeType([0.1, 0.2, 0.15], 0.9, 0.2)).toBe("fail");
+    expect(judgeType([0.95, 0.5, 0.96], 0.9, 0.2)).toBe("undecided");
+    expect(judgeType([0.95, Number.NaN, 0.96], 0.9, 0.2)).toBe("undecided");
   });
 });
