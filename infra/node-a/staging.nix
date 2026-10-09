@@ -8,7 +8,8 @@
 #   /var/lib/mike-staging/app.env      backend secrets, generated once
 #   /var/lib/mike-staging/backend.env  model and search keys, copied in by the operator
 #   /var/lib/mike-staging/workstation.env  the owner's workstation VM, written by owner-link
-#   mike-staging deploy | up | down | ps | logs [svc] | owner-link <email>
+#   /var/lib/mike-staging/backups/<time>/  daily: postgres.dump (restore-checked) and storage.tar.zst
+#   mike-staging deploy | up | down | ps | logs [svc] | owner-link <email> | backup | health
 { config, lib, pkgs, ... }:
 
 let
@@ -18,7 +19,7 @@ let
 
   stagingTool = pkgs.writeShellApplication {
     name = "mike-staging";
-    runtimeInputs = with pkgs; [ coreutils openssl gnugrep curl jq podman docker-compose ];
+    runtimeInputs = with pkgs; [ coreutils findutils gnutar zstd openssl gnugrep curl jq podman docker-compose ];
     text = ''
       export DOCKER_HOST=unix:///run/podman/podman.sock
       compose() {
@@ -118,7 +119,40 @@ let
             compose up -d backend >&2
           fi
           jq -r '.action_link // .properties.action_link' <<<"$link" ;;
-        *) echo "usage: mike-staging deploy|up|down|ps|logs [svc]|compose ...|owner-link <email>" >&2; exit 2 ;;
+        backup)
+          # A dump that has not been restored is a hope, not a backup: each
+          # one is restored into a scratch database and its tables counted.
+          dest=${root}/backups/$(date -u +%Y%m%dT%H%M%SZ)
+          mkdir -p "$dest"
+          chmod 700 ${root}/backups
+          podman exec mike-db-1 pg_dump -U postgres -Fc postgres > "$dest/postgres.dump"
+          podman exec mike-db-1 sh -c 'dropdb -U postgres --if-exists restore_check && createdb -U postgres restore_check'
+          podman exec -i mike-db-1 pg_restore -U postgres --no-owner -d restore_check < "$dest/postgres.dump" 2> "$dest/restore.log" || true
+          tables=$(podman exec mike-db-1 psql -U postgres -d restore_check -tAc "select count(*) from information_schema.tables where table_schema = 'public'")
+          live=$(podman exec mike-db-1 psql -U postgres -d postgres -tAc "select count(*) from information_schema.tables where table_schema = 'public'")
+          podman exec mike-db-1 dropdb -U postgres restore_check
+          echo "public tables: live $live, restored $tables" > "$dest/restore-check.txt"
+          if [ "$tables" != "$live" ]; then echo "backup restore check FAILED: $(cat "$dest/restore-check.txt")" >&2; exit 1; fi
+          tar -C /var/lib/containers/storage/volumes/mike_storage_data/_data -cf - . | zstd -q -T0 > "$dest/storage.tar.zst"
+          # Keep fourteen days.
+          find ${root}/backups -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+          echo "backup $dest: $(du -sh "$dest" | cut -f1), $(cat "$dest/restore-check.txt")" ;;
+        health)
+          # Public endpoints through Caddy and TLS, then the stack's own state.
+          failed=0
+          for path in / /api/health /gotrue/health; do
+            code=$(curl -s -o /dev/null -m 15 -w '%{http_code}' "https://${domain}$path" || true)
+            if [ "$code" != 200 ]; then echo "unhealthy: $path returned $code" >&2; failed=1; fi
+          done
+          used=$(df --output=pcent / | tail -1 | tr -dc 0-9)
+          if [ "$used" -ge 85 ]; then echo "disk: / is $used% full" >&2; failed=1; fi
+          if [ "$failed" = 1 ]; then
+            # Start whatever stopped; a crash loop stays visible in the journal.
+            compose up -d >&2 || true
+            exit 1
+          fi
+          echo "healthy" ;;
+        *) echo "usage: mike-staging deploy|up|down|ps|logs [svc]|compose ...|owner-link <email>|backup|health" >&2; exit 2 ;;
       esac
     '';
   };
@@ -147,6 +181,25 @@ in
       ExecStart = "${stagingTool}/bin/mike-staging up";
       TimeoutStartSec = 900;
     };
+  };
+
+  systemd.services.mike-staging-backup = {
+    description = "Back up Mike staging (Postgres, restore-checked, and object storage)";
+    unitConfig.ConditionPathExists = "${root}/secrets.env";
+    serviceConfig = { Type = "oneshot"; ExecStart = "${stagingTool}/bin/mike-staging backup"; };
+  };
+  systemd.timers.mike-staging-backup = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "*-*-* 03:30:00"; RandomizedDelaySec = "20m"; Persistent = true; };
+  };
+  systemd.services.mike-staging-health = {
+    description = "Check Mike staging from the public URL";
+    unitConfig.ConditionPathExists = "${root}/secrets.env";
+    serviceConfig = { Type = "oneshot"; ExecStart = "${stagingTool}/bin/mike-staging health"; };
+  };
+  systemd.timers.mike-staging-health = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "5m"; };
   };
 
   services.caddy = {
