@@ -21,6 +21,16 @@ describe("DbClient", () => {
     expect(statements[0].params).toEqual(["x'; DROP TABLE chats; --", ["a", "b"]]);
   });
 
+  it("follows a JSON path in a filter column, as PostgREST does", async () => {
+    const { db, statements } = recording();
+    await db.from("db_jobs").select("id").filter("payload->>userId", "eq", "u1").eq("payload->base->>userId", "u2").eq("events->0->>type", "x");
+    expect(statements[0].sql).toContain(
+      `WHERE "db_jobs"."payload"->>'userId' = $1 AND "db_jobs"."payload"->'base'->>'userId' = $2 AND "db_jobs"."events"->0->>'type' = $3`,
+    );
+    const refused = await db.from("db_jobs").select("id").eq("payload->>'x'; drop table db_jobs; --", "u");
+    expect(refused.error).toMatchObject({ code: "MIKE_UNSUPPORTED_QUERY" });
+  });
+
   it("refuses what it does not support instead of guessing, without touching the database", async () => {
     const { db, statements } = recording();
     for (const query of [

@@ -54,6 +54,21 @@ function ident(name: string): string {
   return `"${trimmed}"`;
 }
 
+// A filter column may follow a JSON path into a json/jsonb column, as
+// PostgREST allows: `payload->>userId`, `payload->base->>userId`. Keys are
+// restricted to word characters, so they can be written as literals.
+const JSON_PATH = /^([A-Za-z_][A-Za-z0-9_]*)((?:->>?[A-Za-z0-9_]+)+)$/;
+
+function filterColumn(table: string, name: string): string {
+  const path = JSON_PATH.exec(name.trim());
+  if (!path) return `${table}.${ident(name)}`;
+  let sql = `${table}.${ident(path[1])}`;
+  for (const [, operator, key] of path[2].matchAll(/(->>?)([A-Za-z0-9_]+)/g)) {
+    sql += `${operator}${/^\d+$/.test(key) ? key : `'${key}'`}`;
+  }
+  return sql;
+}
+
 /**
  * A select list as SQL: `*`, plain columns, and `alias:column`. `qualifier`
  * prefixes each column (an UPDATE … FROM has two relations with the same
@@ -439,7 +454,7 @@ export class QueryBuilder<Data = any[]> implements PromiseLike<DbResult<Data>> {
       return `$${params.length}`;
     };
     const table = ident(this.table);
-    const column = (name: string) => `${table}.${ident(name)}`;
+    const column = (name: string) => filterColumn(table, name);
     const where = this.filters.length ? ` WHERE ${this.filters.map((filter) => filter.sql(column, param)).join(" AND ")}` : "";
 
     if (!this.write) {
