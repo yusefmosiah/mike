@@ -139,6 +139,32 @@ until the owner says so.
    capability socket; capsules (overlay per command) for per-command undo and
    review; prompt-injection flags on tool results.
 
+## Receipts
+
+**Phase 1, 2026-10-09 (dev lane, not the Linux host).** The `dev-aarch64-linux`
+guest ran under QEMU with software emulation inside Docker Desktop on the
+owner's M1 (the Mac's own aarch64 builder was down). `backend/scripts/workstation-smoke.mts`
+drove it through the harness's exec library (`runInWorkstation`):
+
+| step | result |
+|---|---|
+| `id`, `pwd`, `df /home` | uid 1000 `agent`, `/home/agent`, `/dev/vdb` 7.8G mounted on `/home` |
+| tools | Python 3.14.7, Node v22.23.3, git 2.55.0 |
+| write a .docx with python-docx, then edit and read it back | `['Workstation smoke test', 'Edited by python-docx inside the workstation VM.']` |
+| openpyxl workbook with a formula | `=A2*B2` read back |
+| `cat /does/not/exist` | exit 1, stderr returned |
+| `sudo true` | refused (`a password is required`), exit 1 |
+| `sleep 30` with a 3 s limit | exit 124, `timedOut: true` after 3.7 s |
+
+After a VM restart (new boot id) the edited .docx was intact. The .xlsx,
+written seconds before the container was killed, came back **0 bytes**: an
+unclean stop loses whatever the guest had not flushed. Phase 3 must sync or
+freeze the guest filesystem before each snapshot and stop VMs cleanly.
+
+First run found a bug, fixed before the receipt above: the empty home disk
+is mounted over `/home` after NixOS creates home directories, so
+`/home/agent` did not exist; a tmpfiles rule now creates it after the mount.
+
 ## Open questions for the owner
 
 - Which machine is the first Linux host for phases 3 and 4? Cloud Hypervisor

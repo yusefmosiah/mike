@@ -131,6 +131,40 @@ export const WORKFLOW_TOOLS = [
   },
 ];
 
+/**
+ * Offered only to users with a workstation VM (lib/workstation, Mission 13):
+ * a full Linux userland where commands run as an unprivileged account that
+ * holds no secrets.
+ */
+export const WORKSTATION_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description:
+        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr. Mike's own documents are not in the workstation.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description: "The bash command or script to run.",
+          },
+          cwd: {
+            type: "string",
+            description: "Working directory inside the workstation (default /home/agent).",
+          },
+          timeout_seconds: {
+            type: "number",
+            description: "Time limit in seconds (default 120, at most 1800).",
+          },
+        },
+        required: ["command"],
+      },
+    },
+  },
+];
+
 export const TOOLS = [
   {
     type: "function",

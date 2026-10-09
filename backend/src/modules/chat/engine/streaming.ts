@@ -37,6 +37,7 @@ import {
 import {
   TOOLS,
   WORKFLOW_TOOLS,
+  WORKSTATION_TOOLS,
   isDocumentMutatingTool,
   withoutDocumentMutatingTools,
 } from "./tools/toolSchemas";
@@ -60,6 +61,7 @@ import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
+import { workstationFor } from "../../../lib/workstation";
 import { createSubagentHost } from "./subagents/subagentHost";
 import { getAutoModeDecisionModel } from "../../user/user.service";
 import {
@@ -516,7 +518,8 @@ export async function runLLMStream(params: {
     includeAskInputs && !autoMode
       ? TOOLS
       : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
-  const baseTools = [...conversationTools, ...researchTools, ...WORKFLOW_TOOLS];
+  const workstationTools = workstationFor(userId) ? WORKSTATION_TOOLS : [];
+  const baseTools = [...conversationTools, ...researchTools, ...WORKFLOW_TOOLS, ...workstationTools];
   const advertisedTools = [
     ...baseTools,
     ...mcpTools,

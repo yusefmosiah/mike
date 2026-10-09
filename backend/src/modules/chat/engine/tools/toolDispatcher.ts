@@ -15,6 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
+import { runInWorkstation, workstationFor } from "../../../../lib/workstation";
 import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
@@ -1668,6 +1669,38 @@ export async function runToolCalls(
           content: JSON.stringify({
             error: err instanceof Error ? err.message : String(err),
           }),
+        });
+      }
+    } else if (tc.function.name === "run_command") {
+      const target = workstationFor(userId);
+      if (!target) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: "No workstation is configured for this user." }),
+        });
+      } else {
+        const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
+        const result = await runInWorkstation(target, {
+          command: String(args.command ?? ""),
+          cwd: typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined,
+          timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
+        });
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(
+            result.ok
+              ? {
+                  exit_code: result.exitCode,
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                  timed_out: result.timedOut,
+                  truncated: result.truncated,
+                  duration_ms: result.durationMs,
+                }
+              : { error: result.error },
+          ),
         });
       }
     } else if (tc.function.name === "fetch_web_page") {
