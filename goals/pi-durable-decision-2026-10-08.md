@@ -99,6 +99,20 @@ reported stale-live-turn defect, which happens before the backend is involved.
   muse-spark-1.3 (Responses), and OpenRouter Gemini and Claude Haiku. All recalled
   the fact that appeared only in the tool result.
 
+## Mission 3 branching (stage 3, browser-checked on the global chat)
+
+On the rebuilt stack with `MIKE_LLM_RUNTIME=pi` and an OpenCode Go model:
+regenerate adds a sibling answer with a "‹ 2/2 ›" navigator and no duplicate
+prompt; stepping between answer versions and prompt versions shows each
+branch's own answers (D2); editing the prompt just sent saves a version and
+answers it immediately (D1/D3); "Branch into new thread" opens a new chat
+holding the path up to that answer, and its next turn continued Pi conversation
+77, a fork of the source chat's conversation at the answer's entry (D4).
+Browser QA also found and fixed: edit and regenerate hidden until a reload in a
+live session, and a finished turn grafted onto another branch after navigation.
+Not browser-checked: the project chat page (same hook and server routes; fork
+navigation differs), phone width, and the D1 failure path (unit-tested).
+
 ## Remaining limits
 
 - Tools still run through the request binding, so after a restart every
