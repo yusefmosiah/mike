@@ -207,6 +207,12 @@ in
     email = "staging@${domain}";
     virtualHosts.${domain}.extraConfig = ''
       encode zstd gzip
+      # A private staging site: nothing here is for search engines.
+      handle /robots.txt {
+        respond "User-agent: *
+Disallow: /
+" 200
+      }
       # GoTrue, for email links and OAuth callbacks.
       handle_path /gotrue/* {
         reverse_proxy 127.0.0.1:54321
@@ -232,7 +238,9 @@ in
         Strict-Transport-Security "max-age=31536000"
         X-Content-Type-Options nosniff
         Referrer-Policy strict-origin-when-cross-origin
+        X-Robots-Tag "noindex, nofollow"
         -Server
+        -X-Powered-By
       }
     '';
   };
