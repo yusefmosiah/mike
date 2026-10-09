@@ -1,4 +1,4 @@
-import { completeWithProvider } from "../llm/providers";
+import { completeText } from "../llm";
 import type { UserApiKeys } from "../llm/types";
 
 import { tierForTool, type GuardrailTier } from "./policy";
@@ -85,7 +85,7 @@ export type ClassifyToolCallResult = {
 };
 
 const completeOnRoute: ClassifierCompleteFn = (params) =>
-  completeWithProvider({
+  completeText({
     model: params.model,
     systemPrompt: params.systemPrompt,
     user: params.user,

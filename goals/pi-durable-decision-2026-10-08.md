@@ -1,6 +1,6 @@
 # Runtime decision: embed Pi Durable or port its patterns
 
-Date: 2026-10-08. Branch `spike/pi-durable-embed` (on top of
+Date: 2026-10-08. Branch `feat/pi-runtime` (on top of
 `feat/mission-2-compaction`). **A recommendation with measured evidence, not an
 owner decision.** Background and the option space are in
 [`pi-durable-recon-and-design.md`](pi-durable-recon-and-design.md) §7 and §10;
@@ -72,15 +72,42 @@ answer, sharing the cached prefix. **Edit prompt** could not be tested: the
 frontend saved the branch and then never sent the re-answer — the previously
 reported stale-live-turn defect, which happens before the backend is involved.
 
-## Spike limits (not production)
+## Progress since the spike (stage 1)
+
+- **Lineage by message id.** Each stored Mike message maps to its Pi conversation
+  and entry; a turn continues its parent answer's conversation or forks at it.
+  Text matching remains only for chats begun before the runtime.
+- **Every provider on pi-ai** (`backend/src/lib/llm/pi/providers.mts`). Mike's
+  static catalog (Claude, Gemini, GPT) and the OpenCode Go, OpenRouter and Vercel
+  ids resolve to pi-ai's native catalogs. OpenCode Go uses three protocols
+  (chat completions, Anthropic Messages, Responses) and pi already knows which
+  id speaks which. Ids pi does not know, Ollama models, and
+  `MIKE_MODEL_CONFIG_JSON` endpoints become one-model providers. One wrapper
+  around the catalog applies a turn's user key (else the deployment key, with
+  Mike's env aliases), the attestation pre-check (fail closed), and the
+  local-model tolerance shim (`<think>` → reasoning, prose tool calls → real
+  calls). Keyless endpoints send no `Authorization` header.
+- **One-shot calls** (`completeText`: titles, tabular extraction, the guardrail
+  classifier) and tool loops without a chat (memory curator, diligence) run on
+  pi-ai too, the latter on an in-memory Harness so they leave no durable rows.
+  Models that cannot turn thinking off get their lightest effort plus headroom,
+  so a 64-token title is not eaten by reasoning.
+- `maxIterations` is enforced: past the budget a tool call returns "answer with
+  what you have" instead of running, and the model finishes.
+- Live check (`backend/src/durable/spike/liveProviders.mts`): a tool round plus a
+  title through glm-5.3 (chat completions), minimax-m3 (Messages),
+  muse-spark-1.3 (Responses), and OpenRouter Gemini and Claude Haiku. All recalled
+  the fact that appeared only in the tool result.
+
+## Remaining limits
 
 - Tools still run through the request binding, so after a restart every
   in-flight Mike tool behaves as unsafe (interrupted). Durable server tools are
   Stage 2.
-- OpenCode Go models only. Per-user keys are deliberately out of scope (a
-  separate gateway, per owner).
-- Lineage matching uses user-message text; production should key on Mike message
-  IDs ↔ entry IDs.
+- Not live-verified for lack of local keys: direct Anthropic, Google and OpenAI
+  keys (the same pi-ai catalogs that OpenRouter exercised), Ollama, and
+  configured endpoints (covered by tests against a local OpenAI-compatible
+  server).
 - `chat_messages` is still written as the UI projection, so there are two stores.
 - On the Pi path Pi's own compaction applies; Mission 2's adapter compaction does
   not. If B is chosen, Mission 2 becomes the legacy path's fix and is retired with

@@ -7,6 +7,19 @@ import {
   type AiSdkAdapterConfig,
 } from "./aiSdk";
 import { recordReceipt, verifyAttestation } from "./attestation";
+import {
+  OPENCODE_GO_BASE_URL,
+  OPENROUTER_BASE_URL,
+  VERCEL_GATEWAY_BASE_URL,
+  ollamaAuthHeaders,
+  ollamaBaseUrl,
+  ollamaModelName,
+  requiredKey,
+  ROUTER_LABELS,
+  routerKey,
+  type RouterProvider,
+} from "./endpoints";
+export { ollamaAuthHeaders } from "./endpoints";
 import { localModelToleranceMiddleware } from "./localModelMiddleware";
 import {
   isOpenCodeGoChatCompletionsModel,
@@ -32,15 +45,6 @@ import type {
 } from "./types";
 import { REASONING_LEVELS } from "./types";
 
-const OPENROUTER_BASE_URL =
-  process.env.OPENROUTER_BASE_URL?.trim().replace(/\/+$/, "") ||
-  "https://openrouter.ai/api/v1";
-const OPENCODE_GO_BASE_URL =
-  process.env.OPENCODE_GO_BASE_URL?.trim().replace(/\/+$/, "") ||
-  "https://opencode.ai/zen/go/v1";
-const VERCEL_GATEWAY_BASE_URL =
-  process.env.VERCEL_AI_GATEWAY_BASE_URL?.trim().replace(/\/+$/, "");
-
 type CompleteProviderParams = {
   model: string;
   systemPrompt?: string;
@@ -48,88 +52,6 @@ type CompleteProviderParams = {
   maxTokens?: number;
   apiKeys?: UserApiKeys;
 };
-
-type RouterProvider = Extract<
-  Provider,
-  "openrouter" | "vercel" | "opencode-go"
->;
-
-const ROUTER_LABELS: Record<RouterProvider, string> = {
-  openrouter: "OpenRouter",
-  vercel: "Vercel AI Gateway",
-  "opencode-go": "OpenCode Go",
-};
-
-const ROUTER_KEY_ENV_HINTS: Record<RouterProvider, string> = {
-  openrouter: "OPENROUTER_API_KEY",
-  vercel: "AI_GATEWAY_API_KEY",
-  "opencode-go": "OPENCODE_API_KEY",
-};
-
-// Env aliases a provider also answers to. CLAUDE_API_KEY is accepted by
-// envApiKey("claude") in modules/user/user.apiKeyStore.ts, which decides
-// whether Settings reports the key as configured — without the same alias here
-// a deployment that only sets CLAUDE_API_KEY showed a green key and then
-// failed every request with "not configured".
-const ENVIRONMENT_KEY_ALIASES: Record<string, string[]> = {
-  ANTHROPIC_API_KEY: ["CLAUDE_API_KEY"],
-  OPENCODE_API_KEY: ["OPENCODE_GO_API_KEY"],
-};
-
-function requiredKey(
-  label: string,
-  environmentVariable: string,
-  override?: string | null,
-): string {
-  const key =
-    override?.trim() ||
-    process.env[environmentVariable]?.trim() ||
-    (ENVIRONMENT_KEY_ALIASES[environmentVariable] ?? [])
-      .map((alias) => process.env[alias]?.trim())
-      .find((value) => !!value) ||
-    "";
-  if (!key) {
-    throw new Error(
-      `${label} API key is not configured. Set ${environmentVariable} or add a user ${label} key.`,
-    );
-  }
-  return key;
-}
-
-function routerEnvironmentKey(provider: RouterProvider): string | undefined {
-  if (provider === "vercel") {
-    return (
-      process.env.AI_GATEWAY_API_KEY?.trim() ||
-      process.env.VERCEL_AI_GATEWAY_API_KEY?.trim()
-    );
-  }
-  if (provider === "opencode-go")
-    return (
-      process.env.OPENCODE_API_KEY?.trim() ||
-      process.env.OPENCODE_GO_API_KEY?.trim()
-    );
-  return process.env.OPENROUTER_API_KEY?.trim();
-}
-
-function routerUserKey(
-  provider: RouterProvider,
-  apiKeys?: UserApiKeys,
-): string | null | undefined {
-  if (provider === "vercel") return apiKeys?.vercel;
-  if (provider === "opencode-go") return apiKeys?.["opencode-go"];
-  return apiKeys?.openrouter;
-}
-
-function routerKey(provider: RouterProvider, apiKeys?: UserApiKeys): string {
-  const key =
-    routerUserKey(provider, apiKeys)?.trim() || routerEnvironmentKey(provider);
-  if (!key) {
-    throw new Error(
-      `${ROUTER_LABELS[provider]} API key is not configured. Set ${ROUTER_KEY_ENV_HINTS[provider]} or add a user ${ROUTER_LABELS[provider]} key.`,
-    );
-  }
-  return key;
-}
 
 async function createAnthropicAdapter(args: {
   provider: Extract<Provider, "claude" | "opencode-go">;
@@ -302,22 +224,6 @@ function unsupportedOpenCodeGoModel(model: string): Error {
   return new Error(
     `OpenCode Go model ${openCodeGoModelId(model)} requires a protocol Mike does not support yet. Select a model listed in Settings → Bring Your Own Keys → Routers.`,
   );
-}
-
-function ollamaBaseUrl(): string {
-  return (
-    process.env.OLLAMA_BASE_URL?.trim() || "http://localhost:11434/v1"
-  ).replace(/\/$/, "");
-}
-
-function ollamaModelName(model: string): string {
-  const tag = model.replace(/^ollama\/?/, "");
-  return tag || process.env.OLLAMA_MODEL?.trim() || "qwen3.6";
-}
-
-export function ollamaAuthHeaders(): Record<string, string> {
-  const key = process.env.OLLAMA_API_KEY?.trim();
-  return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
 async function createProviderAdapter(

@@ -3,7 +3,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
-import { piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "./runtime.mjs";
+import { createMikeModels } from "./providers.mjs";
+import { completeTextOnPi, piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "./runtime.mjs";
 import type { LlmMessage, OpenAIToolSchema, StreamChatParams } from "../types";
 
 const MODEL = "opencode-go/test-model";
@@ -22,7 +23,7 @@ let requests: Seen[];
 /** The scripted model: answers with what it was shown, and reads a document when asked to. */
 function setup() {
   requests = [];
-  const faux = fauxProvider({ provider: "opencode-go", models: [{ id: "test-model" }] });
+  const faux = fauxProvider({ provider: "opencode-go", models: [{ id: "test-model", input: ["text"] }] });
   const models = createModels();
   models.setProvider(faux.provider);
   const respond = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => {
@@ -39,13 +40,17 @@ function setup() {
     };
     requests.push(seen);
     const last = ctx.messages.at(-1);
+    const firstUser = text(ctx.messages.find((m) => m.role === "user")?.content);
+    if (firstUser.includes("keep reading") && !(last?.role === "toolResult" && text(last.content).startsWith("Not run"))) {
+      return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: `nda-${requests.length}` })], { stopReason: "toolUse" });
+    }
     if (last?.role === "user" && text(last.content).includes("read NDA")) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" });
     }
     return fauxAssistantMessage([fauxText(`answer ${requests.length}`)]);
   };
   faux.setResponses(Array.from({ length: 50 }, () => respond));
-  return { models, storage: new MemoryStorage() };
+  return { models: createMikeModels(models), storage: new MemoryStorage() };
 }
 
 async function turn(
@@ -157,6 +162,45 @@ describe("Pi runtime: turns, branches and memory", () => {
     expect(requests.at(-1)!.users.join("|")).toContain("old question");
     const map = await lineage();
     expect(map.messages.a2).toBeDefined();
+  });
+
+  it("stops running tools once the turn's round budget is spent, and the model still answers", async () => {
+    let runs = 0;
+    const result = await turn([{ role: "user", content: "keep reading documents" }], { user: "u1", parent: null, assistant: "a1" }, {
+      maxIterations: 2,
+      runTools: async (calls) => calls.map((call) => (runs++, { tool_use_id: call.id, content: "more text" })),
+    });
+    expect(runs).toBe(2);
+    expect(result.fullText).toMatch(/^answer/);
+  });
+
+  it("runs a one-shot loop without a chat in memory, leaving nothing in durable storage", async () => {
+    const { harness } = await piRuntime();
+    const result = await streamChatWithToolsOnPi({
+      model: MODEL,
+      systemPrompt: "Curate memory.",
+      messages: [{ role: "user", content: "Please read NDA" }],
+      tools: [readDocument],
+      runTools: async (calls) => calls.map((call) => ({ tool_use_id: call.id, content: "Delaware" })),
+    });
+    expect(result.fullText).toMatch(/^answer/);
+    expect(requests.at(-1)!.toolResults.join("")).toContain("Delaware");
+    // The durable Harness never saw it: its first conversation id is still unused.
+    expect(await harness.conversation(1 as never, context)).toBeUndefined();
+  });
+
+  it("gives a text-only model a rendered page's own text, not an omitted-image placeholder", async () => {
+    await turn(
+      [{ role: "user", content: [{ type: "text", text: "Summarise:" }, { type: "image", image: new Uint8Array([1, 2, 3]), mimeType: "image/png", fallbackText: "PAGE 1: governing law is Delaware" }] }],
+      { user: "u1", parent: null, assistant: "a1" },
+    );
+    expect(requests.at(-1)!.users.join("")).toContain("PAGE 1: governing law is Delaware");
+  });
+
+  it("answers a one-shot prompt without tools or a transcript", async () => {
+    const text = await completeTextOnPi({ model: MODEL, systemPrompt: "Title this.", user: "An NDA question" });
+    expect(text).toMatch(/^answer/);
+    expect(requests.at(-1)!.users).toEqual(["An NDA question"]);
   });
 
   it("stopping a turn stops a tool that is still running and leaves no tool task behind", async () => {
