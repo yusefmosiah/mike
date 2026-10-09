@@ -6,7 +6,7 @@
 //   1. ON BY DEFAULT for community installs; SENTRY_DISABLED=true opts out.
 //      An explicit DSN overrides Mike's project. Test processes stay disabled
 //      unless SENTRY_ALLOW_IN_TESTS=true is explicitly set.
-//   2. NEVER LEAK DOCUMENT CONTENT OR CREDENTIALS. This is a legal platform:
+//   2. NEVER LEAK DOCUMENT CONTENT OR CREDENTIALS. Users bring confidential work:
 //      request bodies carry privileged documents and chat transcripts, and
 //      headers carry session cookies. `beforeSend` strips request bodies,
 //      cookies, and auth headers, and redacts secret-looking keys anywhere

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemPrompt } from "../../modules/chat/engine/prompts";
 import { COURTLISTENER_SYSTEM_PROMPT } from "../../modules/chat/engine/tools/courtlistenerTools";
+import { buildWordChatSystemPrompt } from "../../modules/chat/engine/wordPrompt";
+import { buildTabularMessages } from "../../modules/tabular/tabular.chats";
 
 describe("buildSystemPrompt", () => {
     it("always contains the core identity and rules", () => {
         for (const prompt of [buildSystemPrompt(true), buildSystemPrompt(false)]) {
             expect(prompt).toContain(
-                "You are Mike, an AI legal assistant for lawyers and legal professionals.",
+                "You are Mike, a general knowledge-work assistant.",
             );
             expect(prompt).toContain("Do not fabricate document content.");
             expect(prompt).toContain(
@@ -120,5 +122,47 @@ describe("buildSystemPrompt", () => {
 
     it("defaults to including research tools", () => {
         expect(buildSystemPrompt()).toBe(buildSystemPrompt(true));
+    });
+});
+
+// Mike is a general knowledge-work agent with legal strengths. A legal-only
+// identity made models refuse ordinary questions ("what are the baseball
+// scores?"), so no surface may introduce Mike as a legal assistant.
+describe("assistant identity", () => {
+    const tabularSystem = () => {
+        const [system] = buildTabularMessages(
+            [],
+            { documents: [], columns: [], cells: new Map() },
+            "Review",
+        ) as { content: string }[];
+        return system.content;
+    };
+    const surfaces: [string, () => string][] = [
+        ["assistant", () => buildSystemPrompt(true)],
+        ["assistant without research", () => buildSystemPrompt(false)],
+        ["Word", () => buildWordChatSystemPrompt(false)],
+        ["Word client tools", () => buildWordChatSystemPrompt(true)],
+        ["tabular", tabularSystem],
+    ];
+
+    it.each(surfaces)("%s introduces Mike as a general assistant", (_name, build) => {
+        const prompt = build();
+        expect(prompt).toContain("You are Mike, a general knowledge-work assistant");
+        expect(prompt).not.toMatch(/legal assistant/i);
+        expect(prompt).not.toContain("for lawyers and legal professionals");
+    });
+
+    it("keeps legal work as a stated strength without limiting the subject", () => {
+        const prompt = buildSystemPrompt(true);
+        expect(prompt).toContain("Legal work is one of your strengths");
+        expect(prompt).toContain("never refuse a request because it is not legal");
+        expect(prompt).toContain("answer from general knowledge, whatever the subject");
+        expect(prompt).not.toContain("answer from legal knowledge");
+    });
+
+    it("tells the model to look up current facts instead of declining", () => {
+        const prompt = buildSystemPrompt(false);
+        expect(prompt).toContain("sports scores");
+        expect(prompt).toContain("rather than declining");
     });
 });

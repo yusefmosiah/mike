@@ -627,7 +627,7 @@ export const TOOLS = [
     function: {
       name: "web_search",
       description:
-        "Search the web for legal authorities, regulatory updates, company filings, or current market facts. Returns ranked results with title, URL, and snippet.",
+        "Search the web for current or outside information on any subject: news, sports, prices, legal authorities, regulatory updates, company filings, market facts. Returns ranked results with title, URL, and snippet.",
       parameters: {
         type: "object",
         properties: {
