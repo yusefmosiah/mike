@@ -301,9 +301,14 @@ Subagents split the same way. The runtime (`lib/llm/pi/runtime.mts`) owns the
 `delegate` tool: the child conversation, its limits, its records and its
 restart. The engine (`modules/chat/engine/subagents/`) decides what a child
 may be: the type files, the models the user may pick, and a `SubagentHost`
-that checks each call and runs the child's tools through the ordinary
-dispatcher. A new kind of subagent is a markdown file in `subagents/types/`,
-and its tools must be tier-1 reads.
+that checks each call. A child's tool calls run through the turn's own
+runner (`runTurnTools` in `streaming.ts`, scope `"child"`): the same
+guardrails, the same edit state, writes from concurrent children taken in
+turn, and only edits, new documents, workflows and connector calls shown in
+the parent's timeline. A new kind of subagent is a markdown file in
+`subagents/types/`; `tools: *` means every tool the parent has, and no type
+may list `delegate` or `ask_inputs`. Add a type only when it changes what a
+child may do or how it must work, not the subject it works on.
 
 ## Background jobs
 

@@ -148,7 +148,7 @@ export type StreamChatParams = {
 
 /** The first line of the delegate tool's description; the host appends the model memo. */
 export const DELEGATE_TOOL_SUMMARY =
-    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with its own read-only tools, and cannot talk to the user.";
+    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with the tools its type allows, and cannot talk to the user. Several delegate calls in one response run at the same time, so split independent work into separate calls.";
 
 /**
  * A child the `delegate` tool may start: what the parent turn's host decided

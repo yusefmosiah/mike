@@ -38,7 +38,7 @@ const transcript: SubagentTranscript = {
     ],
 };
 
-const toggle = () => screen.getByRole("button", { name: /Delegated to document review/ });
+const toggle = () => screen.getByRole("button", { name: /Document review subagent/ });
 
 describe("SubagentBlock", () => {
     it("shows what was delegated, on which model, and what it cost, closed", () => {
@@ -119,5 +119,15 @@ describe("delegatedTurnCost", () => {
         expect(delegatedTurnCost([own])).toBeNull();
         expect(delegatedTurnCost([event])).toBeNull();
         expect(delegatedTurnCost(undefined)).toBeNull();
+    });
+});
+
+describe("SubagentBlock label", () => {
+    it.each([
+        ["general", "General subagent"],
+        ["citation_check", "Citation check subagent"],
+    ])("names a %s child by its type", (agentType, label) => {
+        render(<SubagentBlock event={{ ...event, agent_type: agentType }} />);
+        expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     });
 });

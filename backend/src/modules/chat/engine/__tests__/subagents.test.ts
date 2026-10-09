@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantEvent, SubagentEvent } from "@mike/contracts";
 import type { Db } from "../../../../lib/db";
 import { DELEGATE_TOOL_SUMMARY, type SubagentSpec } from "../../../../lib/llm/types";
+import { isParallelSafeTool } from "../../../../lib/guardrails";
 
 const routerModels = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("../../../../lib/routerModels", async (importOriginal) => ({
@@ -16,8 +17,6 @@ vi.mock("../../../../lib/llm/registry", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../../../lib/llm/registry")>()),
     configuredEndpointSummaries: endpoints.list,
 }));
-const dispatcher = vi.hoisted(() => ({ run: vi.fn() }));
-vi.mock("../tools/toolDispatcher", () => ({ runToolCalls: dispatcher.run }));
 
 import { createSubagentHost, type SubagentHostArgs } from "../subagents/subagentHost";
 import {
@@ -72,10 +71,15 @@ describe("subagent types", () => {
         });
     });
 
+    it("reads tools: * as every tool the parent has", () => {
+        expect(parseSubagentType(typeSource({ tools: "*" }), "document_review.md").tools).toBe("all");
+    });
+
     it.each([
-        [{ tools: "read_document, edit_document" }, "tool edit_document is not a read-only tool"],
-        [{ tools: "delegate" }, "tool delegate is not a read-only tool"],
-        [{ tools: "" }, "tools must list at least one tool"],
+        [{ tools: "read_document, delegate" }, "tool delegate is never given to a subagent"],
+        [{ tools: "ask_inputs" }, "tool ask_inputs is never given to a subagent"],
+        [{ tools: "*, read_document" }, "tools: * stands alone"],
+        [{ tools: "" }, "tools must be * or list at least one tool"],
         [{ name: "Document-Review" }, "name must be snake_case"],
         [{ name: "other_review" }, "name must match the file name"],
         [{ description: "" }, "description is required"],
@@ -91,17 +95,18 @@ describe("subagent types", () => {
 
     it("loads every shipped type, and names a malformed file", () => {
         const shipped = loadSubagentTypes();
-        expect(shipped.get("document_review")?.tools).toEqual([
-            "read_document",
-            "fetch_documents",
-            "find_in_document",
-            "list_documents",
-        ]);
+        expect([...shipped.keys()]).toEqual(["citation_check", "general"]);
+        expect(shipped.get("general")?.tools).toBe("all");
+        // The checker only looks things up.
+        const checker = shipped.get("citation_check")!.tools as string[];
+        expect(checker).toContain("web_search");
+        expect(checker).toContain("courtlistener_verify_citations");
+        expect(checker.every((tool) => isParallelSafeTool(tool))).toBe(true);
         expect(subagentModelMemo()).toContain("Leave `model` out");
 
         const dir = mkdtempSync(path.join(tmpdir(), "subagent-types-"));
-        writeFileSync(path.join(dir, "broken.md"), typeSource({ name: "broken", tools: "send_email" }));
-        expect(() => loadSubagentTypes(dir)).toThrow("Subagent type broken.md: tool send_email is not a read-only tool");
+        writeFileSync(path.join(dir, "broken.md"), typeSource({ name: "broken", tools: "delegate" }));
+        expect(() => loadSubagentTypes(dir)).toThrow("Subagent type broken.md: tool delegate is never given to a subagent");
     });
 });
 
@@ -217,6 +222,10 @@ describe("subagent host", () => {
         instructions: "You are a reviewer.",
     };
     const tableType: SubagentType = { ...reviewType, name: "table_check", tools: ["read_table_cells"] };
+    const generalType: SubagentType = { ...reviewType, name: "general", tools: "all" };
+    const runTools = vi.fn(async (calls: { id: string }[]) =>
+        calls.map((call) => ({ tool_use_id: call.id, content: "Clause 12" })),
+    );
 
     function args(overrides: Partial<SubagentHostArgs> = {}) {
         const writes: string[] = [];
@@ -226,12 +235,12 @@ describe("subagent host", () => {
             userId: "u1",
             chatModel: "chat-model",
             reasoning: "high" as never,
-            docStore: new Map() as never,
+            runTools,
             docIndex: {
                 "doc-0": { document_id: "11111111-aaaa", filename: "NDA.docx" },
                 "doc-1": { document_id: "22222222-bbbb", filename: "MSA.pdf" },
             },
-            offeredTools: ["read_document", "list_documents", "edit_document"],
+            offeredTools: ["read_document", "list_documents", "edit_document", "web_search", "delegate", "ask_inputs"],
             write: (chunk) => writes.push(chunk),
             events,
             types: new Map([
@@ -300,21 +309,25 @@ describe("subagent host", () => {
         expect(other.reasoning).toBeUndefined();
     });
 
-    it("runs only the child's own tools, and answers the rest as unavailable", async () => {
-        dispatcher.run.mockResolvedValue({
-            toolResults: [{ tool_call_id: "c1", content: "Clause 12" }],
-        });
+    it("gives a general child every tool the parent has, except delegate and ask_inputs", async () => {
+        const { host, promptSection } = await createSubagentHost(
+            args({ types: new Map([[generalType.name, generalType]]) }).hostArgs,
+        );
+        expect(promptSection).toContain("- general:");
+        const spec = (await host.prepare({ type: "general", task: "x" })) as SubagentSpec;
+        expect(spec.tools).toEqual(["read_document", "list_documents", "edit_document", "web_search"]);
+    });
+
+    it("runs only the child's own tools through the turn's runner, and answers the rest as unavailable", async () => {
+        runTools.mockClear();
         const { host } = await createSubagentHost(args().hostArgs);
         const spec = (await host.prepare({ type: "document_review", task: "x" })) as SubagentSpec;
         const results = await spec.runTools([
             { id: "c1", name: "read_document", input: { doc_id: "doc-0" } },
             { id: "c2", name: "edit_document", input: {} },
         ]);
-        expect(dispatcher.run).toHaveBeenCalledTimes(1);
-        const [calls] = dispatcher.run.mock.calls[0];
-        expect(calls).toEqual([
-            { id: "c1", function: { name: "read_document", arguments: '{"doc_id":"doc-0"}' } },
-        ]);
+        expect(runTools).toHaveBeenCalledTimes(1);
+        expect(runTools).toHaveBeenCalledWith([{ id: "c1", name: "read_document", input: { doc_id: "doc-0" } }]);
         expect(results).toEqual([
             { tool_use_id: "c1", content: "Clause 12" },
             { tool_use_id: "c2", content: JSON.stringify({ error: "Tool 'edit_document' is not available to this subagent." }) },

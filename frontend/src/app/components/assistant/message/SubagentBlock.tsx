@@ -121,7 +121,7 @@ export function SubagentBlock({
             <EventDisclosureButton
                 open={open}
                 onToggle={() => setOpen((value) => !value)}
-                label={`Delegated to ${typeLabel(event.agent_type).toLowerCase()}`}
+                label={`${typeLabel(event.agent_type)} subagent`}
                 isStreaming={running}
             />
             <p className="text-xs break-words">{event.model}</p>

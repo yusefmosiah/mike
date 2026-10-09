@@ -9,7 +9,10 @@ How to choose a subagent's model (edited as new models arrive; last edited
 - Keep the conversation's model, or pick a stronger one, for judgment: risk
   assessment, comparing a draft against a standard, anything where a missed
   nuance changes the advice.
-- Several small, independent tasks are better than one large one. Give each
+- Several small, independent tasks are better than one large one, and
+  several delegate calls in one response run at the same time. Give each
   subagent one clear question and the documents it needs.
+- Use citation_check on a draft before you rely on its citations; use
+  general for everything else.
 - Only models in the table of models you may use will run; any other is
   refused. In strict private mode the table holds only private models.

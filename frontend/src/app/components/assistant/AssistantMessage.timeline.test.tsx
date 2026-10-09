@@ -197,7 +197,7 @@ describe("AssistantMessage timeline", () => {
         );
         // Like other work before the answer, it folds away once the answer is written.
         fireEvent.click(screen.getByRole("button", { name: /Completed in 1 step/ }));
-        expect(screen.getByRole("button", { name: /Delegated to document review/ })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Document review subagent/ })).toBeInTheDocument();
         expect(
             screen.getByText("This answer: 5,700 tokens · $0.01. 1 subagent: 1,500 tokens · under $0.01."),
         ).toBeInTheDocument();

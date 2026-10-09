@@ -65,11 +65,44 @@ import {
   AUTO_MODE_SAFE_DEFAULTS,
   classifyToolCall,
   inScopeForContainer,
+  isParallelSafeTool,
   tierForTool,
 } from "../../../lib/guardrails";
 
 export type { AssistantEvent } from "@mike/contracts";
 import type { AssistantEvent, AssistantErrorCode } from "@mike/contracts";
+
+/**
+ * What a subagent's tool calls put in front of the user: anything that changed
+ * a document, made one, applied a workflow or reached a connector. Its reads
+ * and searches are not shown in the parent's timeline.
+ */
+const SURFACED_CHILD_EVENTS: ReadonlySet<string> = new Set([
+  "doc_edited",
+  "doc_created",
+  "doc_replicated",
+  "workflow_applied",
+  "mcp_tool_call",
+]);
+const SURFACED_CHILD_FRAMES: ReadonlySet<string> = new Set([
+  ...SURFACED_CHILD_EVENTS,
+  "doc_edited_start",
+  "doc_created_start",
+  "doc_replicate_start",
+  "mcp_tool_start",
+  "mcp_tool_result",
+]);
+
+function isSurfacedChildFrame(chunk: string): boolean {
+  const match = /^data: (\{.*\})\n\n$/s.exec(chunk);
+  if (!match) return false;
+  try {
+    const type = (JSON.parse(match[1]) as { type?: unknown }).type;
+    return typeof type === "string" && SURFACED_CHILD_FRAMES.has(type);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Tools the model can call that execute outside this process — in the Word
@@ -724,6 +757,337 @@ export async function runLLMStream(params: {
     // after the user's saved selection is applied, before any provider or
     // stored BYOK key can be spent. No-op outside strict mode.
     assertModelAllowed(selectedModel);
+    // Writes from concurrent subagents take turns, so edits to one document
+    // build on each other's versions instead of racing (the parent's own
+    // writes already run their round in order).
+    let writeQueue: Promise<unknown> = Promise.resolve();
+    const inWriteOrder = <T,>(run: () => Promise<T>): Promise<T> => {
+      const next = writeQueue.then(run, run);
+      writeQueue = next.catch(() => undefined);
+      return next;
+    };
+
+    /**
+     * Runs one batch of this turn's tool calls: the parent's own, or a
+     * subagent's (scope "child"). A child's calls pass the same guardrails
+     * and share the turn's edit and read state. Only what it produced for the
+     * user (edits, new or copied documents, applied workflows, connector
+     * calls) reaches the parent's stream and record; its lookups are in its
+     * own transcript.
+     */
+    const runTurnTools = async (
+      calls: NormalizedToolCall[],
+      scope: "parent" | "child",
+    ): Promise<{ tool_use_id: string; content: string }[]> => {
+      if (scope === "child" && !calls.every((call) => isParallelSafeTool(call.name))) {
+        return inWriteOrder(() => runTurnToolsNow(calls, scope));
+      }
+      return runTurnToolsNow(calls, scope);
+    };
+    const runTurnToolsNow = async (
+      calls: NormalizedToolCall[],
+      scope: "parent" | "child",
+    ): Promise<{ tool_use_id: string; content: string }[]> => {
+      const record = (...added: AssistantEvent[]) => {
+        for (const event of added) {
+          if (scope === "parent" || SURFACED_CHILD_EVENTS.has(event.type)) {
+            events.push(event);
+          }
+        }
+      };
+      const emit =
+        scope === "parent"
+          ? write
+          : (chunk: string) => {
+              if (isSurfacedChildFrame(chunk)) write(chunk);
+            };
+      throwIfAborted(signal);
+      // Emit any text the model produced before this tool turn so the
+      // UI sees it before the tool results stream in.
+      flushText();
+
+      // Client-executed tools (Word add-in) round-trip through the SSE
+      // stream and never enter the server dispatcher. They run before the
+      // server batch and sequentially among themselves: each call mutates
+      // or reads the live document, so order is part of their semantics.
+      const clientResultByCallId = new Map<string, string>();
+      // Results for calls the Auto Mode guardrails refuse or answer
+      // themselves. Keyed by tool_call_id and merged into the batch's
+      // results below, so every tool_use the model sent gets an answer.
+      const guardrailResultByCallId = new Map<string, string>();
+
+      // Auto Mode: judge every call before it can reach the dispatcher, and
+      // return the refusal as a tool RESULT the model can read and react
+      // to — a throw here would end the turn.
+      //   Tier 1 — reads; always allowed.
+      //   Tier 2 — document writes; allowed only where the caller may
+      //            mutate documents AND the arguments stay inside this
+      //            turn's container.
+      //   Tier 3 — connector writes, anything with external egress, and
+      //            every unknown tool; allowed only when the on-route
+      //            classifier says so, judged against the user's own words
+      //            and the tools already tried.
+      // A model-emitted ask_inputs call is answered here deterministically:
+      // Auto Mode has nobody to pause for.
+      const applyAutoModeGuardrails = async (
+        call: NormalizedToolCall,
+      ): Promise<string | null> => {
+        const denied = (reason: string) =>
+          JSON.stringify({
+            error: `Auto Mode guardrail denied ${call.name}: ${reason}`,
+          });
+
+        if (call.name === "ask_inputs") {
+          const { event, responses } = autoAnswerAskInputs(call.input);
+          // Mirror the dispatcher: a call with nothing to ask is no
+          // question, so it leaves no event behind.
+          if (event.items.length > 0) {
+            emit(`data: ${JSON.stringify(event)}\n\n`);
+            record(event);
+            const answerEvent: AssistantEvent = {
+              type: "ask_inputs_response",
+              // The assistant row this turn becomes is reserved by the
+              // route, not known here; the pairing that matters in the
+              // transcript is ask_event_id.
+              assistant_message_id: "",
+              ask_event_id: event.event_id,
+              responses,
+            };
+            emit(`data: ${JSON.stringify(answerEvent)}\n\n`);
+            record(answerEvent);
+          }
+          const approvalDenied = responses.some(
+            (response) =>
+              response.kind === "approval" && response.decision === "reject",
+          );
+          return JSON.stringify({
+            ok: true,
+            auto_answered: true,
+            responses,
+            message: approvalDenied
+              ? "Auto Mode answered these itself and rejected the approval items: nothing was approved. Do not ask again or retry the approvals."
+              : "Auto Mode answered these itself — no user is present. Continue with the answers above and do not ask again.",
+          });
+        }
+
+        const tier = tierForTool(call.name);
+        if (tier === 1) return null;
+        if (tier === 2) {
+          if (!allowDocumentMutation) {
+            return denied(
+              "this conversation does not allow changing documents",
+            );
+          }
+          if (!inScopeForContainer(call.input, projectId ?? null)) {
+            return denied(
+              "the call targets a container outside this conversation",
+            );
+          }
+          return null;
+        }
+
+        let verdict: { verdict: "allow" | "deny"; reason: string };
+        try {
+          verdict = await classifyToolCall({
+            userIntent: autoModeIntent,
+            toolName: call.name,
+            toolArgs: call.input,
+            history: [...priorToolNames],
+            model: selectedModel,
+            apiKeys,
+          });
+        } catch {
+          // `classifyToolCall` fails closed by contract; this catch is the
+          // second belt, because a throw here would end the whole turn.
+          verdict = { verdict: "deny", reason: "classifier unavailable" };
+        }
+        if (verdict.verdict === "allow") return null;
+        return denied(verdict.reason || "the classifier did not allow it");
+      };
+
+      // Enforcement, not just omission: a document-writing call from a
+      // caller who may not write is dropped before dispatch, on the server
+      // side and the client side alike. It falls through to the
+      // "Tool 'x' is not available." answer below, which every tool_use
+      // without a result already gets, so the model is told plainly rather
+      // than left waiting on a call that silently did nothing.
+      let permittedCalls: NormalizedToolCall[];
+      if (autoMode) {
+        permittedCalls = [];
+        for (const call of calls) {
+          const refusal = await applyAutoModeGuardrails(call);
+          if (refusal === null) permittedCalls.push(call);
+          else guardrailResultByCallId.set(call.id, refusal);
+          priorToolNames.push(call.name);
+        }
+      } else {
+        permittedCalls = allowDocumentMutation
+          ? calls
+          : calls.filter((c) => !isDocumentMutatingTool(c.name));
+      }
+      const serverCalls = clientTools
+        ? permittedCalls.filter((c) => !clientTools.owns(c.name))
+        : permittedCalls;
+      if (clientTools) {
+        for (const call of permittedCalls) {
+          if (!clientTools.owns(call.name)) continue;
+          const { content, events: clientEvents } =
+            await clientTools.execute(call);
+          clientResultByCallId.set(call.id, content);
+          record(...clientEvents);
+          throwIfAborted(signal);
+        }
+      }
+
+      const toolCalls: ToolCall[] = serverCalls.map((c) => ({
+        id: c.id,
+        function: {
+          name: c.name,
+          arguments: JSON.stringify(c.input),
+        },
+      }));
+      const {
+        toolResults,
+        docsRead,
+        docsFound,
+        docsCreated,
+        docsReplicated,
+        workflowsApplied,
+        docsEdited,
+        askInputsEvents,
+        courtlistenerEvents,
+        caseCitationEvents,
+        mcpEvents,
+      } = await runToolCalls(
+        toolCalls,
+        docStore,
+        userId,
+        db,
+        emit,
+        workflowStore,
+        tabularStore,
+        docIndex,
+        turnEditState,
+        turnReadState,
+        projectId,
+        courtlistenerTurnState,
+        apiKeys,
+        nonce,
+        // A child cannot pause for the user, so an approval-gated
+        // connector call is refused rather than turned into a question.
+        {
+          connectorApprovals:
+            scope === "parent" && connectorApprovals && includeAskInputs,
+        },
+      );
+      throwIfAborted(signal);
+      for (const r of docsRead) {
+        record({
+          type: "doc_read",
+          filename: r.filename,
+          document_id: r.document_id,
+          version_id: r.version_id,
+          version_number: r.version_number,
+        });
+      }
+      for (const f of docsFound) {
+        record({
+          type: "doc_find",
+          filename: f.filename,
+          document_id: f.document_id,
+          version_id: f.version_id,
+          version_number: f.version_number,
+          query: f.query,
+          total_matches: f.total_matches,
+        });
+      }
+      for (const dl of docsCreated) {
+        record({
+          type: "doc_created",
+          filename: dl.filename,
+          download_url: dl.download_url,
+          document_id: dl.document_id,
+          version_id: dl.version_id,
+          version_number: dl.version_number ?? null,
+        });
+      }
+      for (const r of docsReplicated) {
+        record({
+          type: "doc_replicated",
+          filename: r.filename,
+          count: r.count,
+          copies: r.copies,
+        });
+      }
+      for (const wf of workflowsApplied) {
+        record({
+          type: "workflow_applied",
+          workflow_id: wf.workflow_id,
+          title: wf.title,
+        });
+      }
+      for (const e of docsEdited) {
+        record({
+          type: "doc_edited",
+          filename: e.filename,
+          document_id: e.document_id,
+          version_id: e.version_id,
+          version_number: e.version_number,
+          download_url: e.download_url,
+          annotations: e.annotations,
+        });
+      }
+      for (const askInputsEvent of askInputsEvents) {
+        emit(`data: ${JSON.stringify(askInputsEvent)}\n\n`);
+        record(askInputsEvent);
+      }
+      for (const event of courtlistenerEvents) {
+        record(event);
+      }
+      for (const event of mcpEvents) {
+        record(event);
+      }
+      for (const event of caseCitationEvents) {
+        record(event);
+      }
+
+      // Auto Mode never pauses for input. The events above still stream and
+      // persist (a connector approval can be answered from the transcript
+      // later), but the turn continues toward the model's summary; a pause
+      // would park the run on a user who is not there.
+      if (askInputsEvents.length > 0 && !autoMode) {
+        throw new AssistantStreamAskInputsPause();
+      }
+
+      // Index alignment would break if any tool branch skips its
+      // push (unhandled tool name, disabled store, guard failure).
+      // Each tool_result already carries its tool_call_id, so key off
+      // that directly — and fall back to an error result for any
+      // tool_use that didn't produce one, so Claude's next request
+      // has a tool_result for every tool_use it sent.
+      const resultByCallId = new Map<string, string>(clientResultByCallId);
+      for (const [callId, content] of guardrailResultByCallId) {
+        resultByCallId.set(callId, content);
+      }
+      for (const r of toolResults) {
+        const row = r as {
+          tool_call_id: string;
+          content?: unknown;
+        };
+        resultByCallId.set(row.tool_call_id, String(row.content ?? ""));
+      }
+      // Answer every tool_use the model sent — client and server alike —
+      // in the model's original call order.
+      return calls.map((c) => ({
+        tool_use_id: c.id,
+        content:
+          resultByCallId.get(c.id) ??
+          JSON.stringify({
+            error: `Tool '${c.name}' is not available.`,
+          }),
+      }));
+    };
+
     let delegation: Awaited<ReturnType<typeof createSubagentHost>> | null = null;
     if (params.includeSubagents) {
       try {
@@ -733,15 +1097,11 @@ export async function runLLMStream(params: {
           apiKeys,
           chatModel: selectedModel,
           reasoning: params.reasoning ?? "high",
-          docStore,
           docIndex,
-          workflowStore,
-          tabularStore,
-          projectId,
-          nonce,
           offeredTools: (activeTools as OpenAIToolSchema[]).map(
             (tool) => tool.function.name,
           ),
+          runTools: (calls) => runTurnTools(calls, "child"),
           write,
           events,
         });
@@ -815,288 +1175,7 @@ export async function runLLMStream(params: {
           );
         },
       },
-      runTools: async (calls) => {
-        throwIfAborted(signal);
-        // Emit any text the model produced before this tool turn so the
-        // UI sees it before the tool results stream in.
-        flushText();
-
-        // Client-executed tools (Word add-in) round-trip through the SSE
-        // stream and never enter the server dispatcher. They run before the
-        // server batch and sequentially among themselves: each call mutates
-        // or reads the live document, so order is part of their semantics.
-        const clientResultByCallId = new Map<string, string>();
-        // Results for calls the Auto Mode guardrails refuse or answer
-        // themselves. Keyed by tool_call_id and merged into the batch's
-        // results below, so every tool_use the model sent gets an answer.
-        const guardrailResultByCallId = new Map<string, string>();
-
-        // Auto Mode: judge every call before it can reach the dispatcher, and
-        // return the refusal as a tool RESULT the model can read and react
-        // to — a throw here would end the turn.
-        //   Tier 1 — reads; always allowed.
-        //   Tier 2 — document writes; allowed only where the caller may
-        //            mutate documents AND the arguments stay inside this
-        //            turn's container.
-        //   Tier 3 — connector writes, anything with external egress, and
-        //            every unknown tool; allowed only when the on-route
-        //            classifier says so, judged against the user's own words
-        //            and the tools already tried.
-        // A model-emitted ask_inputs call is answered here deterministically:
-        // Auto Mode has nobody to pause for.
-        const applyAutoModeGuardrails = async (
-          call: NormalizedToolCall,
-        ): Promise<string | null> => {
-          const denied = (reason: string) =>
-            JSON.stringify({
-              error: `Auto Mode guardrail denied ${call.name}: ${reason}`,
-            });
-
-          if (call.name === "ask_inputs") {
-            const { event, responses } = autoAnswerAskInputs(call.input);
-            // Mirror the dispatcher: a call with nothing to ask is no
-            // question, so it leaves no event behind.
-            if (event.items.length > 0) {
-              write(`data: ${JSON.stringify(event)}\n\n`);
-              events.push(event);
-              const answerEvent: AssistantEvent = {
-                type: "ask_inputs_response",
-                // The assistant row this turn becomes is reserved by the
-                // route, not known here; the pairing that matters in the
-                // transcript is ask_event_id.
-                assistant_message_id: "",
-                ask_event_id: event.event_id,
-                responses,
-              };
-              write(`data: ${JSON.stringify(answerEvent)}\n\n`);
-              events.push(answerEvent);
-            }
-            const approvalDenied = responses.some(
-              (response) =>
-                response.kind === "approval" && response.decision === "reject",
-            );
-            return JSON.stringify({
-              ok: true,
-              auto_answered: true,
-              responses,
-              message: approvalDenied
-                ? "Auto Mode answered these itself and rejected the approval items: nothing was approved. Do not ask again or retry the approvals."
-                : "Auto Mode answered these itself — no user is present. Continue with the answers above and do not ask again.",
-            });
-          }
-
-          const tier = tierForTool(call.name);
-          if (tier === 1) return null;
-          if (tier === 2) {
-            if (!allowDocumentMutation) {
-              return denied(
-                "this conversation does not allow changing documents",
-              );
-            }
-            if (!inScopeForContainer(call.input, projectId ?? null)) {
-              return denied(
-                "the call targets a container outside this conversation",
-              );
-            }
-            return null;
-          }
-
-          let verdict: { verdict: "allow" | "deny"; reason: string };
-          try {
-            verdict = await classifyToolCall({
-              userIntent: autoModeIntent,
-              toolName: call.name,
-              toolArgs: call.input,
-              history: [...priorToolNames],
-              model: selectedModel,
-              apiKeys,
-            });
-          } catch {
-            // `classifyToolCall` fails closed by contract; this catch is the
-            // second belt, because a throw here would end the whole turn.
-            verdict = { verdict: "deny", reason: "classifier unavailable" };
-          }
-          if (verdict.verdict === "allow") return null;
-          return denied(verdict.reason || "the classifier did not allow it");
-        };
-
-        // Enforcement, not just omission: a document-writing call from a
-        // caller who may not write is dropped before dispatch, on the server
-        // side and the client side alike. It falls through to the
-        // "Tool 'x' is not available." answer below, which every tool_use
-        // without a result already gets, so the model is told plainly rather
-        // than left waiting on a call that silently did nothing.
-        let permittedCalls: NormalizedToolCall[];
-        if (autoMode) {
-          permittedCalls = [];
-          for (const call of calls) {
-            const refusal = await applyAutoModeGuardrails(call);
-            if (refusal === null) permittedCalls.push(call);
-            else guardrailResultByCallId.set(call.id, refusal);
-            priorToolNames.push(call.name);
-          }
-        } else {
-          permittedCalls = allowDocumentMutation
-            ? calls
-            : calls.filter((c) => !isDocumentMutatingTool(c.name));
-        }
-        const serverCalls = clientTools
-          ? permittedCalls.filter((c) => !clientTools.owns(c.name))
-          : permittedCalls;
-        if (clientTools) {
-          for (const call of permittedCalls) {
-            if (!clientTools.owns(call.name)) continue;
-            const { content, events: clientEvents } =
-              await clientTools.execute(call);
-            clientResultByCallId.set(call.id, content);
-            events.push(...clientEvents);
-            throwIfAborted(signal);
-          }
-        }
-
-        const toolCalls: ToolCall[] = serverCalls.map((c) => ({
-          id: c.id,
-          function: {
-            name: c.name,
-            arguments: JSON.stringify(c.input),
-          },
-        }));
-        const {
-          toolResults,
-          docsRead,
-          docsFound,
-          docsCreated,
-          docsReplicated,
-          workflowsApplied,
-          docsEdited,
-          askInputsEvents,
-          courtlistenerEvents,
-          caseCitationEvents,
-          mcpEvents,
-        } = await runToolCalls(
-          toolCalls,
-          docStore,
-          userId,
-          db,
-          write,
-          workflowStore,
-          tabularStore,
-          docIndex,
-          turnEditState,
-          turnReadState,
-          projectId,
-          courtlistenerTurnState,
-          apiKeys,
-          nonce,
-          { connectorApprovals: connectorApprovals && includeAskInputs },
-        );
-        throwIfAborted(signal);
-        for (const r of docsRead) {
-          events.push({
-            type: "doc_read",
-            filename: r.filename,
-            document_id: r.document_id,
-            version_id: r.version_id,
-            version_number: r.version_number,
-          });
-        }
-        for (const f of docsFound) {
-          events.push({
-            type: "doc_find",
-            filename: f.filename,
-            document_id: f.document_id,
-            version_id: f.version_id,
-            version_number: f.version_number,
-            query: f.query,
-            total_matches: f.total_matches,
-          });
-        }
-        for (const dl of docsCreated) {
-          events.push({
-            type: "doc_created",
-            filename: dl.filename,
-            download_url: dl.download_url,
-            document_id: dl.document_id,
-            version_id: dl.version_id,
-            version_number: dl.version_number ?? null,
-          });
-        }
-        for (const r of docsReplicated) {
-          events.push({
-            type: "doc_replicated",
-            filename: r.filename,
-            count: r.count,
-            copies: r.copies,
-          });
-        }
-        for (const wf of workflowsApplied) {
-          events.push({
-            type: "workflow_applied",
-            workflow_id: wf.workflow_id,
-            title: wf.title,
-          });
-        }
-        for (const e of docsEdited) {
-          events.push({
-            type: "doc_edited",
-            filename: e.filename,
-            document_id: e.document_id,
-            version_id: e.version_id,
-            version_number: e.version_number,
-            download_url: e.download_url,
-            annotations: e.annotations,
-          });
-        }
-        for (const askInputsEvent of askInputsEvents) {
-          write(`data: ${JSON.stringify(askInputsEvent)}\n\n`);
-          events.push(askInputsEvent);
-        }
-        for (const event of courtlistenerEvents) {
-          events.push(event);
-        }
-        for (const event of mcpEvents) {
-          events.push(event);
-        }
-        for (const event of caseCitationEvents) {
-          events.push(event);
-        }
-
-        // Auto Mode never pauses for input. The events above still stream and
-        // persist (a connector approval can be answered from the transcript
-        // later), but the turn continues toward the model's summary; a pause
-        // would park the run on a user who is not there.
-        if (askInputsEvents.length > 0 && !autoMode) {
-          throw new AssistantStreamAskInputsPause();
-        }
-
-        // Index alignment would break if any tool branch skips its
-        // push (unhandled tool name, disabled store, guard failure).
-        // Each tool_result already carries its tool_call_id, so key off
-        // that directly — and fall back to an error result for any
-        // tool_use that didn't produce one, so Claude's next request
-        // has a tool_result for every tool_use it sent.
-        const resultByCallId = new Map<string, string>(clientResultByCallId);
-        for (const [callId, content] of guardrailResultByCallId) {
-          resultByCallId.set(callId, content);
-        }
-        for (const r of toolResults) {
-          const row = r as {
-            tool_call_id: string;
-            content?: unknown;
-          };
-          resultByCallId.set(row.tool_call_id, String(row.content ?? ""));
-        }
-        // Answer every tool_use the model sent — client and server alike —
-        // in the model's original call order.
-        return calls.map((c) => ({
-          tool_use_id: c.id,
-          content:
-            resultByCallId.get(c.id) ??
-            JSON.stringify({
-              error: `Tool '${c.name}' is not available.`,
-            }),
-        }));
-      },
+      runTools: (calls) => runTurnTools(calls, "parent"),
     })).usage;
   } catch (err) {
     if (isAskInputsPause(err)) {

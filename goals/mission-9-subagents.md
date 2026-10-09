@@ -120,3 +120,23 @@ round and reported; the parent answered with clause citations. Run 1: parent
 list), 132 s. Audit rows and stored events matched. The transcript endpoint
 answered 200 for the chat and 404 for another chat id. Opened in the browser,
 the line expanded to the child's task and steps with no console errors.
+
+## Types and parallel children (2026-10-09, later)
+
+Owner direction: parallel tool calls and parallel subagents; subagents get
+every tool except delegate; a general subagent and a citation checker. Built:
+
+- Types: `general` (`tools: *` — every parent tool except `delegate` and
+  `ask_inputs`, writes included) and `citation_check` (lookups, case law and
+  web only; verdict per citation: verified, misquoted, unsupported, not
+  found). `document_review` is folded into `general`: a type exists to change
+  what a child may do or how it must work, not its subject.
+- A child's tool calls run through the turn's own runner, so they pass the
+  same guardrails and share the turn's edit state. Concurrent children's
+  writes take turns. A child's edits and new documents appear in the parent's
+  answer for the user to accept; its reads stay in its transcript. Connector
+  calls that need the user's approval are refused for children.
+- Live (e2e stack, deepseek-v4.1-flash, UK MSC): one response made two
+  `general` delegate calls; both ran at once (started 302, 310; finished 302,
+  310); then a `citation_check` on the draft found 8 citations verified.
+  List-price spend: children $0.0019, $0.0053 and $0.0110; parent $0.0052.
