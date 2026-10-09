@@ -1694,8 +1694,9 @@ export async function runToolCalls(
             result.ok
               ? {
                   exit_code: result.exitCode,
-                  stdout: result.stdout,
-                  stderr: result.stderr,
+                  // Output can carry anything the command fetched or read.
+                  stdout: nonce && result.stdout ? spotlight(result.stdout, nonce) : result.stdout,
+                  stderr: nonce && result.stderr ? spotlight(result.stderr, nonce) : result.stderr,
                   timed_out: result.timedOut,
                   truncated: result.truncated,
                   duration_ms: result.durationMs,
@@ -1713,7 +1714,8 @@ export async function runToolCalls(
           tool_call_id: tc.id,
           content: JSON.stringify({
             url: page.url,
-            content: page.content.slice(0, 8000),
+            // A web page is outside text: fenced like a document.
+            content: nonce ? spotlight(page.content.slice(0, 8000), nonce) : page.content.slice(0, 8000),
             sha256: page.contentSha256,
           }),
         });

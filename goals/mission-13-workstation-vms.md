@@ -284,6 +284,22 @@ outbound PII and confidential-figure checks are not possible on HTTPS without
 terminating TLS in the proxy, which needs a CA the guest trusts. That is an
 owner decision (below). The proxy log names hosts, not paths, for HTTPS.
 
+**Phase 6, first part: prompt-injection flags, 2026-10-09 (not accepted).**
+`backend/src/lib/guardrails/injection.ts` is a deterministic first layer: it
+looks for text that addresses an AI rather than a reader (overriding
+instructions, "attention AI assistant", chat-template role markers, "do not
+tell the user", invisible Unicode tag characters or heavy zero-width
+padding). Results from tools that carry outside text (web, workstation,
+documents, Gmail, Drive, CourtListener, MCP, scripts) are scanned, after
+decoding their JSON, and a flagged result gets a "Mike security notice"
+after it naming the signals. Nothing is blocked. Fetched web pages and
+`run_command` output are now also inside the nonce-fenced
+`<untrusted-content>` blocks the system prompt already explains. Tests: 18
+detector cases (including seven ordinary sentences it must leave alone) and
+three streaming cases. False-positive check: 0 of 2,042 paragraphs of this
+repository's docs, goals and assets flagged. Not yet: a decision-model
+second opinion on flagged text, and showing the flag in the web app.
+
 ## Open questions for the owner
 
 - Outbound PII checks on the VM's HTTPS traffic need the proxy to terminate

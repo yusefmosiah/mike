@@ -58,7 +58,9 @@ vi.mock("../../../../lib/mcpConnectors", () => ({
 // Stand-in policy, matching the shipped tiers for the names these tests use:
 // read_document is a read, edit_document is a document write, and everything
 // else (connector writes, ask_inputs, unknown names) needs the classifier.
-vi.mock("../../../../lib/guardrails", () => ({
+vi.mock("../../../../lib/guardrails", async () => ({
+  // The prompt-injection flags are real; only the tier policy is stood in.
+  ...(await vi.importActual<Record<string, unknown>>("../../../../lib/guardrails/injection")),
   tierForTool: (name: string | null | undefined) =>
     name === "read_document" ? 1 : name === "edit_document" ? 2 : 3,
   inScopeForContainer: (

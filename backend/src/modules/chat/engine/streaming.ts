@@ -74,9 +74,13 @@ import { createSubagentHost } from "./subagents/subagentHost";
 import { getAutoModeDecisionModel } from "../../user/user.service";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
+  carriesExternalContent,
   classifyToolCall,
+  injectionNotice,
+  injectionSignals,
   inScopeForContainer,
   isParallelSafeTool,
+  resultText,
   tierForTool,
 } from "../../../lib/guardrails";
 
@@ -799,7 +803,29 @@ export async function runLLMStream(params: {
      * calls) reaches the parent's stream and record; its lookups are in its
      * own transcript.
      */
+    /**
+     * Every batch's results, as the model will read them: a result from a
+     * tool that carries outside text (web, workstation, documents,
+     * connectors, scripts) and reads like instructions to an AI gets a
+     * notice after it (lib/guardrails/injection.ts). Inner calls of a
+     * script are not flagged one by one; the script's own result is.
+     */
     const runTurnTools = async (
+      calls: NormalizedToolCall[],
+      scope: "parent" | "child",
+    ): Promise<{ tool_use_id: string; content: string }[]> => {
+      const results = await runTurnToolsInOrder(calls, scope);
+      const nameOf = new Map(calls.map((call) => [call.id, call.name]));
+      return results.map((result) => {
+        const name = nameOf.get(result.tool_use_id);
+        if (!name || !carriesExternalContent(name)) return result;
+        const signals = injectionSignals(resultText(result.content));
+        if (signals.length === 0) return result;
+        console.info("[guardrails] injection flag", { tool: name, signals, scope });
+        return { ...result, content: `${result.content}\n\n${injectionNotice(name, signals)}` };
+      });
+    };
+    const runTurnToolsInOrder = async (
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
     ): Promise<{ tool_use_id: string; content: string }[]> => {
@@ -813,11 +839,11 @@ export async function runLLMStream(params: {
             pending.push(call);
             continue;
           }
-          if (pending.length) results.push(...(await runTurnTools(pending, scope)));
+          if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
           pending = [];
           results.push({ tool_use_id: call.id, content: await runScriptCall(call, scope) });
         }
-        if (pending.length) results.push(...(await runTurnTools(pending, scope)));
+        if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
         return results;
       }
       if (scope === "child" && !calls.every((call) => isParallelSafeTool(call.name))) {

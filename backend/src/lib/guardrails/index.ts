@@ -26,3 +26,11 @@ export type {
   ClassifyToolCallInput,
   ClassifyToolCallResult,
 } from "./classifier";
+
+export {
+  carriesExternalContent,
+  injectionNotice,
+  injectionSignals,
+  resultText,
+} from "./injection";
+export type { InjectionSignal } from "./injection";
