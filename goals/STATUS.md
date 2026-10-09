@@ -153,6 +153,10 @@ tool-call UI and configurable iteration policy remain explicitly open.
 These are accounted for, not silently promoted above Missions 3 and 4:
 
 - **Durable runtime and KV-cache continuity:** Pi/Pi Durable research exists.
+  A 2026-10-08 spike measured the Postgres adapter, throughput, crash recovery and
+  a Pi-backed chat path in the real app, and recommends embedding (option B):
+  [`pi-durable-decision-2026-10-08.md`](pi-durable-decision-2026-10-08.md).
+  Owner decision pending; Mission 3's branching design depends on it.
   Embedding versus adopting patterns remains owner-undecided. Raw persisted tool
   history, retrievable originals after compaction, frozen/thread-scoped memory,
   durable runs/tasks and immutable streaming audit are not built by Mission 2.
