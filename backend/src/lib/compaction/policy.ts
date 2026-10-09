@@ -18,6 +18,9 @@ export const KEEP_RECENT_TOKENS = 20_000;
 /** Ceiling for the deterministic text summary that replaces older turns. */
 export const MAX_SUMMARY_TOKENS = 16_384;
 
+/** Conservative allowance for one retained media part or archive frame. */
+export const MEDIA_TOKENS = 4096;
+
 /**
  * After compaction the context must sit below this fraction of the trigger.
  * A "recovery" that landed at, say, 95% of the trigger would immediately
@@ -189,15 +192,27 @@ export function contextTokensFromUsage(
 }
 
 /** A role-tagged turn of the conversation, in send order. */
-export type CompactTurn = { role: string; text: string };
+export type CompactTurn = {
+  role: string;
+  text: string;
+  /** Conservative allowance for media, in addition to the text estimate. */
+  additionalTokens?: number;
+};
 
 /** ~4 chars/token heuristic, rounded up so short text is never zero. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function estimateTurnTokens(turn: CompactTurn): number {
+  const additional = Number.isFinite(turn.additionalTokens)
+    ? Math.max(0, turn.additionalTokens ?? 0)
+    : 0;
+  return estimateTokens(turn.text) + additional;
+}
+
 export function estimateTurnsTokens(turns: readonly CompactTurn[]): number {
-  return turns.reduce((total, turn) => total + estimateTokens(turn.text), 0);
+  return turns.reduce((total, turn) => total + estimateTurnTokens(turn), 0);
 }
 
 // Error/recovery turns are anchor material for both the archive (they survive
@@ -222,7 +237,7 @@ export function splitRecentTurns(
   let used = 0;
   let splitAt = turns.length;
   for (let index = turns.length - 1; index >= 0; index--) {
-    const cost = estimateTokens(turns[index].text);
+    const cost = estimateTurnTokens(turns[index]);
     if (used + cost > keepTokens) break;
     used += cost;
     splitAt = index;

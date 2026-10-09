@@ -1,5 +1,5 @@
 // Context compaction: token-triggered policy, deterministic text fallback,
-// Snapcompact PNG frames, and the chat-engine hook.
+// and bounded Snapcompact PNG archives.
 //
 // The policy is the oh-my-pi one — trigger strictly above
 // floor(C * thresholdPercent / 100) — and the routing rule is fail-closed:
@@ -29,10 +29,6 @@ import {
 } from "../../../../lib/compaction/snapcompact";
 import { summarizeToText } from "../../../../lib/compaction/textFallback";
 import { compactIfNeeded } from "../../../../lib/compaction";
-import {
-  compactConversationIfNeeded,
-  estimateConversationTokens,
-} from "../contextBuilders";
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -313,31 +309,5 @@ describe("compactIfNeeded", () => {
     });
     expect(unknown.compacted).toBe(true);
     expect(unknown.archivedFrames).toBeUndefined();
-  });
-});
-
-describe("compactConversationIfNeeded hook", () => {
-  it("estimates stored-conversation tokens at ~4 chars/token", () => {
-    expect(
-      estimateConversationTokens([{ role: "user", content: "x".repeat(400) }]),
-    ).toBe(100);
-    expect(estimateConversationTokens([{ role: "assistant", content: null }])).toBe(0);
-  });
-
-  it("maps messages and no-ops below the trigger", () => {
-    const messages = [
-      { role: "user", content: "hello" },
-      { role: "assistant", content: null },
-    ];
-    const result = compactConversationIfNeeded({
-      messages,
-      contextTokens: 1_000,
-      modelId: "glm-5.3",
-    });
-    expect(result.compacted).toBe(false);
-    expect(result.keptTurns).toEqual([
-      { role: "user", text: "hello" },
-      { role: "assistant", text: "" },
-    ]);
   });
 });

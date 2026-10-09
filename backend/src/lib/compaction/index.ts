@@ -11,6 +11,7 @@ import {
   estimateTurnsTokens,
   KEEP_RECENT_TOKENS,
   MAX_SUMMARY_TOKENS,
+  MEDIA_TOKENS,
   RECOVERY_BAND,
   resolveThresholdTokens,
   shouldCompact,
@@ -18,6 +19,8 @@ import {
   type CompactTurn,
 } from "./policy";
 import {
+  ARCHIVE_FRAME_CHARS,
+  MAX_ARCHIVE_FRAMES,
   compressArchiveTurns,
   framesForArchive,
   serializeTurnsForArchive,
@@ -49,25 +52,32 @@ export type CompactIfNeededArgs = {
   thresholdPct?: number;
   /** Explicit window for models outside the focus table. */
   contextWindow?: number;
+  /** System/tool overhead outside the serialized conversation. */
+  reservedTokens?: number;
+  /** Active request and pending tool units that must remain verbatim. */
+  protectedTurnIndices?: readonly number[];
 };
 
 /**
  * Compact when (and only when) the context exceeds the model's token trigger
- * and the result is a real reduction. Vision models get Snapcompact PNG
- * frames plus the text summary; every other model gets text only — image
- * blocks are never routed to a model that did not positively claim vision.
+ * and the result is a real reduction. Vision models get bounded, ASCII-safe
+ * Snapcompact PNG frames plus the text summary. Other archives use text only;
+ * images are never routed to a model that did not positively claim vision.
  */
 export function compactIfNeeded(args: CompactIfNeededArgs): CompactResult {
   const turns = [...args.turns];
   const window = args.contextWindow ?? contextWindowForModel(args.modelId);
   const thresholdPct = clampThresholdPercent(args.thresholdPct);
+  const reserved = Number.isFinite(args.reservedTokens)
+    ? Math.max(0, args.reservedTokens ?? 0)
+    : 0;
   const reported =
     typeof args.contextTokens === "number" && Number.isFinite(args.contextTokens)
       ? args.contextTokens
       : 0;
   // Provider-reported usage is floored by the stored-conversation estimate:
   // a missing or under-reported usage field must not hide a full context.
-  const beforeTokens = Math.max(reported, estimateTurnsTokens(turns));
+  const beforeTokens = Math.max(reported, reserved + estimateTurnsTokens(turns));
   if (
     window === undefined ||
     window <= 0 ||
@@ -76,28 +86,49 @@ export function compactIfNeeded(args: CompactIfNeededArgs): CompactResult {
     return { compacted: false, keptTurns: turns };
   }
 
-  const { kept, older } = splitRecentTurns(turns, KEEP_RECENT_TOKENS);
+  const tailStart = turns.length - splitRecentTurns(turns, KEEP_RECENT_TOKENS).kept.length;
+  const protectedIndices = args.protectedTurnIndices
+    ? new Set(args.protectedTurnIndices)
+    : undefined;
+  const kept: CompactTurn[] = [];
+  const older: CompactTurn[] = [];
+  for (let index = 0; index < turns.length; index++) {
+    (index >= tailStart || protectedIndices?.has(index) ? kept : older).push(turns[index]);
+  }
   if (older.length === 0) return { compacted: false, keptTurns: turns };
 
-  const summaryText = summarizeToText(turns, MAX_SUMMARY_TOKENS);
   const threshold = resolveThresholdTokens(window, thresholdPct);
-  const projected = estimateTurnsTokens(kept) + estimateTokens(summaryText);
-  // Reject no-ops. The recovery band is the point of compacting at all: a
-  // result that lands back at >=80% of the trigger would re-trigger next turn.
-  if (
-    projected >= beforeTokens ||
-    projected > Math.floor(threshold * RECOVERY_BAND)
-  ) {
-    return { compacted: false, keptTurns: turns };
-  }
+  const ceiling = Math.floor(threshold * RECOVERY_BAND);
+  const retainedTokens = reserved + estimateTurnsTokens(kept);
+  // Reserve the summary message envelope, then size only the discarded
+  // history to the actual headroom. Retained content is never summarized twice.
+  const available = ceiling - retainedTokens - 8;
+  if (available <= 0) return { compacted: false, keptTurns: turns };
 
   let archivedFrames: ArchiveFrame[] | undefined;
-  if (modelSupportsVision(args.modelId)) {
+  if (
+    modelSupportsVision(args.modelId) &&
+    available >= MAX_SUMMARY_TOKENS + MAX_ARCHIVE_FRAMES * MEDIA_TOKENS
+  ) {
     // Frame-pressure compression drops oldest non-anchor turns first; user
     // requests and error/recovery turns always survive into the archive.
     const archive = serializeTurnsForArchive(compressArchiveTurns(older));
-    const frames = framesForArchive(archive);
-    if (frames.length > 0) archivedFrames = frames;
+    // The bitmap font is ASCII-only. Never substitute glyphs in legal text,
+    // or render an unbounded anchor into one enormous final image.
+    if (
+      archive.length <= ARCHIVE_FRAME_CHARS * MAX_ARCHIVE_FRAMES &&
+      /^[\x09\x0a\x0d\x20-\x7e]*$/.test(archive)
+    ) {
+      const frames = framesForArchive(archive);
+      if (frames.length > 0) archivedFrames = frames;
+    }
+  }
+
+  const frameTokens = (archivedFrames?.length ?? 0) * MEDIA_TOKENS;
+  const summaryText = summarizeToText(older, Math.min(MAX_SUMMARY_TOKENS, available - frameTokens));
+  const projected = retainedTokens + 8 + estimateTokens(summaryText) + frameTokens;
+  if (projected >= beforeTokens || projected > ceiling) {
+    return { compacted: false, keptTurns: turns };
   }
 
   return { compacted: true, archivedFrames, summaryText, keptTurns: kept };

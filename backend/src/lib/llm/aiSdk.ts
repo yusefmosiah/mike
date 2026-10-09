@@ -14,6 +14,7 @@ import type {
 } from "./types";
 import { streamChunkTimeouts } from "../runtimeConfig";
 import { assertEgressAllowed } from "../egress";
+import { clampThresholdPercent, contextTokensFromUsage } from "../compaction/policy";
 import { asProviderStallError, toProviderStreamError } from "./providerErrors";
 import { createRawLlmStreamRecorder, logRawLlmStream } from "./rawStreamLog";
 import {
@@ -21,6 +22,10 @@ import {
   modelSupportsVision,
 } from "./models";
 import { repairToolArguments } from "./toolCallParsing";
+import {
+  compactModelMessages,
+  replayConversationCompaction,
+} from "./conversationCompaction";
 
 /**
  * Per-step output limit, or undefined to leave it to the provider.
@@ -527,6 +532,111 @@ export function extractEarlyToolCall(raw: unknown): { name: string; id?: string 
 
   return null;
 }
+
+// Provider errors that explicitly say the *input* context no longer fits the
+// model's window. Kept narrow on purpose: an output-length limit, auth
+// failure, rate limit, tool fault or cancel must never be treated as a
+// context overflow and retried. Canonical exceeded codes qualify; a bare
+// context_window field in unrelated validation metadata does not.
+const CONTEXT_OVERFLOW_PATTERN =
+  /\b(?:context_(?:length|window)_exceeded|prompt is too long|too many (?:input|prompt) tokens|reduce the length of the messages|(?:input token count|(?:maximum )?context (?:length|window))(?:\s+(?:is\s+|of\s+)?\(?\d[\d,]*\)?(?:\s+tokens?)?,?)?\s+(?:(?:is|was|has been|which)\s+)?(?:exceed(?:s|ed)?|too (?:long|large))|(?:prompt|input|messages)(?: (?:length|size|tokens|token count))?(?: (?:of )?\(?\d[\d,]*\)?(?: tokens)?)?(?: (?:plus|and)(?: \d[\d,]*)? (?:requested )?completion (?:tokens|length))? exceed(?:s|ed)? (?:maximum(?: allowed)? |this |the )?(?:model's )?context (?:length|window))\b/i;
+const CONTEXT_REQUESTED_TOKENS_PATTERN =
+  /\bmaximum context (?:length|window)\b\s*(?:is\s+|of\s+|:\s*)?(\d+(?:,\d{3})*)\s+tokens\b[^\n]{0,200}\b(?:you )?requested\s+(\d+(?:,\d{3})*)\s+tokens\b/i;
+const NON_CONTEXT_OVERFLOW_PATTERN =
+  /\b(?:rate[ _]?limit|quota|api[ _-]?key|unauthori[sz]ed|per minute|tpm|timed? out|abort(?:ed)?|cancel(?:led|ed)?)\b/i;
+const OUTPUT_CAP_ERROR_PATTERN =
+  /\b(?:max_(?:completion_)?tokens[_ ](?:too_(?:large|high)|is too (?:large|high))|too many tokens (?:requested )?for (?:output|completion)|(?:maximum|at most|supports)\s+(?:of\s+)?(?:\d[\d,]*\s+)?(?:output|completion) tokens)\b/i;
+
+function isOverflowDiagnostic(text: string): boolean {
+  if (CONTEXT_OVERFLOW_PATTERN.test(text)) return true;
+  const counts = CONTEXT_REQUESTED_TOKENS_PATTERN.exec(text);
+  if (!counts) return false;
+  const limit = Number(counts[1].replaceAll(",", ""));
+  const requested = Number(counts[2].replaceAll(",", ""));
+  return Number.isFinite(limit) && limit > 0 && Number.isFinite(requested) && requested > limit;
+}
+
+type ErrorChainNode = {
+  name?: unknown;
+  message?: unknown;
+  statusCode?: unknown;
+  responseBody?: unknown;
+  code?: unknown;
+  data?: unknown;
+  cause?: unknown;
+  lastError?: unknown;
+};
+
+// Match actual diagnostic fields separately, never serialized limit/help
+// metadata or prose assembled across unrelated JSON fields. Bounded traversal
+// also handles nested provider errors without trusting malformed JSON bodies.
+function providerErrorDiagnostics(value: unknown): string[] {
+  const texts: string[] = [];
+  const pending: unknown[] = [value];
+  const seen = new Set<object>();
+  for (let index = 0; index < pending.length && index < 16; index++) {
+    let item = pending[index];
+    if (typeof item === "string") {
+      const trimmed = item.trimStart();
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+          item = JSON.parse(item);
+        } catch {
+          continue;
+        }
+      } else {
+        texts.push(item);
+        continue;
+      }
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item) || seen.has(item)) continue;
+    seen.add(item);
+    const fields = item as Record<string, unknown>;
+    for (const field of ["message", "code", "type", "error", "detail"]) {
+      if (fields[field] != null) pending.push(fields[field]);
+    }
+  }
+  return texts;
+}
+
+/**
+ * True only when the failure is the provider stating the prompt no longer
+ * fits the model's context window (OpenAI/DeepSeek "maximum context length",
+ * Anthropic "prompt is too long", Gemini "input token count ... exceeds").
+ * The whole cause chain is inspected — the SDK wraps provider failures in
+ * RetryError and our own guard re-wraps abort-shaped ones — and any level
+ * that reads as a cancel, auth, rate-limit or output failure disqualifies the
+ * error so the single recovery retry is spent only where a smaller prompt can
+ * actually help.
+ */
+function isExplicitContextOverflow(error: unknown): boolean {
+  let matched = false;
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (typeof current === "string") {
+      const texts = providerErrorDiagnostics(current);
+      if (texts.some((text) => NON_CONTEXT_OVERFLOW_PATTERN.test(text) || OUTPUT_CAP_ERROR_PATTERN.test(text))) return false;
+      if (texts.some(isOverflowDiagnostic)) matched = true;
+      break;
+    }
+    if (typeof current !== "object") break;
+    const node = current as ErrorChainNode;
+    if (node.name === "AbortError") return false;
+    const texts = [node.message, node.responseBody, node.code, node.data]
+      .flatMap(providerErrorDiagnostics);
+    if (texts.some((text) => NON_CONTEXT_OVERFLOW_PATTERN.test(text) || OUTPUT_CAP_ERROR_PATTERN.test(text))) return false;
+    const status = typeof node.statusCode === "number" ? node.statusCode : null;
+    if (status !== null && status !== 400 && status !== 413) return false;
+    if (texts.some(isOverflowDiagnostic)) {
+      matched = true;
+    }
+    current = node.lastError ?? node.cause;
+  }
+  return matched;
+}
+
 export async function streamAiSdk(
   params: StreamChatParams,
   config: AiSdkAdapterConfig,
@@ -537,15 +647,38 @@ export async function streamAiSdk(
   // NEXT model request before this consumer sees the `tool-error` part — so
   // abort synchronously in the batcher's failure path and keep that first
   // failure (the stream may surface an `abort` part before the `tool-error`).
-  const internalAbort = new AbortController();
-  const forwardAbort = () => internalAbort.abort(params.abortSignal?.reason);
+  // A context-overflow recovery retries the turn with a reduced transcript, so
+  // every model attempt owns a fresh controller; the (once-built) tools abort
+  // whichever attempt is live.
+  let attemptAbort = new AbortController();
+  const forwardAbort = () => attemptAbort.abort(params.abortSignal?.reason);
   if (params.abortSignal?.aborted) forwardAbort();
   else params.abortSignal?.addEventListener("abort", forwardAbort, { once: true });
   const runToolsFailure: { first: { error: unknown } | null } = { first: null };
-  const tools = toAiSdkTools(params.tools ?? [], params.runTools, sdk, (error) => {
-    runToolsFailure.first ??= { error };
-    internalAbort.abort();
-  });
+  // Call IDs actually dispatched to runTools whose results are not yet part
+  // of the working transcript. A failed step never reaches the onStepEnd
+  // commit below, so a non-empty set means real side effects already ran that
+  // the next prompt would not represent — the single overflow recovery must
+  // refuse then, or the model could re-issue those calls. Merely announcing a
+  // tool call is not enough to arm this: only an actual runTools dispatch
+  // counts. An aborted SDK stream does not cancel runTools itself, so neither
+  // the abort below nor an abort-shaped provider error may clear it.
+  const uncommittedToolDispatches = new Set<string>();
+  const runTools = params.runTools;
+  const tools = toAiSdkTools(
+    params.tools ?? [],
+    runTools
+      ? async (calls: NormalizedToolCall[]) => {
+          for (const call of calls) uncommittedToolDispatches.add(call.id);
+          return runTools(calls);
+        }
+      : undefined,
+    sdk,
+    (error) => {
+      runToolsFailure.first ??= { error };
+      attemptAbort.abort();
+    },
+  );
   // An exception that merely LOOKS like an abort (name "AbortError" or
   // isAbortError's exact message) must not take streaming.ts's silent
   // user-cancel path unless the caller's signal really is aborted.
@@ -579,181 +712,347 @@ export async function streamAiSdk(
   });
   let fullText = "";
   let iteration = 0;
+  // Text the current step has streamed so far. Reset at every step boundary,
+  // so when a step fails it holds only that step's uncommitted prose — a
+  // recovery retry can replay it without duplicating a completed step's text.
+  let stepText = "";
   const openReasoningBlocks = new Set<string>();
   const notifiedEarlyToolCalls = new Set<string>();
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   let lastFinishReason: string | undefined;
 
-  try {
-    const result = sdk.streamText({
-      model: config.model,
-      system: params.systemPrompt,
+  // Token-triggered compaction runs on the OpenCode Go route only; every other
+  // provider sends the caller's transcript through untouched.
+  const compactionEnabled = config.provider === "opencode-go";
+  const thresholdPct = compactionEnabled
+    ? clampThresholdPercent(Number(process.env.LLM_COMPACTION_THRESHOLD_PERCENT?.trim() || Number.NaN))
+    : undefined;
+  // Preflight replay: the raw transcript is run through the deterministic
+  // checkpoint sequence, so the same conversation (plus appended turns)
+  // always yields the same compacted prefix. No per-conversation store is
+  // needed to keep the provider's KV-cache prefix stable across invocations.
+  let sessionMessages: AiSdk.ModelMessage[] = cacheHints.messages;
+  if (compactionEnabled) {
+    const preflight = replayConversationCompaction({
       messages: cacheHints.messages,
-      ...(Object.keys(providerOptions).length
-        ? { providerOptions }
-        : {}),
-      tools,
-      maxOutputTokens: maxOutputTokensFor(config.provider, config.modelId),
-      stopWhen: sdk.stepCountIs(maxIterations),
-      abortSignal: internalAbort.signal,
-      // Cut off a provider that stops sending, at the source. Tool execution
-      // is deliberately not bounded here: it runs through runTools, which
-      // does not observe the SDK's per-tool signal, so the run-level idle
-      // deadline in streamRuns.ts is what covers a hung tool.
-      timeout: streamChunkTimeouts(),
-      reasoning:
-        config.supportsReasoning === false
-          ? undefined
-          : // The OpenAI adapter and API support `max`, while AI SDK Core 7's
-            // shared call-options type still omits it. Preserve the runtime
-            // value across that temporary upstream type mismatch.
-            ((params.reasoning ?? "none") as
-              | "provider-default"
-              | Exclude<NonNullable<StreamChatParams["reasoning"]>, "max">
-              | undefined),
-      include: { rawChunks: true },
-      // Without an onError, streamText's default is `console.error(error)`:
-      // the raw provider error is logged — and filed by the Sentry console
-      // bridge — before the same failure reaches the "error" part below,
-      // where it is classified and the caller reports it once
-      // (MIKE-BACKEND-C). Every failure still arrives through fullStream.
-      onError: () => {},
-      ...(config.courtlistenerCitationReminder
-        ? {
-            prepareStep: ({
-              steps,
-            }: {
-              steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
-            }) =>
-              usesCourtlistenerTool(steps)
-                ? {
-                    system: `${params.systemPrompt}\n\n${COURTLISTENER_CITATION_REMINDER}`,
-                  }
-                : undefined,
-          }
-        : {}),
+      modelId: config.modelId,
+      systemPrompt: params.systemPrompt,
+      tools: params.tools,
+      thresholdPct,
     });
+    if (preflight.compacted) sessionMessages = preflight.messages;
+  }
+  // Newest transcript the SDK has been shown: what the next model request
+  // carries, including every completed step's response messages. The post-turn
+  // checkpoint rewrites it at each tool-loop boundary and the next prepareStep
+  // hands it back, so a compaction carries into the next round and into the
+  // overflow retry.
+  //
+  // The checkpoint lives only for this call: the caller's persisted transcript
+  // is never mutated and no extra result fields are added. That is enough for
+  // the next invocation, because its preflight replay reconstructs the same
+  // checkpoint from the same raw transcript. The one limitation to know: a
+  // checkpoint whose trigger existed ONLY in provider usage (never in the
+  // estimate) is not reconstructed by a later invocation's replay — nothing
+  // durable records it. Persisting provider-usage checkpoints would need a
+  // caller-side store, which is deliberately out of scope here.
+  let workingMessages: AiSdk.ModelMessage[] = sessionMessages;
+  // Latest step's provider-reported prompt + output tokens, never summed
+  // across rounds: summing would keep a pre-compaction figure alive after the
+  // prompt already shrank, and each step reports fresh usage anyway.
+  let latestContextTokens = 0;
+  let overflowRecoveryUsed = false;
 
-    for await (const part of result.stream) {
-      switch (part.type) {
-        case "start-step":
-          iteration += 1;
-          notifiedEarlyToolCalls.clear();
-          break;
-        case "raw":
-          logRawLlmStream({
-            provider: config.provider,
-            model: config.modelId,
-            iteration: Math.max(0, iteration - 1),
-            label: "ai_sdk_raw",
-            payload: part.rawValue,
-          });
-          rawStreamRecorder?.record({
-            iteration: Math.max(0, iteration - 1),
-            label: "ai_sdk_raw",
-            payload: part.rawValue,
-          });
+  try {
+    // Restarted at most once, after an explicit context-window rejection was
+    // answered with a forced reduction of the newest transcript.
+    while (true) {
+      const remainingIterations = Math.max(0, maxIterations - iteration);
+      try {
+        const result = sdk.streamText({
+          model: config.model,
+          system: params.systemPrompt,
+          messages: sessionMessages,
+          ...(Object.keys(providerOptions).length
+            ? { providerOptions }
+            : {}),
+          tools,
+          maxOutputTokens: maxOutputTokensFor(config.provider, config.modelId),
+          stopWhen: sdk.stepCountIs(remainingIterations),
+          abortSignal: attemptAbort.signal,
+          // Cut off a provider that stops sending, at the source. Tool execution
+          // is deliberately not bounded here: it runs through runTools, which
+          // does not observe the SDK's per-tool signal, so the run-level idle
+          // deadline in streamRuns.ts is what covers a hung tool.
+          timeout: streamChunkTimeouts(),
+          reasoning:
+            config.supportsReasoning === false
+              ? undefined
+              : // The OpenAI adapter and API support `max`, while AI SDK Core 7's
+                // shared call-options type still omits it. Preserve the runtime
+                // value across that temporary upstream type mismatch.
+                ((params.reasoning ?? "none") as
+                  | "provider-default"
+                  | Exclude<NonNullable<StreamChatParams["reasoning"]>, "max">
+                  | undefined),
+          include: { rawChunks: true },
+          // Without an onError, streamText's default is `console.error(error)`:
+          // the raw provider error is logged — and filed by the Sentry console
+          // bridge — before the same failure reaches the "error" part below,
+          // where it is classified and the caller reports it once
+          // (MIKE-BACKEND-C). Every failure still arrives through fullStream.
+          onError: () => {},
+          // Post-turn checkpoint, which is also the tool-loop boundary: once a
+          // step's tools have completed, fold its response messages into the
+          // working transcript and re-check the model's context window with
+          // the provider-reported usage. `step.response.messages` preserves
+          // complete tool call/result pairs.
+          ...(compactionEnabled
+            ? {
+                onStepEnd: (step: {
+                  finishReason: string;
+                  usage: AiSdk.LanguageModelUsage;
+                  response: { messages: AiSdk.ModelMessage[] };
+                }) => {
+                  // A step that ended in a provider error never completed its
+                  // tools; its partial response must not join the transcript
+                  // the retry prompt is built from (an assistant tool-call
+                  // without its result would be rejected outright).
+                  if (step.finishReason === "error") return;
+                  workingMessages = [
+                    ...workingMessages,
+                    ...step.response.messages,
+                  ];
+                  // The step's dispatched tool executions are now represented
+                  // in the transcript; only a real commit may clear the
+                  // watermark that gates overflow recovery.
+                  uncommittedToolDispatches.clear();
+                  latestContextTokens = contextTokensFromUsage(step.usage);
+                  const checkpoint = compactModelMessages({
+                    messages: workingMessages,
+                    modelId: config.modelId,
+                    systemPrompt: params.systemPrompt,
+                    tools: params.tools,
+                    thresholdPct,
+                    contextTokens: latestContextTokens,
+                  });
+                  if (checkpoint.compacted) {
+                    workingMessages = checkpoint.messages;
+                  }
+                },
+              }
+            : {}),
+          ...(config.courtlistenerCitationReminder || compactionEnabled
+            ? {
+                prepareStep: ({
+                  steps,
+                }: {
+                  steps: Array<{ toolCalls: Array<{ toolName: string }> }>;
+                }) => {
+                  const overrides: {
+                    system?: string;
+                    messages?: AiSdk.ModelMessage[];
+                  } = {};
+                  if (
+                    config.courtlistenerCitationReminder &&
+                    usesCourtlistenerTool(steps)
+                  ) {
+                    overrides.system = `${params.systemPrompt}\n\n${COURTLISTENER_CITATION_REMINDER}`;
+                  }
+                  // Hand back the checkpointed transcript so the next round
+                  // sends the compacted prefix instead of the raw expansion
+                  // (the SDK appends each step's response messages to this
+                  // array; the post-turn checkpoint above already folded them
+                  // in, so the two stay in lockstep).
+                  if (compactionEnabled) {
+                    overrides.messages = workingMessages;
+                  }
+                  return Object.keys(overrides).length ? overrides : undefined;
+                },
+              }
+            : {}),
+        });
 
-          // Early tool-call notification: fires the instant the provider names a tool in
-          // the first chunk of tool_calls, long before AI SDK parses the complete JSON
-          // arguments (which can take 15-60s for large tools like generate_docx). This
-          // flushes any trailing prose held back in visible buffers and signals the client
-          // to open "Working..." instead of appearing frozen mid-sentence.
-          const earlyCall = extractEarlyToolCall(part.rawValue);
-          if (earlyCall && !notifiedEarlyToolCalls.has(earlyCall.name)) {
-            notifiedEarlyToolCalls.add(earlyCall.name);
-            params.callbacks?.onToolCallStart?.({
-              id: earlyCall.id || randomUUID(),
-              name: earlyCall.name,
-              input: {},
-            });
+        for await (const part of result.stream) {
+          switch (part.type) {
+            case "start-step":
+              iteration += 1;
+              notifiedEarlyToolCalls.clear();
+              stepText = "";
+              break;
+            case "raw":
+              logRawLlmStream({
+                provider: config.provider,
+                model: config.modelId,
+                iteration: Math.max(0, iteration - 1),
+                label: "ai_sdk_raw",
+                payload: part.rawValue,
+              });
+              rawStreamRecorder?.record({
+                iteration: Math.max(0, iteration - 1),
+                label: "ai_sdk_raw",
+                payload: part.rawValue,
+              });
+
+              // Early tool-call notification: fires the instant the provider names a tool in
+              // the first chunk of tool_calls, long before AI SDK parses the complete JSON
+              // arguments (which can take 15-60s for large tools like generate_docx). This
+              // flushes any trailing prose held back in visible buffers and signals the client
+              // to open "Working..." instead of appearing frozen mid-sentence.
+              const earlyCall = extractEarlyToolCall(part.rawValue);
+              if (earlyCall && !notifiedEarlyToolCalls.has(earlyCall.name)) {
+                notifiedEarlyToolCalls.add(earlyCall.name);
+                params.callbacks?.onToolCallStart?.({
+                  id: earlyCall.id || randomUUID(),
+                  name: earlyCall.name,
+                  input: {},
+                });
+              }
+              break;
+            case "text-delta":
+              fullText += part.text;
+              stepText += part.text;
+              params.callbacks?.onContentDelta?.(part.text);
+              break;
+            case "reasoning-start":
+              openReasoningBlocks.add(part.id);
+              break;
+            case "reasoning-delta":
+              openReasoningBlocks.add(part.id);
+              params.callbacks?.onReasoningDelta?.(part.text);
+              break;
+            case "reasoning-end":
+              if (openReasoningBlocks.delete(part.id)) {
+                params.callbacks?.onReasoningBlockEnd?.();
+              }
+              break;
+            case "tool-call": {
+              const call: NormalizedToolCall = {
+                id: part.toolCallId,
+                name: part.toolName,
+                input: normalizeToolInput(part.input),
+              };
+              // The early stub (input: {}) opens the client's Working state; the
+              // parsed call re-fires with the real arguments so a consumer that
+              // records the last notification per tool ends with the true input.
+              notifiedEarlyToolCalls.add(call.name);
+              params.callbacks?.onToolCallStart?.(call);
+              break;
+            }
+            case "finish-step":
+              lastFinishReason = part.finishReason;
+              break;
+            // A tool's own failure is not the model provider's: a search tool
+            // answering 401 says nothing about our LLM key, so this path keeps the
+            // executor error rather than blaming the user's credentials.
+            case "tool-error":
+              // Station 4: `dynamic: true` = the SDK synthesized this part for a
+              // call it could not dispatch (unknown tool / unparseable input). It
+              // has already queued the error as that call's result and keeps the
+              // step loop alive, so break out of the switch (continue the loop)
+              // and let the model recover in-band. Falling through to the throw
+              // would abort a turn the model can still finish. Mike's tools are
+              // static, so only a genuine execute() failure reaches the throw.
+              if ("dynamic" in part && part.dynamic === true) break;
+              runToolsFailure.first ??= { error: part.error };
+              throw guardAbortShaped(rethrowable(part.error, config.label));
+            case "error":
+              throw guardAbortShaped(toProviderStreamError(part.error, config));
+            case "abort": {
+              const stalled = params.abortSignal?.aborted
+                ? null
+                : asProviderStallError(part.reason, config);
+              if (stalled) throw stalled;
+              const error = new Error(part.reason || "Stream aborted.");
+              error.name = "AbortError";
+              throw error;
+            }
           }
-          break;
-        case "text-delta":
-          fullText += part.text;
-          params.callbacks?.onContentDelta?.(part.text);
-          break;
-        case "reasoning-start":
-          openReasoningBlocks.add(part.id);
-          break;
-        case "reasoning-delta":
-          openReasoningBlocks.add(part.id);
-          params.callbacks?.onReasoningDelta?.(part.text);
-          break;
-        case "reasoning-end":
-          if (openReasoningBlocks.delete(part.id)) {
-            params.callbacks?.onReasoningBlockEnd?.();
+        }
+
+        for (const id of openReasoningBlocks) {
+          openReasoningBlocks.delete(id);
+          params.callbacks?.onReasoningBlockEnd?.();
+        }
+        // A run halted by stopWhen, or cut off at the output ceiling, otherwise
+        // ends exactly like a finished one: streamText just stops and this
+        // function returns whatever text happened to accumulate. That renders
+        // as a bare "Completed in N steps" with no answer and no error, which
+        // is indistinguishable from the model having nothing to say. Name it
+        // instead.
+        const notice = stopNotice(iteration, maxIterations, lastFinishReason);
+        if (notice) {
+          fullText += notice;
+          params.callbacks?.onContentDelta?.(notice);
+        }
+        await rawStreamRecorder?.flush("completed");
+        return { fullText };
+      } catch (error) {
+        attemptAbort.abort();
+        // Prose the failed step already streamed to the user, and nothing
+        // else: completed steps' text is committed into workingMessages via
+        // onStepEnd, and the accumulator was reset at this step's boundary.
+        const streamedStepText = stepText;
+        stepText = "";
+        // Only model-provider failures are eligible for API-key/quota guidance.
+        // Tool failures (including pauses) retain their original identity.
+        const fatal = runToolsFailure.first
+          ? guardAbortShaped(rethrowable(runToolsFailure.first.error, config.label))
+          : guardAbortShaped(toProviderStreamError(error, config));
+        // One bounded recovery: an explicit context-window rejection, answered
+        // with a forced reduction of the newest transcript, is retried once
+        // with the remaining iteration budget. Tool faults, cancels, auth
+        // failures and output-length errors never qualify, an error whose
+        // transcript cannot actually be reduced is rethrown unchanged, and a
+        // failed step that already dispatched tool executions refuses it too:
+        // those side effects are absent from the transcript a retry would
+        // send, so the model could repeat them.
+        if (
+          compactionEnabled &&
+          !overflowRecoveryUsed &&
+          !runToolsFailure.first &&
+          uncommittedToolDispatches.size === 0 &&
+          !params.abortSignal?.aborted &&
+          iteration < maxIterations &&
+          isExplicitContextOverflow(fatal)
+        ) {
+          const reduced = compactModelMessages({
+            messages: workingMessages,
+            modelId: config.modelId,
+            systemPrompt: params.systemPrompt,
+            tools: params.tools,
+            thresholdPct,
+            contextTokens: latestContextTokens,
+            force: true,
+          });
+          if (reduced.compacted && reduced.messages !== workingMessages) {
+            overflowRecoveryUsed = true;
+            // Text-only assistant continuation: the retry request repeats the
+            // partial answer so the model continues it instead of restarting.
+            // No tool-call parts from the failed step ride along, so the
+            // transcript cannot gain an orphan call/result pair.
+            const retryMessages: AiSdk.ModelMessage[] = streamedStepText
+              ? [
+                  ...reduced.messages,
+                  { role: "assistant", content: streamedStepText },
+                ]
+              : reduced.messages;
+            sessionMessages = retryMessages;
+            workingMessages = retryMessages;
+            // The retry prompt is smaller; stale pre-compaction usage must not
+            // floor the next checkpoint's estimate.
+            latestContextTokens = 0;
+            attemptAbort = new AbortController();
+            if (params.abortSignal?.aborted) {
+              attemptAbort.abort(params.abortSignal.reason);
+            }
+            continue;
           }
-          break;
-        case "tool-call": {
-          const call: NormalizedToolCall = {
-            id: part.toolCallId,
-            name: part.toolName,
-            input: normalizeToolInput(part.input),
-          };
-          // The early stub (input: {}) opens the client's Working state; the
-          // parsed call re-fires with the real arguments so a consumer that
-          // records the last notification per tool ends with the true input.
-          notifiedEarlyToolCalls.add(call.name);
-          params.callbacks?.onToolCallStart?.(call);
-          break;
         }
-        case "finish-step":
-          lastFinishReason = part.finishReason;
-          break;
-        // A tool's own failure is not the model provider's: a search tool
-        // answering 401 says nothing about our LLM key, so this path keeps the
-        // executor error rather than blaming the user's credentials.
-        case "tool-error":
-          // Station 4: `dynamic: true` = the SDK synthesized this part for a
-          // call it could not dispatch (unknown tool / unparseable input). It
-          // has already queued the error as that call's result and keeps the
-          // step loop alive, so break out of the switch (continue the loop)
-          // and let the model recover in-band. Falling through to the throw
-          // would abort a turn the model can still finish. Mike's tools are
-          // static, so only a genuine execute() failure reaches the throw.
-          if ("dynamic" in part && part.dynamic === true) break;
-          runToolsFailure.first ??= { error: part.error };
-          throw guardAbortShaped(rethrowable(part.error, config.label));
-        case "error":
-          throw guardAbortShaped(toProviderStreamError(part.error, config));
-        case "abort": {
-          const stalled = params.abortSignal?.aborted
-            ? null
-            : asProviderStallError(part.reason, config);
-          if (stalled) throw stalled;
-          const error = new Error(part.reason || "Stream aborted.");
-          error.name = "AbortError";
-          throw error;
-        }
+        await rawStreamRecorder?.flush("error", fatal);
+        throw fatal;
       }
     }
-
-    for (const id of openReasoningBlocks) {
-      openReasoningBlocks.delete(id);
-      params.callbacks?.onReasoningBlockEnd?.();
-    }
-    // A run halted by stopWhen, or cut off at the output ceiling, otherwise
-    // ends exactly like a finished one: streamText just stops and this
-    // function returns whatever text happened to accumulate. That renders as
-    // a bare "Completed in N steps" with no answer and no error, which is
-    // indistinguishable from the model having nothing to say. Name it instead.
-    const notice = stopNotice(iteration, maxIterations, lastFinishReason);
-    if (notice) {
-      fullText += notice;
-      params.callbacks?.onContentDelta?.(notice);
-    }
-    await rawStreamRecorder?.flush("completed");
-    return { fullText };
-  } catch (error) {
-    internalAbort.abort();
-    // Only model-provider failures are eligible for API-key/quota guidance.
-    // Tool failures (including pauses) retain their original identity.
-    const fatal = runToolsFailure.first
-      ? guardAbortShaped(rethrowable(runToolsFailure.first.error, config.label))
-      : guardAbortShaped(toProviderStreamError(error, config));
-    await rawStreamRecorder?.flush("error", fatal);
-    throw fatal;
   } finally {
     params.abortSignal?.removeEventListener("abort", forwardAbort);
   }

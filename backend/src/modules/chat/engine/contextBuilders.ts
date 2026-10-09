@@ -23,7 +23,6 @@ import { ACTIVE_WORD_DOCUMENT_LIVE_FILENAME } from "./wordPrompt";
 import { parseCitations, createCitation } from "./citations";
 import type { AssistantEvent } from "./streaming";
 import { catalogWorkflowId, ensureDefaultWorkflows } from "../../../lib/workflowCatalog";
-import { compactIfNeeded, type CompactResult } from "../../../lib/compaction";
 
 // ---------------------------------------------------------------------------
 // Prompt-injection spotlighting helpers
@@ -490,50 +489,6 @@ export function buildMessages(
     formatted.push({ role: msg.role, content: stamp(msg, index, content) });
   }
   return formatted;
-}
-
-// ---------------------------------------------------------------------------
-// Context compaction hook (token-triggered; see lib/compaction)
-// ---------------------------------------------------------------------------
-
-/**
- * Stored-conversation token estimate (~4 chars/token). The compaction trigger
- * takes the max of this estimate and provider-reported usage, so an
- * under-reported usage field cannot hide an over-full context.
- */
-export function estimateConversationTokens(
-  messages: readonly ChatMessage[],
-): number {
-  let chars = 0;
-  for (const message of messages) chars += message.content?.length ?? 0;
-  return Math.ceil(chars / 4);
-}
-
-/**
- * Compaction hook for the chat engine: map stored history onto the compaction
- * turn shape and run the token-triggered policy (checked post-turn, at a
- * tool-loop boundary, or on overflow recovery). The result only ever proposes
- * a history replacement — `compacted: false` means leave history untouched,
- * which is what keeps the append-only prompt-cache prefix stable.
- */
-export function compactConversationIfNeeded(args: {
-  messages: readonly ChatMessage[];
-  contextTokens?: number | null;
-  modelId: string;
-  thresholdPct?: number;
-  contextWindow?: number;
-}): CompactResult {
-  const turns = args.messages.map((message) => ({
-    role: message.role,
-    text: message.content ?? "",
-  }));
-  return compactIfNeeded({
-    turns,
-    contextTokens: args.contextTokens ?? null,
-    modelId: args.modelId,
-    thresholdPct: args.thresholdPct,
-    contextWindow: args.contextWindow,
-  });
 }
 
 /**
