@@ -10,6 +10,7 @@
     ./disks.nix
     ./choir-builder.nix
     ./workstations.nix
+    ./staging.nix
   ];
 
   boot.loader.efi.canTouchEfiVariables = true;

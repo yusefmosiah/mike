@@ -1,0 +1,44 @@
+# Staging overrides for docker-compose.yml on node-a. Every demo secret in the
+# base file is replaced by a value generated on the host
+# (/var/lib/mike-staging/secrets.env, read with --env-file), and every
+# published port binds loopback: Caddy is the only public entry.
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+  auth:
+    environment:
+      GOTRUE_DB_DATABASE_URL: postgres://gotrue:${GOTRUE_DB_PASSWORD:?}@db:5432/postgres
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET:?}
+      GOTRUE_URI_ALLOW_LIST: ${FRONTEND_URL:?}/auth/callback
+      GOTRUE_SMTP_ADMIN_EMAIL: staging@choir-ip.com
+  db-init:
+    environment:
+      DB: postgres://postgres:${POSTGRES_PASSWORD:?}@db:5432/postgres
+  storage:
+    environment:
+      RUSTFS_ACCESS_KEY: ${STORAGE_ACCESS_KEY:?}
+      RUSTFS_SECRET_KEY: ${STORAGE_SECRET_KEY:?}
+  createbucket:
+    environment:
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY:?}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:?}
+  workflow-sync:
+    environment:
+      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:?}
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:?}@db:5432/postgres
+      - R2_ACCESS_KEY_ID=${STORAGE_ACCESS_KEY:?}
+      - R2_SECRET_ACCESS_KEY=${STORAGE_SECRET_KEY:?}
+  backend:
+    environment:
+      - NODE_ENV=production
+      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:?}
+      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:?}@db:5432/postgres
+      - R2_ACCESS_KEY_ID=${STORAGE_ACCESS_KEY:?}
+      - R2_SECRET_ACCESS_KEY=${STORAGE_SECRET_KEY:?}
+      # Presigned upload URLs point at the public origin; Caddy routes
+      # path-style S3 requests (/mike/...?X-Amz-...) to RustFS unchanged.
+      - R2_PUBLIC_ENDPOINT_URL=${FRONTEND_URL:?}
+  frontend:
+    environment:
+      - API_BASE_URL=http://backend:3001
