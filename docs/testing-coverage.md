@@ -3,8 +3,8 @@
 The backend has a Vitest unit-test harness whose coverage ratchet measures all
 of `backend/src/**` — modules, workers, middleware and jobs included, not just
 `src/lib/**`, so an untested area cannot silently drop to zero. This doc tracks
-what is covered, what still needs tests, and how the coverage ratchet works —
-so you can pick up a checkbox below and land it as a small PR.
+how to measure that scope and maintain its ratchet. Current product acceptance and
+priorities live in [the whole-project accounting](../goals/TRIAGE.md), not a test-file checklist.
 
 ## Running the tests
 
@@ -25,98 +25,31 @@ in-memory Supabase query mocks for unit tests, no real network, one `describe`
 block per function or concern, and assertions on current behavior. Tests that
 need a real local Supabase stack are explicitly gated.
 
-## Current coverage (measured 2026-08)
+## Coverage evidence and regression priorities
 
-Per-area statement coverage from `npm run test:coverage`:
+The old August percentage table and unchecked "untested libs" PR list have been
+removed. Refactors and subsequent suites made them unsuitable as a current
+measurement or work queue. A stale "0%" row is not evidence that current code has
+no tests.
 
-| Lib area                                                                                | % statements |               Tested?               |
-| --------------------------------------------------------------------------------------- | -----------: | :---------------------------------: |
-| `modules/user/user.dataCleanup.ts`, `lib/manifestSigning.ts`, `lib/supabase.ts`         |          100 |                  ✓                  |
-| `lib/llm/models.ts`                                                                     |           96 |                  ✓                  |
-| `modules/chat/engine/types.ts`                                                          |           95 |                  ✓                  |
-| `lib/documentVersions.ts`                                                               |           98 |                  ✓                  |
-| `modules/chat/engine/citations.ts`                                                      |           98 |                  ✓                  |
-| `lib/userLookup.ts`                                                                     |           91 |                  ✓                  |
-| `lib/docxTrackedChanges.ts`                                                             |           89 |                  ✓                  |
-| `lib/downloadTokens.ts`                                                                 |           87 |                  ✓                  |
-| `lib/access.ts`                                                                         |           76 |                  ✓                  |
-| `lib/storage.ts`, `lib/upload.ts`                                                       |           58 |               partial               |
-| `lib/workflowCatalog.ts`                                                                |           69 |               partial               |
-| `lib/workflowCatalogSource.ts`, `lib/workflowCatalogSync.ts`                            |        74–96 |                  ✓                  |
-| `modules/user/user.dataExport.ts`                                                       |           43 |               partial               |
-| `modules/chat/engine/contextBuilders.ts`, `modules/chat/engine/tools/toolDispatcher.ts` |        37–38 |               partial               |
-| `lib/userApiKeys.ts`                                                                    |           13 | partial — provider/env helpers only |
-| `modules/chat/engine/tools/documentOps.ts`                                              |           10 |               partial               |
-| `lib/convert.ts`, `modules/chat/engine/streaming.ts`, `lib/courtlistener.ts`            |          2–5 |               minimal               |
-| `lib/llm/**`                                                                            |            5 |     minimal outside `models.ts`     |
-| `lib/mcp/**`                                                                            |            6 |               minimal               |
-| `lib/userSettings.ts`, `lib/officeText.ts`, `lib/spreadsheet.ts`                        |            0 |                  ✗                  |
+Run `npm run test:coverage --prefix backend` when current coverage is needed.
+Record the source revision, measured scope, command, output and skipped tests.
+Configured floors are not freshly measured percentages, and line coverage does
+not prove behavior or private-deployment acceptance.
 
-Global, measured over the full `src/**` scope (modules, workers, middleware and
-jobs, not `src/lib/**` alone): **60.59% statements / 51.98% branches / 64.77%
-functions / 63.18% lines**. The floors in `backend/vitest.config.mts` sit just
-below those. The global number is held
-down by a few very large feature libs (toolDispatcher, documentOps,
-courtlistener, MCP, provider adapters) that are still untested and dominate the
-line count, and by the worker/job entry points that only the stack suites
-exercise.
+Choose regressions from consumer-visible risk: authorization and revocation,
+document-version lifecycle and reversible edits, source/citation provenance,
+provider/context-overflow behavior, streaming recovery and safe error handling.
+Inspect existing module/lib suites before adding tests. Keep tests deterministic
+and isolated; use real local services only through documented stack fixtures.
+Do not add tests for source wording, trivial forwarding, copied mock arguments or
+incidental implementation shape.
 
-## TODO — untested libs, in priority order
+The prior default-concurrency corpus timeouts and reduced-concurrency passing
+run remain dated evidence in [`goals/TRIAGE.md`](../goals/TRIAGE.md#3-source-deployment-and-acceptance-receipts).
+Their cause is not established. This documentation cleanup neither reruns those
+checks nor changes timeouts or workers to suppress the failures.
 
-Each item is meant to be one self-contained PR: add the suite, then raise the
-floors in `backend/vitest.config.mts` to just below the new measured numbers.
-Size is a rough guess: S ≈ an hour, M ≈ an afternoon.
-
-- [x] `lib/documentTypes.ts` — pure catalog/lookup of document types; assert
-      known types resolve and unknown inputs fall back sanely. (S)
-- [x] `modules/chat/engine/prompts.ts` — pure prompt builders; assert key instructions and
-      interpolated values appear in the output strings. (S)
-- [ ] `lib/userSettings.ts` — title/tabular model resolution from which API
-      keys a user has; reuse the Supabase mock pattern from
-      `userLookup.test.ts`. (S)
-- [ ] `lib/upload.ts` — multer wrapper: assert LIMIT_FILE_SIZE maps to a 413
-      with the right message and other errors pass through. (S)
-- [ ] `lib/officeText.ts` — office XML text extraction; build a tiny in-memory
-      zip fixture with JSZip and assert extracted/decoded text. (S)
-- [ ] `modules/chat/engine/tools/toolSchemas.ts` — assert every tool schema has a name,
-      description, and well-formed parameters (guards against schema drift). (S)
-- [ ] `lib/userApiKeys.ts` (rest) — encrypt/decrypt round-trip and DB
-      load/store paths with a mocked Supabase client. (M)
-- [ ] `lib/storage.ts` (rest) — S3 upload/download/list/delete wrappers with a
-      mocked AWS SDK client. (M)
-- [ ] `modules/user/user.dataExport.ts` — export assembly: given seeded mock tables,
-      assert the export contains the user's data and nobody else's. (M)
-- [ ] `lib/spreadsheet.ts` — parse a small in-memory xlsx fixture; assert sheet
-      and cell extraction, including empty/edge cells. (M)
-- [ ] `modules/chat/engine/contextBuilders.ts` — context assembly from doc stores; assert
-      doc labels, truncation, and ordering. (M)
-- [x] `lib/docxTrackedChanges.ts` — tracked-changes XML round-trip on a minimal
-      docx fixture: insert/delete runs, accept/reject. High value: document
-      integrity. (M)
-- [ ] `lib/courtlistener.ts` — API client with mocked fetch: query building,
-      pagination, and error paths. Legal-research correctness. (M)
-- [x] `lib/workflowCatalogSource.ts`, `lib/workflowCatalogSync.ts` — validate
-      downloaded workflow definitions, temporary-file cleanup, asset uploads,
-      and the transactional import payload. (M)
-- [ ] `lib/llm/aiSdk.ts` + `lib/llm/providers.ts` — provider-neutral tool plumbing
-      and provider selection with mocked provider modules. (M)
-- [ ] `lib/mcp/types.ts` + `lib/mcp/servers.ts` — server config validation and
-      allow-listing logic; security relevant. (M)
-- [ ] `lib/mcp/client.ts` + `lib/mcp/oauth.ts` — connection lifecycle and OAuth
-      token handling with a mocked MCP SDK; security relevant. (M)
-- [ ] `lib/llm/rawStreamLog.ts` — log path construction and redaction with a
-      mocked fs. (S)
-- [ ] `modules/chat/engine/tools/documentOps.ts` — start with the pure helpers (diff/match
-      utilities), not the full tool handlers. (M)
-- [ ] `modules/chat/engine/tools/toolDispatcher.ts` — dispatch table routing and argument
-      validation with stubbed tools; don't try to cover every tool body. (M)
-- [ ] `modules/chat/engine/streaming.ts` + `lib/llm/{aiSdk,providers}.ts` — streaming
-      loops and provider adapters; hardest to unit test, consider extracting
-      pure chunk-parsing helpers first. (M)
-
-Not worth unit testing directly: `lib/supabase.ts` and `lib/convert.ts` are
-thin wrappers around external services (Supabase auth, LibreOffice); they are
-better exercised by the e2e suite.
 
 ## Ratchet policy
 
@@ -124,11 +57,10 @@ better exercised by the e2e suite.
 statements 60 / branches 51 / functions 64 / lines 63). They are a
 no-regression ratchet, not a target:
 
-CI runs `npm run test:coverage` in the backend job of `ci.yml`, so a drop
-below a floor fails the build. That was not always true: from 2026-07-22 to
-2026-09-14 the job ran plain `npm test`, so the floors existed but nothing
-enforced them, and coverage drifted up unnoticed — which is why the floors
-jumped when the gate was finally wired up. Rules:
+`.github/workflows/ci.yml` defines the coverage check. A workflow definition does
+not prove that this fork has run it or configured required branch checks; verify
+repository enforcement separately. The earlier fork audit found no runs and
+unprotected main, as recorded in `goals/TRIAGE.md`. Rules:
 
 - **Floors only go up.** Never lower them to get a PR green — that means your
   change removed tested behavior or added a large untested lib; add tests
@@ -136,5 +68,5 @@ jumped when the gate was finally wired up. Rules:
 - **Raise them in the same PR that adds tests.** After your suite passes, run
   `npm run test:coverage`, take the new global numbers, and set each floor to
   the measured value rounded down to a whole percent.
-- Keep the measured numbers in the config comment and the table above honest
-  when you do.
+- Keep measurements revision-bound. Change a threshold only with observed output;
+  do not recreate an undated per-file snapshot as the current backlog.

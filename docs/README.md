@@ -6,9 +6,12 @@
   registration, Ollama, and first-run setup
 - [Manual and production deployment](deployment.md) — managed infrastructure,
   environment variables, database upgrades, and deployment safety
-- [Private deployment scoping](private-deployment-scoping.md) — gap analysis
-  and release plan for a firm-owned private install (strict privacy mode,
-  attested confidential compute, conversation tree, voice, ingestion, mobile)
+- [Current project agenda](../goals/STATUS.md) — current mission state, owner
+  constraints, and proposed course
+- [Whole-project accounting](../goals/TRIAGE.md) — all phases/missions, omitted
+  requests, inherited release obligations, evidence levels and dependencies
+- [Program accounting letter](reports/mike-program-accounting-2026-10-07.md) —
+  readable explanation of the standing state and proposed course
 - [Troubleshooting](troubleshooting.md) — common local and production problems
 - [Safe local testing](safe-local-testing.md) — disposable resources, synthetic
   documents, and secret handling
@@ -51,12 +54,11 @@
 - [Open-source credits](../CREDITS.md) — the libraries, tools, and
   infrastructure behind Mike
 
-## Historical design and investigation notes
+## Investigation evidence
 
-These files preserve the context of completed work. They are not current setup
-or architecture guidance.
+These dated investigations preserve measured behavior and unresolved acceptance
+cases. They are evidence for their recorded revisions, not current setup guidance.
 
-- [Legal workflows design spec](superpowers/specs/2026-06-29-legal-workflows-design.md)
 - [Word add-in assistant scroll-jump report](word-addin-chat-scroll-report.md)
 
 Contribution and disclosure policies live in [CONTRIBUTING.md](../CONTRIBUTING.md)

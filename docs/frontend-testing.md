@@ -144,84 +144,39 @@ confirmed failures, unaffected paths examined and limits of the investigation.
 
 ## What the coverage gate covers
 
-The ratchet gates `src/app/lib/**` only — the client library — mirroring the
-backend's decision to gate `src/lib/**`. Components and hooks have their own
-suites (they run in the same `npm test`), but their coverage is UI-shaped and
-noisy, so they are exercised without being floor-gated.
+The ratchet gates `src/app/lib/**` only — the client library. Backend coverage has
+a different scope: all `backend/src/**`. Components and hooks run in the same
+frontend unit suite but are not coverage-floor-gated. The executable scope and
+thresholds live in `frontend/vitest.config.mts`.
 
-## Current coverage (measured 2026-08)
+## Coverage evidence and regression priorities
 
-Per-file statement coverage of the gated lib layer from
-`npm run test:coverage`:
+The old August percentage table and unchecked "untested surfaces" PR list have
+been removed. They are not a current coverage measurement or proof that a suite
+is missing. Do not schedule work from an old checkbox or a config comment.
 
-| Lib file | % statements | Tested? |
-| --- | ---: | :---: |
-| `lib/documentUploadValidation.ts` | 100 | ✓ |
-| `lib/deleteTabularReviewsWithConcurrency.ts` | 100 | ✓ |
-| `lib/folderDeleteState.ts` | 100 | ✓ |
-| `lib/modelAvailability.ts` | 100 | ✓ |
-| `lib/paginatedRows.ts` | 100 | ✓ |
-| `lib/utils.ts` | 100 | ✓ |
-| `lib/supabase.ts` | 100 | ✓ |
-| `lib/mikeApi.ts` | 99.77 | ✓ — every endpoint wrapper asserted |
+For a behavior change, inspect its current colocated suites and run the smallest
+relevant regression. Use `npm run test:coverage --prefix frontend` when a current
+measurement is needed; record the source revision, scope, command and output.
+Coverage proves execution, not user-visible correctness.
 
-Global (lib layer): **99.81% statements / 97.09% branches / 100% functions /
-100% lines**. The only uncovered code is the dev-only logging branch and a
-couple of `?? null` default arms. `mikeApi.ts` now has a route/method/body
-assertion for every thin endpoint wrapper (folders, library, workflows, MCP
-connectors, document versions) on top of the earlier plumbing, mapping, and
-streaming suites.
+Prioritize consumer-visible failures: permission/error handling, active-thread
+selection after reload or out-of-order history, streaming/stop/resume transitions,
+model availability, document/version resolution, and useful tool/citation rendering.
+Add permanent tests for plausible behavioral regressions, not copied endpoint
+arguments, prompt wording, component existence or implementation shape.
 
-Outside the gate, the SSE **parse** loop — the frontend half of the SSE
-contract with the backend (`data: <json>\n\n` lines) — is covered in
-`src/app/hooks/useAssistantChat.sse.test.ts`: chunk-boundary reassembly,
-multi-event chunks, reasoning/content interleaving, `error` events, malformed
-lines, and end-of-stream flush without a trailing newline.
+Real-app acceptance for the currently open branching, prompt-editing and local
+voice outcomes is tracked in [the current agenda](../goals/STATUS.md) and
+[whole-project accounting](../goals/TRIAGE.md). Passing unit tests does not close
+the owner's reported missing controls.
 
-## TODO — untested surfaces, in priority order
-
-Each item is one self-contained PR: add the suite, then (for lib files) raise
-the floors in `frontend/vitest.config.mts` to just below the new measured
-numbers. Size guess: S ≈ an hour, M ≈ an afternoon.
-
-- [ ] Assistant message rendering — start with the pure helpers
-      `components/assistant/message/citationUtils.ts` and `eventUtils.ts`,
-      then render `EventBlocks` / `MarkdownContent` with fixture events and
-      assert what a lawyer actually sees (citations, edit cards, error
-      blocks). Highest-value component surface. (M)
-- [ ] Tabular review state — `components/tabular/TabularReviewView.tsx` and
-      `TRChatPanel.tsx` each contain their own copy of the SSE read loop plus
-      cell/flag state transitions; test the state transitions with mocked
-      streams the way `useAssistantChat.sse.test.ts` does. Consider extracting
-      the duplicated parse loop into a shared lib helper first, which would
-      also pull it under the coverage gate. (M) The server-owned half of both
-      is already covered: `TabularReviewView.generation.test.tsx` and the
-      "server-owned turns" block in `TRChatPanel.test.tsx` (Stop through the
-      endpoint, reconnect with `from`, attach on open).
-- [x] `lib/mikeApi.ts` (rest) — the remaining thin wrappers: folders/library
-      moves, workflows share/hide, MCP connectors, document versions. Done as
-      a table-driven `it.each` suite of URL/method/body assertions. (M)
-- [ ] `hooks/useSelectedModel.ts` — model choice persistence and fallback to
-      `DEFAULT_MODEL_ID` when the stored model is unavailable. (S)
-- [ ] `hooks/useGenerateChatTitle.ts` — title generation trigger and failure
-      tolerance (a failed title must never break the chat). (S)
-- [ ] `hooks/useFetchSingleDoc.ts` + `useFetchDocxBytes.ts` — fetch/refresh
-      lifecycle with mocked `mikeApi`. (S)
-- [ ] `useAssistantChat` beyond parsing — `ask_inputs` handling and the
-      tool-event placeholder lifecycle. (M) Stop, detach, return-to-thread
-      and resume after a reload are covered by
-      `useAssistantChat.lifecycle.test.tsx`, `assistantTurns.test.ts` and
-      `assistantTurnStream.test.ts`.
-
-Not worth unit testing directly: `lib/supabase.ts` is a thin wrapper around
-`createClient` (better exercised by the e2e suite), and `app/` page components
-are mostly composition.
 
 ## Ratchet policy
 
 `frontend/vitest.config.mts` enforces global coverage **floors** over
-`src/app/lib/**` (currently statements 99 / branches 97 / functions 100 /
-lines 100). Same rules as the backend
+`src/app/lib/**`: statements 100 / branches 99 / functions 100 / lines 100
+(config inspected 2026-10-07, not a new measurement). Same rules as the backend
 ([testing-coverage.md](testing-coverage.md#ratchet-policy)):
 
 - **Floors only go up.** Never lower them to get a PR green — that means your
@@ -230,5 +185,5 @@ lines 100). Same rules as the backend
 - **Raise them in the same PR that adds tests.** After your suite passes, run
   `npm run test:coverage`, take the new global numbers, and set each floor to
   the measured value rounded down to a whole percent.
-- Keep the measured numbers in the config comment and the table above honest
-  when you do.
+- Keep measurements revision-bound. Update a threshold only with observed output;
+  a documentation edit is not authority to lower the configured gate.

@@ -22,7 +22,7 @@ dangerous (scope in `backend/stryker.config.json`):
 - `src/lib/downloadTokens.ts` — HMAC-signed download tokens
 - `src/modules/chat/engine/citations.ts` — citation extraction (what the model may
   cite from which document)
-- `src/lib/chat/verifyCitations.ts` — quote-against-source verification
+- `src/modules/chat/engine/verifyCitations.ts` — quote-against-source verification
   (the "verified" badge)
 - `src/lib/privateIp.ts` — the SSRF private/reserved-IP guard for
   server-side connector fetches
@@ -35,16 +35,15 @@ npm ci
 npm run test:mutation
 ```
 
-Takes about a minute locally (~2 in CI). The **Mutation testing**
-workflow can be dispatched from the Actions tab and runs itself monthly
-as a drift check. It is **not** a PR gate — see "Blocked on vitest 5"
-below for why the promotion to one was held back.
+The **Mutation testing** workflow defines manual dispatch and monthly drift
+checks, not a PR gate. Definition does not prove execution in this fork. The
+recorded tooling blocker below must be resolved before interpreting a new score.
 
 ### Blocked on vitest 5 (since 2026-09-11)
 
-`npm run test:mutation` cannot currently produce a real score.
-`@stryker-mutator/vitest-runner` 10.0.0 — the latest release — does not
-work with vitest 5, which the repo moved to in #455 on 2026-09-11. Two
+The 2026-09-14 investigation found that
+`@stryker-mutator/vitest-runner` 10.0.0 could not drive vitest 5. This is a dated
+failure receipt, not a fresh claim about the latest upstream release. Two
 separate breakages, both reproduced locally on 2026-09-14:
 
 1. **Hard crash.** Stryker's sandbox rewrites `tsconfig.json` with
@@ -97,17 +96,10 @@ privateIp 65.9). The access figure is mostly no-coverage mutants in
 *covered* code is 82.2. `ignoreStatic` is on: module-load-time mutants
 (the BlockList subnet tables) can't be toggled by mutation switching and
 would survive spuriously; their runtime behavior is asserted directly in
-`privateIp.test.ts`. `thresholds.break` is **69**, just under the
-measured total, so a run fails only on a genuine regression.
+`privateIp.test.ts`. The configured `thresholds.break` is **69**, just under that
+historical total; the blocked harness cannot presently supply a valid regression signal.
 When you kill survivors, raise `break` in the same PR — floors only go up.
 
-### Current tooling limitation
-
-With the backend's TypeScript 7 dependency, Stryker 10 currently aborts during
-sandbox setup because it calls the removed `parseConfigFileTextToJson` API.
-Its corrected mutation targets are discovered, but no mutation score is
-produced. The regular unit, coverage, typecheck, database, and browser checks
-remain separate; a green CI run does not imply this optional harness passed.
 
 ## SSE load harness (k6)
 
@@ -170,13 +162,10 @@ removed workflow from git history as a starting point.
 
 ## What gates merges?
 
-- **Mutation testing does not gate anything today.** It is blocked on
-  vitest 5 support in `@stryker-mutator/vitest-runner` (above). The
-  monthly cron still runs, so the block stays visible in the Actions tab
-  instead of being forgotten. When the block lifts, the intended shape is
-  a path-filtered PR gate on the mutated security libs, their tests and
-  the harness itself: a measured run costs ~2 minutes, so gating those
-  PRs is cheap and unrelated PRs never pay it.
+- **Mutation testing is not a PR gate.** The configured runner's vitest 5
+  incompatibility is recorded above. The workflow declares monthly execution,
+  but no current successful fork run is claimed. A new measured score is needed
+  before considering a path-filtered required check.
 - **The load harness never gates.** It needs a live stack and real
   provider keys, and it detects capacity/stability drift, not the
   correctness of a single diff — it is for before/after checks around

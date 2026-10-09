@@ -1,117 +1,67 @@
 ---
 definition_version: 4
-
-readiness: executable
-
-review:
-  reviewer: owner-instruction-2026-10-07
-  frozen_ref: a756ea2
-  verdict: accept
-  evidence_ref: goals/private-firm-deployment-spine.md
-
-start:
-  captured_at: "2026-10-07T02:15:00Z"
-  source:
-    canonical_ref: a756ea2
-    deploy_identity: local-docker-compose
-  worktrees:
-    - path: /Users/wiz/mike
-      status: clean
-      class: goal_candidate
-      owner: yusefmosiah
-      touch: goal_owned
-      recovery: git reset --hard a756ea2
-
-finish:
-  deliver: >-
-    Upgrade conversation architecture to a Pi-style immutable tree with edit-and-branch,
-    regeneration, and sibling branch navigation controls.
-  artifact: >-
-    Database migration for parent_message_id and chat_leaf_state, server-authoritative
-    context builder in backend/src/modules/chat/chat.prepare.ts, and frontend branching
-    controls in UserMessage.tsx and AssistantMessage.tsx.
-  acceptance:
-    - action: npm test --prefix backend -- src/__tests__/integration/chat.tree.test.ts
-      proves: Tree context builder traverses leaf to root; alternate branches remain intact without leaking into model context.
-      evidence_class: local_test
-  rollback: git checkout -- backend/src/modules/chat/ frontend/src/
-  landing:
-    required: true
-    environment: local
-    required_receipts: [pushed_commit, environment_identity, deployed_acceptance]
-
-value:
-  better_means: >-
-    Enable non-destructive prompt revision and alternate exploration paths while keeping
-    all conversation branches immutable and uncorrupted.
-  goodharting_would_be: >-
-    Destructive SQL UPDATE of prior user prompts that destroys earlier drafting history.
-
-homotopy:
-  realism_axis: >-
-    From linear flat transcripts (low resolution) to
-    immutable directed acyclic message trees with per-user leaf state (high resolution).
-
-boundaries:
-  mutation_class: yellow
-  authority_sources:
-    - goals/private-firm-deployment-spine.md
-  must_preserve:
-    - Existing flat chat messages must backfill cleanly with parent links.
-  excluded:
-    - Cross-conversation branch merging
-
-now:
-  status: unverified
-  slice: pi-tree-branching
-  source_ref: a756ea2
-  deploy_identity: local-docker-compose
-  candidate:
-    id: candidate-branching-done
-    state: ready
-    ref: main
-    base: e8a9b1c
-    digest: none
-    scope: [backend/src/modules/chat/, backend/src/modules/project-chat/, frontend/src/app/components/assistant/]
-  conjecture:
-    id: c-tree-branching-context-integrity
-    claim: >-
-      Walking server-authoritative leaf-to-root paths guarantees that abandoned branches
-      never leak into the LLM context window.
-    test: Test suite verifies context tokens contain only the active branch's ancestry.
-    edge: independence
-    delta_o: Context inspection unit tests in chat.tree.test.ts.
-    scope_if_supported: Conversation engine.
-    status: supported
-    evidence_refs: [a756ea2]
-  decision:
-    what: Implemented parent_message_id hierarchy with per-user leaf tracking table.
-    kind: architecture
-    status: settled
-    evidence_ref: user-prompt-2026-10-07
-    owner_ratification_ref: user-prompt-2026-10-07
-  belief:
-    believed_state: Station 5 landed at a756ea2; edit-prompt, regenerate, branch-into-new-thread, and sibling navigation live on both chat surfaces.
-    main_uncertainty: Sibling navigation on user messages shows the prompt without auto-hopping to its newest answer child.
-    next_observation: Station 6 local audio proxies.
-  blocker_or_risk: none
-  next_action: Advance spine to Station 6.
-
-receipts:
-  - id: station-5-code-landed
-    boundary: implement
-    identity: a756ea2
-    proof_refs:
-      - backend/src/__tests__/integration/chat.tree.test.ts
-      - frontend/src/app/components/assistant/ChatView.branch.test.tsx
-      - frontend/src/app/components/assistant/useChatBranchActions.test.tsx
-    rollback_ref: e8a9b1c
-    disposition: Station 5 landed on main; backend 2848 pass (2 pre-existing openrouter failures), assistant suite 245/245, pages 44/44, hooks+lib 729/729.
+readiness: intent
 ---
 
-> **Status (2026-10-07): unverified.** This file was written by the overnight run and
-> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
+# Branching and prompt editing: retained scope
 
-# Station 5: Pi-Style Conversation Tree & Branching UI
+**Incomplete. This file is retained intent, not implementation authorization and
+not acceptance.** Original Station 5 was written as landed by the overnight run;
+the accounting reduced it to unverified. Migration, server tree, UI controls and
+tests exist in source, but the owner reported missing controls on the actual app
+and no real-surface acceptance is established in the reviewed record. Baseline:
+HEAD `4f0f186`, working tree dirty with unrelated Mission 2 WIP; no mutation is authorized from here.
 
-Introduces Pi-style branching conversation histories, parent_message_id relationships, and UI branch navigation.
+## Intended outcome
+
+Pi-style immutable conversation tree: edit a prompt as a sibling branch,
+regenerate an answer, step between sibling branches with a persisted per-user
+leaf, branch into a new thread, and reload onto the intended history.
+
+## What exists now (source, not acceptance)
+
+- `backend/migrations/20261007_01_chat_message_tree_branching.sql`:
+  `chat_messages.parent_message_id` (indexed, nullable FK) and per-user
+  `chat_leaf_state` with RLS, plus chronological backfill for pre-tree rows.
+- `backend/src/modules/chat/chat.tree.ts`: root-first path walk (depth cap 500,
+  row-scan cap 2000, cycle-safe, fail-open reads) and `resolveLeaf`.
+- `chat.branches.ts` and routes: `POST /chat/:chatId/branches` (edit-and-branch;
+  inserts a sibling, moves the caller's leaf), `POST /chat/:chatId/leaf`,
+  `GET /chat/:chatId/path`,
+  `GET /chat/:chatId/branches/:messageId/siblings`.
+- `chat.prepare.ts` resolves the caller's leaf so a new turn hangs off the
+  active branch; the project-chat service mirrors the parent/leaf handling.
+- Frontend: `useChatBranchActions.ts` (`editPrompt`, `regenerate` via
+  `link_only_to_message_id`, `branchIntoNewThread` — re-points the leaf so the
+  next prompt continues from the chosen message — `navigateSibling`,
+  leaf-move reload); `UserMessage.tsx` edit control; `AssistantMessage.tsx`
+  regenerate and "Branch into new thread"; `BranchNavigator.tsx`; `mikeApi.ts`
+  `createBranch` / `setChatLeaf` / `fetchSiblings`.
+- Tests on disk (source-implemented evidence only):
+  `backend/src/__tests__/integration/chat.tree.test.ts`,
+  `ChatView.branch.test.tsx`, `useChatBranchActions.test.tsx`,
+  `AssistantMessage.branch.test.tsx`, `BranchNavigator.test.tsx`.
+
+## Open acceptance outcomes
+
+- The owner's missing-controls report on the actual app stands; no
+  visible-surface acceptance has superseded it.
+- Real-app runs (Mission 3 acceptance is Playwright on each flow): edit prompt
+  creates the correct sibling branch; regenerate re-answers in place; sibling
+  navigation persists the leaf; "branch into a new thread" is an independent
+  case, not interchangeable with regenerate or sibling switching; reload
+  renders the intended branch history; both chat surfaces and phone browser.
+
+## Constraints retained
+
+- Messages are immutable: an edit or regeneration inserts a sibling and moves
+  the leaf; no destructive rewrite of prior prompts.
+- The leaf is per reader: one user's navigation never moves another's view.
+- Existing flat transcripts must backfill cleanly.
+- Excluded: cross-conversation branch merging.
+
+## Current mapping
+
+Mission 3 (STATUS.md agenda item 3; acceptance: Playwright runs of each flow in
+the real app). TRIAGE.md: "Source exists; user reported missing controls;
+actual-surface acceptance remains open."

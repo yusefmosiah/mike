@@ -130,9 +130,9 @@ Calendar UI control recovered. No successful write GIF is claimed.
   This is not evidence of an Internal Workspace audience or administrator policy.
 - The old `mikeamal` connections were removed before this run. All eight old-client
   screenshots were subsequently removed from both PR branches, and old testing
-  comments/descriptions were replaced with current-evidence pointers. The
-  [September 22 report](google-workspace-live-2026-09-22.md) is now a retirement
-  notice, not evidence for the current client.
+  comments/descriptions were replaced with current-evidence pointers. The superseded
+  September 22 retirement notice has also been removed; it was not acceptance
+  evidence for the current client.
 
 ## Earlier combined-integration baseline
 

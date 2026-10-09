@@ -1,119 +1,101 @@
 ---
 definition_version: 4
-
-readiness: executable
-
-review:
-  reviewer: owner-instruction-2026-10-07
-  frozen_ref: 6e5b553
-  verdict: accept
-  evidence_ref: goals/private-firm-deployment-spine.md
-
-start:
-  captured_at: "2026-10-07T05:00:00Z"
-  source:
-    canonical_ref: 6e5b553
-    deploy_identity: local-docker-compose
-  worktrees:
-    - path: /Users/wiz/mike
-      status: clean
-      class: goal_candidate
-      owner: yusefmosiah
-      touch: goal_owned
-      recovery: git reset --hard 6e5b553
-
-finish:
-  deliver: >-
-    Make privacy an enforceable deployment mode with STRICT_PRIVATE_MODE=true, cryptographic
-    Phala TEE remote attestation verification, audit receipts, and local DGX Spark vLLM endpoints.
-  artifact: >-
-    backend/src/lib/llm/attestation/ (CVM verifier), inference_receipts database table,
-    catalog lockdown in models.service.ts, and runtimeConfig.ts fail-fast startup checks.
-  acceptance:
-    - action: npm test --prefix backend -- src/lib/llm/__tests__/attestation.test.ts
-      proves: Attested adapter cryptographically verifies measurement and fails closed on tampering.
-      evidence_class: local_test
-    - action: STRICT_PRIVATE_MODE=true npm test --prefix backend -- src/__tests__/integration/strictPrivateMode.test.ts
-      proves: Hosted cloud providers, telemetry, and unapproved external models are completely rejected at startup.
-      evidence_class: local_test
-  rollback: git checkout -- backend/src/lib/llm/attestation/ backend/src/lib/runtimeConfig.ts
-  landing:
-    required: true
-    environment: local
-    required_receipts: [pushed_commit, environment_identity, deployed_acceptance]
-
-value:
-  better_means: >-
-    Guarantee client matter confidentiality by enforcing that zero privileged prompt or document
-    tokens ever reach unverified external cloud endpoints.
-  goodharting_would_be: >-
-    Showing a "private" UI toggle while allowing background analytics or automatic cloud fallback.
-
-homotopy:
-  realism_axis: >-
-    From unverified OpenAI-compatible HTTP endpoints (low resolution) to
-    cryptographically attested GPU CVM lanes with immutable audit receipts and egress lockdown (high resolution).
-
-boundaries:
-  mutation_class: yellow
-  authority_sources:
-    - goals/private-firm-deployment-spine.md
-  must_preserve:
-    - Fail-closed: if Phala attestation fails, request fails immediately; never fallback to public cloud.
-    - Zero prompt or response text recorded in inference_receipts table.
-  excluded:
-    - Developing custom hardware TEE microcode
-
-now:
-  status: tabled
-  slice: private-hardening-and-phala
-  source_ref: 6e5b553
-  deploy_identity: local-docker-compose
-  candidate:
-    id: candidate-hardening-done
-    state: ready
-    ref: main
-    base: 200c341
-    digest: none
-    scope: [backend/src/lib/privateMode.ts, backend/src/lib/llm/attestation/, backend/src/lib/egress.ts]
-  conjecture:
-    id: c-tee-attestation-gate
-    claim: >-
-      Verifying remote attestation before dispatching model requests establishes cryptographic
-      proof of confidential execution without measurable latency degradation.
-    test: Attestation handshake completes in <500ms and verifies CVM measurement hashes.
-    edge: resource
-    delta_o: Live attestation benchmark against Phala CVM endpoint.
-    scope_if_supported: Confidential inference layer.
-    status: supported
-    evidence_refs: [6e5b553]
-  decision:
-    what: Enforce strict private mode at boot time and record cryptographic receipts per turn.
-    kind: safety
-    status: settled
-    evidence_ref: user-prompt-2026-10-06
-    owner_ratification_ref: user-prompt-2026-10-06
-  belief:
-    believed_state: Station 8 landed at 6e5b553; strict mode + attested lane + egress lockdown live.
-    main_uncertainty: Live attestation latency against a real Phala CVM (no endpoint configured in this env).
-    next_observation: Station 9 code execution and RLM.
-  blocker_or_risk: none
-  next_action: Advance spine to Station 9.
-receipts:
-  - id: station-8-code-landed
-    boundary: implement
-    identity: 6e5b553
-    proof_refs:
-      - backend/src/lib/llm/attestation/__tests__/attestation.test.ts
-      - backend/src/__tests__/integration/strictPrivateMode.test.ts
-    rollback_ref: 200c341
-    disposition: Station 8 landed on main; attestation + strict suites green, full suite 2973 pass (2 pre-existing openrouter failures).
-
+readiness: intent
 ---
-
-> **Status (2026-10-07): tabled.** This file was written by the overnight run and
-> overstates what landed. See [`goals/STATUS.md`](STATUS.md) for the audited state.
 
 # Station 8: Private Deployment Hardening & Phala TEE Lane
 
-Delivers the private deployment milestone: strict egress lockdown, verified Phala confidential inference, and DGX vLLM integration.
+> **Incomplete — retained intent, not implementation authorization.** Original
+> roadmap Phase 5. No station acceptance is established in the reviewed record.
+> The stale review header and invalid acceptance recipes have been removed;
+> source implementation and its limits are distinguished below. See
+> [`TRIAGE.md`](TRIAGE.md) §3. [`STATUS.md`](STATUS.md) is the
+> authoritative agenda; this scope may be promoted only after its authority,
+> real starting state, acceptance and landing requirements are reconciled — an
+> owner course decision, not an assistant default.
+
+## Retained goal (desired)
+
+Make privacy an enforceable deployment mode, not a UI claim: under
+`STRICT_PRIVATE_MODE=true`, no privileged prompt or document token reaches an
+unverified external endpoint; hosted providers, telemetry and unapproved
+egress are refused fail-closed; confidential inference runs on
+operator-controlled lanes (Phala CVM, local DGX Spark vLLM), with cryptographic
+verification for any lane claimed as attested and a content-free audit receipt.
+The original milestone is a private demo — a live matter workflow on private inference with a
+usable UI, verified citations and honest attestation claims. Mobile and RLM are
+not prerequisites for that demo.
+
+## Constraints to preserve
+
+- Fail closed: if attestation verification fails, the request fails
+  immediately; never fall back to public cloud.
+- Receipts and audit rows carry identity fields only — never prompt, response
+  or system text.
+- Zero prompt/document tokens to unverified external endpoints.
+- Under strict mode, LLM/audio operator hosts are private/loopback or
+  explicitly allowlisted (`PRIVATE_MODE_ALLOWED_EGRESS_HOSTS`).
+- Excluded: developing custom hardware TEE microcode.
+
+## Source implemented (inspected 2026-10-07)
+
+- Boot gate (`lib/privateMode.ts`, wired in `app.ts`): literal `"true"` opt-in,
+  requires `SENTRY_DISABLED=true`, forbids hosted cloud-provider credentials in
+  the environment; startup fails otherwise.
+- Request-time model allow-gate (`assertModelAllowed`) at the shared streaming
+  resolution choke point and other model callers; the catalog refuses
+  OpenRouter and Vercel with `private_mode_disabled`.
+- Purpose-based egress policy (`lib/egress.ts`): `llm`/`audio` reach only
+  private/loopback hosts or the allowlist; search-purpose checks delegate to
+  the search gate (`lib/search/egress.ts`), which `fetchPage` uses. Backend
+  Sentry is disabled under strict mode.
+- Attestation plumbing (`lib/llm/attestation/`): the verifier GETs
+  `{verifierUrl}/attestation`, parses JSON, and exact-string-compares the
+  reported `measurement` against the pinned `expectedMeasurement`; unpinned
+  declarations are rejected. It never throws; the transport fails the request
+  loudly with no fallback lane. Content-free receipts (process-local ring, cap
+  1000) are drained by the chat/project-chat/word-chat routes into
+  `inference.attested` audit rows via `recordChatTurn`.
+
+## Observed limits (dated audit observations, not runtime claims)
+
+- Attestation is measurement string checking only — no quote parsing,
+  signature verification, nonce freshness or TLS binding to the inference
+  endpoint, so nothing proves the machine that served the request is the one
+  the verifier described. It must not be described as cryptographic
+  verification; cryptographic tampering rejection has not been proved.
+- Strict mode does not yet gate search provider API calls, CourtListener,
+  Google Workspace, MCP, the GitHub workflow catalog download, or frontend
+  Sentry (backend Sentry is gated).
+- No dedicated `inference_receipts` table exists. The `inference.attested`
+  audit-event plumbing does exist and is the receipt path; absence of the
+  table does not mean no receipt plumbing.
+- No real Phala CVM or DGX endpoint has been exercised from this environment.
+  Configured OpenAI-compatible endpoints exist, but owned-compute inference,
+  TLS/trust configuration, limits and performance are unproved. The old file's
+  sub-500 ms handshake claim was never measured and is removed.
+- Unit tests exist at `lib/llm/attestation/__tests__/attestation.test.ts`,
+  `__tests__/integration/strictPrivateMode.test.ts` and `lib/egress.test.ts`;
+  they pin mocked source behavior, which is not station acceptance.
+
+## Unresolved acceptance outcomes
+
+- Real Phala CVM (or DGX-attested) endpoint passes with a pinned measurement,
+  and quote/signature/nonce/TLS tampering fails closed — the gate before any
+  "attested" claim.
+- Deployed segmented-environment run proves enforcement of each remaining
+  boundary above (settings alone do not), including operator-host allowlisting.
+- Private demo: live matter workflow, private inference, usable UI, verified
+  citations, owner-observed.
+
+## Mapping
+
+- Original Phase 5 → this station (`TRIAGE.md` numbering crosswalk; STATUS
+  "Original Phase 5 / Station 8").
+- TRIAGE outcomes: "Strict private mode and external boundaries", "Phala
+  attestation and inference receipts", "DGX/local model and speech serving",
+  "Private demo milestone".
+- Proposed course C: private-demo/trust foundation (private inference/egress/
+  telemetry enforcement, real DGX/Phala endpoints, cryptographic attestation if
+  claimed, trustworthy audit, crash/restore proof). Privacy, RBAC and actor
+  boundaries apply throughout; owner controls outbound access.
