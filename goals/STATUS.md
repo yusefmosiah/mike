@@ -1,7 +1,9 @@
-# Private Deployment: Status and Agenda
+# Status and Agenda
 
-Audited 2026-10-07, after an unattended overnight run that marked every
-station of `goals/private-firm-deployment-spine.md` complete. It wasn't.
+Updated 2026-10-09 with the owner's direction for the next missions. First
+written 2026-10-07, after an unattended overnight run that marked every
+station of `goals/private-firm-deployment-spine.md` complete. It wasn't; the
+rules at the end of this file exist so that cannot happen again.
 
 This file is the source of truth for the current agenda; station files do not
 override it. [`TRIAGE.md`](TRIAGE.md) now accounts for the whole program: original
@@ -31,172 +33,105 @@ Word → handoff → citations → Pi priority ladder is withdrawn.
   1/2 goals have been removed. Their surviving requirements and claim corrections
   are consolidated in `TRIAGE.md`; the parent spine is now a non-executable index.
 
-## Verified state (2026-10-07, later in the day)
+## Where things stand (2026-10-09)
 
-Preserved observations from the preceding triage, not fresh runtime assertions.
-Exact commands and scope are recorded in [`TRIAGE.md`](TRIAGE.md) §3.
+Recorded from this session's own runs; receipts are in the commit messages and
+in the overnight report (`docs/reports/overnight-2026-10-09.md`) once written.
+"Built" means source implemented and exercised locally; nothing here is owner
+accepted until the owner says so.
 
-- The earlier backend run had three DOCX corpus timeouts at default concurrency;
-  `--maxWorkers=2` gave 4,301 passed, 0 failed. Two workers are reduced concurrency,
-  not serial execution. Cause and default-run reliability remain unresolved.
-- Mission 2 (compaction) remains uncommitted: modified adapter/policy/context/env
-  files, one new production helper, three new tests and a probe script. Recorded
-  targeted tests passed; this is not durable cross-turn tool-history acceptance.
-- The earlier Docker/DB audit observed images predating HEAD and missing
-  `document_versions.block_ids` / `document_edits.w_ids`. The current server-DOCX
-  paths require those columns; deployed-source/schema alignment must precede
-  their acceptance. Active-document Office.js edits are a separate path.
-- The earlier fork audit found eleven workflow definitions, zero Actions runs,
-  and unprotected `main`. Definitions are not enforced checks; this is a dated
-  observation, not a fresh GitHub-status claim.
-- Organizations, sharing UI, grants, message authorship and audit plumbing exist.
-  End-to-end firm handoff, attribution coverage, cross-replica turn admission and
-  presence are not accepted merely because those artifacts exist.
+Built on `feat/pi-runtime` (local, unpushed), awaiting owner review:
 
-## Station state
+- **Pi runtime (Mission 7).** Every model call runs on pi-ai behind Pi Durable
+  (`backend/src/lib/llm/pi/`); the AI SDK loop is gone. The database client
+  queries Postgres directly (`backend/src/lib/db/`); PostgREST and the rest of
+  Supabase are gone, GoTrue stays as the auth server, and no Supabase names
+  remain outside history. Docker Compose runs stock Postgres + GoTrue.
+- **Restart-safe turns on every surface.** A turn cut off by a restart or
+  deploy resumes when the backend starts again: chat, project chat, cloud Word
+  chats and tabular review chats (`backend/src/turnResumers.ts`). Verified live
+  by killing the backend mid-answer for tabular and Word: the answer finished,
+  stored once, complete. Open: a client still attached when the server dies
+  re-attaches only on reload.
+- **Branch threads are titled** "BRANCH <title>", "BRANCH 2 <title>", ...
+  across a whole family; **chat titles** retry once instead of steering the
+  model to a "Misc. Query" fallback, which now appears only when the model
+  fails twice.
+- **Local e2e and stack harnesses** run without editing env files
+  (`scripts/e2e-local-stack.sh`, `backend/scripts/test-stack.sh`).
+- Last full runs: backend 4195 passed (two DOCX corpus tests time out under
+  full load, pass alone); stack suite 65/65; schema drift none; local e2e 57
+  passed, 3 failed (two synthetic React update-depth failures, one tabular
+  create blocked by the e2e account having no configured model).
 
-| # | Station | State | What is actually there |
-|---|---|---|---|
-| 1 | Document AST and block tools | awaiting owner review | Rebuilt as Mission 1a (document model, segmented reading) and 1b (tracked-change editing). The old block tools are removed. Edits address blocks by id, split only the runs they touch, keep formatting, footnote references, links and fields, and resolve against the document as read; batches are all-or-nothing. Formatting, new links and footnotes, table rows and edits inside pending insertions are tracked changes too, and block ids carry across versions. See [`mission-1b-docx-editing.md`](mission-1b-docx-editing.md) and [`mission-1c-block-ids.md`](mission-1c-block-ids.md). |
-| 2 | `get_diff` and linter | awaiting owner review | The linter (now with revision-structure checks) gates every edit before a version is created or overwritten. `get_diff` queried a column that does not exist and always reported no edits against a real database; fixed and pinned by a test. |
-| 3 | Search and citations | partial | Four search adapters and `fetchPage` work. Citation checking is substring matching only; snapshots live in a process-wide in-memory map (unbounded, lost on restart). `fetchPage` follows redirects and checks DNS before, not at, connect time. Search API calls have no strict-mode gate. |
-| 4 | Context resilience and compaction | awaiting owner review | JSON repair and paginated `read_document` are real. Mission 2 wires compaction into the shared OpenCode Go streaming adapter: deterministic preflight replay, completed-step/tool-loop checkpoints, and one explicit context-overflow recovery. Complete tool pairs and the active request survive; oversized tool outputs are explicitly summarized. Unicode or oversized bitmap archives use text instead of corrupted images. Threshold tests, vision transport tests, and a live GLM session pass. Provider-usage-only checkpoints remain invocation-local. See [`station-4-context-resilience-and-compaction.md`](station-4-context-resilience-and-compaction.md). |
-| 5 | Tree branching | unverified | Migration, server context builder, UI and tests exist. Not yet checked end to end in a browser. |
-| 6 | Local audio | unverified | Backend proxies and frontend hooks exist. Never run against a real STT/TTS endpoint. |
-| 7 | Auto Mode | partial | Three tiers and a classifier that denies on failure. Tier 1 auto-approved `web_search`, `fetch_web_page` and `execute_code` (fixed in Mission 0). No OpenRouter classifier lane. |
-| 8 | Private mode and Phala | tabled | Measurement-only checking is not cryptographic attestation; outbound search/connectors/catalog/telemetry policy remains incomplete. `inference.attested` audit plumbing exists, but does not prove quote/signature/nonce/TLS binding. |
-| 9 | Code execution and RLM | tabled | The `node:vm` sandbox exposed the host `process` (env secrets) to model-written code (removed in Mission 0). The "RLM" is a wave-based excerpt skimmer capped at 500 documents; no subagents, SDK, worker container or schedule. |
-| 10 | Mobile and OCR | tabled | Mobile is a Capacitor config plus a README. OCR stops after 10 pages per document. The hybrid-retrieval module has no callers and nothing writes `document_chunks`; there is no pgvector. |
+The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
+(option B). Mission 3's branching design no longer waits on it.
 
-## Owner decisions (2026-10-07)
+## Owner direction (2026-10-09)
 
-- **Private stack.** No Temporal/Cloudflare external orchestration dependency.
-  Default to the existing self-hosted stack; an additional self-hosted service is
-  a proposal to evaluate, not globally forbidden by an assistant inference.
-  This does not rescind Phala/DGX inference, controlled source/web retrieval,
-  development OpenCode/OpenRouter usage, or the requested Tailscale access.
-- **Firm multi-user is a target, not a now.** A partner starts a thread, an associate
-  continues it, a third person reads or resumes it, with RBAC over projects and files.
-  Not built immediately; the design must not foreclose it. The RBAC substrate is
-  largely present already (§11.1 there); the gaps are per-turn attribution, DB-fenced
-  turn admission and actor stamping. Draft:
-  [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md).
-- **Subagents for verification.** Two separate named workloads: document review
-  and citation checking (existence and quoted meaning for local, connector and web
-  sources). Neither is delivered by the current quote matcher or dormant RLM.
-  [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md)
-  is an assistant-authored future draft, not authorization to start it.
+- **Mike is a general knowledge-work agent.** Legal features are a strength
+  because everyone needs legal help, not the boundary of what Mike answers. The
+  system prompt must not refuse ordinary questions ("what are the baseball
+  scores") or frame every chat as legal.
+- **Subagents** are built on Pi Durable's task-owned conversations, informed by
+  the Pi subagent extensions (`pi-subagents`, `@tintinweb/pi-subagents`) but
+  not copied from them: those are coding-agent tools built on files and
+  processes, Mike's authority is the user's access to projects and documents.
+  Default model is the chat model; the calling model may choose any model the
+  user may use, guided by a frequently edited model-selection memo with
+  pricing and speed tiers. Child transcripts are not sidebar threads: a
+  collapsed control under the tool call opens them. Message passing is designed
+  now (addresses, typed envelopes) and built later.
+- **Code mode** (Pi 1.0 style: QuickJS sandbox, tools as `tools.*` functions,
+  only script output reaches the model) is a later mission. Designs made now
+  must route every tool call through one dispatcher so code mode can reuse it.
+- **Decision models.** Evaluate the OpenRouter decision models for Auto Mode and
+  other decisions, configurable in app settings, with particular interest in
+  small open-weight models Mike can run itself (Liquid's open d1-3B and
+  d1-omni-600M, Kev 4B, Tev1 4B, Clef-flash 9B). OpenRouter's `liquid/d1` is a
+  larger closed model, distinct from the open d1 checkpoints.
+- **Voice.** Local options through the browser (on-device recognition, the
+  operating system's own voices, WebGPU models) plus OpenRouter for testing
+  parity and coverage, plus any OpenAI-compatible server so Mike's own GPU
+  hardware can serve it later. OpenRouter voice is a test lane, never strict
+  private mode. Models are configurable and comparable in app, with prices. A
+  browser model download is opt-in, offered as "about N minutes of setup",
+  with N estimated from a small speed test, never as a size in megabytes.
+- Spending: up to $2 of OpenRouter calls per overnight run for evaluation and
+  voice tests, recorded in the report.
 
 ## Agenda
 
-One mission at a time. A mission is done only when the owner accepts it.
+One mission at a time, in this order. Each runs on its own branch off
+`feat/pi-runtime`, is merged locally only when its tests pass, and is reported
+with the commands run and what they printed. No push, no deployment, and no
+mission marked accepted by the agent.
 
-**Release preconditions, not new feature phases:** preserve/reconcile local and
-cloud Word candidates; establish matching source/schema/images before acceptance;
-retain Mission 2's bounded evidence; resolve test reliability and release-check
-enforcement. No stash, commit, migration, deployment or GitHub-setting change is
-authorized by the accounting alone. Prior doc-path/command corrections are recorded;
-they do not count as product acceptance.
+| # | Mission | State | File |
+|---|---|---|---|
+| 7 | Pi runtime, GoTrue-only, restart-safe turns, branch titles | built, awaiting review | this file; `pi-durable-decision-2026-10-08.md` |
+| 12 | Cleanup: tests, live reconnect, docs | next | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
+| 8 | General knowledge-work system prompt | next | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
+| 9 | Subagent foundation (document review first) | next | [`mission-9-subagents.md`](mission-9-subagents.md) |
+| 4 | Decision models and Auto Mode | next | [`mission-4-decision-models.md`](mission-4-decision-models.md) |
+| 10 | Voice: local, OpenRouter and self-hosted | next | [`mission-10-voice.md`](mission-10-voice.md) |
+| 3 | Branching, prompt editing and branch threads, end to end | after 10 | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
+| 11 | Code mode | later | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
+| 6 | Citation verification subagents | later, on top of 9 | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
+| 5 | Firm thread handoff | later | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
+| 1, 2 | Word editing (1a–1c), compaction | built, awaiting review | mission and station files |
 
-0. **Honest baseline** (this change)
-   - Disable `execute_code` everywhere: the tool is no longer advertised or
-     dispatched, and `lib/sandbox/executeCode` refuses all input.
-   - Move `web_search` and `fetch_web_page` out of Auto Mode Tier 1.
-   - Unmount `/diligence` (RLM deep runs).
-   - Correct the spine and station statuses; remove unrun receipts; write
-     this file.
-1. **Word document handling and the tool/prompt surface**
-   - Run-level edits that keep formatting, footnote references, hyperlinks
-     and fields; reversible in Word.
-   - Block IDs that stay stable within a batch; true all-or-nothing batches.
-   - Table cells as edit targets; tracked empty-paragraph removal.
-   - Linter gates version activation.
-   - Redesign tools and system prompt together so each kind of edit has one
-     clear path.
-   - Acceptance: real human-authored `.docx` fixtures (13+ pages, tables,
-     footnotes, mixed formatting, existing tracked changes). Untouched parts
-     unchanged; accept-all and reject-all in Word give the right documents.
-   - Progress: 1a (document model, segmented reading), 1b (editing, gate,
-     tools and prompt, plus formatting, new links and footnotes, table rows
-     and edits inside pending insertions) and 1c (block ids across versions)
-     are built and awaiting owner review.
+Still open from the earlier agenda, not scheduled tonight: Station 3 search and
+citation closure; re-reading originals after compaction; progressive tool-call
+UI; configurable iteration policy; memory-injection audit; Phala and
+cryptographic attestation (Station 8); OCR, ingestion and mobile (Station 10);
+release obligations in [`TRIAGE.md`](TRIAGE.md) §2.
 
-   Separate still-open document work: stale/wrong-version acceptance, one-tab
-   version selection, generated Word fidelity, and the owner's AST-version-control
-   design request. Source already includes a version picker and same-document tab
-   identity; those are not the same as durable AST revision commits.
+## Earlier state (2026-10-07, historical)
 
-**Early cross-cutting work:** Station 3 search/fetch/provider QA and truthful source
-verification remain basic-functioning priorities. The memory-injection audit,
-append-only raw tool trajectory, re-reading originals after compaction, progressive
-tool-call UI and configurable iteration policy remain explicitly open.
-
-2. **Compaction that triggers**
-   - Wire the policy into the streaming loop: post-turn, at tool-loop
-     boundaries, and on overflow recovery.
-   - Acceptance: a test that drives a conversation past the threshold and
-     shows it fire, plus one live OpenCode Go session.
-   - Progress: implemented and awaiting owner review. The shared adapter is
-     exercised by behavioral tests and a synthetic live `opencode-go/glm-5.3`
-     session; consensus findings have been addressed. Receipts and remaining
-     limitations are in the Station 4 file.
-3. **Branching, prompt editing, branch threads, and audio, end to end**
-   - Acceptance: Playwright runs of each flow in the real app.
-4. **Auto Mode: development classifier and private System 1 lane**
-   - The source has a turn-model/OpenCode classifier, not the owner's requested
-     Jev/OpenRouter development lane and local System 1 production split.
-   - The stale Station 7 "settled" claim has been removed. Classifier routing and
-     its permission boundaries remain unresolved; no new lane is authorized here.
-
-## Later phases and newly requested directions
-
-These are accounted for, not silently promoted above Missions 3 and 4:
-
-- **Durable runtime and KV-cache continuity:** Pi/Pi Durable research exists.
-  A 2026-10-08 spike measured the Postgres adapter, throughput, crash recovery and
-  a Pi-backed chat path in the real app, and recommends embedding (option B):
-  [`pi-durable-decision-2026-10-08.md`](pi-durable-decision-2026-10-08.md).
-  Owner decision pending; Mission 3's branching design depends on it.
-  Embedding versus adopting patterns remains owner-undecided. Raw persisted tool
-  history, retrievable originals after compaction, frozen/thread-scoped memory,
-  durable runs/tasks and immutable streaming audit are not built by Mission 2.
-  Resolve the architecture before committing to engine/task interfaces.
-- **Firm thread handoff:** draft
-  [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md).
-  This is not original Phase 5. RBAC/sharing are existing substrates; end-to-end
-  handoff/actor/permission/concurrency acceptance remains open. Future-proof now;
-  do not schedule ahead of core usability without an owner course decision.
-- **Both subagent workloads:** document review and citation checking. Durable
-  evidence and authority are shared prerequisites, but the workflows are distinct.
-- **Original Phase 5 / Station 8:** strict private mode, full egress/telemetry
-  enforcement, real Phala/DGX endpoints, cryptographic attestation and private demo.
-  Existing `inference.attested` audit-event plumbing is not cryptographic proof.
-- **Original Phase 6:** split ingestion/OCR/retrieval, isolated JS/TS code mode,
-  and recursive scheduled RLM into distinct outcomes. Dormant code is not delivered
-  behavior; deletion is not an owner decision. Ordinary review subagents need not
-  wait for a sandbox or RLM.
-- **Original Phase 7:** native mobile/MDM remains a scaffold/later track. Immediate
-  phone-browser/Tailscale usability is separate and not deferred with it.
-- **Advanced Word track:** multi-document synchronization/heavy client-side AST
-  transformations remain deferred/client-demand work, distinct from immediate
-  document correctness and cloud Word work.
-- **Existing product/release obligations:** Google/MCP live acceptance, memory
-  production safety, workflow catalog sync/offline policy, export/backup/restore,
-  crash recovery, secrets-incident disposition, QA regressions, and clean upstream
-  contributions. See the full ledger in [`TRIAGE.md`](TRIAGE.md) §2.
-
-## Proposed course, pending owner selection
-
-Close/protect current candidates → document/version correctness and search closure
-→ compaction acceptance plus continuity architecture → Mission 3 visible usability
-→ Mission 4 Auto Mode → private-demo/trust foundation with durable history/audit and
-both review subagents → firm handoff acceptance, scaled ingestion/code/RLM, native
-mobile and client-demand Word capabilities as separate later outcomes.
-
-Privacy, RBAC and actor boundaries apply throughout. Multi-user/replica piloting
-requires closing handoff/concurrency gaps before that pilot, regardless of schedule.
-This proposal restores the established usability/Auto Mode missions and does not
-claim a whole phase complete from passing unit tests.
+The verified-state notes, station table and agenda from the 2026-10-07 audit
+are kept in git history (`git show b331d70:goals/STATUS.md`). Their surviving
+open items are folded into the agenda above and into [`TRIAGE.md`](TRIAGE.md).
 
 ## Acceptance rules
 
