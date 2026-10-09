@@ -426,6 +426,8 @@ export async function runLLMStream(params: {
   nonce?: string;
   /** Durable conversation id, forwarded to the provider as a cache hint. */
   conversationId?: string | null;
+  /** The stored identity of this turn (see StreamChatParams.turn). */
+  turn?: import("../../../lib/llm").TurnIdentity;
 }): Promise<{
   fullText: string;
   events: AssistantEvent[];
@@ -725,6 +727,7 @@ export async function runLLMStream(params: {
       reasoning: params.reasoning ?? "high",
       abortSignal: signal,
       conversationId,
+      turn: params.turn,
       memoryMessage: memory.message ?? undefined,
       readMemory: includeMemory
         ? async () =>

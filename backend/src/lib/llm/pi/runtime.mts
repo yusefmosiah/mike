@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import type { ImageContent, Message, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
+import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import {
   configure,
@@ -29,8 +29,11 @@ import {
   type Conversation,
   type ConversationId,
   type EntryDraft,
+  type EntryId,
   type EntryRecord,
+  type Storage,
   type ToolRegistration,
+  type Tx,
 } from "@earendil-works/pi-durable";
 import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
 import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
@@ -43,17 +46,30 @@ import type {
   ReasoningLevel,
   StreamChatParams,
   StreamChatResult,
+  TurnIdentity,
 } from "../types.js";
 
 const SCHEMA = process.env.PI_DURABLE_SCHEMA ?? "pi_durable";
 
-/** Which Pi conversations hold a Mike chat's branches, oldest first. */
-const ChatLineage = defineDocFamily<{ conversations: number[] }, null>({
+/** Where a stored Mike message lives in Pi: its conversation and entry. */
+type MessagePlace = { conversation: number; entry: number };
+
+/**
+ * A Mike chat's Pi lineage: the conversations holding its branches, oldest
+ * first, and where each stored Mike message (user prompt or answer) landed.
+ */
+type LineageState = { conversations: number[]; messages: Record<string, MessagePlace> };
+
+const ChatLineage = defineDocFamily<LineageState, null>({
   kind: "mike.chat",
-  version: 1,
+  version: 2,
   scope: "session",
   family: true,
-  initial: () => ({ conversations: [] }),
+  initial: () => ({ conversations: [], messages: {} }),
+  migrate: (value) => ({
+    conversations: (value.conversations as number[] | undefined) ?? [],
+    messages: {},
+  }),
 });
 
 type TurnBinding = {
@@ -72,6 +88,10 @@ type Runtime = {
 
 let opening: Promise<Runtime> | undefined;
 
+/** What a test substitutes for the deployment's storage and model catalog. */
+export type RuntimeOverrides = { storage?: Storage; models?: Models };
+let overrides: RuntimeOverrides | undefined;
+
 export function piRuntime(): Promise<Runtime> {
   opening ??= openRuntime().catch((error) => {
     opening = undefined;
@@ -80,7 +100,17 @@ export function piRuntime(): Promise<Runtime> {
   return opening;
 }
 
-async function openRuntime(): Promise<Runtime> {
+/** Tests: close the open runtime and open the next one with these overrides. */
+export async function resetPiRuntime(next?: RuntimeOverrides): Promise<void> {
+  const current = opening;
+  opening = undefined;
+  overrides = next;
+  bindings.clear();
+  if (current) await (await current.catch(() => undefined))?.harness.close(background);
+}
+
+async function openStorage(): Promise<Storage> {
+  if (overrides?.storage) return overrides.storage;
   const connectionString = process.env.PI_DURABLE_DATABASE_URL;
   if (!connectionString) throw new Error("PI_DURABLE_DATABASE_URL is not set");
   const admin = new pg.Client({ connectionString });
@@ -90,15 +120,24 @@ async function openRuntime(): Promise<Runtime> {
   } finally {
     await admin.end();
   }
-  const storage = await PostgresStorage.open(
+  return PostgresStorage.open(
     nodePostgresDatabase(new pg.Pool({ connectionString, options: `-c search_path=${SCHEMA}`, max: 1 })),
   );
+}
 
+function openModels(): Models {
+  if (overrides?.models) return overrides.models;
   const models = createModels();
   if (!process.env.OPENCODE_API_KEY && process.env.OPENCODE_GO_API_KEY) {
     process.env.OPENCODE_API_KEY = process.env.OPENCODE_GO_API_KEY;
   }
   models.setProvider(opencodeGoProvider());
+  return models;
+}
+
+async function openRuntime(): Promise<Runtime> {
+  const storage = await openStorage();
+  const models = openModels();
 
   const registry = createRegistry();
   const tools = new Map<string, ToolRegistration>();
@@ -147,6 +186,17 @@ const readMemoryTool = defineTool({
   },
 });
 
+/** Settle with `work`, or reject as soon as the call is aborted (a stop, or the run ending). */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(new Error("The tool call was stopped."));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error("The tool call was stopped."));
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 /** A Mike tool: its schema as declared, executed by the live request that offered it. */
 function mikeTool(schema: OpenAIToolSchema): ToolRegistration {
   const name = schema.function.name;
@@ -155,12 +205,12 @@ function mikeTool(schema: OpenAIToolSchema): ToolRegistration {
     description: schema.function.description,
     parameters: schema.function.parameters as never,
     replay: "unsafe",
-    execute: async (args, api) => {
+    execute: async (args, api, context) => {
       const binding = bindings.get(api.conversationId);
       if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");
       const call: NormalizedToolCall = { id: api.callId, name, input: args as Record<string, unknown> };
       binding.onToolCallStart?.(call);
-      const [result] = await binding.runTools([call]);
+      const [result] = await untilAborted(binding.runTools([call]), context.abortSignal);
       return { content: [{ type: "text", text: result?.content ?? "" }] };
     },
   });
@@ -261,7 +311,56 @@ function commonPrefix(piUsers: readonly EntryRecord[], clientUsers: readonly str
 }
 
 /**
- * The conversation to continue for this history: an exact match in the chat's
+ * The conversation a stored turn belongs on, from its tree parent: the parent
+ * answer's conversation when nothing was asked after it there, else a fork at
+ * that answer (an edited prompt, a regenerated answer, an older branch). A chat's
+ * first message starts a root conversation. Undefined when the parent was never
+ * mapped (history from before this runtime), for the text fallback.
+ */
+async function conversationForTurn(
+  harness: Harness,
+  chatKey: string,
+  turn: TurnIdentity,
+  agentModel: { provider: string; modelId: string },
+): Promise<Conversation | undefined> {
+  const remember = async (tx: Tx, id: ConversationId) => {
+    (await tx.doc(ChatLineage, chatKey, null)).conversations.push(id);
+  };
+  if (turn.parentMessageId === null) {
+    return harness.createConversation(
+      { ownership: { kind: "ownerless" }, agent: { model: agentModel }, init: remember },
+      background,
+    );
+  }
+  const lineage = await harness.snapshot(ChatLineage, chatKey, background);
+  const place = lineage?.messages?.[turn.parentMessageId];
+  if (!place) return undefined;
+  const base = await harness.conversation(place.conversation as ConversationId, background);
+  if (!base) return undefined;
+  const later = await base.entries({ minEntryId: (place.entry + 1) as EntryId, order: "ascending" }, 200, undefined, background);
+  if (!later.items.some((entry) => entry.kind === "pi.user")) return base;
+  return base.fork(place.entry as EntryId, { ownership: { kind: "ownerless" }, init: remember }, background);
+}
+
+/** Record where this turn's stored user prompt and answer landed. */
+async function recordTurn(
+  conversation: Conversation,
+  chatKey: string,
+  turn: TurnIdentity,
+  userEntry: EntryId,
+  answerEntry: EntryId,
+): Promise<void> {
+  await conversation.commit(async (tx) => {
+    const lineage = await tx.doc(ChatLineage, chatKey, null);
+    if (!lineage.conversations.includes(conversation.id)) lineage.conversations.push(conversation.id);
+    if (turn.userMessageId) lineage.messages[turn.userMessageId] = { conversation: conversation.id, entry: userEntry };
+    lineage.messages[turn.assistantMessageId] = { conversation: conversation.id, entry: answerEntry };
+  }, background);
+}
+
+/**
+ * Fallback for history this runtime never stored (chats begun before it, or
+ * surfaces without a message tree): the conversation to continue for this history: an exact match in the chat's
  * lineage, else a fork of the best match before its first difference, seeded
  * with the client's turns Pi has not seen.
  */
@@ -368,7 +467,10 @@ export async function streamChatWithToolsOnPi(params: StreamChatParams): Promise
   const tools = params.tools ?? [];
   installTools(tools);
   const chatKey = params.conversationId ?? `ephemeral:${randomUUID()}`;
-  const conversation = await conversationFor(harness, chatKey, history, ref);
+  const conversation =
+    (params.turn && params.conversationId
+      ? await conversationForTurn(harness, chatKey, params.turn, ref)
+      : undefined) ?? (await conversationFor(harness, chatKey, history, ref));
 
   // One commit fixes this turn's agent: model, effort, Mike's system prompt, and the offered tools.
   await conversation.commit(async (tx) => {
@@ -475,6 +577,9 @@ export async function streamChatWithToolsOnPi(params: StreamChatParams): Promise
     const settled = await submission.wait(background);
     if (settled.status !== "done" || settled.type !== "input") {
       throw new Error(`The answer could not be completed (${settled.reason ?? "unanswered"})`);
+    }
+    if (params.turn && params.conversationId) {
+      await recordTurn(conversation, chatKey, params.turn, settled.entry, settled.answer);
     }
     // The committed answer is authoritative; deltas may have been coalesced into a snapshot.
     const answer = await conversation.commit((tx) => tx.entry(settled.answer), background);

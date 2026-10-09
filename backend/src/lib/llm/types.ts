@@ -83,6 +83,12 @@ export type UserApiKeys = {
     courtlistener?: string | null;
 };
 
+export type TurnIdentity = {
+    userMessageId: string | null;
+    parentMessageId: string | null;
+    assistantMessageId: string;
+};
+
 export type StreamChatParams = {
     model: string;
     systemPrompt: string;
@@ -118,6 +124,12 @@ export type StreamChatParams = {
      * render it with the system prompt instead.
      */
     memoryMessage?: LlmMessage;
+    /**
+     * The stored identity of this turn, when the caller keeps a message tree:
+     * the user message, its tree parent, and the assistant row reserved for
+     * the answer. Runtimes with their own transcript map these to it.
+     */
+    turn?: TurnIdentity;
     /** Reads the memory this conversation may see, as of now (the memory tool). */
     readMemory?: () => Promise<string>;
 };

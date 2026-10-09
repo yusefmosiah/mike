@@ -132,6 +132,8 @@ export type PreparedProjectChatStream = {
     lastUser: ChatMessage | undefined;
     /** The row this turn's user message occupies (null for ask_inputs continuations). */
     turnUserMessageId: string | null;
+    /** The tree parent of this turn's user message (null for a chat's first message). */
+    turnParentMessageId: string | null;
     // Whether the turn that is about to stream has a durable row behind it.
     // An ask_inputs continuation that could not be appended is not durable,
     // and must not trigger memory consolidation.
@@ -392,6 +394,7 @@ export async function prepareProjectChatStream(
     // parent/memory link from this, never from a freshly generated id that
     // may not have been inserted.
     let turnUserMessageId: string | null = null;
+    let turnParentMessageId: string | null = null;
     if (args.askInputsResponse) {
         const appendResult = await appendAskInputsResponseToAssistantMessage(
             db,
@@ -454,10 +457,12 @@ export async function prepareProjectChatStream(
         ) {
             const { data: leafRow } = await db
                 .from("chat_messages")
-                .select("role, content")
+                .select("role, content, parent_message_id")
                 .eq("chat_id", chatId)
                 .eq("id", parentMessageId)
                 .maybeSingle();
+            turnParentMessageId =
+                (leafRow?.parent_message_id as string | null | undefined) ?? null;
             reuseLeafRow =
                 leafRow?.role === "user" &&
                 JSON.stringify(leafRow.content) ===
@@ -483,6 +488,7 @@ export async function prepareProjectChatStream(
                 return { ok: false, internal: true, error: userMessageError };
             }
             turnUserMessageId = args.inputMessageId;
+            turnParentMessageId = parentMessageId;
 
             // Bookkeeping only: the row above is already durable, so a failed
             // leaf move must not fail the turn.
@@ -630,6 +636,7 @@ export async function prepareProjectChatStream(
                 chatTitle,
                 lastUser,
                 turnUserMessageId,
+                turnParentMessageId,
                 completedTurnPersisted,
                 approvalEvents,
                 autoMode: args.autoMode === true,

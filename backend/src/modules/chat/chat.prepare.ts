@@ -46,6 +46,11 @@ export type PreparedChatStream = {
      * The assistant reservation must be wired from THIS id.
      */
     turnUserMessageId: string | null;
+    /**
+     * The tree parent of this turn's user message (null for a chat's first
+     * message). Runtimes that keep their own transcript pick the branch from it.
+     */
+    turnParentMessageId: string | null;
     resolvedProjectId: string | null;
     // Whether the turn that is about to stream has a durable row behind it.
     // An ask_inputs continuation that could not be appended is not durable,
@@ -320,6 +325,7 @@ export async function prepareChatStream(
     // reservation's parent/memory link from this, never from a freshly
     // generated id that may not have been inserted.
     let turnUserMessageId: string | null = null;
+    let turnParentMessageId: string | null = null;
     if (args.askInputsResponse) {
         const appendResult = await appendAskInputsResponseToAssistantMessage(
             db,
@@ -386,10 +392,12 @@ export async function prepareChatStream(
         ) {
             const { data: leafRow } = await db
                 .from("chat_messages")
-                .select("role, content")
+                .select("role, content, parent_message_id")
                 .eq("chat_id", chatId)
                 .eq("id", parentMessageId)
                 .maybeSingle();
+            turnParentMessageId =
+                (leafRow?.parent_message_id as string | null | undefined) ?? null;
             reuseLeafRow =
                 leafRow?.role === "user" &&
                 JSON.stringify(leafRow.content) ===
@@ -417,6 +425,7 @@ export async function prepareChatStream(
                 return { ok: false, internal: true, error: userMessageError };
             }
             turnUserMessageId = args.inputMessageId;
+            turnParentMessageId = parentMessageId;
 
             // Move the caller's leaf onto the turn they just sent, so the
             // next message chains from it. Bookkeeping only: the row above
@@ -514,6 +523,7 @@ export async function prepareChatStream(
                 chatTitle,
                 lastUser,
                 turnUserMessageId,
+                turnParentMessageId,
                 resolvedProjectId,
                 completedTurnPersisted,
                 approvalEvents,

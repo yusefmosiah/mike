@@ -177,6 +177,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         chatId,
         lastUser,
         turnUserMessageId,
+        turnParentMessageId,
         allowDocumentMutation,
         memorySharedAudience,
         memoryTurn,
@@ -301,6 +302,13 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                 signal: stream.signal,
                 projectId,
                 conversationId: chatId,
+                turn: assistantMessageId
+                    ? {
+                          userMessageId: turnUserMessageId,
+                          parentMessageId: turnParentMessageId,
+                          assistantMessageId,
+                      }
+                    : undefined,
                 includeMemory: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
