@@ -12,6 +12,8 @@
 # e2e/llm.ts), and this workflow never passes a model key to the stack or to
 # Playwright, so they always skip here while every keyless case runs. Run the
 # LLM specs locally with a key (docs/e2e-ci.md, "LLM specs run locally").
+# The branching spec does send real chat turns, to e2e/stubModel.mjs: a
+# scripted OpenAI-compatible server started below, not a model.
 #
 # Each worker creates its own account through e2e/fixtures.ts and e2e/users.ts.
 # auth.setup.ts creates only the isolated logout account. No login secret is needed.
@@ -312,6 +314,9 @@ jobs:
             echo "MIKE_WORKFLOWS_REF=ce62e6a2d3f47e1d3567a4f2edc61898cfe9e78a"
             # Error reporting is on by default; CI runs must not report.
             echo "SENTRY_DISABLED=true"
+            # The one configured model, answered by e2e/stubModel.mjs (scripted
+            # text, no model call); same as scripts/e2e-local-stack.sh.
+            echo 'MIKE_MODEL_CONFIG_JSON={"models":[{"id":"e2e-placeholder","label":"E2E placeholder","provider":"openai-compatible","location":"local","baseUrl":"http://127.0.0.1:21434/v1","apiModel":"e2e-placeholder"}]}'
           } >> backend/.env
 
       # Production runs this as a release job after migrations and before the
@@ -319,6 +324,8 @@ jobs:
       - name: Sync Mike workflow catalog
         run: npm run sync:workflows --prefix backend
 
+      - name: Start stub model
+        run: node e2e/stubModel.mjs 21434 > /tmp/e2e-stub-model.log 2>&1 &
       - name: Start backend API
         run: npm run dev --prefix backend &
       - name: Start web
@@ -330,7 +337,7 @@ jobs:
           fi
 
       - name: Wait for servers
-        run: npx wait-on http://localhost:3001/health http://localhost:3000 --timeout 120000
+        run: npx wait-on http://localhost:3001/health http://localhost:3000 http://127.0.0.1:21434/health --timeout 120000
 
       # Precompile static routes so cold Turbopack work does not consume UI
       # assertion budgets. Development overlays remain visible to the tests.

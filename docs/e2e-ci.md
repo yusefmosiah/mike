@@ -144,6 +144,18 @@ line. Cost is a handful of short completions, a few cents per run. The paid
 Auto Mode gate evals (`backend/evals/auto-mode-gate/`) are local-only for the
 same reason.
 
+### Chat turns without a model: the stub
+
+`e2e/branching.spec.ts` sends real chat turns through the real backend,
+database and Pi runtime, and still runs in CI. Its model is "E2E placeholder",
+whose endpoint is `e2e/stubModel.mjs`: a scripted OpenAI-compatible server
+(port 21434, `E2E_STUB_MODEL_PORT`) that streams `Stub answer N to: <prompt>`.
+The numbering makes two answers to one prompt differ, which regenerate and
+sibling checks need. It answers no question and calls nothing, so it keeps
+the no-model rule above. Locally `playwright.config.ts` starts it; the
+workflow starts it before the backend. Use it for flows that need a stored
+turn, not for answer quality.
+
 ### Model selection
 
 When the secret is present, the shared `selectClaudeModel` helper selects a
@@ -195,5 +207,12 @@ Playwright as environment variables, which win over `backend/.env`; no env
 file is edited. It also declares one configured model, "E2E placeholder"
 (`MIKE_MODEL_CONFIG_JSON`, unless you set your own), so specs that only need a
 model to be *chosen*, such as creating a tabular review, find one for an
-account with no keys or saved router models. Nothing serves that model; the
+account with no keys or saved router models. The stub above serves it; the
 LLM specs pick their own.
+
+If your development stack already holds ports 3000 and 3001, move the servers
+Playwright starts: `E2E_API_PORT=3201 E2E_WEB_PORT=3100 npm run test:e2e`.
+Browser uploads then fail, because the local storage's CORS rule
+(`docker/storage-cors.json`) allows only `http://localhost:3000`; the tabular
+review "adds a document" spec fails for that reason alone. Use the override
+for specs that upload nothing, such as `e2e/branching.spec.ts`.

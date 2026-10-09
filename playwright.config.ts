@@ -13,6 +13,14 @@ const SYNTHETIC_SPECS = [
 /* Locally, the backend Playwright starts runs against the mike-e2e stack
    (scripts/e2e-local-stack.sh); test users must be created in that stack's
    GoTrue too (e2e/users.ts). CI sets these itself. */
+/* E2E_API_PORT and E2E_WEB_PORT move the servers Playwright starts locally,
+   for a machine whose development stack already holds 3000 and 3001. Uploads
+   need the web app on 3000: local storage's CORS allows only that origin
+   (docker/storage-cors.json). */
+const API_PORT = process.env.E2E_API_PORT ?? "3001";
+const WEB_PORT = process.env.E2E_WEB_PORT ?? "3000";
+const STUB_MODEL_PORT = process.env.E2E_STUB_MODEL_PORT ?? "21434";
+
 if (!process.env.CI) {
     process.env.AUTH_URL ??= `http://localhost:${process.env.E2E_AUTH_PORT ?? "21421"}`;
     process.env.AUTH_SERVICE_KEY ??=
@@ -53,7 +61,7 @@ export default defineConfig({
         : "list",
     /* Shared settings for all the projects below */
     use: {
-        baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+        baseURL: process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${WEB_PORT}`,
         video: process.env.PW_VIDEO === "1"
             ? { mode: "on", size: { width: 1280, height: 720 } }
             : "off",
@@ -99,17 +107,29 @@ export default defineConfig({
                   command:
                       "bash ../scripts/e2e-local-stack.sh --serve-backend",
                   cwd: "backend",
-                  url: "http://localhost:3001/health",
+                  env: {
+                      PORT: API_PORT,
+                      FRONTEND_URL: `http://localhost:${WEB_PORT}`,
+                      E2E_STUB_MODEL_PORT: STUB_MODEL_PORT,
+                  },
+                  url: `http://localhost:${API_PORT}/health`,
                   reuseExistingServer: true,
                   timeout: 120_000,
               },
               {
-                  command: "npm run dev",
+                  command: `npm run dev -- -p ${WEB_PORT}`,
                   cwd: "frontend",
-                  env: { API_BASE_URL: "http://localhost:3001" },
-                  url: "http://localhost:3000",
+                  env: { API_BASE_URL: `http://localhost:${API_PORT}` },
+                  url: `http://localhost:${WEB_PORT}`,
                   reuseExistingServer: true,
                   timeout: 120_000,
+              },
+              /* The "E2E placeholder" model's endpoint (e2e/stubModel.mjs). */
+              {
+                  command: `node e2e/stubModel.mjs ${STUB_MODEL_PORT}`,
+                  url: `http://127.0.0.1:${STUB_MODEL_PORT}/health`,
+                  reuseExistingServer: true,
+                  timeout: 10_000,
               },
           ],
 });

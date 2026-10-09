@@ -65,3 +65,41 @@ leaf, branch into a new thread, and reload onto the intended history.
 Mission 3 (STATUS.md agenda item 3; acceptance: Playwright runs of each flow in
 the real app). TRIAGE.md: "Source exists; user reported missing controls;
 actual-surface acceptance remains open."
+
+## Real-app runs (2026-10-09, agent; not acceptance)
+
+`e2e/branching.spec.ts` drives each open outcome above in Chromium against
+the real web app, backend, Postgres and Pi runtime of the local e2e stack.
+Answers come from `e2e/stubModel.mjs`, a scripted OpenAI-compatible server
+behind the stack's "E2E placeholder" model: `Stub answer N to: <prompt>`,
+numbered, so a regenerated answer differs from the first. No model is called,
+so the spec also runs in CI (`.github/workflows/e2e.yml` now starts the stub).
+
+| Test | What it checks |
+|---|---|
+| regenerate | a second answer becomes a sibling ("Response branches" 2/2), still one prompt and one answer on screen; Previous shows answer 1 (1/2); a reload keeps answer 1 |
+| edit prompt | Save replaces the prompt with the edited version and its own answer ("Message branches" 2/2); Previous brings back the original prompt and answer (1/2); a reload keeps it; Next returns to the edit |
+| branch into new thread | opens a different chat URL holding the prompt and answer; a follow-up sent there does not appear in the original chat |
+| project chat | the edit flow in a project's assistant chat, with a reload and Previous |
+| phone (390×844, touch) | edit, regenerate and both steppers in view at phone width; no sideways scroll |
+
+Run, from the repository root, with the development stack holding 3000/3001:
+
+```
+E2E_API_PORT=3201 E2E_WEB_PORT=3100 npx playwright test e2e/branching.spec.ts --project=chromium --reporter=line
+  6 passed (2.0m)
+```
+
+The six include Playwright's sign-in setup. The first two runs failed for
+harness reasons, not app ones: a stale backend from earlier in the session
+answered on 3201, and the stub quoted Mike's `[Sent: ...]` timestamp prefix.
+Both were fixed in the harness before the passing run. The controls the owner
+reported missing were present and working in these runs; whether that matches
+what the owner saw needs the owner's look.
+
+Whole local suite with the same port override:
+`66 passed, 4 skipped, 1 failed (16.0m)`. The 4 skipped are the LLM specs (no
+`ANTHROPIC_API_KEY`). The failure is tabular reviews "adds a document",
+reproduced alone: the upload is refused because local storage's CORS allows
+only `http://localhost:3000` and the override put the web app on 3100. It is a
+harness limit, documented in `docs/e2e-ci.md`, not a branching or app change.
