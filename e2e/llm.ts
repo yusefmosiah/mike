@@ -3,23 +3,18 @@
  *
  * Four specs (chat rename, chat delete, project-assistant create+submit, and
  * the critical-path "ask a question" flow) create/populate a chat by sending a
- * message. Mike supports keyless local models through Ollama, but the GitHub
- * Actions job does not provision an Ollama server or pull a model. Its only
- * live model is therefore the Anthropic model enabled by ANTHROPIC_API_KEY.
- * Without that secret, these specs cannot submit a message in CI and would
+ * message, which needs a live model: locally, the Anthropic model enabled by
+ * ANTHROPIC_API_KEY. Without a key they cannot submit a message and would
  * otherwise hang until their timeout.
  *
  * The auto title-generation call (POST /chat/:id/generate-title) is NOT why
  * the gate exists: keyless it just returns 500, and the specs already treat it
  * as best-effort (`.catch(() => null)`).
  *
- * In CI the key is the `ANTHROPIC_API_KEY` repository secret, which
- * `.github/workflows/e2e.yml` exposes both to the backend (backend/.env) and
- * to the Playwright process. Guarding with
- * `test.skip(!hasLlmKey, LLM_SKIP_REASON)` keeps a keyless run (a plain local
- * run without Ollama, or a fork PR with no secret access) green on the other 27
- * specs, while still running — and enforcing — the LLM specs whenever the key
- * is present. Setup steps: docs/e2e-ci.md, "Enable the LLM specs".
+ * GitHub Actions never receives a model key (.github/workflows/e2e.yml passes
+ * none), so these specs always skip there and every other spec still runs.
+ * Locally, with ANTHROPIC_API_KEY set, they run and are enforced: see
+ * docs/e2e-ci.md, "LLM specs run locally".
  *
  * When the key IS set, the specs' selectClaudeModel helper picks "Claude
  * Sonnet 4.6" in the ModelToggle (see docs/e2e-ci.md, "Model selection"), so
@@ -28,4 +23,4 @@
 export const hasLlmKey = Boolean(process.env.ANTHROPIC_API_KEY);
 
 export const LLM_SKIP_REASON =
-    "requires a model key — set the ANTHROPIC_API_KEY secret to run LLM-dependent specs";
+    "requires a model key — LLM-dependent specs run locally with ANTHROPIC_API_KEY set";

@@ -7,15 +7,11 @@
 # this job "e2e / playwright" as a required status check in branch protection —
 # see docs/e2e-ci.md ("Make it merge-blocking").
 #
-# The suite is green with NO secret: the four live-LLM-dependent cases
-# (chat + critical path) skip themselves when ANTHROPIC_API_KEY is absent (see
-# e2e/llm.ts), while all keyless cases still run. Mike supports local
-# Ollama models without a provider key, but this job does not provision Ollama;
-# the gate is not caused by the best-effort title-generation call. To run and
-# enforce those 4, set the ANTHROPIC_API_KEY repository secret; exact steps, the
-# fork-PR caveat (fork `pull_request` runs never receive secrets, so they
-# always take the skip path), cost, and how to verify the specs ran are in
-# docs/e2e-ci.md ("Enable the LLM specs").
+# No model is ever called from GitHub Actions. The four live-LLM cases (chat +
+# critical path) skip themselves when ANTHROPIC_API_KEY is absent (see
+# e2e/llm.ts), and this workflow never passes a model key to the stack or to
+# Playwright, so they always skip here while every keyless case runs. Run the
+# LLM specs locally with a key (docs/e2e-ci.md, "LLM specs run locally").
 #
 # Each worker creates its own account through e2e/fixtures.ts and e2e/users.ts.
 # auth.setup.ts creates only the isolated logout account. No login secret is needed.
@@ -29,10 +25,8 @@ on:
   # requests (a dependency bump, an image change, an upstream UI tweak
   # breaking a selector) is caught within a day instead of surfacing on the next
   # unrelated PR. 03:47 UTC is a quiet hour for GitHub's cron pool (on-the-hour
-  # slots are congested and can be delayed or dropped). Scheduled runs exercise
-  # the 4 LLM-gated specs only when the ANTHROPIC_API_KEY repository secret is
-  # configured — without it they self-skip (e2e/llm.ts) and the run still
-  # covers the other specs.
+  # slots are congested and can be delayed or dropped). Like every run here, it
+  # skips the 4 LLM-gated specs.
   schedule:
     - cron: "47 3 * * *"
 
@@ -151,12 +145,6 @@ jobs:
       # Parallel Playwright workers, each with its own account (e2e/users.ts).
       # The runner has 4 vCPUs shared with Postgres, the API and Next.
       E2E_WORKERS: "3"
-      # Exposed to the Playwright process (not just backend/.env) so the LLM-gated
-      # specs can skip themselves when no key is present — see e2e/llm.ts. When the
-      # secret is set they run and are enforced; when absent they skip, so a keyless
-      # run (e.g. a fork PR, which never receives this secret) is still green on
-      # all other cases. Setup: docs/e2e-ci.md, "Enable the LLM specs".
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -322,7 +310,6 @@ jobs:
             # Keep the release-job fixture reproducible even when the source
             # repository's main branch changes independently of this PR.
             echo "MIKE_WORKFLOWS_REF=ce62e6a2d3f47e1d3567a4f2edc61898cfe9e78a"
-            echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
             # Error reporting is on by default; CI runs must not report.
             echo "SENTRY_DISABLED=true"
           } >> backend/.env
