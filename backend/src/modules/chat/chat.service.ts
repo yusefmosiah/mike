@@ -78,7 +78,11 @@ export {
   buildWordChatSystemPrompt,
   withoutEmptyAssistantReservations,
 } from "./engine/index";
-export { generateAssistantChatTitle, logChatTitleFailure } from "./chat.title";
+export {
+    CHAT_TITLE_FALLBACK,
+    generateAssistantChatTitle,
+    logChatTitleFailure,
+} from "./chat.title";
 
 export {
   persistWordDocumentEdits,

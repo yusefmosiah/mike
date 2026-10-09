@@ -77,15 +77,22 @@ export function logChatTitleFailure(
     console.warn(label, error);
 }
 
-const TITLE_FALLBACK = "Misc. Query";
+/**
+ * The title a chat gets when the title model could not produce one, even on a
+ * second try. Never offered to the model: told it may answer this, it answers
+ * this for anything short.
+ */
+export const CHAT_TITLE_FALLBACK = "Misc. Query";
+
+/** Attempts per title: the first, and one retry. */
+const TITLE_ATTEMPTS = 2;
 
 function normalizeGeneratedTitle(raw: string): string {
-    const title = raw
+    return raw
         .trim()
         .replace(/^["'`]+|["'`.,:;!?]+$/g, "")
-        .trim();
-    if (!title) return TITLE_FALLBACK;
-    return title.slice(0, 80);
+        .trim()
+        .slice(0, 80);
 }
 
 export async function generateAssistantChatTitle(args: {
@@ -100,11 +107,23 @@ export async function generateAssistantChatTitle(args: {
     // reply it runs beside is unaffected, and no fallback title model is
     // attempted.
     assertModelAllowed(args.model);
-    const titleText = await completeText({
-        model: args.model,
-        user: `Generate a concise title (3–6 words) for a chat in an AI Legal Platform that starts with this message. The title should describe the topic or document — do NOT include words like "Legal Assistant", "AI", "Chat", or any similar prefix. If there is not enough information to generate a title, return exactly "${TITLE_FALLBACK}". Return only the title, no quotes or punctuation.\n\nMessage: ${args.message.slice(0, 500)}`,
-        maxTokens: 64,
-        apiKeys: args.apiKeys,
-    });
-    return normalizeGeneratedTitle(titleText);
+    // A failed call or an empty answer is tried once more; after that the
+    // failure is the caller's, which logs it and stores CHAT_TITLE_FALLBACK.
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < TITLE_ATTEMPTS; attempt++) {
+        try {
+            const titleText = await completeText({
+                model: args.model,
+                user: `Generate a concise title (3–6 words) for a chat that starts with this message. The title should describe what the message is about, whatever the subject — do NOT include words like "Assistant", "AI", "Chat", or any similar prefix. Return only the title, no quotes or punctuation.\n\nMessage: ${args.message.slice(0, 500)}`,
+                maxTokens: 256,
+                apiKeys: args.apiKeys,
+            });
+            const title = normalizeGeneratedTitle(titleText);
+            if (title) return title;
+            lastError = new Error("The title model returned no title");
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError;
 }

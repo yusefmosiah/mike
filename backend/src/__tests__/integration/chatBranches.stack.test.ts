@@ -116,7 +116,6 @@ maybeDescribe("chat branching against Postgres", () => {
             userId,
             userEmail,
             projectId: null,
-            title: "Indemnity review",
             atMessageId: ids.a1,
         });
         if (!forked.ok) throw new Error(`fork failed: ${JSON.stringify(forked)}`);
@@ -131,7 +130,7 @@ maybeDescribe("chat branching against Postgres", () => {
         ]);
         expect(copy.messages.map((m) => m.id)).not.toContain(ids.u1);
         const { data: chat } = await db.from("chats").select("user_id, title, project_id").eq("id", forked.chatId).single();
-        expect(chat).toEqual({ user_id: userId, title: "Indemnity review", project_id: null });
+        expect(chat).toEqual({ user_id: userId, title: "BRANCH Indemnity review", project_id: null });
 
         // The source chat is untouched.
         const source = await getChatMessages(db, chatId, userId);
@@ -143,9 +142,34 @@ maybeDescribe("chat branching against Postgres", () => {
             userId,
             userEmail,
             projectId: null,
-            title: null,
             atMessageId: ids.u2,
         });
         expect(fromPrompt).toMatchObject({ ok: false, kind: "validation" });
+    });
+
+    it("numbers a chat's branches in one sequence, branches of branches included", async () => {
+        const { chatId, ids } = await seedChat();
+        const fork = async (from: string, at: string) => {
+            const forked = await forkChat(db, { chatId: from, userId, userEmail, projectId: null, atMessageId: at });
+            if (!forked.ok) throw new Error(`fork failed: ${JSON.stringify(forked)}`);
+            chats.push(forked.chatId);
+            const { data } = await db.from("chats").select("title, branch_root_chat_id, branch_number").eq("id", forked.chatId).single();
+            return { id: forked.chatId, leaf: forked.leaf, row: data };
+        };
+
+        const first = await fork(chatId, ids.a1);
+        expect(first.row).toEqual({ title: "BRANCH Indemnity review", branch_root_chat_id: chatId, branch_number: 1 });
+
+        const second = await fork(chatId, ids.a2);
+        expect(second.row).toEqual({ title: "BRANCH 2 Indemnity review", branch_root_chat_id: chatId, branch_number: 2 });
+
+        // A branch of a branch joins the same family, under the family's title.
+        const nested = await fork(first.id, first.leaf);
+        expect(nested.row).toEqual({ title: "BRANCH 3 Indemnity review", branch_root_chat_id: chatId, branch_number: 3 });
+
+        // Deleting an older branch leaves a gap rather than a duplicate.
+        await db.from("chats").delete().eq("id", second.id);
+        const fourth = await fork(nested.id, nested.leaf);
+        expect(fourth.row).toMatchObject({ title: "BRANCH 4 Indemnity review", branch_number: 4 });
     });
 });

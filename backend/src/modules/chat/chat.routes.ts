@@ -809,7 +809,6 @@ chatRouter.post("/:chatId/fork", requireAuth, asyncRoute(async (req, res) => {
         userId,
         userEmail,
         projectId: access.chat.project_id,
-        title: access.chat.title,
         atMessageId: body.message_id,
     });
     if (!result.ok) {

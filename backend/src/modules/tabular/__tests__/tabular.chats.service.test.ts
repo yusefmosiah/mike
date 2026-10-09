@@ -636,10 +636,17 @@ describe("titleTabularChat", () => {
         });
     });
 
-    it("leaves the chat untitled when the model declines", async () => {
-        generateChatTitle.mockResolvedValue("");
+    it("stores the fallback title only when the model could not give one", async () => {
+        // generateChatTitle has already retried by the time it answers null.
+        generateChatTitle.mockResolvedValue(null);
         const fake = makeFakeDb();
-        expect(await titleTabularChat(fake.db, args)).toBeNull();
-        expect(fake.calls).toEqual([]);
+        expect(await titleTabularChat(fake.db, args)).toBe("Misc. Query");
+        expect(fake.calls).toEqual([
+            expect.objectContaining({
+                table: "tabular_review_chats",
+                op: "update",
+                payload: { title: "Misc. Query" },
+            }),
+        ]);
     });
 });

@@ -105,21 +105,56 @@ describe("generateAssistantChatTitle", () => {
         expect(completeText).toHaveBeenCalledWith(
             expect.objectContaining({
                 model: "title-model",
-                maxTokens: 64,
+                maxTokens: 256,
                 apiKeys: {},
             }),
         );
     });
 
-    it("uses the fallback for an empty model response", async () => {
-        completeText.mockResolvedValue("   ");
+    it("never offers the model a fallback title to give", async () => {
+        completeText.mockResolvedValue("Greeting");
+        await generateAssistantChatTitle({ model: "title-model", message: "hi" });
+        const prompt = (completeText.mock.calls[0] as unknown as [{ user: string }])[0].user;
+        expect(prompt).not.toContain("Misc. Query");
+        expect(prompt).not.toMatch(/legal/i);
+    });
+
+    it("retries an empty answer once", async () => {
+        completeText.mockResolvedValueOnce("   ").mockResolvedValueOnce("Greeting");
 
         await expect(
-            generateAssistantChatTitle({
-                model: "title-model",
-                message: "Hello",
-            }),
-        ).resolves.toBe("Misc. Query");
+            generateAssistantChatTitle({ model: "title-model", message: "hi" }),
+        ).resolves.toBe("Greeting");
+        expect(completeText).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries a failed call once", async () => {
+        completeText
+            .mockRejectedValueOnce(new Error("socket hang up"))
+            .mockResolvedValueOnce("Tea Prices in China");
+
+        await expect(
+            generateAssistantChatTitle({ model: "title-model", message: "price of tea in china?" }),
+        ).resolves.toBe("Tea Prices in China");
+        expect(completeText).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws for the caller's fallback once the retry fails too", async () => {
+        const unreachable = new Error("provider unreachable");
+        completeText.mockRejectedValueOnce(new Error("first")).mockRejectedValueOnce(unreachable);
+
+        await expect(
+            generateAssistantChatTitle({ model: "title-model", message: "hi" }),
+        ).rejects.toBe(unreachable);
+        expect(completeText).toHaveBeenCalledTimes(2);
+    });
+
+    it("treats two empty answers as a failure", async () => {
+        completeText.mockResolvedValue("");
+
+        await expect(
+            generateAssistantChatTitle({ model: "title-model", message: "hi" }),
+        ).rejects.toThrow("no title");
     });
 
     it("limits generated titles to 80 characters", async () => {

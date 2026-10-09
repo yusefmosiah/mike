@@ -105,13 +105,22 @@ export async function generateChatTitle(
             ? `This chat is in the context of a tabular review.\n${contextLines.join("\n")}\n\n`
             : "";
 
-        const raw = await completeText({
-            model,
-            user: `${contextBlock}Generate a short title (4-6 words) for a chat that starts with the message below. The title should reflect the user's specific question, not the review or project name. Return only the title, no punctuation, no quotes:\n\n${firstUserMessage}`,
-            maxTokens: 64,
-            apiKeys,
-        });
-        return raw.trim().slice(0, 80) || null;
+        // A failed call or an empty answer is tried once more.
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const raw = await completeText({
+                    model,
+                    user: `${contextBlock}Generate a short title (4-6 words) for a chat that starts with the message below. The title should reflect the user's specific question, not the review or project name. Return only the title, no punctuation, no quotes:\n\n${firstUserMessage}`,
+                    maxTokens: 256,
+                    apiKeys,
+                });
+                const title = raw.trim().slice(0, 80);
+                if (title) return title;
+            } catch {
+                // Retried below, then given up.
+            }
+        }
+        return null;
     } catch {
         return null;
     }

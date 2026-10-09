@@ -5,6 +5,7 @@
 // over. The streaming loop itself stays in tabular.routes.ts.
 
 import {
+    CHAT_TITLE_FALLBACK,
     loadUserMessageSentTimes,
     parseOptionalModel,
     parseOptionalReasoning,
@@ -871,8 +872,8 @@ export async function saveTabularChatTurn(
 
 /**
  * Name a chat from its first user message and persist the title. Returns the
- * title so the caller can announce it on the stream, or null when the model
- * declined to produce one (the chat simply stays untitled).
+ * title so the caller can announce it on the stream. A model that cannot
+ * produce one, even on a retry, leaves CHAT_TITLE_FALLBACK.
  */
 export async function titleTabularChat(
     db: Db,
@@ -884,17 +885,17 @@ export async function titleTabularChat(
         projectName: string | null;
         apiKeys: UserApiKeys;
     },
-): Promise<string | null> {
+): Promise<string> {
     const title = await generateChatTitle(
         args.titleModel,
         args.userContent,
         { reviewTitle: args.reviewTitle, projectName: args.projectName },
         args.apiKeys,
     );
-    if (!title) return null;
+    const stored = title || CHAT_TITLE_FALLBACK;
     await db
         .from("tabular_review_chats")
-        .update({ title })
+        .update({ title: stored })
         .eq("id", args.chatId);
-    return title;
+    return stored;
 }

@@ -1980,8 +1980,19 @@ create table if not exists public.chats (
   constraint chats_org_requires_project
     check (org_id is null or project_id is not null),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- A thread branched off another: the chat its family started from (a plain
+  -- uuid, so deleting that chat leaves its branches numbered) and its place
+  -- in the family, which its title shows ("BRANCH 2 ...").
+  branch_root_chat_id uuid,
+  branch_number integer,
+  constraint chats_branch_number_positive
+    check (branch_number is null or branch_number >= 1)
 );
+
+create index if not exists chats_branch_root_idx
+  on public.chats(branch_root_chat_id)
+  where branch_root_chat_id is not null;
 
 create index if not exists idx_chats_user
   on public.chats(user_id);

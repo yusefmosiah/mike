@@ -221,6 +221,10 @@ export async function chatPath(
 // record what was said, and when); the new chat belongs to the caller, in the
 // same project. With the Pi runtime the model transcript forks at the same
 // point, so the new chat reuses the cached prefix instead of replaying it.
+//
+// The new chat is titled after its family: every thread branched off a chat,
+// or off one of its branches, is numbered in one sequence from the chat the
+// family started from — "BRANCH <title>", then "BRANCH 2 <title>", ...
 export async function forkChat(
     db: Db,
     args: {
@@ -228,7 +232,6 @@ export async function forkChat(
         userId: string;
         userEmail: string | undefined;
         projectId: string | null;
-        title: string | null;
         atMessageId: string;
     },
 ): Promise<
@@ -260,6 +263,9 @@ export async function forkChat(
         ((full ?? []) as Array<Record<string, unknown> & { id: string }>).map((row) => [row.id, row]),
     );
 
+    const branch = await nextBranch(db, args.chatId);
+    if (!branch.ok) return { ok: false, kind: "error", error: branch.error };
+
     const created = await createChat(db, {
         userId: args.userId,
         userEmail: args.userEmail,
@@ -284,8 +290,15 @@ export async function forkChat(
         };
     });
     const { error: insertError } = await db.from("chat_messages").insert(copies);
-    if (!insertError && args.title) {
-        await db.from("chats").update({ title: args.title }).eq("id", created.id);
+    if (!insertError) {
+        await db
+            .from("chats")
+            .update({
+                title: branch.title,
+                branch_root_chat_id: branch.rootChatId,
+                branch_number: branch.number,
+            })
+            .eq("id", created.id);
     }
     if (insertError) {
         // No half-copied chat left behind for the caller to find.
@@ -310,4 +323,73 @@ export async function forkChat(
         console.error("[chat/fork] failed to fork the model transcript", safeError(error));
     });
     return { ok: true, chatId: created.id, leaf };
+}
+
+function branchPrefix(number: number): string {
+    return number === 1 ? "BRANCH" : `BRANCH ${number}`;
+}
+
+/**
+ * "BRANCH <title>" for a family's first branch, "BRANCH <n> <title>" after.
+ * Branching a branch titles the new one after the family's own title: the
+ * source's prefix comes off first, unless the source was renamed since.
+ */
+export function branchTitle(
+    source: { title: string | null; branchNumber: number | null },
+    number: number,
+): string {
+    let base = (source.title ?? "").trim();
+    if (source.branchNumber !== null) {
+        const sourcePrefix = branchPrefix(source.branchNumber);
+        if (base === sourcePrefix) base = "";
+        else if (base.startsWith(`${sourcePrefix} `)) base = base.slice(sourcePrefix.length + 1).trim();
+    }
+    return base ? `${branchPrefix(number)} ${base}` : branchPrefix(number);
+}
+
+/**
+ * The family a new branch of `chatId` joins, and its place in it: one past
+ * the highest number among the family's branches, so a new branch never
+ * shares a number with one that still exists. (Deleting the newest branch
+ * frees its number; deleting an older one leaves a gap.) Two branches made at
+ * the same instant can share a number; nothing depends on it being unique.
+ */
+async function nextBranch(
+    db: Db,
+    chatId: string,
+): Promise<
+    | { ok: true; rootChatId: string; number: number; title: string }
+    | { ok: false; error: unknown }
+> {
+    const { data: source, error: sourceError } = await db
+        .from("chats")
+        .select("title, branch_root_chat_id, branch_number")
+        .eq("id", chatId)
+        .single();
+    if (sourceError || !source) {
+        return { ok: false, error: sourceError ?? new Error("Chat not found") };
+    }
+    const rootChatId = (source.branch_root_chat_id as string | null) ?? chatId;
+    const { data: last, error: lastError } = await db
+        .from("chats")
+        .select("branch_number")
+        .eq("branch_root_chat_id", rootChatId)
+        .not("branch_number", "is", null)
+        .order("branch_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (lastError) return { ok: false, error: lastError };
+    const number = ((last?.branch_number as number | null) ?? 0) + 1;
+    return {
+        ok: true,
+        rootChatId,
+        number,
+        title: branchTitle(
+            {
+                title: source.title as string | null,
+                branchNumber: source.branch_number as number | null,
+            },
+            number,
+        ),
+    };
 }

@@ -22,7 +22,11 @@ import {
 import { titleModelForChat } from "../../lib/modelSelection";
 import { stopOutcomeFrame } from "../../lib/streamRuns";
 import { type Db } from "../../lib/db";
-import { generateAssistantChatTitle, logChatTitleFailure } from "./chat.title";
+import {
+    CHAT_TITLE_FALLBACK,
+    generateAssistantChatTitle,
+    logChatTitleFailure,
+} from "./chat.title";
 import { updateChatTitle } from "./chat.titles";
 import { prepareChatStream, type PreparedChatStream } from "./chat.prepare";
 import { linkedPrompt, walkActivePath, type TreeRow } from "./chat.tree";
@@ -362,8 +366,11 @@ export async function driveChatTurn(
                 );
             }
 
-            if (!chatTitle && lastUser?.content) {
-                const title = lastUser.content.slice(0, 120);
+            // Only a title the model could not give, even on a retry, falls
+            // back. A turn that never asked (an ask-inputs continuation)
+            // leaves the chat untitled for the next turn to title.
+            if (!chatTitle && titleOutcome.failure) {
+                const title = CHAT_TITLE_FALLBACK;
                 // The SSE response is already streaming, so a failure here
                 // cannot become an HTTP error — but it must not be announced
                 // either: an ignored error pushed a chat_title frame the

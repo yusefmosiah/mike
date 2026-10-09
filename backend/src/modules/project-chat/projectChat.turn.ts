@@ -29,6 +29,7 @@ import {
     assistantStreamErrorPayload,
     buildCancelledAssistantMessage,
     extractCitations,
+    CHAT_TITLE_FALLBACK,
     generateAssistantChatTitle,
     isAbortError,
     logChatTitleFailure,
@@ -364,8 +365,10 @@ export async function driveProjectChatTurn(
                 );
             }
 
-            if (!chatTitle && lastUser?.content) {
-                const title = lastUser.content.slice(0, 120);
+            // Only a title the model could not give, even on a retry, falls
+            // back; see the chat turn.
+            if (!chatTitle && titleOutcome.failure) {
+                const title = CHAT_TITLE_FALLBACK;
                 await updateChatTitle(db, { chatId, title });
                 chatTitle = title;
                 if (shouldGenerateTitle && !stream.signal.aborted) {
