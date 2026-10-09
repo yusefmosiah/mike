@@ -30,6 +30,9 @@
   setup, sideloading, builds, storage behavior, testing, and troubleshooting
 - [Tamper-evident exports](tamper-evident-exports.md) — document hashes and
   optional signed manifests
+- [Decision models](decision-models.md) — the Auto Mode gate's questions,
+  consent-aware policy, injection hardening and eval method, with the
+  [2026-10-09 eval report](reports/auto-mode-gate-eval-2026-10-09.md)
 
 ## Backend
 

@@ -2498,6 +2498,37 @@ export async function updateChatReasoningLevel(
     });
 }
 
+/** A decision model the user may choose to judge Auto Mode tool calls. */
+export type DecisionModelOption = {
+    value: string;
+    id: string;
+    name: string;
+    inputPricePerMillion: number | null;
+    openWeights: string | null;
+    /** Median decision time Mike measured; the list holds only models under a second, fastest first. */
+    medianLatencyMs: number;
+};
+
+export type AutoModeDecisionSettings = {
+    /** null: the conversation's own model judges (the default). */
+    model: string | null;
+    options: DecisionModelOption[];
+};
+
+export async function getAutoModeDecisionSettings(): Promise<AutoModeDecisionSettings> {
+    return apiRequest<AutoModeDecisionSettings>("/user/auto-mode-decision");
+}
+
+export async function setAutoModeDecisionModel(
+    model: string | null,
+): Promise<AutoModeDecisionSettings> {
+    return apiRequest<AutoModeDecisionSettings>("/user/auto-mode-decision", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+    });
+}
+
 export async function getChatPeople(chatId: string): Promise<ProjectPeople> {
     return apiRequest<ProjectPeople>(`/chat/${chatId}/people`);
 }

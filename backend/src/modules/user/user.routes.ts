@@ -73,7 +73,10 @@ import {
     validateExportRequest,
     validateOnboardingPayload,
     validateProfilePayload,
+    getAutoModeDecisionSettings,
+    setAutoModeDecisionModel,
 } from "./user.service";
+import { sendServiceFailure } from "../../lib/serviceResult";
 
 export const userRouter = Router();
 
@@ -243,6 +246,26 @@ userRouter.get("/profile", requireAuth, asyncRoute(async (_req, res) => {
     const result = await getUserProfile(db, userId);
     if (!result.ok) return void sendInternalError(res, result.error);
     res.json(result.body);
+}));
+
+// GET /user/auto-mode-decision
+// The model that judges this user's Auto Mode tool calls, and the decision
+// models they may choose from (none in strict private mode).
+userRouter.get("/auto-mode-decision", requireAuth, asyncRoute(async (_req, res) => {
+    const result = await getAutoModeDecisionSettings(createDb(), res.locals.userId as string);
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// PUT /user/auto-mode-decision  { model: "openrouter-decisions/<id>" | null }
+userRouter.put("/auto-mode-decision", requireAuth, asyncRoute(async (req, res) => {
+    const result = await setAutoModeDecisionModel(
+        createDb(),
+        res.locals.userId as string,
+        (req.body as { model?: unknown } | undefined)?.model ?? null,
+    );
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
 }));
 
 // PATCH /user/profile

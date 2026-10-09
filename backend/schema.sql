@@ -46,6 +46,7 @@ create table if not exists public.user_profiles (
   title_model text,
   tabular_model text,
   memory_curator_model text,
+  auto_mode_decision_model text,
   last_selected_chat_model text,
   last_selected_reasoning_level text check (last_selected_reasoning_level in ('none', 'low', 'medium', 'high', 'xhigh', 'max')),
   quote_model text,

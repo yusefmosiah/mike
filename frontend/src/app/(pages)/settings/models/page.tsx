@@ -31,6 +31,7 @@ import {
   SettingsLabel,
 } from "@/app/components/settings/SettingsText";
 import { SettingsCard } from "@/app/components/settings/SettingsCard";
+import { AutoModeDecisionModelRow } from "@/app/components/settings/AutoModeDecisionModelRow";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
 import { SETTINGS_CONTROL_CLASS } from "@/app/components/settings/SettingsTextInput";
@@ -177,6 +178,7 @@ export default function ModelPreferencesPage() {
               onChange={(id) => handleModelChange("memoryCuratorModel", id)}
             />
           </SettingsRow>
+          <AutoModeDecisionModelRow />
         </SettingsCard>
       </section>
     </div>

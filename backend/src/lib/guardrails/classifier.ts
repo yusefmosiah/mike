@@ -1,6 +1,7 @@
 import { completeText } from "../llm";
 import type { UserApiKeys } from "../llm/types";
 
+import { decideToolCall, isDecisionModelSetting, type GateOutcome, type GateRisk } from "./decisions";
 import { tierForTool, type GuardrailTier } from "./policy";
 
 /**
@@ -41,7 +42,22 @@ const CLASSIFIER_MAX_TOKENS = 200;
 const REDACTED_MARKER = "[redacted]";
 const TRUNCATION_MARKER = "…[truncated]";
 const DEPTH_MARKER = "[max-depth]";
-const SECRET_KEY_PATTERN = /key|token|secret|password/i;
+// Whole words of a key name ("apiKey", "access_token", "Authorization"), so
+// "keywords" or "max_tokens" stay readable while "api_key" is redacted.
+const SECRET_KEY_WORDS: ReadonlySet<string> = new Set([
+  "key", "apikey", "token", "secret", "password", "passwd", "pwd",
+  "passphrase", "credential", "credentials", "authorization", "auth", "cookie",
+]);
+// A code-mode script is the whole action: the gate must read all of it.
+const CODE_ARG_KEYS: ReadonlySet<string> = new Set(["code", "script"]);
+const MAX_CODE_ARG_LENGTH = 8000;
+
+function isSecretKey(key: string): boolean {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .some((word) => SECRET_KEY_WORDS.has(word.toLowerCase()));
+}
 
 /** A completion that fails to arrive in time; distinguishes timeout logs. */
 class ClassifierTimeoutError extends Error {
@@ -70,6 +86,11 @@ export type ClassifyToolCallInput = {
   /** Names of tools this turn already called, oldest first. */
   history?: string[];
   model?: string;
+  /**
+   * The user's Auto Mode decision model ("openrouter-decisions/<id>"), when
+   * they chose one; it then judges instead of the on-route completion.
+   */
+  decisionModel?: string | null;
   apiKeys?: UserApiKeys;
   timeoutMs?: number;
   /** Test seam; production uses the on-route completion below. */
@@ -82,6 +103,11 @@ export type ClassifyToolCallResult = {
   tier: GuardrailTier;
   /** Tier 2 only: argument-scope enforcement stays with the caller. */
   scopeAssumed?: boolean;
+  /**
+   * Decision-model calls only: what the gate saw, for the decision log. Holds
+   * no argument text, so it is safe to log.
+   */
+  gate?: { model: string; outcome: GateOutcome; triggered: GateRisk[]; latencyMs: number };
 };
 
 const completeOnRoute: ClassifierCompleteFn = (params) =>
@@ -110,6 +136,31 @@ export async function classifyToolCall(
       reason: "workspace-scoped document write",
       tier: 2,
       scopeAssumed: true,
+    };
+  }
+
+  if (isDecisionModelSetting(input.decisionModel)) {
+    const decision = await decideToolCall({
+      model: input.decisionModel,
+      state: {
+        user_request: (typeof input.userIntent === "string" ? input.userIntent : "").slice(0, MAX_INTENT_LENGTH),
+        tool: input.toolName,
+        arguments: redactArgs(input.toolArgs ?? {}),
+        tools_already_used: (input.history ?? []).slice(-MAX_HISTORY_ENTRIES),
+      },
+      apiKeys: input.apiKeys,
+      timeoutMs: input.timeoutMs,
+    });
+    return {
+      verdict: decision.verdict,
+      reason: decision.reason,
+      tier: 3,
+      gate: {
+        model: input.decisionModel,
+        outcome: decision.outcome,
+        triggered: decision.score?.triggered ?? [],
+        latencyMs: decision.latencyMs,
+      },
     };
   }
 
@@ -157,14 +208,17 @@ export async function classifyToolCall(
 
 /**
  * Truncate long strings and drop secret-looking keys before arguments reach
- * the classifier. Key matching is deliberately blunt (any key containing
- * "key", "token", "secret" or "password"): a redacted value costs the
- * classifier nothing, a leaked credential costs everything.
+ * the classifier. Key matching is by whole word of the key name (an `api_key`,
+ * `accessToken` or `password` value is dropped; `keywords` is not): a
+ * redacted value costs the classifier nothing, a leaked credential costs
+ * everything. A secret pasted into an ordinary value (a search query) stays
+ * visible on purpose — that is what the gate has to catch. A code-mode
+ * script is read up to MAX_CODE_ARG_LENGTH, since it is the whole action.
  */
-export function redactArgs(value: unknown, depth = 0): unknown {
+export function redactArgs(value: unknown, depth = 0, limit = MAX_ARG_STRING_LENGTH): unknown {
   if (typeof value === "string") {
-    return value.length > MAX_ARG_STRING_LENGTH
-      ? `${value.slice(0, MAX_ARG_STRING_LENGTH)}${TRUNCATION_MARKER}`
+    return value.length > limit
+      ? `${value.slice(0, limit)}${TRUNCATION_MARKER}`
       : value;
   }
   if (Array.isArray(value)) {
@@ -176,9 +230,9 @@ export function redactArgs(value: unknown, depth = 0): unknown {
   if (depth >= MAX_ARG_DEPTH) return DEPTH_MARKER;
   const redacted: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    redacted[key] = SECRET_KEY_PATTERN.test(key)
+    redacted[key] = isSecretKey(key)
       ? REDACTED_MARKER
-      : redactArgs(entry, depth + 1);
+      : redactArgs(entry, depth + 1, CODE_ARG_KEYS.has(key) ? MAX_CODE_ARG_LENGTH : MAX_ARG_STRING_LENGTH);
   }
   return redacted;
 }

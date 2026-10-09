@@ -138,6 +138,7 @@ services:
       - ./backend/migrations/20261007_03_document_edit_revision_ids.sql:/document-edit-revision-ids-migration.sql:ro
       - ./backend/migrations/20261007_04_document_version_block_ids.sql:/document-version-block-ids-migration.sql:ro
       - ./backend/migrations/20261009_01_chat_branch_numbers.sql:/chat-branch-numbers-migration.sql:ro
+      - ./backend/migrations/20261009_02_auto_mode_decision_model.sql:/auto-mode-decision-model-migration.sql:ro
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -191,6 +192,7 @@ services:
         psql "$$DB" -v ON_ERROR_STOP=1 -f /document-edit-revision-ids-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /document-version-block-ids-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /chat-branch-numbers-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /auto-mode-decision-model-migration.sql || exit 1;
     restart: "no"
 
   # --- Local SMTP catcher. Auth emails land in its web inbox (no real sending).

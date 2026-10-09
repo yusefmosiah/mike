@@ -394,6 +394,37 @@ describe("runLLMStream Auto Mode", () => {
     expect(seenHistory).toEqual([[], ["mcp_send_email"]]);
   });
 
+  it("judges a round's calls at once, each seeing the calls before it", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const seen = new Map<string, string[]>();
+    classifyToolCall.mockImplementation(async (args: ClassifierArgs) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight--;
+      seen.set(String(args.toolArgs.query), args.history);
+      return args.toolArgs.query === "b"
+        ? { verdict: "deny", reason: "it would send a password, key or token outside the workspace" }
+        : { verdict: "allow", reason: "allowed" };
+    });
+    const capture = captureBatch([
+      { id: "call-a", name: "web_search", input: { query: "a" } },
+      { id: "call-b", name: "web_search", input: { query: "b" } },
+      { id: "call-c", name: "fetch_web_page", input: { query: "c" } },
+    ]);
+
+    await runLLMStream(baseParams());
+
+    expect(peak).toBe(3);
+    expect(seen.get("a")).toEqual([]);
+    expect(seen.get("b")).toEqual(["web_search"]);
+    expect(seen.get("c")).toEqual(["web_search", "web_search"]);
+    expect(dispatchedToolNames()).toEqual(["web_search", "fetch_web_page"]);
+    const refused = capture.results?.find((result) => result.tool_use_id === "call-b");
+    expect(refused?.content).toContain("Auto Mode guardrail denied web_search");
+  });
+
   it("auto-answers a model-emitted ask_inputs call and records the exchange", async () => {
     const params = baseParams();
     const capture = captureBatch([

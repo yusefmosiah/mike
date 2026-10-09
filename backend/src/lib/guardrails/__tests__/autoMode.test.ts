@@ -382,15 +382,44 @@ describe("redactArgs", () => {
         expect(truncated).toBe(`${"y".repeat(500)}…[truncated]`);
     });
 
-    it("redacts secret-looking keys, even false positives", () => {
+    it("redacts keys whose name has a secret word, not a secret substring", () => {
         expect(
-            redactArgs({ apiKey: "a", keywords: "b", monkey: "c", plain: "d" }),
+            redactArgs({
+                apiKey: "a",
+                api_key: "a",
+                "X-Auth-Token": "a",
+                Authorization: "a",
+                client_secret: "a",
+                keywords: "b",
+                monkey: "c",
+                max_tokens: 5,
+                plain: "d",
+            }),
         ).toEqual({
             apiKey: "[redacted]",
-            keywords: "[redacted]",
-            monkey: "[redacted]",
+            api_key: "[redacted]",
+            "X-Auth-Token": "[redacted]",
+            Authorization: "[redacted]",
+            client_secret: "[redacted]",
+            keywords: "b",
+            monkey: "c",
+            max_tokens: 5,
             plain: "d",
         });
+    });
+
+    it("leaves a secret inside an ordinary value for the gate to judge", () => {
+        expect(redactArgs({ query: "login error password hunter2" })).toEqual({
+            query: "login error password hunter2",
+        });
+    });
+
+    it("reads a code-mode script well past the ordinary string limit", () => {
+        const code = "x".repeat(3000);
+        expect(redactArgs({ code })).toEqual({ code });
+        expect((redactArgs({ code: "x".repeat(9000) }) as { code: string }).code).toHaveLength(
+            8000 + "…[truncated]".length,
+        );
     });
 
     it("stops at the depth limit", () => {

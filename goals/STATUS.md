@@ -130,7 +130,7 @@ the agent.
 | 12 | Cleanup: tests, live reconnect, docs | built, awaiting review | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
 | 8 | General knowledge-work system prompt | built, awaiting review | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
 | 9 | Subagent foundation (document review first) | built, awaiting review | [`mission-9-subagents.md`](mission-9-subagents.md) |
-| 4 | Decision models and Auto Mode | next | [`mission-4-decision-models.md`](mission-4-decision-models.md) |
+| 4 | Decision models and Auto Mode | built, awaiting review | [`mission-4-decision-models.md`](mission-4-decision-models.md); [`docs/reports/auto-mode-gate-eval-2026-10-09.md`](../docs/reports/auto-mode-gate-eval-2026-10-09.md) |
 | 10 | Voice: local, OpenRouter and self-hosted | next | [`mission-10-voice.md`](mission-10-voice.md) |
 | 3 | Branching, prompt editing and branch threads, end to end | after 10 | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
 | 11 | Code mode | later | [`mission-11-code-mode.md`](mission-11-code-mode.md) |

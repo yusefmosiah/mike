@@ -36,3 +36,71 @@ they are the target for local runs later.
   numbers from a real run (spend recorded).
 - Settings: choosing a decision model changes the model Auto Mode calls; a
   failing or unreachable model denies.
+
+## Built (2026-10-09), awaiting owner review
+
+Owner direction during the mission:
+
+- Ask many targeted questions ("does it harm others", "does it delete valuable
+  data") and decide on an aggregate.
+- Avoid both kinds of error; a veto from any one question would over-refuse.
+- The real targets are deletion, harm, leaked valuable data and prompt
+  injection, especially once code mode is on. Gmail, Calendar and Drive are an
+  eval surface only.
+- Code mode does not have to exist first: its scripts enter the eval as
+  `run_code` cases.
+- Faster is better. Any model taking more than a second per decision is
+  eliminated, and time is benchmarked.
+
+What was built:
+
+- **The gate** (`backend/src/lib/guardrails/decisions.ts`):
+  - 16 atomic `noul` questions;
+  - `scoreGate`, a pure policy that folds answers into risks with AND/OR,
+    discounts consentable risks by the user's explicit go-ahead, and never
+    discounts a credential leak, injected instructions, harm or improper
+    conduct;
+  - three outcomes: allow, ask (deny with "confirm with the user first") and
+    deny;
+  - fails closed on every error.
+- **Settings:** `GET`/`PUT /user/auto-mode-decision`,
+  `user_profiles.auto_mode_decision_model` (migration
+  `20261009_02_auto_mode_decision_model.sql`), and the Settings → Models row.
+  The live catalog leaves out Respan and `:free` models, which cannot serve the
+  gate.
+- **Redaction fix:** keys are now redacted by whole word, so `keywords` is no
+  longer hidden. A code-mode `code` argument is read up to 8,000 characters.
+- **Eval** (`backend/evals/auto-mode-gate/`):
+  - 107 cases;
+  - a runner that stores raw answers;
+  - a report script that replays policies.
+- **Pearls:** [`docs/decision-models.md`](../docs/decision-models.md).
+- **Report:**
+  [`docs/reports/auto-mode-gate-eval-2026-10-09.md`](../docs/reports/auto-mode-gate-eval-2026-10-09.md).
+  - Spend was about $0.70.
+  - Speed, one call at a time:
+    - nine models are inside the 1 s budget, from Luna at 170 ms to Kev at
+      646 ms;
+    - eliminated: Upstage solar-decide-flash (1.5 s), Upstage solar-decide
+      (about 20 s), and the current LLM classifier (1.8 s median, 7.3 s p90).
+  - Settings now lists only measured, in-budget models, fastest first, and the
+    gate's timeout is 2 s.
+  - Best line: `perplexity/pplx-decider-v1.1-27b` with the default policy.
+    On held-out it allowed 0/23 deny cases and refused 5% of legitimate calls,
+    at a 358 ms median.
+  - A veto from any one question refused 89–100% of legitimate calls on every
+    model.
+
+- **Live check:** the settings round trip works. On a password request the
+  chat model avoided the password itself, and the gate then over-refused its
+  safer generic searches (`off_request`). Rewording that question is the first
+  tuning item.
+- **Gate decisions** are logged without arguments, and a round's calls are
+  judged concurrently.
+
+Open for the owner:
+
+- Whether to make Perplexity's decider the default instead of the on-route
+  classifier, which fails the 1 s rule.
+- A second labeller and a larger held-out set before relying on rates below
+  about 14%.

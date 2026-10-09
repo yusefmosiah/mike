@@ -61,6 +61,7 @@ import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
 import { createSubagentHost } from "./subagents/subagentHost";
+import { getAutoModeDecisionModel } from "../../user/user.service";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
   classifyToolCall,
@@ -713,6 +714,11 @@ export async function runLLMStream(params: {
   // differently-named one.
   const autoModeIntent = autoMode ? lastUserIntent(apiMessages) : "";
   const priorToolNames: string[] = [];
+  // The user's chosen judge for Auto Mode tool calls, read once per turn;
+  // null keeps the on-route classifier.
+  const autoModeDecisionModel = autoMode
+    ? await getAutoModeDecisionModel(db, userId).catch(() => null)
+    : null;
   if (autoMode) {
     devLog("[chat/stream] auto mode turn", {
       userId,
@@ -831,6 +837,7 @@ export async function runLLMStream(params: {
       // Auto Mode has nobody to pause for.
       const applyAutoModeGuardrails = async (
         call: NormalizedToolCall,
+        history: string[],
       ): Promise<string | null> => {
         const denied = (reason: string) =>
           JSON.stringify({
@@ -886,21 +893,31 @@ export async function runLLMStream(params: {
           return null;
         }
 
-        let verdict: { verdict: "allow" | "deny"; reason: string };
+        let verdict: Awaited<ReturnType<typeof classifyToolCall>>;
         try {
           verdict = await classifyToolCall({
+            decisionModel: autoModeDecisionModel,
             userIntent: autoModeIntent,
             toolName: call.name,
             toolArgs: call.input,
-            history: [...priorToolNames],
+            history,
             model: selectedModel,
             apiKeys,
           });
         } catch {
           // `classifyToolCall` fails closed by contract; this catch is the
           // second belt, because a throw here would end the whole turn.
-          verdict = { verdict: "deny", reason: "classifier unavailable" };
+          verdict = { verdict: "deny", reason: "classifier unavailable", tier: 3 };
         }
+        // The decision log: tool, outcome and which risks fired, never the
+        // arguments or a model-written reason (either may hold the secret
+        // the gate just stopped).
+        console.info("[auto-mode] gate", {
+          tool: call.name,
+          verdict: verdict.verdict,
+          tier: verdict.tier,
+          ...(verdict.gate ?? { model: autoModeDecisionModel ? "unavailable" : "on-route classifier" }),
+        });
         if (verdict.verdict === "allow") return null;
         return denied(verdict.reason || "the classifier did not allow it");
       };
@@ -913,13 +930,25 @@ export async function runLLMStream(params: {
       // than left waiting on a call that silently did nothing.
       let permittedCalls: NormalizedToolCall[];
       if (autoMode) {
+        // Every call in the round is judged at once: the gate runs before
+        // each Tier 3 call, so a round of searches waits for the slowest
+        // verdict, not the sum. Each call still sees the tools before it.
+        const before = [...priorToolNames];
+        const refusals = await Promise.all(
+          calls.map((call, index) =>
+            applyAutoModeGuardrails(call, [
+              ...before,
+              ...calls.slice(0, index).map((earlier) => earlier.name),
+            ]),
+          ),
+        );
         permittedCalls = [];
-        for (const call of calls) {
-          const refusal = await applyAutoModeGuardrails(call);
+        calls.forEach((call, index) => {
+          const refusal = refusals[index];
           if (refusal === null) permittedCalls.push(call);
           else guardrailResultByCallId.set(call.id, refusal);
           priorToolNames.push(call.name);
-        }
+        });
       } else {
         permittedCalls = allowDocumentMutation
           ? calls

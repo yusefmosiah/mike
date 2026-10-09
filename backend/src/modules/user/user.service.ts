@@ -114,6 +114,12 @@ export {
 } from "./user.apiKeyStore";
 
 export { resolveUserChatSelection } from "./user.chatSelection";
+export {
+    getAutoModeDecisionModel,
+    getAutoModeDecisionSettings,
+    setAutoModeDecisionModel,
+    type AutoModeDecisionSettings,
+} from "./user.decisionModel";
 
 export { handleAccountDelete } from "./user.accountJobs";
 export { handleExportBuild } from "./user.exportJobs";
