@@ -103,6 +103,9 @@ export function useReadAloud(text: string): UseReadAloud {
     // aborted session can never play (or cache) against the current one.
     const generationRef = useRef(0);
     const sessionRef = useRef({ active: false, paused: false });
+    // Mirrors `error`, so the prose-change reset can tell whether there is
+    // anything to reset without depending on (and re-running for) the state.
+    const errorRef = useRef<string | null>(null);
 
     useEffect(() => {
         sentencesRef.current = sentences;
@@ -133,6 +136,7 @@ export function useReadAloud(text: string): UseReadAloud {
         setPlaying(false);
         setPausedState(false);
         setSentenceIndex(0);
+        errorRef.current = null;
         setError(null);
     }, [releaseUrls]);
 
@@ -140,16 +144,24 @@ export function useReadAloud(text: string): UseReadAloud {
         (cause: unknown) => {
             if (!sessionRef.current.active) return;
             stopInternal();
-            setError(readAloudErrorMessage(cause));
+            const message = readAloudErrorMessage(cause);
+            errorRef.current = message;
+            setError(message);
         },
         [stopInternal],
     );
 
     // New prose invalidates every cached blob and kills any session: text
-    // from a previous body must never be spoken underneath the new one.
+    // from a previous body must never be spoken underneath the new one. A
+    // streaming answer changes its prose on every chunk, so reset only when
+    // there is a session or an error to clear: dispatching even unchanged
+    // state from this effect on each chunk exceeds React's nested
+    // passive-update limit ("Maximum update depth exceeded").
     useEffect(() => {
-        stopInternal();
         blobCacheRef.current.clear();
+        if (sessionRef.current.active || errorRef.current !== null) {
+            stopInternal();
+        }
     }, [sentences, stopInternal]);
 
     // Silence whatever is playing when the message unmounts.

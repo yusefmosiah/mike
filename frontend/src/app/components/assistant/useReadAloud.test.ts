@@ -252,4 +252,48 @@ describe("useReadAloud", () => {
         expect(result.current.sentenceCount).toBe(2);
         expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:test-1");
     });
+
+    it("clears a playback error when the prose changes", async () => {
+        synthesizeMock.mockImplementationOnce(() =>
+            Promise.reject(new Error("engine exploded")),
+        );
+        const { result, rerender } = renderHook(
+            ({ text }: { text: string }) => useReadAloud(text),
+            { initialProps: { text: "One." } },
+        );
+
+        await act(async () => {
+            result.current.play();
+        });
+        await waitFor(() =>
+            expect(result.current.error).toBe("engine exploded"),
+        );
+
+        rerender({ text: "One. Two." });
+
+        await waitFor(() => expect(result.current.error).toBeNull());
+        expect(result.current.sentenceCount).toBe(2);
+    });
+
+    it("leaves idle state alone while streamed prose grows", () => {
+        let renders = 0;
+        const { result, rerender } = renderHook(
+            ({ text }: { text: string }) => {
+                renders += 1;
+                return useReadAloud(text);
+            },
+            { initialProps: { text: "One." } },
+        );
+        const before = renders;
+
+        for (const text of ["One. Two", "One. Two.", "One. Two. Three."]) {
+            rerender({ text });
+        }
+
+        // One render per new prop, none from the reset effect.
+        expect(renders - before).toBe(3);
+        expect(result.current.playing).toBe(false);
+        expect(result.current.error).toBeNull();
+        expect(revokeObjectURLMock).not.toHaveBeenCalled();
+    });
 });
