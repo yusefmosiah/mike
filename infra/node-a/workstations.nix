@@ -6,9 +6,14 @@
 #  - Storage: /var/lib/microvms/<name> is a btrfs subvolume holding home.img;
 #    `ws-snapshot` takes read-only snapshots after flushing the guest, and
 #    `ws-restore` rolls the disk back to one.
-#  - Network: a tap per VM with NAT to the internet. The VM cannot reach this
-#    host (input from ws-* is dropped), other VMs, or private and link-local
-#    ranges. An egress proxy with logging is phase 4.
+#  - Network: a tap per VM, and no route out except the egress proxy
+#    (tinyproxy on this host, port 3128 on the VM's gateway address), which
+#    logs every request to the journal (`journalctl -u tinyproxy`). The guest
+#    has proxy settings for HTTP(S), git, pip, npm, Node and ssh, and no DNS:
+#    the proxy resolves names. The proxy itself cannot open connections to
+#    loopback, private, link-local or CGNAT addresses, so a VM cannot use it
+#    to reach this host's services or anything internal. A VM with
+#    `directEgress = true` also gets filtered NAT to the internet.
 #  - The Mike backend (a container) reaches a VM through
 #    /run/mike-workstations/<vm>.sock, a socket-activated relay to the VM's
 #    vsock socket, and asks for snapshots on /run/mike-workstations/control.sock.
@@ -18,10 +23,17 @@
 let
   harnessKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJL2zWuvPSHPJUbiy7JysOXsQ/HARKlZNM86hFz/geLZ mike-harness@node-a";
 
-  # name -> { index (1..250), vcpu, mem MiB, home disk MiB }
+  # name -> { index (1..250), vcpu, mem MiB, home disk MiB, directEgress }
   workstations = {
-    ws-owner = { index = 1; vcpu = 4; mem = 6144; homeMiB = 65536; };
+    ws-owner = { index = 1; vcpu = 4; mem = 6144; homeMiB = 65536; directEgress = false; };
   };
+
+  proxyPort = 3128;
+  # Fixed so the nftables rules can name it: the ruleset is checked at build
+  # time, where the user does not exist.
+  proxyUid = 931;
+  proxyUrl = ws: "http://${subnet ws}.1:${toString proxyPort}";
+  privateV4 = "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8";
 
   subnet = ws: "10.77.${toString ws.index}";
   mac = ws: "02:00:00:77:00:${lib.fixedWidthString 2 "0" (lib.toHexString ws.index)}";
@@ -48,8 +60,22 @@ let
         matchConfig.MACAddress = mac ws;
         address = [ "${subnet ws}.2/24" ];
         gateway = [ "${subnet ws}.1" ];
-        dns = [ "1.1.1.1" "9.9.9.9" ];
+        dns = lib.optionals ws.directEgress [ "1.1.1.1" "9.9.9.9" ];
       };
+      # Everything leaves through the host's logging proxy.
+      environment.variables = {
+        http_proxy = proxyUrl ws;
+        https_proxy = proxyUrl ws;
+        HTTP_PROXY = proxyUrl ws;
+        HTTPS_PROXY = proxyUrl ws;
+        no_proxy = "localhost,127.0.0.1";
+        NO_PROXY = "localhost,127.0.0.1";
+        NODE_USE_ENV_PROXY = "1";
+      };
+      programs.ssh.extraConfig = ''
+        Host *
+          ProxyCommand ${pkgs.netcat-openbsd}/bin/nc -X connect -x ${subnet ws}.1:${toString proxyPort} %h %p
+      '';
     };
   };
 
@@ -161,7 +187,29 @@ in
   networking.nat = {
     enable = true;
     externalInterface = "eno1";
-    internalInterfaces = lib.attrNames workstations;
+    internalInterfaces = lib.attrNames (lib.filterAttrs (_: ws: ws.directEgress) workstations);
+  };
+
+  # nftables runs every base chain on a hook, so the accept below does not
+  # get past the NixOS firewall's own input chain; open the port there too.
+  networking.firewall.interfaces = lib.mapAttrs (_: _: { allowedTCPPorts = [ proxyPort ]; }) workstations;
+
+  users.users.tinyproxy.uid = proxyUid;
+  services.tinyproxy = {
+    enable = true;
+    settings = {
+      # All addresses; the host firewall admits port 3128 only from the VMs'
+      # taps (below), and `Allow` repeats that.
+      Listen = null;
+      Port = proxyPort;
+      Allow = "10.77.0.0/16";
+      # CONNECT to https and ssh (git) only.
+      ConnectPort = [ 443 22 ];
+      Timeout = 600;
+      MaxClients = 200;
+      LogLevel = "Info";
+      DisableViaHeader = true;
+    };
   };
 
   networking.nftables.enable = true;
@@ -169,18 +217,31 @@ in
     family = "inet";
     content = ''
       chain input {
-        # The host talks to a VM over vsock only; nothing a VM sends to any
-        # of the host's addresses is accepted (ssh on 22 is open globally).
+        # The host talks to a VM over vsock only; the one thing a VM may
+        # reach on the host is the egress proxy. Everything else from a tap
+        # is dropped here, before the NixOS firewall (which opens ssh on 22
+        # to every interface) is consulted.
         type filter hook input priority filter - 1; policy accept;
+        iifname "ws-*" tcp dport ${toString proxyPort} accept
         iifname "ws-*" drop
       }
       chain forward {
         type filter hook forward priority filter - 1; policy accept;
-        # A VM reaches the internet through eno1 and nothing else: not
-        # another VM, not private, loopback, link-local or CGNAT ranges.
-        iifname "ws-*" oifname != "eno1" drop
-        iifname "ws-*" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8 } drop
-        iifname "ws-*" meta nfproto ipv6 drop
+        # Only a VM with directEgress is forwarded at all, and then only to
+        # the internet through eno1: not another VM, not private, loopback,
+        # link-local or CGNAT ranges, no IPv6.
+        ${lib.concatStrings (lib.mapAttrsToList (name: ws: lib.optionalString ws.directEgress ''
+        iifname "${name}" oifname "eno1" ip daddr != { ${privateV4} } accept
+        '') workstations)}
+        iifname "ws-*" drop
+      }
+      chain output {
+        # The proxy acts for the VMs, so it gets their limits: no new
+        # connections to this host or anything internal, whatever a name
+        # resolves to. Replies to the VMs are established traffic.
+        type filter hook output priority filter - 1; policy accept;
+        meta skuid ${toString proxyUid} ct state new ip daddr { ${privateV4} } drop
+        meta skuid ${toString proxyUid} ct state new meta nfproto ipv6 drop
       }
     '';
   };

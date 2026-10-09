@@ -207,7 +207,7 @@ btrfs on md RAID1; ZFS is not available there, so snapshots are btrfs).
   `/etc/ssh/authorized_keys.d/root`.
 
 Still open for phase 4: the logging egress proxy and outbound PII checks.
-The NAT path is filtered but not proxied.
+The NAT path is filtered but not proxied. (Proxy: see below.)
 
 **Harness link on staging, 2026-10-09 (node-a, not accepted).** The staging
 backend (a container under Podman) reaches `ws-owner` through
@@ -243,7 +243,52 @@ snapshot: {"ok":true,"snapshot":"ws-owner/20261009T174847Z-turn"}
 used it yet: `WORKSTATION_USER_IDS` is written by `mike-staging owner-link`
 when the owner's account is created, and that has not happened.
 
+**Phase 4 egress proxy, 2026-10-09, on node-a (not accepted).** The VMs
+have no route out except tinyproxy on the host (port 3128 on each tap's
+gateway address); forwarding from `ws-*` is dropped unless a VM is given
+`directEgress`. The guest gets proxy settings for curl, git, pip/requests,
+npm, Node `fetch` (`NODE_USE_ENV_PROXY`) and ssh (`nc -X connect`), and no
+DNS. The proxy runs as uid 931, and an nftables output rule drops its new
+connections to loopback, private, link-local and CGNAT addresses and all of
+IPv6, so a name that resolves inward gets nowhere either. CONNECT is limited
+to ports 443 and 22. Probes from inside `ws-owner`:
+
+```
+via proxy  https://example.com                     200
+direct     https://example.com (--noproxy)         000 blocked
+direct     tcp 1.1.1.1:443                         blocked
+direct     tcp 10.77.1.1:22 (host ssh)             blocked
+via proxy  http://10.77.1.1:3001/health            000 failed
+via proxy  http://127.0.0.1:3001/health            000 failed
+via proxy  http://localhost:3000/                  000 failed
+via proxy  http://10.89.0.1:3001/health            000 failed
+via proxy  http://169.254.169.254/                 000 failed
+via proxy  http://192.168.1.1/                     000 failed
+via proxy  https://127.0.0.1:443/                  000 failed
+via proxy  CONNECT smtp.gmail.com:25               000 refused
+git ls-remote https://github.com/git/git HEAD      6de20f6092dc
+python requests https://pypi.org/simple/openpyxl/  200
+node fetch https://example.com                     200
+ssh -T git@github.com                              git@github.com: Permission denied (publickey).
+```
+
+`journalctl -u tinyproxy` shows each request with the VM's address, e.g.
+`Connect (file descriptor 5): 10.77.1.2`, `Request (file descriptor 5):
+CONNECT example.com:443 HTTP/1.1`, and the refused inward ones
+(`GET http://127.0.0.1:3001/health`). First attempt found that an nftables
+`accept` in one input chain does not get past the NixOS firewall's own
+chain; the port is now opened on the taps there as well.
+
+Not done: no internal service is allowlisted (none is wanted yet), and the
+outbound PII and confidential-figure checks are not possible on HTTPS without
+terminating TLS in the proxy, which needs a CA the guest trusts. That is an
+owner decision (below). The proxy log names hosts, not paths, for HTTPS.
+
 ## Open questions for the owner
+
+- Outbound PII checks on the VM's HTTPS traffic need the proxy to terminate
+  TLS with a CA installed in the guest. Do it, or keep host-level logging
+  only?
 
 - Which machine is the first Linux host for phases 3 and 4? Cloud Hypervisor
   needs KVM, which this M1 cannot provide (no nested virtualization).
