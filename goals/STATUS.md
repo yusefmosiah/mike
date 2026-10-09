@@ -51,18 +51,33 @@ Built on `feat/pi-runtime` (local, unpushed), awaiting owner review:
   deploy resumes when the backend starts again: chat, project chat, cloud Word
   chats and tabular review chats (`backend/src/turnResumers.ts`). Verified live
   by killing the backend mid-answer for tabular and Word: the answer finished,
-  stored once, complete. Open: a client still attached when the server dies
-  re-attaches only on reload.
+  stored once, complete. A client still attached when the server dies now
+  re-attaches to the resumed turn on every surface (Mission 12).
 - **Branch threads are titled** "BRANCH <title>", "BRANCH 2 <title>", ...
   across a whole family; **chat titles** retry once instead of steering the
   model to a "Misc. Query" fallback, which now appears only when the model
   fails twice.
 - **Local e2e and stack harnesses** run without editing env files
   (`scripts/e2e-local-stack.sh`, `backend/scripts/test-stack.sh`).
-- Last full runs: backend 4195 passed (two DOCX corpus tests time out under
-  full load, pass alone); stack suite 65/65; schema drift none; local e2e 57
-  passed, 3 failed (two synthetic React update-depth failures, one tabular
-  create blocked by the e2e account having no configured model).
+- **General knowledge-work prompt (Mission 8).** Every assistant surface
+  presents Mike as a general assistant with legal work as a strength; ordinary
+  questions are answered, current events go to web search.
+- **Cleanup (Mission 12).** Read-aloud no longer re-renders on every streamed
+  chunk (the React update-depth failures); corpus tests have a 60 s budget;
+  the local e2e account gets one configured model; open clients re-attach
+  after a restart (incarnation frames, shared reconnect policy); dev runs
+  background jobs inline under tsx.
+- **Subagents (Mission 9).** `delegate` hands a task to a document-review
+  child with its own tools and budgets; the web app shows its line, its
+  transcript and what it cost; audit rows record both spends. Open for the
+  owner: children run one at a time; flat-rate model costs show list prices.
+  See `mission-9-subagents.md`.
+- Last full runs (2026-10-09, after Mission 9): backend 4268 passed, 90
+  skipped; frontend 2179 passed; lint 0 errors; local e2e (Mission 12) 62
+  passed, 4 skipped (LLM-gated, need `ANTHROPIC_API_KEY`).
+- Still open: the `mike-backend-1` Docker dev image predates these
+  changes; the page title ("Mike - Legal AI Platform") and onboarding step 2
+  ("Your legal practice") still read legal-only.
 
 The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
 (option B). Mission 3's branching design no longer waits on it.
@@ -110,9 +125,9 @@ mission marked accepted by the agent.
 | # | Mission | State | File |
 |---|---|---|---|
 | 7 | Pi runtime, GoTrue-only, restart-safe turns, branch titles | built, awaiting review | this file; `pi-durable-decision-2026-10-08.md` |
-| 12 | Cleanup: tests, live reconnect, docs | next | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
-| 8 | General knowledge-work system prompt | next | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
-| 9 | Subagent foundation (document review first) | next | [`mission-9-subagents.md`](mission-9-subagents.md) |
+| 12 | Cleanup: tests, live reconnect, docs | built, awaiting review | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
+| 8 | General knowledge-work system prompt | built, awaiting review | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
+| 9 | Subagent foundation (document review first) | built, awaiting review | [`mission-9-subagents.md`](mission-9-subagents.md) |
 | 4 | Decision models and Auto Mode | next | [`mission-4-decision-models.md`](mission-4-decision-models.md) |
 | 10 | Voice: local, OpenRouter and self-hosted | next | [`mission-10-voice.md`](mission-10-voice.md) |
 | 3 | Branching, prompt editing and branch threads, end to end | after 10 | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
