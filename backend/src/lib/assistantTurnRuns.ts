@@ -7,6 +7,7 @@ import {
     startStreamRun,
     type StreamRun,
 } from "./streamRuns";
+export { STREAM_RUNS_INCARNATION } from "./streamRuns";
 
 /**
  * Server-owned assistant turns.
@@ -165,6 +166,10 @@ export function getActiveAssistantTurn(
 /**
  * Stream a turn into an Express response as SSE, from `from` onwards, and end
  * the response when the turn finishes. Closing the response only detaches.
+ * Every assistant-turn reader is told the server's incarnation first, and a
+ * reader resuming with an older one (the server restarted and resumed the
+ * turn) is told `turn_restarted` and replayed from frame 1; see
+ * `STREAM_RUNS_INCARNATION`.
  *
  * Returns the same `{ signal, write, finish }` shape `openAssistantSse` gives
  * the streaming routes, so a route that starts a turn drives the generation
@@ -174,12 +179,23 @@ export function attachAssistantTurnSse(
     res: Response,
     run: AssistantTurnRun,
     from = 1,
+    incarnation: string | null = null,
 ): {
     signal: AbortSignal;
     write: (line: string) => boolean;
     finish: () => void;
 } {
-    return attachStreamRunSse(res, run, from);
+    return attachStreamRunSse(res, run, from, {
+        announceIncarnation: true,
+        incarnation,
+    });
+}
+
+/** The `incarnation` query parameter of a turn attach request, if any. */
+export function requestedIncarnation(value: unknown): string | null {
+    return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value)
+        ? value
+        : null;
 }
 
 /** Test hook: forget every run. */

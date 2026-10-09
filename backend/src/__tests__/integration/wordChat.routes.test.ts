@@ -658,8 +658,12 @@ describe("server-owned Word turns", () => {
   };
   const emitFrom = (params: StreamParams) => (frame: object) =>
     params.write(`data: ${JSON.stringify(frame)}\n\n`);
+  // The turn's own records, without the attach's incarnation announcement.
   const records = (text: string) =>
-    text.split("\n\n").filter((record) => record.includes("data: "));
+    text
+      .split("\n\n")
+      .filter((record) => record.includes("data: "))
+      .filter((record) => !record.includes('"type":"stream_incarnation"'));
 
   const OTHER_DOCUMENT_ID = "123e4567-e89b-42d3-a456-426614174999";
 

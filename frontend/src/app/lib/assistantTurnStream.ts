@@ -6,6 +6,12 @@ import { isPanelDocument } from "@/app/components/shared/types";
 import type { AssistantEvent, Citation } from "@/app/components/shared/types";
 import type { AssistantTurnHandle } from "@/app/lib/assistantTurns";
 import type { ConnectorApprovalItem } from "@mike/contracts";
+import {
+  createTurnReconnectPolicy,
+  waitForReconnect,
+  type TurnReconnectFailure,
+  type TurnReconnectOptions,
+} from "@/shared/lib/turnReconnect";
 
 /**
  * Reading an assistant turn's SSE stream into its turn record.
@@ -30,6 +36,8 @@ export type TurnCursor = {
   turnId?: string;
   /** Sequence number of the last frame applied; 0 before any. */
   lastSeq: number;
+  /** The server incarnation `lastSeq` was numbered by, once announced. */
+  incarnation?: string;
 };
 
 export function createTurnCursor(chatId?: string): TurnCursor {
@@ -150,6 +158,17 @@ export function createTurnEventSink(
   initialEvents: AssistantEvent[],
 ) {
   const eventsRef = { current: initialEvents };
+  // The server restarted and is replaying the turn from its first frame:
+  // drop everything this stream applied so nothing is shown twice.
+  const restart = () => {
+    eventsRef.current = initialEvents;
+    turn.update((message) => ({
+      ...message,
+      events: [...initialEvents],
+      citations: undefined,
+      citationStatus: undefined,
+    }));
+  };
   const publish = () => {
     const snapshot = [...eventsRef.current];
     turn.update((message) => ({ ...message, events: snapshot }));
@@ -282,6 +301,7 @@ export function createTurnEventSink(
     pushEvent,
     updateMatchingEvent,
     appendCancellation,
+    restart,
   };
 }
 
@@ -322,6 +342,17 @@ export async function consumeAssistantTurnStream(
     const data = frame as Record<string, unknown>;
 
     try {
+        if (data.type === "stream_incarnation") {
+          if (typeof data.incarnation === "string") cursor.incarnation = data.incarnation;
+          continue;
+        }
+
+        if (data.type === "turn_restarted") {
+          cursor.lastSeq = 0;
+          sink.restart();
+          continue;
+        }
+
         if (data.type === "chat_id") {
           const streamed = data.chatId as string;
           const assistantMessageId =
@@ -1243,9 +1274,12 @@ export async function consumeAssistantTurnStream(
  * Read a turn to its end, reconnecting to the server's copy of it when the
  * connection drops. `open` produces the first response (the POST that starts
  * the turn, or a resume GET); after that, every retry is a resume from the
- * frame after the last one seen. An abort — Stop — is never retried, and
- * neither is a turn the server no longer knows (a 404 after the retention
- * window), which surfaces the original failure.
+ * frame after the last one seen, under the reconnect policy in
+ * shared/lib/turnReconnect.ts: a blip is retried at once and a restarting
+ * server is waited out, and a server that resumed the turn after restarting
+ * replays it from the start (`turn_restarted`). An abort — Stop — is never
+ * retried, and neither is a turn the server no longer knows once the
+ * policy's 404 grace has passed: the original failure surfaces.
  */
 export async function readAssistantTurn(args: {
   open: () => Promise<Response>;
@@ -1254,43 +1288,56 @@ export async function readAssistantTurn(args: {
   cursor: TurnCursor;
   signal?: AbortSignal;
   hooks?: TurnStreamHooks;
-  /** Reconnect attempts after the first response (default 2). */
-  retries?: number;
+  reconnect?: TurnReconnectOptions;
 }): Promise<void> {
   const { turn, sink, cursor, signal, hooks } = args;
-  const retries = args.retries ?? 2;
+  const policy = createTurnReconnectPolicy(args.reconnect);
   let response = await args.open();
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
     throw new Error(`Chat request failed with status ${response.status}`);
   }
-  for (let attempt = 0; ; attempt += 1) {
+  for (;;) {
+    let error: unknown;
+    const seenBefore = cursor.lastSeq;
     try {
       await consumeAssistantTurnStream(response, { turn, sink, cursor, signal, hooks });
       return;
-    } catch (error) {
-      if (
-        isAbortError(error) ||
-        signal?.aborted ||
-        !cursor.chatId ||
-        !cursor.turnId ||
-        attempt >= retries
-      ) {
+    } catch (caught) {
+      error = caught;
+    }
+    if (isAbortError(error) || signal?.aborted || !cursor.chatId || !cursor.turnId) {
+      throw error;
+    }
+    if (cursor.lastSeq !== seenBefore) policy.recovered();
+    let failure: TurnReconnectFailure = { kind: "stream" };
+    for (;;) {
+      const delay = policy.next(failure);
+      if (delay === null) throw error;
+      await waitForReconnect(delay, signal).catch(() => {
         throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
-      if (signal?.aborted) throw error;
-      const resumed = await streamChatTurn({
-        chatId: cursor.chatId,
-        turnId: cursor.turnId,
-        from: cursor.lastSeq + 1,
-        signal,
       });
+      let resumed: Response;
+      try {
+        resumed = await streamChatTurn({
+          chatId: cursor.chatId,
+          turnId: cursor.turnId,
+          from: cursor.lastSeq + 1,
+          incarnation: cursor.incarnation,
+          signal,
+        });
+      } catch (fetchError) {
+        if (isAbortError(fetchError) || signal?.aborted) throw error;
+        failure = { kind: "unreachable" };
+        continue;
+      }
       if (!resumed.ok) {
         await resumed.body?.cancel().catch(() => {});
-        throw error;
+        failure = { kind: "status", status: resumed.status };
+        continue;
       }
       response = resumed;
+      break;
     }
   }
 }

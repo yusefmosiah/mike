@@ -3309,8 +3309,13 @@ describe("server-owned turns: resume, stop, concurrency", () => {
     type StreamParams = { write: (s: string) => void; signal?: AbortSignal };
     const emitFrom = (params: StreamParams) => (frame: object) =>
         params.write(`data: ${JSON.stringify(frame)}\n\n`);
+    // The turn's own records: every attach opens with the server's
+    // unnumbered incarnation announcement, asserted once below.
     const records = (text: string) =>
-        text.split("\n\n").filter((record) => record.includes("data: "));
+        text
+            .split("\n\n")
+            .filter((record) => record.includes("data: "))
+            .filter((record) => !record.includes('"type":"stream_incarnation"'));
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -3387,6 +3392,7 @@ describe("server-owned turns: resume, stop, concurrency", () => {
         const resumed = await tail;
         expect(resumed.status).toBe(200);
         expect(resumed.headers["content-type"]).toContain("text/event-stream");
+        expect(resumed.text).toMatch(/^data: \{"type":"stream_incarnation","incarnation":"[0-9a-f-]{36}"\}\n\n/);
         const lines = records(resumed.text);
         expect(lines[0]).toBe('id: 2\ndata: {"type":"content_delta","text":"First"}');
         const second = lines.findIndex((line) => line.includes('"text":" second"'));

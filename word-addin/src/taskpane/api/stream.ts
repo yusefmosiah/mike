@@ -47,6 +47,18 @@ export class WordChatStreamInterrupted extends Error {
   }
 }
 
+/**
+ * A request to reattach to a turn was answered with a non-2xx status: down
+ * or restarting (502-504), not (yet) registered after a restart (404), or
+ * refused. The reconnect policy decides which of these to wait out.
+ */
+export class WordChatResumeRefused extends Error {
+  constructor(readonly status: number) {
+    super("This answer could not be reattached. Reopen the chat to see it.");
+    this.name = "WordChatResumeRefused";
+  }
+}
+
 /** The server ended the turn with an error frame and a terminal `[DONE]`. */
 export class WordChatTerminalError extends Error {
   constructor(message: string) {
@@ -86,6 +98,14 @@ export interface WordTurnHandlers {
   onCitations?: (citations: unknown[]) => void;
   /** The sequence number of each frame applied, for a reconnect's `from`. */
   onEventId?: (seq: number) => void;
+  /** The server incarnation this response's sequence numbers belong to. */
+  onIncarnation?: (incarnation: string) => void;
+  /**
+   * The server restarted, resumed the turn, and replays it from its first
+   * frame: what the pane applied so far must be discarded. A handler that
+   * cannot do that safely throws, which ends the read.
+   */
+  onRestart?: () => void;
 }
 
 /**
@@ -110,7 +130,11 @@ async function consumeTurnStream(
     res,
     (data) => {
       const d = data as Record<string, unknown>;
-      if (d.type === "content_delta" && typeof d.text === "string" && d.text) {
+      if (d.type === "stream_incarnation" && typeof d.incarnation === "string") {
+        params.onIncarnation?.(d.incarnation);
+      } else if (d.type === "turn_restarted") {
+        params.onRestart?.();
+      } else if (d.type === "content_delta" && typeof d.text === "string" && d.text) {
         onText(d.text);
       } else if (
         d.type === "reasoning_delta" &&
@@ -191,6 +215,7 @@ export async function resumeAssistant(
     turnId: string;
     documentId: string;
     from?: number;
+    incarnation?: string;
     signal?: AbortSignal;
   },
   onText: (text: string) => void,
@@ -200,8 +225,13 @@ export async function resumeAssistant(
     turnId: params.turnId,
     documentId: params.documentId,
     from: params.from ?? 1,
+    incarnation: params.incarnation,
     signal: params.signal,
   });
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new WordChatResumeRefused(res.status);
+  }
   await consumeTurnStream(res, params, onText);
 }
 

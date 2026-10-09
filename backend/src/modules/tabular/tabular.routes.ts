@@ -21,6 +21,7 @@ import {
 } from "../../lib/streamRuns";
 import {
     attachAssistantTurnSse,
+    requestedIncarnation,
     getActiveAssistantTurn,
     getAssistantTurnRun,
 } from "../../lib/assistantTurnRuns";
@@ -773,7 +774,7 @@ tabularRouter.get(
         }
         const rawFrom = Number.parseInt(String(req.query.from ?? "1"), 10);
         const from = Number.isFinite(rawFrom) && rawFrom > 0 ? rawFrom : 1;
-        attachAssistantTurnSse(res, run, from);
+        attachAssistantTurnSse(res, run, from, requestedIncarnation(req.query.incarnation));
     }),
 );
 

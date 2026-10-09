@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { streamRunDeadlines } from "./runtimeConfig";
 
@@ -30,6 +31,32 @@ import { streamRunDeadlines } from "./runtimeConfig";
  */
 
 export const FINISHED_RUN_RETENTION_MS = 60_000;
+
+/**
+ * This process's identity, as announced to every attached reader that asks
+ * for it. Sequence numbers only mean something within one incarnation: a turn
+ * resumed after a restart (turnResumers.ts) keeps its id but starts numbering
+ * again from 1, replaying what it committed before. A reader that reconnects
+ * with the incarnation it last saw lets the server tell the two apart.
+ */
+export const STREAM_RUNS_INCARNATION = randomUUID();
+
+/** How a reader attaches beyond the sequence number it resumes from. */
+export type StreamRunAttachOptions = {
+    /**
+     * Announce this process's incarnation as the first (unnumbered) frame,
+     * `{"type":"stream_incarnation","incarnation":"..."}`. Opt in: only readers
+     * that know the frame may receive it.
+     */
+    announceIncarnation?: boolean;
+    /**
+     * The incarnation the reader last saw. When it is not this one and the
+     * reader asked to resume past frame 1, its sequence numbers belong to a
+     * process that has since restarted: it is sent `{"type":"turn_restarted"}`
+     * and the run's frames from 1, and must discard what it applied before.
+     */
+    incarnation?: string | null;
+};
 /**
  * Defaults for the two run deadlines (see `streamRunDeadlines` in
  * runtimeConfig.ts for the env overrides). The idle deadline catches a hung
@@ -361,6 +388,7 @@ export function attachStreamRunSse(
     res: Response,
     run: StreamRun<unknown>,
     from = 1,
+    options: StreamRunAttachOptions = {},
 ): {
     signal: AbortSignal;
     write: (line: string, opts?: StreamRunWriteOptions) => boolean;
@@ -372,8 +400,21 @@ export function attachStreamRunSse(
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
 
+    const restarted =
+        from > 1 &&
+        typeof options.incarnation === "string" &&
+        options.incarnation !== STREAM_RUNS_INCARNATION;
+    if (options.announceIncarnation) {
+        res.write(
+            `data: ${JSON.stringify({ type: "stream_incarnation", incarnation: STREAM_RUNS_INCARNATION })}\n\n`,
+        );
+    }
+    if (restarted) {
+        res.write(`data: ${JSON.stringify({ type: "turn_restarted" })}\n\n`);
+    }
+
     let ended = false;
-    const detach = run.subscribe(from, {
+    const detach = run.subscribe(restarted ? 1 : from, {
         write: (chunk) => {
             if (ended || res.writableEnded) return;
             res.write(chunk);

@@ -13,6 +13,7 @@ import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import {
   attachAssistantTurnSse,
+    requestedIncarnation,
   getActiveAssistantTurn,
   getAssistantTurnRun,
 } from "../../lib/assistantTurnRuns";
@@ -290,7 +291,7 @@ wordChatRouter.get(
     if (!run) return void turnNotFound(res);
     const rawFrom = Number.parseInt(String(req.query.from ?? "1"), 10);
     const from = Number.isFinite(rawFrom) && rawFrom > 0 ? rawFrom : 1;
-    attachAssistantTurnSse(res, run, from);
+    attachAssistantTurnSse(res, run, from, requestedIncarnation(req.query.incarnation));
   }),
 );
 

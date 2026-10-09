@@ -93,6 +93,9 @@
       ],
       "@mike/sentry-event": [
         "../frontend/src/shared/lib/sentryEvent.ts"
+      ],
+      "@mike/turn-reconnect": [
+        "../frontend/src/shared/lib/turnReconnect.ts"
       ]
     },
     "jsx": "react-jsx",

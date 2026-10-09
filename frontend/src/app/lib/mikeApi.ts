@@ -2418,21 +2418,31 @@ export async function fetchSiblings(
     return apiRequest(`/chat/${chatId}/branches/${messageId}/siblings`);
 }
 
+/** Query string of a turn attach request. */
+function turnStreamQuery(from: number, incarnation?: string): string {
+    const query = new URLSearchParams({ from: String(from) });
+    if (incarnation) query.set("incarnation", incarnation);
+    return query.toString();
+}
+
 /**
  * Attach to a turn the server is generating (or has just finished) for this
  * chat. Frames with a sequence number >= `from` are replayed, then the live
  * ones follow until the turn ends. `from` is the id of the last frame the
- * caller saw plus one; 1 means everything.
+ * caller saw plus one; 1 means everything. `incarnation` is the server
+ * identity those ids came from: after a restart the server answers
+ * `turn_restarted` and replays from frame 1.
  */
 export async function streamChatTurn(payload: {
     chatId: string;
     turnId: string;
     from?: number;
+    incarnation?: string;
     signal?: AbortSignal;
 }): Promise<Response> {
-    const { chatId, turnId, from = 1, signal } = payload;
+    const { chatId, turnId, from = 1, incarnation, signal } = payload;
     return apiFetch(
-        `${API_BASE}/chat/${chatId}/turn/${turnId}/stream?from=${from}`,
+        `${API_BASE}/chat/${chatId}/turn/${turnId}/stream?${turnStreamQuery(from, incarnation)}`,
         { headers: { Accept: "text/event-stream" }, signal },
     );
 }
@@ -2903,11 +2913,12 @@ export async function streamTabularChatTurn(payload: {
     chatId: string;
     turnId: string;
     from?: number;
+    incarnation?: string;
     signal?: AbortSignal;
 }): Promise<Response> {
-    const { reviewId, chatId, turnId, from = 1, signal } = payload;
+    const { reviewId, chatId, turnId, from = 1, incarnation, signal } = payload;
     return apiFetch(
-        `${API_BASE}/tabular-review/${reviewId}/chats/${chatId}/turn/${turnId}/stream?from=${from}`,
+        `${API_BASE}/tabular-review/${reviewId}/chats/${chatId}/turn/${turnId}/stream?${turnStreamQuery(from, incarnation)}`,
         { headers: { Accept: "text/event-stream" }, signal },
     );
 }

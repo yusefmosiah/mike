@@ -109,6 +109,71 @@ test("rejoins a dropped stream from the frame after the last one applied", async
   expect(resumed.searchParams.get("document_id")).toBeTruthy();
 });
 
+test("waits out a server restart and replays the resumed turn from its start", async ({
+  addin,
+  page,
+}) => {
+  await page.route("**/word-chat", async (route, request) => {
+    if (request.method() !== "POST") return route.fallback();
+    return route.fulfill(
+      eventStream(
+        sse(
+          [
+            { data: { type: "stream_incarnation", incarnation: "before" } },
+            {
+              seq: 1,
+              data: { type: "chat_id", chatId: CHAT_ID, turnId: TURN_ID },
+            },
+            {
+              seq: 2,
+              data: { type: "content_delta", text: "Half an answer" },
+            },
+          ],
+          { done: false },
+        ),
+      ),
+    );
+  });
+  const resumeUrls: string[] = [];
+  await page.route(TURN_STREAM_GLOB, async (route, request) => {
+    if (request.method() !== "GET") return route.fallback();
+    resumeUrls.push(request.url());
+    // Still restarting: the gateway answers 503 once.
+    if (resumeUrls.length === 1) return route.fulfill({ status: 503, body: "" });
+    // Back, with the turn resumed under a new incarnation and replayed.
+    return route.fulfill(
+      eventStream(
+        sse([
+          { data: { type: "stream_incarnation", incarnation: "after" } },
+          { data: { type: "turn_restarted" } },
+          {
+            seq: 1,
+            data: { type: "chat_id", chatId: CHAT_ID, turnId: TURN_ID },
+          },
+          {
+            seq: 2,
+            data: { type: "content_delta", text: "The whole answer." },
+          },
+        ]),
+      ),
+    );
+  });
+
+  await addin.gotoTaskpane();
+  await addin.expectAuthedShell();
+  await page.getByPlaceholder("How can I help?").fill("Summarise this");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("The whole answer.")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText(/Half an answer/)).toHaveCount(0);
+  expect(resumeUrls).toHaveLength(2);
+  const resumed = new URL(resumeUrls[1] as string);
+  expect(resumed.searchParams.get("from")).toBe("3");
+  expect(resumed.searchParams.get("incarnation")).toBe("before");
+});
+
 test("Stop posts to the stop endpoint instead of dropping the connection", async ({
   addin,
   page,
@@ -353,7 +418,7 @@ test("a finished local turn is not advertised as running when the chat is reopen
   expect(resumeUrls).toHaveLength(0);
 });
 
-test("a local turn remains resumable after transport retries are exhausted", async ({
+test("a local turn remains resumable after the pane gives up rejoining it", async ({
   addin,
   page,
 }) => {
@@ -388,8 +453,14 @@ test("a local turn remains resumable after transport retries are exhausted", asy
   await page.route(TURN_STREAM_GLOB, async (route, request) => {
     if (request.method() !== "GET") return route.fallback();
     resumeCount += 1;
-    if (resumeCount <= 2) {
-      return route.fulfill(eventStream(sse([], { done: false })));
+    // A dropped stream or a restarting server is waited out; a server error
+    // on the resume is not, so the pane gives up on the first one.
+    if (resumeCount === 1) {
+      return route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Internal error" }),
+      });
     }
     return route.fulfill(
       eventStream(
@@ -417,9 +488,11 @@ test("a local turn remains resumable after transport retries are exhausted", asy
 
   await page.getByPlaceholder("How can I help?").fill("Resume this answer");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect.poll(() => resumeCount).toBe(2);
+  await expect.poll(() => resumeCount).toBe(1);
   await expect(
-    page.getByText("Error: Chat stream ended before the completion marker."),
+    page.getByText(
+      "Error: This answer could not be reattached. Reopen the chat to see it.",
+    ),
   ).toBeVisible();
   expect(localChatId).not.toBeNull();
 
@@ -430,7 +503,7 @@ test("a local turn remains resumable after transport retries are exhausted", asy
     .getByRole("button", { name: /Resume this answer/ })
     .click();
 
-  await expect.poll(() => resumeCount).toBe(3);
+  await expect.poll(() => resumeCount).toBe(2);
   await expect(page.getByText("Recovered after reopening.")).toBeVisible({
     timeout: 15_000,
   });

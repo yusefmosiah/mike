@@ -2341,8 +2341,13 @@ describe("tabular.routes", () => {
         type StreamParams = { write: (s: string) => void; signal?: AbortSignal };
         const emitFrom = (params: StreamParams) => (frame: object) =>
             params.write(`data: ${JSON.stringify(frame)}\n\n`);
+        // The turn's own records, without the attach's incarnation
+        // announcement.
         const records = (text: string) =>
-            text.split("\n\n").filter((record) => record.includes("data: "));
+            text
+                .split("\n\n")
+                .filter((record) => record.includes("data: "))
+                .filter((record) => !record.includes('"type":"stream_incarnation"'));
 
         const CHAT_ROW = {
             id: "review-chat-1",

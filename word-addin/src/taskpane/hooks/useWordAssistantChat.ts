@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  createTurnReconnectPolicy,
+  waitForReconnect,
+  type TurnReconnectFailure,
+} from "@mike/turn-reconnect";
+import {
   resumeAssistant,
   streamAssistant,
+  WordChatResumeRefused,
   WordChatStreamInterrupted,
   WordChatTerminalError,
   type WordClientToolCall,
@@ -66,23 +72,47 @@ interface WordTurnCursor {
   turnId: string | null;
   /** The sequence number of the last frame applied; a resume asks for +1. */
   lastSeq: number;
+  /** The server incarnation `lastSeq` was numbered by. */
+  incarnation?: string;
   /** The user explicitly asked the backend to stop this turn. */
   stopRequested: boolean;
 }
 
 /**
- * Is this failure worth rejoining the server's copy of the turn for?
+ * Is this failure worth rejoining the server's copy of the turn for, and how
+ * should the reconnect policy read it? Null for a final failure.
  *
- * A dropped transport is: the answer is still being generated, and the pane
- * can pick it up from the frame after the last one it applied. A pre-`[DONE]`
- * `error` frame is not — the turn is over and the server said why.
+ * A dropped transport is worth it: the answer is still being generated, and
+ * the pane can pick it up from the frame after the last one it applied. So is
+ * a server that is down or restarting. A pre-`[DONE]` `error` frame is not —
+ * the turn is over and the server said why.
  */
-function isRejoinableStreamFailure(error: unknown): boolean {
-  return (
-    error instanceof WordChatStreamInterrupted ||
-    (error instanceof Error &&
-      (error.name === "TypeError" || error.name === "NetworkError"))
-  );
+function reconnectFailureOf(error: unknown): TurnReconnectFailure | null {
+  if (error instanceof WordChatStreamInterrupted) return { kind: "stream" };
+  if (error instanceof WordChatResumeRefused) {
+    return { kind: "status", status: error.status };
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "TypeError" || error.name === "NetworkError")
+  ) {
+    return { kind: "unreachable" };
+  }
+  return null;
+}
+
+/**
+ * The server restarted and is replaying a turn whose edits already reached
+ * the document. Starting the answer over could apply them twice, so the pane
+ * stops reading; the finished answer is in the chat once it is reopened.
+ */
+class WordTurnRestartedAfterEdits extends Error {
+  constructor() {
+    super(
+      "Mike restarted while answering. Reopen this chat to see the finished answer.",
+    );
+    this.name = "WordTurnRestartedAfterEdits";
+  }
 }
 
 let localMessageSequence = 0;
@@ -675,6 +705,27 @@ export function useWordAssistantChat({
               onEventId: (seq) => {
                 cursor.lastSeq = seq;
               },
+              onIncarnation: (incarnation) => {
+                cursor.incarnation = incarnation;
+              },
+              onRestart: () => {
+                // The server restarted, resumed the turn and replays it from
+                // its first frame. Prose can simply start over; edits that
+                // already reached the document cannot be replayed safely.
+                cursor.lastSeq = 0;
+                if (
+                  clientToolsSeen ||
+                  assistantEdits.length > 0 ||
+                  streamedContent.includes("<EDITS")
+                ) {
+                  throw new WordTurnRestartedAfterEdits();
+                }
+                streamedContent = "";
+                assistantEvents = [];
+                assistantCitations = undefined;
+                redlineParsePending = false;
+                if (requestIsCurrent()) publishAssistantEventsNow();
+              },
               onMetadata: (metadata) => {
                 // The cursor is bookkeeping, not transcript state: record it
                 // even for a send this pane no longer owns, so Stop and a
@@ -781,12 +832,16 @@ export function useWordAssistantChat({
            * the connection drops. A drop is no longer a cancellation — the
            * answer is still being generated — so it is a transport failure to
            * recover from, by resuming at the frame after the last one
-           * applied. An abort (Stop) is never retried, and neither is a turn
-           * whose id the pane never learned.
+           * applied, under the shared reconnect policy: a blip is retried at
+           * once and a restarting server is waited out. An abort (Stop) is
+           * never retried, and neither is a turn whose id the pane never
+           * learned.
            */
+          const reconnect = createTurnReconnectPolicy();
           let opener: "post" | "resume" =
             input.kind === "send" ? "post" : "resume";
-          for (let attempt = 0; ; attempt += 1) {
+          for (;;) {
+            const seenBefore = cursor.lastSeq;
             try {
               if (opener === "post" && submission) {
                 await streamAssistant(
@@ -820,6 +875,7 @@ export function useWordAssistantChat({
                     turnId: cursor.turnId,
                     documentId: wordDocumentId,
                     from: cursor.lastSeq + 1,
+                    incarnation: cursor.incarnation,
                   },
                   onStreamText,
                 );
@@ -829,19 +885,21 @@ export function useWordAssistantChat({
               break;
             } catch (error) {
               opener = "resume";
+              const failure = reconnectFailureOf(error);
               if (
                 controller.signal.aborted ||
                 !cursor.chatId ||
                 !cursor.turnId ||
-                attempt >= 2 ||
-                !isRejoinableStreamFailure(error)
+                failure === null
               ) {
                 throw error;
               }
-              await new Promise((resolve) =>
-                setTimeout(resolve, 400 * (attempt + 1)),
-              );
-              if (controller.signal.aborted) throw error;
+              if (cursor.lastSeq !== seenBefore) reconnect.recovered();
+              const delay = reconnect.next(failure);
+              if (delay === null) throw error;
+              await waitForReconnect(delay, controller.signal).catch(() => {
+                throw error;
+              });
             }
           }
           publishAssistantEventsNow();

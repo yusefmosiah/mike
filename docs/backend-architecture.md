@@ -199,6 +199,21 @@ replays read tools and answers interrupted writes as interrupted, so nothing
 is written twice. A turn that can no longer be driven (access gone, chat
 deleted, the conversation moved on) is abandoned and its answer row says why.
 
+A client that was attached when the process died does not need a reload.
+Its reader (the web chat, the review chat and the Word pane share one policy,
+`frontend/src/shared/lib/turnReconnect.ts`) waits out the outage, retrying
+from 400 ms up to every 5 s for three minutes, and tolerates 404s for 15 s
+while the new process re-registers its turns. Sequence numbers restart with
+the run, so each attach opens with an unnumbered
+`{"type":"stream_incarnation"}` frame naming the process
+(`STREAM_RUNS_INCARNATION` in `lib/streamRuns.ts`), and a reader that
+reconnects with an older incarnation is sent `{"type":"turn_restarted"}` and
+the run from frame 1: the resumed run replays what the turn committed before
+the restart, so the reader drops its partial answer and rebuilds it. The Word
+pane does that only while no edit has reached the document; after one it
+stops and asks for the chat to be reopened, since a replay could apply the
+edit twice.
+
 Only turns whose transcript lives in Mike's database are durable: a
 `storage: "local"` Word chat keeps nothing server-side, so its interrupted run
 is simply stopped. Review chats store the answer row at the end rather than

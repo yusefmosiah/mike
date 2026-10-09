@@ -38,6 +38,11 @@ import {
     ReasoningBlock,
 } from "../assistant/message/EventBlocks";
 import { readSseFrames } from "@/app/lib/sse";
+import {
+    createTurnReconnectPolicy,
+    waitForReconnect,
+    type TurnReconnectFailure,
+} from "@/shared/lib/turnReconnect";
 import { LIQUID_GLASS_FLAT_CLASS } from "@/app/components/ui/liquid-surface";
 import { ChatPanelHeader } from "../shared/ChatPanelHeader";
 import { HeaderActionsMenu } from "../shared/HeaderActionsMenu";
@@ -581,6 +586,8 @@ export function TRChatPanel({
         turnId: string | null;
         lastSeq: number;
         hadError: boolean;
+        /** The server incarnation `lastSeq` was numbered by. */
+        incarnation?: string;
     };
     const turnCursorRef = useRef<TurnCursor>({
         chatId: null,
@@ -1219,6 +1226,38 @@ export function TRChatPanel({
         })) {
                 const data = frame as Record<string, unknown>;
 
+                if (data.type === "stream_incarnation") {
+                    if (typeof data.incarnation === "string")
+                        cursor.incarnation = data.incarnation;
+                    continue;
+                }
+
+                if (data.type === "turn_restarted") {
+                    // The server restarted, resumed this turn and is
+                    // replaying it from its first frame: start the answer
+                    // over so nothing is shown twice.
+                    cursor.lastSeq = 0;
+                    if (streamGenerationRef.current !== gen) continue;
+                    stopDrip();
+                    dripTargetRef.current = "";
+                    dripDisplayLenRef.current = 0;
+                    eventsRef.current = [];
+                    setMessages((prev) => {
+                        const last = prev[prev.length - 1];
+                        if (last?.role !== "assistant") return prev;
+                        return [
+                            ...prev.slice(0, -1),
+                            {
+                                role: "assistant",
+                                content: "",
+                                events: [],
+                                isStreaming: true,
+                            },
+                        ];
+                    });
+                    continue;
+                }
+
                 if (data.type === "chat_id") {
                     const newId = data.chatId as string;
                     // What a reconnect needs: which thread this is and which
@@ -1780,9 +1819,11 @@ export function TRChatPanel({
      *
      * A dropped connection is no longer a cancellation — the answer is still
      * being generated on the server — so it is a transport failure to
-     * recover from, by resuming at the frame after the last one applied. An
-     * abort (the local Stop fallback) is never retried, and neither is a
-     * turn the server no longer knows.
+     * recover from, by resuming at the frame after the last one applied,
+     * under the shared reconnect policy (shared/lib/turnReconnect.ts): a blip
+     * is retried at once and a restarting server is waited out. An abort
+     * (the local Stop fallback) is never retried, and neither is a turn the
+     * server no longer knows once the policy's 404 grace has passed.
      */
     async function readTurn(args: {
         open: () => Promise<Response>;
@@ -1790,10 +1831,9 @@ export function TRChatPanel({
         signal: AbortSignal;
         settings: TurnSettings;
         cursor: TurnCursor;
-        retries?: number;
     }) {
         const { cursor } = args;
-        const retries = args.retries ?? 2;
+        const policy = createTurnReconnectPolicy();
         let response = await args.open();
         if (!response.ok) {
             await response.body?.cancel().catch(() => {});
@@ -1801,7 +1841,9 @@ export function TRChatPanel({
                 `Tabular chat request failed with status ${response.status}`,
             );
         }
-        for (let attempt = 0; ; attempt += 1) {
+        for (;;) {
+            let error: unknown;
+            const seenBefore = cursor.lastSeq;
             try {
                 await consumeTurnStream(
                     response,
@@ -1811,32 +1853,47 @@ export function TRChatPanel({
                     cursor,
                 );
                 return;
-            } catch (error) {
-                if (
-                    (error instanceof Error && error.name === "AbortError") ||
-                    args.signal.aborted ||
-                    !cursor.chatId ||
-                    !cursor.turnId ||
-                    attempt >= retries
-                ) {
+            } catch (caught) {
+                error = caught;
+            }
+            if (
+                (error instanceof Error && error.name === "AbortError") ||
+                args.signal.aborted ||
+                !cursor.chatId ||
+                !cursor.turnId
+            ) {
+                throw error;
+            }
+            if (cursor.lastSeq !== seenBefore) policy.recovered();
+            let failure: TurnReconnectFailure = { kind: "stream" };
+            for (;;) {
+                const delay = policy.next(failure);
+                if (delay === null) throw error;
+                await waitForReconnect(delay, args.signal).catch(() => {
                     throw error;
-                }
-                await new Promise((resolve) =>
-                    setTimeout(resolve, 400 * (attempt + 1)),
-                );
-                if (args.signal.aborted) throw error;
-                const resumed = await streamTabularChatTurn({
-                    reviewId,
-                    chatId: cursor.chatId,
-                    turnId: cursor.turnId,
-                    from: cursor.lastSeq + 1,
-                    signal: args.signal,
                 });
+                let resumed: Response;
+                try {
+                    resumed = await streamTabularChatTurn({
+                        reviewId,
+                        chatId: cursor.chatId,
+                        turnId: cursor.turnId,
+                        from: cursor.lastSeq + 1,
+                        incarnation: cursor.incarnation,
+                        signal: args.signal,
+                    });
+                } catch {
+                    if (args.signal.aborted) throw error;
+                    failure = { kind: "unreachable" };
+                    continue;
+                }
                 if (!resumed.ok) {
                     await resumed.body?.cancel().catch(() => {});
-                    throw error;
+                    failure = { kind: "status", status: resumed.status };
+                    continue;
                 }
                 response = resumed;
+                break;
             }
         }
     }

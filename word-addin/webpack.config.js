@@ -223,6 +223,9 @@ module.exports = async (_env, options) => {
         // Sentry event hygiene (PII scrub + console-bridge dedupe) is one
         // policy for the web app and the add-in.
         "@mike/sentry-event": frontendShared("lib", "sentryEvent.ts"),
+        // When a reader waits out a restarting server is one policy for the
+        // web chats and the Word pane.
+        "@mike/turn-reconnect": frontendShared("lib", "turnReconnect.ts"),
       },
     },
     module: {

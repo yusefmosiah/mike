@@ -141,7 +141,7 @@ describe("readAssistantTurn", () => {
     vi.useFakeTimers();
     const turn = begin();
     const sink = createTurnEventSink(turn, []);
-    streamChatTurnMock.mockResolvedValueOnce(sseResponse([], { status: 404 }));
+    streamChatTurnMock.mockImplementation(async () => sseResponse([], { status: 404 }));
     const read = readAssistantTurn({
       open: async () =>
         sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], { fail: true }),
@@ -150,9 +150,11 @@ describe("readAssistantTurn", () => {
       cursor: createTurnCursor("chat-a"),
     });
     const outcome = read.then(() => "resolved", (error: Error) => error.message);
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(await outcome).toBe("network error");
-    expect(streamChatTurnMock).toHaveBeenCalledTimes(1);
+    // A restarting server may answer 404 until it re-registers the turn, so
+    // 404s are retried for 15 s (from 0.4 s to 16 s here), then given up.
+    expect(streamChatTurnMock).toHaveBeenCalledTimes(6);
     turn.finish();
   });
 
@@ -186,22 +188,101 @@ describe("readAssistantTurn", () => {
     await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
     expect(streamChatTurnMock).not.toHaveBeenCalled();
 
-    // Every reconnect drops too: give up after the budget.
-    streamChatTurnMock.mockImplementation(async () =>
-      sseResponse([frame(2, { type: "content_delta", text: "y" })], { fail: true }),
-    );
+    // The server stays unreachable: give up once the outage budget is spent.
+    streamChatTurnMock.mockRejectedValue(new TypeError("Failed to fetch"));
     const exhausted = readAssistantTurn({
       open: async () =>
         sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], { fail: true }),
       turn,
       sink,
       cursor: createTurnCursor("chat-a"),
-      retries: 2,
+      reconnect: { outageBudgetMs: 1_000 },
     });
     const outcome = exhausted.then(() => "resolved", (error: Error) => error.message);
     await vi.advanceTimersByTimeAsync(5000);
+    // The stream's own failure surfaces, not the last fetch's.
     expect(await outcome).toBe("network error");
+    // At 400 ms and 1.2 s; the next would start past the 1 s budget.
     expect(streamChatTurnMock).toHaveBeenCalledTimes(2);
+    turn.finish();
+  });
+
+  it("waits out a server restart and re-attaches to the resumed turn", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const cursor = createTurnCursor("chat-a");
+    // Down (connection refused, then the gateway's 503), then up but not yet
+    // re-registered (404), then the turn as the restarted server resumed it:
+    // a new incarnation, replayed from its first frame.
+    streamChatTurnMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(sseResponse([], { status: 503 }))
+      .mockResolvedValueOnce(sseResponse([], { status: 404 }))
+      .mockResolvedValueOnce(
+        sseResponse([
+          'data: {"type":"stream_incarnation","incarnation":"after"}\n\n',
+          'data: {"type":"turn_restarted"}\n\n',
+          frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" }),
+          frame(2, { type: "content_delta", text: "Hello world." }),
+          "id: 3\ndata: [DONE]\n\n",
+        ]),
+      );
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse(
+          [
+            'data: {"type":"stream_incarnation","incarnation":"before"}\n\n',
+            frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" }),
+            frame(2, { type: "content_delta", text: "Hello wor" }),
+          ],
+          { fail: true },
+        ),
+      turn,
+      sink,
+      cursor,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await read;
+    expect(streamChatTurnMock).toHaveBeenCalledTimes(4);
+    // Each attempt resumes after frame 2 of the incarnation it was numbered by.
+    expect(streamChatTurnMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ turnId: "turn-1", from: 3, incarnation: "before" }),
+    );
+    // The replay replaced the partial answer instead of appending to it.
+    expect(text(turn.turn.assistant)).toBe("Hello world.");
+    expect(cursor).toMatchObject({ lastSeq: 3, incarnation: "after" });
+    turn.finish();
+  });
+
+  it("keeps a turn that resumes within the same incarnation", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    streamChatTurnMock.mockResolvedValueOnce(
+      sseResponse([
+        'data: {"type":"stream_incarnation","incarnation":"same"}\n\n',
+        frame(3, { type: "content_delta", text: "ld." }),
+        "id: 4\ndata: [DONE]\n\n",
+      ]),
+    );
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse(
+          [
+            'data: {"type":"stream_incarnation","incarnation":"same"}\n\n',
+            frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" }),
+            frame(2, { type: "content_delta", text: "Hello wor" }),
+          ],
+          { fail: true },
+        ),
+      turn,
+      sink,
+      cursor: createTurnCursor("chat-a"),
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await read;
+    expect(text(turn.turn.assistant)).toBe("Hello world.");
     turn.finish();
   });
 
@@ -1593,7 +1674,7 @@ describe("readAssistantTurn connection handling", () => {
     vi.useFakeTimers();
     const turn = begin();
     const sink = createTurnEventSink(turn, []);
-    streamChatTurnMock.mockResolvedValueOnce(unreadableResponse(404));
+    streamChatTurnMock.mockImplementation(async () => unreadableResponse(404));
     const read = readAssistantTurn({
       open: async () =>
         sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], {
@@ -1607,7 +1688,7 @@ describe("readAssistantTurn connection handling", () => {
       () => "resolved",
       (error: Error) => error.message,
     );
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(await outcome).toBe("network error");
     turn.finish();
   });

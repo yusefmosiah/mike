@@ -5,9 +5,11 @@ import {
   FINISHED_RUN_RETENTION_MS,
   MAX_RUN_LIFETIME_MS,
   STOPPED_RUN_GRACE_MS,
+  STREAM_RUNS_INCARNATION,
   attachAssistantTurnSse,
   getActiveAssistantTurn,
   getAssistantTurnRun,
+  requestedIncarnation,
   resetAssistantTurnRunsForTests,
   startAssistantTurnRun,
 } from "./assistantTurnRuns";
@@ -16,6 +18,9 @@ import {
 function fakeResponse() {
   const emitter = new EventEmitter();
   const chunks: string[] = [];
+  // The incarnation announcement every attach opens with, kept apart so the
+  // frame assertions below read as the run's own frames.
+  const announced: string[] = [];
   const res = {
     headers: {} as Record<string, string>,
     writableEnded: false,
@@ -24,7 +29,7 @@ function fakeResponse() {
     },
     flushHeaders: vi.fn(),
     write(chunk: string) {
-      chunks.push(chunk);
+      (chunk.includes('"type":"stream_incarnation"') ? announced : chunks).push(chunk);
       return true;
     },
     end() {
@@ -35,6 +40,7 @@ function fakeResponse() {
       emitter.emit("close");
     },
     chunks,
+    announced,
   };
   return res;
 }
@@ -149,5 +155,63 @@ describe("assistant turn runs", () => {
     run.finish();
     expect(broken.end).not.toHaveBeenCalled();
     expect(healthy.writableEnded).toBe(true);
+  });
+
+  it("announces the incarnation to every reader before any frame", () => {
+    const run = start();
+    const res = fakeResponse();
+    const stream = attachAssistantTurnSse(res as unknown as Response, run);
+    stream.write('data: {"type":"content_delta","text":"a"}\n\n');
+    expect(res.announced).toEqual([
+      `data: {"type":"stream_incarnation","incarnation":"${STREAM_RUNS_INCARNATION}"}\n\n`,
+    ]);
+    // Unnumbered, so a reader's sequence cursor is untouched by it.
+    expect(res.announced[0]).not.toMatch(/^id:/);
+  });
+
+  it("resumes within the same incarnation from the requested frame", () => {
+    const run = start();
+    const stream = attachAssistantTurnSse(fakeResponse() as unknown as Response, run);
+    for (const text of ["a", "b", "c"]) {
+      stream.write(`data: {"type":"content_delta","text":"${text}"}\n\n`);
+    }
+    const again = fakeResponse();
+    attachAssistantTurnSse(again as unknown as Response, run, 3, STREAM_RUNS_INCARNATION);
+    expect(again.chunks).toEqual(['id: 3\ndata: {"type":"content_delta","text":"c"}\n\n']);
+  });
+
+  it("restarts a reader from frame 1 when its frames came from an earlier incarnation", () => {
+    // A turn resumed after a restart: same id, numbering from 1 again.
+    const run = start();
+    const stream = attachAssistantTurnSse(fakeResponse() as unknown as Response, run);
+    for (const text of ["a", "b"]) {
+      stream.write(`data: {"type":"content_delta","text":"${text}"}\n\n`);
+    }
+    const reader = fakeResponse();
+    attachAssistantTurnSse(
+      reader as unknown as Response,
+      run,
+      40,
+      "00000000-0000-4000-8000-000000000000",
+    );
+    expect(reader.chunks).toEqual([
+      'data: {"type":"turn_restarted"}\n\n',
+      'id: 1\ndata: {"type":"content_delta","text":"a"}\n\n',
+      'id: 2\ndata: {"type":"content_delta","text":"b"}\n\n',
+    ]);
+  });
+
+  it("does not restart a reader that has seen no frames yet", () => {
+    const run = start();
+    const reader = fakeResponse();
+    attachAssistantTurnSse(reader as unknown as Response, run, 1, "00000000-0000-4000-8000-000000000000");
+    expect(reader.chunks).toEqual([]);
+  });
+
+  it("accepts only uuid-shaped incarnation parameters", () => {
+    expect(requestedIncarnation(STREAM_RUNS_INCARNATION)).toBe(STREAM_RUNS_INCARNATION);
+    expect(requestedIncarnation(undefined)).toBeNull();
+    expect(requestedIncarnation(["a"])).toBeNull();
+    expect(requestedIncarnation("not-an-id")).toBeNull();
   });
 });

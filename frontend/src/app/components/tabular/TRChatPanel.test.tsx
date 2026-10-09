@@ -727,6 +727,59 @@ describe("TRChatPanel server-owned turns", () => {
         );
     });
 
+    it("starts the answer over when the server restarted and replays the turn", async () => {
+        const stream = controlledStream();
+        vi.mocked(streamTabularChat).mockResolvedValue(stream.response);
+        vi.mocked(streamTabularChatTurn)
+            // Still restarting: the gateway answers 503.
+            .mockResolvedValueOnce(new Response(null, { status: 503 }))
+            // Back, with the turn resumed under a new incarnation.
+            .mockResolvedValueOnce(
+                sseResponse(
+                    'data: {"type":"stream_incarnation","incarnation":"after"}\n\n' +
+                        'data: {"type":"turn_restarted"}\n\n' +
+                        'id: 1\ndata: {"type":"chat_id","chatId":"chat-9","turnId":"turn-9"}\n\n' +
+                        'id: 2\ndata: {"type":"content_delta","text":"Whole answer"}\n\n' +
+                        "data: [DONE]\n\n",
+                ),
+            );
+        const user = userEvent.setup();
+
+        const { container } = render(
+            <TRChatPanel reviewId="review-1" onCitationClick={vi.fn()} />,
+        );
+        stubViewportScroll(container);
+        await user.click(
+            screen.getByRole("button", { name: "Send test message" }),
+        );
+        act(() => {
+            stream.push(
+                'data: {"type":"stream_incarnation","incarnation":"before"}\n\n',
+            );
+            stream.push(
+                'id: 1\ndata: {"type":"chat_id","chatId":"chat-9","turnId":"turn-9"}\n\n',
+            );
+            stream.push(
+                'id: 2\ndata: {"type":"content_delta","text":"Half an answer"}\n\n',
+            );
+        });
+        await waitFor(() =>
+            expect(screen.getByText(/Half an answer/)).toBeInTheDocument(),
+        );
+
+        act(() => stream.fail(new TypeError("network error")));
+
+        await waitFor(
+            () => expect(screen.getByText(/Whole answer/)).toBeInTheDocument(),
+            { timeout: 5_000 },
+        );
+        expect(screen.queryByText(/Half an answer/)).not.toBeInTheDocument();
+        expect(streamTabularChatTurn).toHaveBeenCalledTimes(2);
+        expect(streamTabularChatTurn).toHaveBeenLastCalledWith(
+            expect.objectContaining({ from: 3, incarnation: "before" }),
+        );
+    });
+
     it("attaches to a thread whose answer is still being generated when it opens", async () => {
         vi.mocked(getTabularChats).mockResolvedValue([
             {

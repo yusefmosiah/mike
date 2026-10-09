@@ -473,12 +473,15 @@ export async function streamWordChatTurn(payload: {
   turnId: string;
   documentId: string;
   from?: number;
+  /** The server incarnation `from` was numbered by (see turn_restarted). */
+  incarnation?: string;
   signal?: AbortSignal;
 }): Promise<Response> {
   const params = new URLSearchParams({
     document_id: payload.documentId,
     from: String(payload.from ?? 1),
   });
+  if (payload.incarnation) params.set("incarnation", payload.incarnation);
   return sendRequest(
     apiUrl(
       `/word-chat/${encodeURIComponent(payload.chatId)}/turn/` +

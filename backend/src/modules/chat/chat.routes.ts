@@ -1,5 +1,6 @@
 import {
     attachAssistantTurnSse,
+    requestedIncarnation,
     getActiveAssistantTurn,
     getAssistantTurnRun,
     startAssistantTurnRun,
@@ -207,7 +208,7 @@ chatRouter.get("/:chatId/turn/:turnId/stream", requireAuth, asyncRoute(async (re
     }
     const rawFrom = Number.parseInt(String(req.query.from ?? "1"), 10);
     const from = Number.isFinite(rawFrom) && rawFrom > 0 ? rawFrom : 1;
-    attachAssistantTurnSse(res, run, from);
+    attachAssistantTurnSse(res, run, from, requestedIncarnation(req.query.incarnation));
 }));
 
 // POST /chat/:chatId/turn/:turnId/stop
