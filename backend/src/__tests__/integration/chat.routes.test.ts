@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
-import { streamAiSdk } from "../../lib/llm/aiSdk";
-import {
-    callStep,
-    config,
-    makeModel,
-    textStep,
-    tick,
-} from "../../lib/llm/__tests__/mockLanguageModel";
 import type { AssistantEvent, ConnectorApprovalItem } from "@mike/contracts";
 
 // #383's model-selection describes grew this file past the chat limiter's
@@ -63,8 +55,7 @@ const {
     },
 }));
 
-const { streamWithProvider, unexpectedFetch } = vi.hoisted(() => ({
-    streamWithProvider: vi.fn(),
+const { unexpectedFetch } = vi.hoisted(() => ({
     unexpectedFetch: vi.fn(() => {
         throw new Error("Unexpected network request in chat route tests");
     }),
@@ -73,11 +64,6 @@ const { streamWithProvider, unexpectedFetch } = vi.hoisted(() => ({
 vi.mock("../../modules/chat/chat.title", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../modules/chat/chat.title")>()),
     generateAssistantChatTitle: vi.fn(async () => "Generated Title"),
-}));
-
-vi.mock("../../lib/llm/providers", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../lib/llm/providers")>()),
-    streamWithProvider: (...args: unknown[]) => streamWithProvider(...args),
 }));
 
 vi.mock("../../lib/mcpConnectors", async (importOriginal) => ({
@@ -105,7 +91,6 @@ vi.mock("../../lib/integrations/googleWorkspace", async (importOriginal) => ({
 beforeEach(() => {
     resetAssistantTurnRunsForTests();
     unexpectedFetch.mockClear();
-    streamWithProvider.mockReset();
     vi.stubGlobal("fetch", unexpectedFetch);
 });
 
@@ -959,7 +944,7 @@ describe("POST /chat — streaming endpoint", () => {
     );
 
     it.each([false, true])(
-        "persists and resumes a real SDK clarification pause (malformed first call: %s)",
+        "persists and resumes a clarification pause through the real model loop (malformed first call: %s)",
         async (malformedFirstCall) => {
             const realChat =
                 await vi.importActual<typeof import("../../modules/chat/engine/index.js")>(
@@ -971,16 +956,14 @@ describe("POST /chat — streaming endpoint", () => {
                 kind: "text",
                 question: "Which jurisdiction?",
             };
-            const model = await makeModel([
+            const model = await scriptPiModel("gpt-5.6-terra", (faux) => [
                 ...(malformedFirstCall
-                    ? [callStep("bad-1", "ask_inputs", '{"items":')]
+                    ? [faux.call("bad-1", "ask_inputs", { items: "not a list" })]
                     : []),
-                callStep("ask-1", "ask_inputs", { items: [question] }),
-                textStep("must not run after a clarification pause"),
+                // Nothing after the pause: the request count below proves no
+                // model call followed it.
+                faux.call("ask-1", "ask_inputs", { items: [question] }),
             ]);
-            streamWithProvider.mockImplementationOnce((params) =>
-                streamAiSdk(params, config(model)),
-            );
             runLLMStream.mockImplementationOnce(realChat.runLLMStream);
             vi.mocked(mockedChat.buildMessages).mockImplementationOnce(
                 realChat.buildMessages,
@@ -1004,17 +987,10 @@ describe("POST /chat — streaming endpoint", () => {
                     expect.objectContaining({ type: "ask_inputs", items: [question] }),
                 ]),
             });
-            await tick();
-            expect(model.doStreamCalls).toHaveLength(
-                malformedFirstCall ? 2 : 1,
-            );
+            expect(model.requests).toHaveLength(malformedFirstCall ? 2 : 1);
             if (malformedFirstCall) {
-                expect(
-                    JSON.stringify(model.doStreamCalls[1]?.prompt),
-                ).toContain("bad-1");
-                expect(
-                    JSON.stringify(model.doStreamCalls[1]?.prompt),
-                ).toContain("error");
+                expect(JSON.stringify(model.requests[1])).toContain("bad-1");
+                expect(JSON.stringify(model.requests[1])).toMatch(/error|invalid/i);
             }
 
             const loaded = await request(app)
@@ -1039,10 +1015,8 @@ describe("POST /chat — streaming endpoint", () => {
                 (event: { type: string }) => event.type === "ask_inputs",
             );
             expect(askEvent.event_id).toEqual(expect.any(String));
-            const resumed = await makeModel([textStep("I will use New York law.")]);
-            streamWithProvider.mockImplementationOnce((params) =>
-                streamAiSdk(params, config(resumed)),
-            );
+            model.andThen((faux) => [faux.text("I will use New York law.")]);
+            const answeredFrom = model.requests.length;
             runLLMStream.mockImplementationOnce(realChat.runLLMStream);
             vi.mocked(mockedChat.buildMessages).mockImplementationOnce(
                 realChat.buildMessages,
@@ -1096,10 +1070,10 @@ describe("POST /chat — streaming endpoint", () => {
                 "I will use New York law.",
             );
             expect(second.text.match(/data: \[DONE\]/g)).toHaveLength(1);
-            expect(JSON.stringify(resumed.doStreamCalls[0]?.prompt)).toContain(
+            expect(JSON.stringify(model.requests[answeredFrom])).toContain(
                 "user answered:",
             );
-            expect(JSON.stringify(resumed.doStreamCalls[0]?.prompt)).toContain(
+            expect(JSON.stringify(model.requests[answeredFrom])).toContain(
                 "New York",
             );
             const saved = dbControl.assistantMessageRows.filter(
@@ -2300,6 +2274,46 @@ function makeRbacDb(
 // settings stub (no last-selected model, gemini-only key) cannot resolve
 // one, which would fail these permission tests with a 429 that has
 // nothing to do with permissions. Seed a resolvable selection per test.
+type FauxSteps = {
+    call: (id: string, name: string, args: Record<string, unknown>) => unknown;
+    text: (text: string) => unknown;
+};
+
+/**
+ * Run the real model loop (Pi Durable on in-memory storage) against a scripted
+ * pi-ai model registered under `modelId`'s provider. `requests` records the
+ * context of every model request; `andThen` scripts the answers after these.
+ */
+async function scriptPiModel(modelId: string, steps: (faux: FauxSteps) => unknown[]) {
+    const { createModels } = await import("@earendil-works/pi-ai/models");
+    const { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } = await import(
+        "@earendil-works/pi-ai/providers/faux"
+    );
+    const { MemoryStorage } = await import("@earendil-works/pi-durable");
+    const { createMikeModels } = await import("../../lib/llm/pi/providers.mjs");
+    const { resetPiRuntime } = await import("../../lib/llm/pi/runtime.mjs");
+    const helpers: FauxSteps = {
+        call: (id, name, args) =>
+            fauxAssistantMessage([{ ...fauxToolCall(name, args), id }], { stopReason: "toolUse" }),
+        text: (text) => fauxAssistantMessage([fauxText(text)]),
+    };
+    const requests: unknown[] = [];
+    const recorded = (step: unknown) => (context: unknown) => {
+        requests.push(structuredClone(context));
+        return step;
+    };
+    const faux = fauxProvider({ provider: "openai", models: [{ id: modelId }] });
+    faux.setResponses(steps(helpers).map(recorded) as never);
+    const base = createModels();
+    base.setProvider(faux.provider);
+    await resetPiRuntime({ models: createMikeModels(base), storage: new MemoryStorage() });
+    return {
+        requests,
+        andThen: (more: (faux: FauxSteps) => unknown[]) =>
+            faux.appendResponses(more(helpers).map(recorded) as never),
+    };
+}
+
 async function seedResolvableModel() {
     const userSettings = await import("../../modules/user/user.settings.js");
     vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({

@@ -105,9 +105,8 @@ export type StreamChatParams = {
      */
     requireTools?: boolean;
     /**
-     * AI SDK reasoning effort. Bulk extraction jobs should leave this unset;
-     * the SDK adapter maps an omitted level to "none" to save tokens and
-     * latency.
+     * Reasoning effort. Bulk extraction jobs should leave this unset; the
+     * runtime maps an omitted level to "off" to save tokens and latency.
      */
     reasoning?: ReasoningLevel;
     abortSignal?: AbortSignal;

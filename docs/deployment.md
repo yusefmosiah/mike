@@ -102,8 +102,18 @@ Use:
   [Running the backend image](#running-the-backend-image));
 - the Supabase project URL for backend `SUPABASE_URL`;
 - the anon/publishable key for backend `SUPABASE_PUBLISHABLE_KEY`;
-- the service-role key for backend `SUPABASE_SECRET_KEY`; and
+- the service-role key for backend `SUPABASE_SECRET_KEY`;
+- a direct Postgres connection string for backend `DATABASE_URL` (see below);
+  and
 - the internal Mike backend origin for frontend `API_BASE_URL`.
+
+Chat runs on Pi Durable, which keeps every conversation's model transcript, and
+any turn in flight, in its own schema of the same database (`pi_durable`, or
+`PI_DURABLE_SCHEMA`). The backend creates the schema on first use. It needs a
+direct, session-mode connection, not a transaction pooler, because it holds an
+advisory lock on the schema for as long as it runs. Run one backend process per
+database. A second one cannot take the lock, and its chat turns fail. A turn
+interrupted by a restart or deploy resumes when the backend starts again.
 
 Set backend `API_PUBLIC_URL` to the browser-reachable frontend gateway, including
 its `/api` prefix (for example, `https://app.example.com/api`). OAuth providers,

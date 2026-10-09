@@ -16,6 +16,7 @@ const validProduction = {
   SUPABASE_URL: "https://project.supabase.co",
   SUPABASE_PUBLISHABLE_KEY: "publishable-key",
   SUPABASE_SECRET_KEY: "service-role-key",
+  DATABASE_URL: "postgres://mike@db.example.test:5432/mike",
   FRONTEND_URL: "https://app.example.test",
   API_PUBLIC_URL: "https://app.example.test/api",
 } as NodeJS.ProcessEnv;
@@ -48,6 +49,19 @@ describe("runtime authentication configuration", () => {
     ).toThrow(
       /FRONTEND_URL is required in production\n- API_PUBLIC_URL is required in production\n\n.*set NODE_ENV=development/s,
     );
+  });
+
+  it("requires the chat runtime's Postgres connection, under either name", () => {
+    expect(() =>
+      validateRuntimeConfiguration({ ...validProduction, DATABASE_URL: undefined }),
+    ).toThrow(/DATABASE_URL is required/);
+    expect(() =>
+      validateRuntimeConfiguration({
+        ...validProduction,
+        DATABASE_URL: undefined,
+        PI_DURABLE_DATABASE_URL: "postgres://mike@db.example.test:5432/mike",
+      }),
+    ).not.toThrow();
   });
 
   it("does not suggest NODE_ENV when only non-production settings are wrong", () => {

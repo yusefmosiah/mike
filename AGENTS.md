@@ -148,9 +148,11 @@ helpers in `frontend/src/app/lib/userFacingError.ts` for unexpected failures.
   state local and update producer/consumer tests when changing a wire payload.
 - Authentication and other request middleware live in
   `backend/src/middleware/`.
-- LLM provider creation is centralized in
-  `backend/src/lib/llm/providers.ts`; shared AI SDK behavior lives alongside it
-  in `backend/src/lib/llm/`.
+- Every model call goes through `backend/src/lib/llm/index.ts`, which runs on
+  Pi Durable and pi-ai (`backend/src/lib/llm/pi/`): `providers.mts` maps
+  Mike's model ids, keys, egress, attestation and local-model tolerance onto
+  pi-ai; `runtime.mts` is the durable chat loop. Chat turns need a direct
+  Postgres connection (`DATABASE_URL`).
 - Backend unit and integration tests live under `backend/src/__tests__/` or
   beside the relevant module as `*.test.ts`.
 

@@ -12,7 +12,7 @@ import type { NormalizedToolCall } from "./types";
 // object inside <tool_call> markers, an XML-ish <function=name> block, a
 // DeepSeek DSML invoke, or a bare map whose single key is the tool name.
 // Hosted providers never need any of it, so this module is only wired up for
-// endpoints the registry marks as tolerant (see localModelMiddleware.ts).
+// endpoints the registry marks as tolerant (see tolerantMessage in pi/providers.mts).
 //
 // Everything here is pure text handling: no transport, no provider SDK.
 

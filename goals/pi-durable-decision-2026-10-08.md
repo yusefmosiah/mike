@@ -135,6 +135,31 @@ skips aborted messages. Word and tabular turns are not recorded: Word needs
 its client tools to wait on durable documents (stage 4). After a restart
 their runs are stopped, so they no longer run on for no one.
 
+## The old loop is gone (stage 5, first half)
+
+Pi is the only runtime. The Vercel AI SDK loop, its provider layer, the
+local-model middleware, Mission 2's adapter compaction (`lib/compaction`) and
+the raw-stream log are deleted, along with the `ai`, `@ai-sdk/*` and
+`@openrouter/ai-sdk-provider` packages. Pi's own compaction applies to every
+chat: it compacts above `contextWindow - 16k` and keeps about 20k recent tokens
+verbatim. Chat needs `DATABASE_URL` (a direct session-mode Postgres
+connection), which startup now requires.
+
+Removing the old loop showed several behaviors that only it had. They now live
+in the pi-ai wrapper or the runtime, each with a test:
+- the strict-private-mode egress gate on every model request;
+- first-chunk and between-chunk stall limits, reported as the provider having
+  stopped responding;
+- provider failures classified (a rejected key, out of credits, rate limited)
+  with their HTTP status, both for turns and for titles;
+- a failing tool batch (the `ask_inputs` pause) ends the turn with no further
+  model request;
+- configured endpoints send `max_tokens` unless they declare otherwise;
+- an omitted reasoning level means off for bulk work.
+
+Persisted tool schemas are now stored as plain JSON. Before that fix they
+failed to save, so a resumed tool call would have found no tool.
+
 ## Remaining limits
 
 - Word add-in and tabular-review turns end with a restart (their runs are
@@ -145,9 +170,13 @@ their runs are stopped, so they no longer run on for no one.
   configured endpoints (covered by tests against a local OpenAI-compatible
   server).
 - `chat_messages` is still written as the UI projection, so there are two stores.
-- On the Pi path Pi's own compaction applies; Mission 2's adapter compaction does
-  not. If B is chosen, Mission 2 becomes the legacy path's fix and is retired with
-  that path.
+- One backend process per database: the transcript schema is held by a session
+  advisory lock.
+- Pi's compaction thresholds are harness-wide. A model with a context window
+  under about 36k tokens (some local models) compacts badly; per-model policy
+  needs an upstream setting.
+- Pi retries a failed generation up to three times, so a provider that keeps
+  stalling holds a turn for several stall periods before it fails.
 - Entries are immutable by Pi's contract, but the table does not enforce it, and
   tasks, submissions and "latest" documents are upserted. The audit journal
   (trigger, hash chain, anchoring) is ours in every option.

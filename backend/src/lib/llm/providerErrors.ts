@@ -5,9 +5,9 @@ type ProviderContext = { label: string; modelId: string };
 
 type ApiCallErrorLike = Error & { statusCode: number; responseBody?: string };
 
-// The AI SDK is ESM-only here, so match its error shapes rather than importing
-// APICallError / RetryError classes. Retried failures (e.g. 429s) arrive as a
-// RetryError whose status code lives on `lastError`.
+// Match error shapes rather than classes: a provider failure carries
+// `statusCode` and `responseBody` (pi/providers.mts providerError builds one
+// from pi-ai's error text), and a retry wrapper keeps it on `lastError`.
 function findApiCallError(error: unknown): ApiCallErrorLike | null {
   if (!(error instanceof Error)) return null;
   if (typeof (error as Partial<ApiCallErrorLike>).statusCode === "number") {
@@ -19,7 +19,7 @@ function findApiCallError(error: unknown): ApiCallErrorLike | null {
 
 /**
  * The HTTP status a model provider answered with, when `error` is the
- * provider's answer (an AI SDK APICallError, or a RetryError around one);
+ * provider's answer (or a retry wrapper around one);
  * null for anything else — our own bugs, network failures, DB errors.
  */
 export function providerFailureStatus(error: unknown): number | null {
@@ -52,8 +52,8 @@ function errorMessage(error: unknown, label: string): string {
   return `${label} stream failed.`;
 }
 
-// The AI SDK's own silence limits (`timeout.firstChunkMs` / `chunkMs`) abort
-// the step with a TimeoutError whose message names the limit.
+// The provider relay's silence limits (`firstChunkMs` / `chunkMs`) end the
+// request with an error whose message names the limit.
 const STALL_PATTERN = /\b(?:first chunk|chunk) timeout of \d+ms exceeded/i;
 
 /**
@@ -80,7 +80,7 @@ export function asProviderStallError(
  * Key and access failures become `UserFacingError`s so the user is told what
  * to change rather than to "try again". Classification has to happen here,
  * before the error is flattened: the status code and response body live on
- * the AI SDK's `APICallError`.
+ * the provider failure.
  */
 export function toProviderStreamError(
   error: unknown,

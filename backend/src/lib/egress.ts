@@ -15,7 +15,7 @@
 // Failures throw EgressSecurityError and MUST stay loud: no fallback, no
 // retry, no silently skipped request.
 //
-// Callers: lib/llm/aiSdk.ts gates every model request before its fetch, and
+// Callers: lib/llm/pi/providers.mts gates every model request before it starts, and
 // modules/audio/audio.service.ts gates the STT/TTS operator requests.
 
 import dns from "node:dns/promises";

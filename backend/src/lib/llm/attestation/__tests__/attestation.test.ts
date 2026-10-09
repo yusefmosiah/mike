@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Mock } from "vitest";
 
 import {
     drainReceiptsSince,
@@ -9,7 +8,6 @@ import {
     verifyAttestation,
     type FetchLike,
 } from "../index";
-import { streamWithProvider } from "../../providers";
 import { getConfiguredModel, resetModelRegistryCache } from "../../registry";
 
 const originalConfig = process.env.MIKE_MODEL_CONFIG_JSON;
@@ -24,24 +22,6 @@ function jsonResponse(body: unknown, status = 200): Response {
         status,
         headers: { "Content-Type": "application/json" },
     });
-}
-
-function streamResponse(chunks: unknown[]): Response {
-    const body = `${chunks
-        .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
-        .join("")}data: [DONE]\n\n`;
-    return new Response(body, {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-    });
-}
-
-function requestUrl(input: string | URL | Request): string {
-    return input instanceof Request ? input.url : String(input);
-}
-
-function fetchedUrls(fetchMock: Mock<FetchLike>): string[] {
-    return fetchMock.mock.calls.map(([input]) => requestUrl(input));
 }
 
 afterEach(() => {
@@ -428,180 +408,5 @@ describe("configured-model attestation parsing", () => {
                 `expected rejection for ${JSON.stringify(attestation)}`,
             ).toBeNull();
         }
-    });
-});
-
-describe("attested transport", () => {
-    it("throws before any model fetch when verification fails", async () => {
-        configureModels([
-            {
-                id: "dgx-verify-fails",
-                provider: "openai-compatible",
-                location: "cloud",
-                baseUrl: "https://dgx.test/v1",
-                attestation: {
-                    endpoint: "https://verifier.test",
-                    expectedMeasurement: "measurement-1",
-                },
-            },
-        ]);
-        const fetchMock = vi.fn<FetchLike>(async (input) => {
-            const url = requestUrl(input);
-            if (url.startsWith("https://verifier.test/")) {
-                return jsonResponse({ error: "attestation unavailable" }, 503);
-            }
-            throw new Error(`model fetch must not happen, got ${url}`);
-        });
-        vi.stubGlobal("fetch", fetchMock);
-
-        await expect(
-            streamWithProvider({
-                model: "dgx-verify-fails",
-                systemPrompt: "Be brief.",
-                messages: [{ role: "user", content: "Hello" }],
-            }),
-        ).rejects.toThrow(
-            "Attested inference unavailable: verifier returned HTTP 503",
-        );
-
-        expect(fetchedUrls(fetchMock)).toHaveLength(1);
-        expect(fetchedUrls(fetchMock)[0]).toBe(
-            "https://verifier.test/attestation",
-        );
-        expect(queryReceipts({ modelId: "dgx-verify-fails" })).toHaveLength(0);
-    });
-
-    it("fails closed on a measurement mismatch before fetching", async () => {
-        configureModels([
-            {
-                id: "dgx-measurement-mismatch",
-                provider: "openai-compatible",
-                location: "cloud",
-                baseUrl: "https://dgx.test/v1",
-                attestation: {
-                    endpoint: "https://verifier.test",
-                    expectedMeasurement: "wanted-measurement",
-                },
-            },
-        ]);
-        const fetchMock = vi.fn<FetchLike>(async (input) => {
-            const url = requestUrl(input);
-            if (url.startsWith("https://verifier.test/")) {
-                return jsonResponse({ measurement: "other-measurement" });
-            }
-            throw new Error(`model fetch must not happen, got ${url}`);
-        });
-        vi.stubGlobal("fetch", fetchMock);
-
-        await expect(
-            streamWithProvider({
-                model: "dgx-measurement-mismatch",
-                systemPrompt: "Be brief.",
-                messages: [{ role: "user", content: "Hello" }],
-            }),
-        ).rejects.toThrow(
-            "Attested inference unavailable: measurement mismatch",
-        );
-
-        expect(
-            fetchedUrls(fetchMock).filter((url) => url.includes("dgx.test")),
-        ).toHaveLength(0);
-    });
-
-    it("verifies, records a receipt, and fetches the model exactly once", async () => {
-        configureModels([
-            {
-                id: "dgx-attested",
-                provider: "openai-compatible",
-                location: "cloud",
-                baseUrl: "https://dgx.test/v1",
-                attestation: {
-                    endpoint: "https://verifier.test",
-                    expectedMeasurement: "measurement-1",
-                },
-            },
-        ]);
-        const fetchMock = vi.fn<FetchLike>(async (input) => {
-            const url = requestUrl(input);
-            if (url.startsWith("https://verifier.test/")) {
-                return jsonResponse({
-                    measurement: "measurement-1",
-                    instance_id: "endpoint-1",
-                    verifier_version: "v3",
-                });
-            }
-            if (url.startsWith("https://dgx.test/")) {
-                return streamResponse([
-                    { choices: [{ delta: { content: "attested answer" } }] },
-                    {
-                        choices: [{ delta: {}, finish_reason: "stop" }],
-                        usage: {
-                            prompt_tokens: 3,
-                            completion_tokens: 2,
-                            total_tokens: 5,
-                        },
-                    },
-                ]);
-            }
-            throw new Error(`unexpected fetch ${url}`);
-        });
-        vi.stubGlobal("fetch", fetchMock);
-
-        const result = await streamWithProvider({
-            model: "dgx-attested",
-            systemPrompt: "Be brief.",
-            messages: [{ role: "user", content: "Hello" }],
-        });
-
-        expect(result.fullText).toBe("attested answer");
-        const urls = fetchedUrls(fetchMock);
-        expect(
-            urls.filter((url) => url.includes("verifier.test")),
-        ).toHaveLength(1);
-        expect(urls.filter((url) => url.includes("dgx.test"))).toHaveLength(1);
-        const receipts = queryReceipts({ modelId: "dgx-attested" });
-        expect(receipts).toHaveLength(1);
-        expect(receipts[0]).toMatchObject({
-            endpointId: "endpoint-1",
-            measurement: "measurement-1",
-            verifierVersion: "v3",
-        });
-        expect(receipts[0]?.requestId).toBeTruthy();
-    });
-
-    it("leaves non-attested configured models on the plain path", async () => {
-        configureModels([
-            {
-                id: "dgx-plain",
-                provider: "openai-compatible",
-                location: "cloud",
-                baseUrl: "https://dgx.test/v1",
-            },
-        ]);
-        const fetchMock = vi.fn<FetchLike>(async (input) => {
-            const url = requestUrl(input);
-            if (url.startsWith("https://dgx.test/")) {
-                return streamResponse([
-                    { choices: [{ delta: { content: "plain answer" } }] },
-                    { choices: [{ delta: {}, finish_reason: "stop" }] },
-                ]);
-            }
-            throw new Error(`unexpected fetch ${url}`);
-        });
-        vi.stubGlobal("fetch", fetchMock);
-
-        const result = await streamWithProvider({
-            model: "dgx-plain",
-            systemPrompt: "Be brief.",
-            messages: [{ role: "user", content: "Hello" }],
-        });
-
-        expect(result.fullText).toBe("plain answer");
-        const urls = fetchedUrls(fetchMock);
-        expect(urls.filter((url) => url.includes("verifier.test"))).toHaveLength(
-            0,
-        );
-        expect(urls.filter((url) => url.includes("dgx.test"))).toHaveLength(1);
-        expect(queryReceipts({ modelId: "dgx-plain" })).toHaveLength(0);
     });
 });

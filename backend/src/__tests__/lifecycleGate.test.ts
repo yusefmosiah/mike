@@ -74,6 +74,8 @@ describe("document-lifecycle boot gate", () => {
             SUPABASE_URL: url,
             SUPABASE_SECRET_KEY: "not-a-real-key",
             SUPABASE_PUBLISHABLE_KEY: "not-a-real-key",
+            // Never opened: the gate refuses before the chat runtime starts.
+            DATABASE_URL: "postgres://unused@127.0.0.1:9/unused",
         });
         expect(output).toMatch(/document-lifecycle migration is not applied/);
         expect(output).not.toMatch(/Mike backend running on port/);

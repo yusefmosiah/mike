@@ -306,6 +306,7 @@ jobs:
           API_URL=$(supabase status -o json | jq -r '.API_URL')
           ANON_KEY=$(supabase status -o json | jq -r '.ANON_KEY')
           SERVICE_KEY=$(supabase status -o json | jq -r '.SERVICE_ROLE_KEY')
+          DB_URL=$(supabase status -o json | jq -r '.DB_URL')
           # dotenv is last-wins: start from the committed example (so any key we
           # don't override keeps a sane placeholder) then append the real values.
           cp backend/.env.example backend/.env
@@ -316,6 +317,8 @@ jobs:
             echo "SUPABASE_URL=$API_URL"
             echo "SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
             echo "SUPABASE_SECRET_KEY=$SERVICE_KEY"
+            # Chat transcripts (Pi Durable) live in the same database.
+            echo "DATABASE_URL=$DB_URL"
             # Both secrets are consumed lazily by download-token signing and API-key
             # encryption; supply CI dummies well over any length floor.
             echo "DOWNLOAD_SIGNING_SECRET=ci-download-signing-secret-0123456789abcdef"

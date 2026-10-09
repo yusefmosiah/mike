@@ -60,7 +60,7 @@ const STANDARD_REASONING_LEVELS: readonly ReasoningLevel[] =
     REASONING_LEVELS.filter((level) => level !== "max");
 const GPT_56_REASONING_LEVELS: readonly ReasoningLevel[] = REASONING_LEVELS;
 
-/** Explicit AI SDK reasoning levels supported by the selected model family. */
+/** Explicit reasoning levels supported by the selected model family. */
 export function reasoningLevelsForModel(
     model: string,
 ): readonly ReasoningLevel[] {

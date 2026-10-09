@@ -12,7 +12,7 @@
 // which exists in the shared vocabulary.
 
 import type { Db } from "../../lib/supabase";
-import { ollamaAuthHeaders as authHeaders } from "../../lib/llm/providers";
+import { ollamaAuthHeaders as authHeaders } from "../../lib/llm/endpoints";
 import { isSupportedOpenCodeGoModel } from "../../lib/llm/models";
 import { configuredEndpointSummaries } from "../../lib/llm/registry";
 import { PrivateModeError, isStrictPrivateMode } from "../../lib/privateMode";

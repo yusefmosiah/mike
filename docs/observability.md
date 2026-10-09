@@ -221,7 +221,7 @@ the backend, Next server/edge, browser, and all Word add-in entries.
   minimization, not a claim of anonymity.
 - Finite failure codes, dependency HTTP status, storage operation, file type,
   capture source, build mode and `diagnostics_version` remain. Wrapped and
-  aggregate causes and AI SDK `lastError` are inspected locally with bounded
+  aggregate causes and retry wrappers' `lastError` are inspected locally with bounded
   traversal. Known provider error classes become a finite `provider_error`
   category; response bodies, prompts and credentials are never retained.
   Browser fetch failures include only `network_state` (online/offline/unknown)

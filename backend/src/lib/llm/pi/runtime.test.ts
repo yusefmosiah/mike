@@ -282,9 +282,12 @@ describe("Pi runtime: turns, branches and memory", () => {
   it("a turn cut off by a restart is driven again: the read reruns, the input is not sent twice", async () => {
     const durableTurn = { context: { surface: "chat", note: "how to drive me again" } };
     const identity = { user: "u1", parent: null, assistant: "a1" };
+    // Built in code like Mike's own schemas: not strict JSON until stored.
+    const tools = [{ ...readDocument, function: { ...readDocument.function, strict: undefined } }] as OpenAIToolSchema[];
     // The process dies while the tool runs: the request never settles.
     void turn([{ role: "user", content: "Please read NDA" }], identity, {
       durableTurn,
+      tools,
       runTools: () => new Promise(() => undefined),
     }).catch(() => undefined);
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -402,6 +405,20 @@ describe("Pi runtime: turns, branches and memory", () => {
         durableTurn: { context: {}, resume: true },
       }),
     ).rejects.toThrow("no longer in progress");
+  });
+
+  it("a tool that ends the turn (an ask_inputs pause) stops it: no further model request, the error reaches the caller", async () => {
+    class Pause extends Error {}
+    const sent = requests.length;
+    await expect(
+      turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {
+        runTools: async () => {
+          throw new Pause("waiting for the user's answer");
+        },
+      }),
+    ).rejects.toBeInstanceOf(Pause);
+    // Only the request that asked for the tool; nothing after the pause.
+    expect(requests.length - sent).toBe(1);
   });
 
   it("stopping a turn stops a tool that is still running and leaves no tool task behind", async () => {

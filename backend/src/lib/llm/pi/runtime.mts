@@ -1,4 +1,4 @@
-// Mike's model loop on Pi Durable (MIKE_LLM_RUNTIME=pi).
+// Mike's model loop, on Pi Durable and pi-ai.
 //
 // One Harness per process over the Postgres adapter, in its own schema of
 // Mike's database. Each Mike chat maps to a lineage of Pi conversations, keyed
@@ -10,17 +10,20 @@
 // throwaway in-memory Harness.
 //
 // Every Mike model id resolves through ./providers.mts to pi-ai. This sits
-// behind `streamChatWithTools`, so everything above it (prompt building,
+// behind `streamChatWithTools`; everything above it (prompt building,
 // guardrails, client tools, the dispatcher, citations, persistence of
-// chat_messages) is unchanged. Tools still execute through the request's
-// `runTools`; a call that outlives its request is answered as interrupted.
+// chat_messages) is Mike's. Tools execute through the live request's
+// `runTools`. A chat turn records how to drive it again, so after a restart
+// its run resumes into a new request; reads replay, writes are answered as
+// interrupted.
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord";
 import type { ImageContent, Message, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
 import { tierForTool } from "../../guardrails/policy.js";
+import { databaseUrl } from "../../runtimeConfig.js";
 import { getConfiguredModel, tolerateTextToolCalls } from "../registry.js";
-import { createMikeModels, tolerantMessage, useRequestKeys, type MikeModels } from "./providers.mjs";
+import { createMikeModels, providerError, tolerantMessage, useRequestKeys, type MikeModels } from "./providers.mjs";
 import {
   configure,
   createRegistry,
@@ -127,6 +130,12 @@ type TurnBinding = {
   maxRounds: number;
   /** The first entry this turn can write; rounds are counted from here. */
   firstEntry: EntryId;
+  /**
+   * End the turn with this error: a failing runTools (the ask_inputs pause
+   * among them) stops the run before another model request, and the turn
+   * rejects with the error, as Mike's dispatcher expects.
+   */
+  halt: (error: unknown) => void;
 };
 
 /**
@@ -182,7 +191,7 @@ type Runtime = {
   bindings: Bindings;
 };
 
-/** Mike's default tool-round budget for a turn, as in the AI SDK loop. */
+/** Mike's default tool-round budget for a turn. */
 const DEFAULT_MAX_ROUNDS = 16;
 
 let opening: Promise<Runtime> | undefined;
@@ -210,8 +219,8 @@ export async function resetPiRuntime(next?: RuntimeOverrides): Promise<void> {
 
 async function openStorage(): Promise<Storage> {
   if (overrides?.storage) return overrides.storage;
-  const connectionString = process.env.PI_DURABLE_DATABASE_URL;
-  if (!connectionString) throw new Error("PI_DURABLE_DATABASE_URL is not set");
+  const connectionString = databaseUrl();
+  if (!connectionString) throw new Error("DATABASE_URL is not set");
   const admin = new pg.Client({ connectionString });
   await admin.connect();
   try {
@@ -280,7 +289,11 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
     void harness
       .commit(async (tx) => {
         const known = await tx.doc(ToolSchemas);
-        for (const schema of schemas) known[schema.function.name] = schema as unknown as StoredToolSchema;
+        // Mike's schemas are built in code and may hold `undefined` fields;
+        // the stored copy must be plain JSON.
+        for (const schema of schemas) {
+          known[schema.function.name] = JSON.parse(JSON.stringify(schema)) as StoredToolSchema;
+        }
       }, background)
       .catch((error: unknown) => console.error("[pi] failed to persist tool schemas", error));
   };
@@ -364,7 +377,14 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
       }
       const call: NormalizedToolCall = { id: api.callId, name, input: args as Record<string, unknown> };
       binding.onToolCallStart?.(call);
-      const [result] = await untilAborted(binding.runTools([call]), context.abortSignal);
+      let result;
+      try {
+        [result] = await untilAborted(binding.runTools([call]), context.abortSignal);
+      } catch (error) {
+        if (context.abortSignal?.aborted) throw error;
+        binding.halt(error);
+        return { content: [{ type: "text", text: "The turn ended here." }], isError: true, control: { terminate: true } };
+      }
       return { content: [{ type: "text", text: result?.content ?? "" }] };
     },
   });
@@ -616,7 +636,9 @@ function thinkingLevel(level: ReasoningLevel | undefined): ModelThinkingLevel {
     case "max":
       return level;
     default:
-      return "high";
+      // Omitted: bulk work (extraction, the memory curator) saves the tokens
+      // and latency. Interactive chat always passes its level.
+      return "off";
   }
 }
 
@@ -699,6 +721,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       };
     }, background);
   }
+  let halted: { error: unknown } | undefined;
   if (params.runTools) {
     bindings.set(conversation.id, {
       runTools: params.runTools,
@@ -706,6 +729,12 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       onToolCallStart: callbacks.onToolCallStart,
       maxRounds: params.maxIterations ?? DEFAULT_MAX_ROUNDS,
       firstEntry,
+      halt: (error) => {
+        if (halted) return;
+        halted = { error };
+        // Not awaited: the abort waits for this very tool to return.
+        void conversation.abort(background).catch(() => undefined);
+      },
     });
   }
   let fullText = "";
@@ -819,7 +848,11 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       background,
     );
     const settled = await submission.wait(background);
+    if (halted) throw halted.error;
     if (settled.status !== "done" || settled.type !== "input") {
+      if (settled.reason === "model_error" && settled.detail !== undefined) {
+        throw providerError(params.model, typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail));
+      }
       throw new Error(`The answer could not be completed (${settled.reason ?? "unanswered"})`);
     }
     if (params.turn && params.conversationId) {
@@ -924,7 +957,7 @@ const THINKING_HEADROOM = 4096;
 
 /**
  * One prompt, one answer, no tools and no transcript: titles, extraction, the
- * guardrail classifier. Reasoning stays off, as it was on the AI SDK path.
+ * guardrail classifier. Reasoning stays off where the model allows it.
  */
 export async function completeTextOnPi(params: {
   model: string;
@@ -961,7 +994,7 @@ export async function completeTextOnPi(params: {
       },
     );
     if (message.stopReason === "error" || message.stopReason === "aborted") {
-      throw new Error(message.errorMessage ?? "The model request failed.");
+      throw message.errorMessage ? providerError(params.model, message.errorMessage) : new Error("The model request failed.");
     }
     const configured = getConfiguredModel(params.model);
     if (configured && tolerateTextToolCalls(configured)) message = tolerantMessage(message);

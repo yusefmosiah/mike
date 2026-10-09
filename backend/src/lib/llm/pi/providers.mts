@@ -25,9 +25,13 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { vercelAIGatewayProvider } from "@earendil-works/pi-ai/providers/vercel-ai-gateway";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { recordReceipt, verifyAttestation } from "../attestation/index.js";
+import { assertEgressAllowed } from "../../egress.js";
+import { toProviderStreamError } from "../providerErrors.js";
+import { streamChunkTimeouts } from "../../runtimeConfig.js";
 import {
   OPENCODE_GO_BASE_URL,
   OPENROUTER_BASE_URL,
+  ROUTER_LABELS,
   VERCEL_GATEWAY_BASE_URL,
   ollamaAuthHeaders,
   ollamaBaseUrl,
@@ -92,7 +96,11 @@ export type MikeModels = {
   resolve(mikeModel: string): ModelRef;
 };
 
-export function createMikeModels(base: MutableModels = createModels()): MikeModels {
+export function createMikeModels(
+  base: MutableModels = createModels(),
+  options: { chunkTimeouts?: { firstChunkMs: number; chunkMs: number } } = {},
+): MikeModels {
+  const timeouts = options.chunkTimeouts ?? streamChunkTimeouts();
   for (const provider of [
     anthropicProvider(),
     googleProvider(),
@@ -167,7 +175,9 @@ export function createMikeModels(base: MutableModels = createModels()): MikeMode
         baseUrl: configured.baseUrl.replace(/\/+$/, ""),
         route: { mikeProvider: "openai-compatible", configured },
         vision: configured.supportsVision === true,
-        maxTokensField: configured.maxTokensField,
+        // Mike's contract: max_tokens unless the endpoint declares otherwise
+        // (pi-ai's own default is max_completion_tokens).
+        maxTokensField: configured.maxTokensField ?? "max_tokens",
       });
     }
     const provider = providerForModel(mikeModel);
@@ -251,22 +261,22 @@ export function createMikeModels(base: MutableModels = createModels()): MikeMode
     const route = routes.get(model.provider);
     const request = withRequest(model, options);
     const configured = route?.configured;
-    if (!configured?.attestation && !(configured && tolerateTextToolCalls(configured))) {
-      return base.streamSimple(model, context, request);
-    }
-    // Attested and tolerant endpoints do work before (or instead of) streaming, so
-    // their events are relayed through a stream of our own.
+    // Every request first passes the egress gate, and attested and tolerant
+    // endpoints do more work before (or instead of) streaming, so events are
+    // relayed through a stream of our own.
     const out = createAssistantMessageEventStream();
     void (async () => {
       try {
-        if (configured.attestation) await attest(configured);
-        if (tolerateTextToolCalls(configured) && (context.tools?.length ?? 0) > 0) {
+        // Under STRICT_PRIVATE_MODE a model host outside the segmented network
+        // is refused here, before any bytes or credentials leave.
+        await assertEgressAllowed(model.baseUrl, "llm");
+        if (configured?.attestation) await attest(configured);
+        if (configured && tolerateTextToolCalls(configured) && (context.tools?.length ?? 0) > 0) {
           const message = await base.completeSimple(model, context, request);
           replay(out, tolerantMessage(message));
           return;
         }
-        for await (const event of base.streamSimple(model, context, request)) out.push(event);
-        out.end();
+        await relayWatched(out, model, (signal) => base.streamSimple(model, context, { ...request, signal }), request.signal, timeouts);
       } catch (error) {
         const failed = failure(model, error);
         out.push({ type: "error", reason: "error", error: failed });
@@ -288,6 +298,54 @@ export function createMikeModels(base: MutableModels = createModels()): MikeMode
     },
   });
   return { models, resolve };
+}
+
+/** How Mike names a model's provider to the user. */
+function providerLabel(mikeModel: string): string {
+  const configured = getConfiguredModel(mikeModel);
+  if (configured) return configured.label || configured.id;
+  const provider = providerForModel(mikeModel);
+  switch (provider) {
+    case "claude":
+      return "Claude";
+    case "gemini":
+      return "Gemini";
+    case "openai":
+      return "OpenAI";
+    case "ollama":
+      return "Ollama";
+    case "openrouter":
+    case "vercel":
+    case "opencode-go":
+      return ROUTER_LABELS[provider];
+    default:
+      return String(provider);
+  }
+}
+
+/**
+ * The HTTP status a provider answered with, read from pi-ai's error text: the
+ * OpenAI and Anthropic SDKs lead with it ("401 Incorrect API key"), pi-ai's
+ * formatter writes "400: <body>", and Google's body carries `"code": 400`.
+ */
+function statusIn(text: string): number | undefined {
+  const lead = /^\s*(?:[^:(\n]*\()?([1-5]\d\d)\)?(?::|\s)/.exec(text);
+  const body = /"(?:code|status)"\s*:\s*([1-5]\d\d)\b/.exec(text);
+  const value = Number(lead?.[1] ?? body?.[1]);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * A failed model request as the error Mike's callers classify: a rejected key
+ * or an access, credit or rate-limit failure becomes a user-facing message,
+ * and the provider's status rides along for logging (`providerFailureStatus`).
+ */
+export function providerError(mikeModel: string, text: string): Error {
+  const statusCode = statusIn(text);
+  const failure = statusCode !== undefined
+    ? Object.assign(new Error(text), { statusCode, responseBody: text })
+    : new Error(text);
+  return toProviderStreamError(failure, { label: providerLabel(mikeModel), modelId: mikeModel });
 }
 
 const KEYLESS = "mike-keyless-endpoint";
@@ -315,6 +373,58 @@ async function attest(configured: ConfiguredModel): Promise<void> {
     verifierVersion: verification.verifierVersion,
     requestId: crypto.randomUUID(),
   });
+}
+
+/**
+ * Relay a provider stream, ending it when the provider goes quiet: no output
+ * within `firstChunkMs` of the request (a reasoning model may think silently
+ * for a while, so it is generous), or a gap over `chunkMs` once output flows.
+ * The failure names the limit, which Mike reports as the provider having
+ * stopped responding; the caller's own abort passes through unchanged.
+ */
+async function relayWatched(
+  out: ReturnType<typeof createAssistantMessageEventStream>,
+  model: Model<Api>,
+  open: (signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>,
+  callerSignal: AbortSignal | undefined,
+  limits: { firstChunkMs: number; chunkMs: number },
+): Promise<void> {
+  const controller = new AbortController();
+  const forward = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) forward();
+  else callerSignal?.addEventListener("abort", forward, { once: true });
+  let stalled: Error | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (ms: number, limit: string) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      stalled = new Error(`${limit} timeout of ${ms}ms exceeded`);
+      controller.abort(stalled);
+    }, ms);
+  };
+  arm(limits.firstChunkMs, "first chunk");
+  try {
+    for await (const event of open(controller.signal)) {
+      if (stalled) break;
+      if (event.type === "done" || event.type === "error") {
+        clearTimeout(timer);
+        out.push(event);
+        continue;
+      }
+      if (event.type !== "start") arm(limits.chunkMs, "chunk");
+      out.push(event);
+    }
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", forward);
+  }
+  if (stalled) {
+    const failed = failure(model, stalled);
+    out.push({ type: "error", reason: "error", error: failed });
+    out.end(failed);
+    return;
+  }
+  out.end();
 }
 
 function failure(model: Model<Api>, error: unknown): AssistantMessage {

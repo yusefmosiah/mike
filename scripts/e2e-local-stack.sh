@@ -89,6 +89,8 @@ set_kv() {
 set_kv .env SUPABASE_URL "$API_URL"
 set_kv .env SUPABASE_PUBLISHABLE_KEY "$ANON_KEY"
 set_kv .env SUPABASE_SECRET_KEY "$SERVICE_KEY"
+# Chat transcripts (Pi Durable) live in the same database.
+set_kv .env DATABASE_URL "$DB_URL"
 # The suite fires well over the backend's default 300-requests/15-min general
 # cap in one run; once tripped every call 429s and profile/list waits time out.
 # Same overrides CI uses — e2e is not testing throttling.

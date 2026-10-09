@@ -67,8 +67,9 @@ Usable declarations are returned by `GET /models/configured` and appear in the
 chat, tabular-review, and model-preference selectors. The response contains
 only display metadata; endpoint URLs and credentials remain server-side.
 
-Declared models are served through the same AI SDK provider layer as
-everything else, so they inherit its transport, retries and streaming.
+Declared models are served through the same pi-ai provider layer as
+everything else (`backend/src/lib/llm/pi/providers.mts`), so they inherit its
+transport, retries, egress gate and streaming.
 
 The compatible provider sends the output limit as `max_tokens` by default,
 which works with most compatible servers. Some newer OpenAI models reject that

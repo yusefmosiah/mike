@@ -125,8 +125,8 @@ export function streamRunDeadlines(env: NodeJS.ProcessEnv = process.env): {
 }
 
 /**
- * Silence limits on the MODEL's response stream, handed to the AI SDK's
- * `streamText({ timeout })`. `firstChunkMs` bounds the wait for the first
+ * Silence limits on the MODEL's response stream, enforced by the provider
+ * relay in lib/llm/pi/providers.mts. `firstChunkMs` bounds the wait for the first
  * output of each step (a reasoning model may think silently for a while, so it
  * is generous); `chunkMs` bounds the gap between chunks once output is
  * flowing, and re-arms on every chunk. They catch a stalled provider at the
@@ -198,6 +198,15 @@ export function authHandoffEncryptionSecret(
 }
 
 /**
+ * The direct Postgres connection the chat runtime (Pi Durable) keeps its
+ * transcripts in. PI_DURABLE_DATABASE_URL is the name it had while it was
+ * opt-in.
+ */
+export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.DATABASE_URL?.trim() || env.PI_DURABLE_DATABASE_URL?.trim() || undefined;
+}
+
+/**
  * Fail before the HTTP listener starts when the authentication boundary is not
  * usable. This deliberately lives outside app.ts so unit tests can import the
  * Express app without supplying production credentials.
@@ -217,6 +226,9 @@ export function validateRuntimeConfiguration(
   }
 
   if (session.url) parsedUrl(session.url, "SUPABASE_URL", errors);
+  if (!databaseUrl(env)) {
+    errors.push("DATABASE_URL is required (a direct Postgres connection for chat transcripts)");
+  }
 
   if (env.AUTH_HANDOFF_ENCRYPTION_SECRET?.trim()) {
     if (env.AUTH_HANDOFF_ENCRYPTION_SECRET.trim().length < 32) {

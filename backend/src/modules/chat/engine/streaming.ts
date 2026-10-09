@@ -402,7 +402,7 @@ export async function runLLMStream(params: {
   maxIterations?: number;
   buildCitations?: (fullText: string) => unknown[];
   model?: string;
-  /** AI SDK reasoning effort for this interactive request. */
+  /** Reasoning effort for this interactive request. */
   reasoning?: import("../../../lib/llm").ReasoningLevel;
   apiKeys?: import("../../../lib/llm").UserApiKeys;
   signal?: AbortSignal;
@@ -720,10 +720,9 @@ export async function runLLMStream(params: {
       systemPrompt,
       messages: chatMessages,
       tools: activeTools as OpenAIToolSchema[],
-      // Keep in step with DEFAULT_MAX_ITERATIONS in llm/aiSdk.ts. Deliberately
-      // a literal, not an import: tests mock the "../llm" barrel, and reaching
-      // past it into llm/aiSdk loads the real SDK module into suites that only
-      // ever wanted the mock, which broke unrelated tests at random.
+      // Keep in step with DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts. A literal,
+      // not an import: tests mock the "../llm" barrel, and the runtime is an
+      // ESM module loaded only on demand.
       maxIterations: params.maxIterations ?? 16,
       apiKeys,
       reasoning: params.reasoning ?? "high",
