@@ -1,63 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const { createClient } = vi.hoisted(() => ({
-  createClient: vi.fn((url: string, key: string) => ({ auth: { url, key } })),
-}));
-
-vi.mock("@supabase/supabase-js", () => ({ createClient }));
-
+import { describe, expect, it } from "vitest";
 import { DbClient } from "../db";
-import { authAdmin, createServerSupabase } from "../supabase";
-
-describe("authAdmin", () => {
-  beforeEach(() => {
-    createClient.mockClear();
-    process.env.SUPABASE_URL = `https://${crypto.randomUUID()}.supabase.test`;
-    process.env.SUPABASE_SECRET_KEY = crypto.randomUUID();
-  });
-
-  it("reuses one admin client for the same configuration", () => {
-    const first = authAdmin();
-    const second = authAdmin();
-
-    expect(second).toBe(first);
-    expect(createClient).toHaveBeenCalledTimes(1);
-    expect(createClient).toHaveBeenCalledWith(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SECRET_KEY,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      },
-    );
-  });
-
-  it("creates a new client when the configuration changes", () => {
-    const first = authAdmin();
-    process.env.SUPABASE_SECRET_KEY = crypto.randomUUID();
-
-    const second = authAdmin();
-
-    expect(second).not.toBe(first);
-    expect(createClient).toHaveBeenCalledTimes(2);
-  });
-
-  it("rejects missing server configuration", () => {
-    delete process.env.SUPABASE_URL;
-
-    expect(() => authAdmin()).toThrow(
-      "SUPABASE_URL and SUPABASE_SECRET_KEY must be set",
-    );
-    expect(createClient).not.toHaveBeenCalled();
-  });
-});
+import { createServerSupabase } from "../supabase";
 
 describe("createServerSupabase", () => {
-  it("is the shared Postgres client, not a Supabase client", () => {
+  it("is the shared Postgres client", () => {
     expect(createServerSupabase()).toBeInstanceOf(DbClient);
     expect(createServerSupabase()).toBe(createServerSupabase());
-    expect(createClient).not.toHaveBeenCalled();
   });
 });

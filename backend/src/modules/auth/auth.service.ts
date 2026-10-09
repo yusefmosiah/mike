@@ -2,17 +2,18 @@
 //
 // Service layer behind auth.routes.ts. This module owns the request-payload
 // schemas, the redirect-URL construction, and every GoTrue call the endpoints
-// make. It never touches req/res: the cookie-bearing Supabase client is
+// make. It never touches req/res: the cookie-bearing GoTrue client is
 // created by the route (that needs req/res to read and write cookies) and
 // handed in, and every function returns GoTrue's own `{ data, error }` shape
 // so the route keeps mapping failures exactly as it always has.
 //
-// There is no `db: Db` here — auth talks to Supabase GoTrue, not to the
-// application database. The cookie/session primitives themselves stay in
+// There is no `db: Db` here — auth talks to GoTrue, not to the application
+// database. The cookie/session primitives themselves stay in
 // lib/authSession and lib/authHandoff because middleware/auth depends on them.
 
 import { z } from "zod";
-import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
+import type { Session, User } from "@supabase/auth-js";
+import { browserAuthUrl, type AuthClient } from "../../lib/gotrue";
 import { consumeAuthHandoff, issueAuthHandoff } from "../../lib/authHandoff";
 
 // ---------------------------------------------------------------------------
@@ -97,28 +98,30 @@ export function buildCallbackUrl(
 // ---------------------------------------------------------------------------
 
 export function signInWithPassword(
-  client: SupabaseClient,
+  client: AuthClient,
   credentials: Credentials,
 ) {
-  return client.auth.signInWithPassword(credentials);
+  return client.signInWithPassword(credentials);
 }
 
 export function signUpWithPassword(
-  client: SupabaseClient,
+  client: AuthClient,
   credentials: Credentials,
   emailRedirectTo: string,
 ) {
-  return client.auth.signUp({
+  return client.signUp({
     ...credentials,
     options: { emailRedirectTo },
   });
 }
 
-export function startGoogleOAuth(client: SupabaseClient, redirectTo: string) {
-  return client.auth.signInWithOAuth({
+export async function startGoogleOAuth(client: AuthClient, redirectTo: string) {
+  const result = await client.signInWithOAuth({
     provider: "google",
     options: { redirectTo, skipBrowserRedirect: true },
   });
+  if (result.data.url) result.data.url = browserAuthUrl(result.data.url);
+  return result;
 }
 
 export const ssoRequestSchema = z.object({
@@ -127,18 +130,18 @@ export const ssoRequestSchema = z.object({
 });
 
 export function startSsoSignIn(
-  client: SupabaseClient,
+  client: AuthClient,
   domain: string,
   redirectTo: string,
 ) {
-  return client.auth.signInWithSSO({
+  return client.signInWithSSO({
     domain,
     options: { redirectTo, skipBrowserRedirect: true },
   });
 }
 
-export function exchangeCodeForSession(client: SupabaseClient, code: string) {
-  return client.auth.exchangeCodeForSession(code);
+export function exchangeCodeForSession(client: AuthClient, code: string) {
+  return client.exchangeCodeForSession(code);
 }
 
 /** Mint a one-shot ticket the Word add-in trades for a cookie session. */
@@ -161,85 +164,85 @@ export function consumeWordHandoff(args: {
 }
 
 export function applyHandoffSession(
-  client: SupabaseClient,
+  client: AuthClient,
   tokens: { accessToken: string; refreshToken: string },
 ) {
-  return client.auth.setSession({
+  return client.setSession({
     access_token: tokens.accessToken,
     refresh_token: tokens.refreshToken,
   });
 }
 
 export function sendPasswordReset(
-  client: SupabaseClient,
+  client: AuthClient,
   email: string,
   redirectTo: string,
 ) {
-  return client.auth.resetPasswordForEmail(email, { redirectTo });
+  return client.resetPasswordForEmail(email, { redirectTo });
 }
 
 export async function currentUser(
-  client: SupabaseClient,
+  client: AuthClient,
 ): Promise<{ user: User | null; error: unknown }> {
-  const { data, error } = await client.auth.getUser();
+  const { data, error } = await client.getUser();
   return { user: data.user, error };
 }
 
-export function signOut(client: SupabaseClient, scope: "global" | "local") {
-  return client.auth.signOut({ scope });
+export function signOut(client: AuthClient, scope: "global" | "local") {
+  return client.signOut({ scope });
 }
 
 export function updateEmail(
-  client: SupabaseClient,
+  client: AuthClient,
   email: string,
   emailRedirectTo: string,
 ) {
-  return client.auth.updateUser({ email }, { emailRedirectTo });
+  return client.updateUser({ email }, { emailRedirectTo });
 }
 
-export function updatePassword(client: SupabaseClient, password: string) {
-  return client.auth.updateUser({ password });
+export function updatePassword(client: AuthClient, password: string) {
+  return client.updateUser({ password });
 }
 
-export function listMfaFactors(client: SupabaseClient) {
-  return client.auth.mfa.listFactors();
+export function listMfaFactors(client: AuthClient) {
+  return client.mfa.listFactors();
 }
 
-export function mfaAssuranceLevel(client: SupabaseClient) {
-  return client.auth.mfa.getAuthenticatorAssuranceLevel();
+export function mfaAssuranceLevel(client: AuthClient) {
+  return client.mfa.getAuthenticatorAssuranceLevel();
 }
 
 export function enrollMfaFactor(
-  client: SupabaseClient,
+  client: AuthClient,
   friendlyName: string,
 ) {
-  return client.auth.mfa.enroll({ factorType: "totp", friendlyName });
+  return client.mfa.enroll({ factorType: "totp", friendlyName });
 }
 
 export function challengeMfaFactor(
-  client: SupabaseClient,
+  client: AuthClient,
   args: { factorId: string },
 ) {
-  return client.auth.mfa.challenge(args);
+  return client.mfa.challenge(args);
 }
 
 export function verifyMfaChallenge(
-  client: SupabaseClient,
+  client: AuthClient,
   args: { factorId: string; challengeId: string; code: string },
 ) {
-  return client.auth.mfa.verify(args);
+  return client.mfa.verify(args);
 }
 
 export function challengeAndVerifyMfa(
-  client: SupabaseClient,
+  client: AuthClient,
   args: { factorId: string; code: string },
 ) {
-  return client.auth.mfa.challengeAndVerify(args);
+  return client.mfa.challengeAndVerify(args);
 }
 
 export function unenrollMfaFactor(
-  client: SupabaseClient,
+  client: AuthClient,
   args: { factorId: string },
 ) {
-  return client.auth.mfa.unenroll(args);
+  return client.mfa.unenroll(args);
 }

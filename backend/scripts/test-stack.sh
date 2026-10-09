@@ -1,62 +1,58 @@
 #!/usr/bin/env bash
-# Run the gated stack-level integration tests against a local Supabase stack.
+# Run the gated stack-level integration tests against a real Postgres + GoTrue.
 #
-# These tests exercise the REAL stack (GoTrue auth + Postgres RLS) instead of
-# mocks. They are the harness you re-run on every Supabase image bump to prove
-# the auth↔API contract and the deny-all RLS firewall still hold.
+# These tests exercise the REAL services (GoTrue auth + Postgres) instead of
+# mocks. They are the harness you re-run on every GoTrue or Postgres bump to
+# prove the auth↔API contract and the deny-all RLS firewall still hold.
 #
-# Usage:  supabase start   # in the repo, once
-#         npm run test:stack        (from backend/)
+# Both services come from docker-compose.yml, started under their own Compose
+# project on their own ports, so the run never touches the development
+# stack's data. The project's volume persists between runs; set
+# STACK_TEST_FRESH=1 to start from an empty database.
+#
+# Usage:  npm run test:stack        (from backend/; needs Docker)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+REPO_DIR="$(cd -- "$BACKEND_DIR/.." && pwd)"
 SCHEMA_FILE="$BACKEND_DIR/schema.sql"
 
-if ! command -v supabase >/dev/null 2>&1; then
-    echo "supabase CLI not found. Install: brew install supabase/tap/supabase" >&2
+PROJECT="${STACK_TEST_PROJECT:-mike-stack-test}"
+# Low dedicated ports: clear of the development stack and of Linux's
+# ephemeral range, where CI runners' outbound connections land.
+export DB_PORT="${STACK_TEST_DB_PORT:-21322}"
+export AUTH_PORT="${STACK_TEST_AUTH_PORT:-21321}"
+export MAILPIT_PORT="${STACK_TEST_MAILPIT_PORT:-21325}"
+export MAILPIT_SMTP_PORT="${STACK_TEST_MAILPIT_SMTP_PORT:-21326}"
+export AUTH_PUBLIC_URL="http://127.0.0.1:$AUTH_PORT"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "docker not found: the stack tests start Postgres and GoTrue in containers." >&2
     exit 1
 fi
 
-STATUS="$(supabase status -o json 2>/dev/null)" || {
-    echo "No running Supabase stack. Start one with: supabase start" >&2
-    exit 1
-}
+compose() { docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" "$@"; }
 
-read_key() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(String(JSON.parse(s)['$1']??'')))" <<<"$STATUS"; }
-
-SUPABASE_TEST_URL="$(read_key API_URL)"
-SUPABASE_TEST_SERVICE_ROLE_KEY="$(read_key SERVICE_ROLE_KEY)"
-SUPABASE_TEST_ANON_KEY="$(read_key ANON_KEY)"
-SUPABASE_TEST_DB_URL="$(read_key DB_URL)"
-
-if [[ -z "$SUPABASE_TEST_URL" || -z "$SUPABASE_TEST_SERVICE_ROLE_KEY" || -z "$SUPABASE_TEST_ANON_KEY" || -z "$SUPABASE_TEST_DB_URL" ]]; then
-    echo "Could not read API_URL/DB_URL/SERVICE_ROLE_KEY/ANON_KEY from 'supabase status'." >&2
-    exit 1
+if [[ "${STACK_TEST_FRESH:-}" == "1" ]]; then
+    compose down -v --remove-orphans
 fi
-# Mike's queries go straight to Postgres; the suites use the same database.
-DATABASE_TEST_URL="$SUPABASE_TEST_DB_URL"
-export SUPABASE_TEST_URL SUPABASE_TEST_SERVICE_ROLE_KEY SUPABASE_TEST_ANON_KEY DATABASE_TEST_URL
+compose up -d --wait db auth
 
-if ! command -v psql >/dev/null 2>&1; then
-    echo "psql not found. Install PostgreSQL's client tools before running stack tests." >&2
-    exit 1
-fi
-
-# A newly started local stack contains Supabase's system schemas but none of
-# Mike's application tables. Initialize only an empty stack: silently resetting
-# or modifying an existing application database would be surprising.
-PROJECTS_TABLE="$(
-    psql "$SUPABASE_TEST_DB_URL" -XAtq \
-        -c "select to_regclass('public.projects');"
-)"
+# GoTrue has built auth.users by the time it reports healthy. Load Mike's
+# schema into an empty database only: silently resetting or modifying an
+# existing application database would be surprising.
+PROJECTS_TABLE="$(compose exec -T db psql -U postgres -XAtq -c "select to_regclass('public.projects');")"
 if [[ "$PROJECTS_TABLE" != "projects" ]]; then
     echo "Mike schema not found; loading $SCHEMA_FILE"
-    psql "$SUPABASE_TEST_DB_URL" -X \
-        --set ON_ERROR_STOP=1 \
-        --file "$SCHEMA_FILE"
+    compose exec -T db psql -U postgres -X --set ON_ERROR_STOP=1 -q <"$SCHEMA_FILE" >/dev/null
 fi
 
-echo "Running stack integration tests against $SUPABASE_TEST_URL"
+export DATABASE_TEST_URL="postgres://postgres:postgres@127.0.0.1:$DB_PORT/postgres"
+export AUTH_TEST_URL="http://127.0.0.1:$AUTH_PORT"
+# The compose file's local demo service-role key, signed with its GoTrue secret.
+export AUTH_TEST_SERVICE_KEY="${AUTH_TEST_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}"
+
+echo "Running stack integration tests against $AUTH_TEST_URL and $DATABASE_TEST_URL"
 cd "$BACKEND_DIR"
-exec npx vitest run src/__tests__/integration/*.supabase.test.ts "$@"
+exec npx vitest run src/__tests__/integration/*.stack.test.ts "$@"

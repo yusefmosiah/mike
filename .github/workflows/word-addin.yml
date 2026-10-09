@@ -2,7 +2,7 @@
 #
 # The add-in's e2e suite is fully hermetic (static-served production bundle,
 # in-page Office shim, every backend call intercepted — see
-# word-addin/playwright.config.ts), so no Supabase/API/secrets are needed here.
+# word-addin/playwright.config.ts), so no database/API/secrets are needed here.
 #
 # WebKit is a first-class project, not extra coverage: the add-in's real host
 # on Word for Mac is WKWebView, which ignores `overflow-anchor: none` and

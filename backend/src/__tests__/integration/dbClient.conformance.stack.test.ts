@@ -1,28 +1,24 @@
-import { createClient } from "@supabase/supabase-js";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DbClient } from "../../lib/db/client";
 
-// Gated: runs only against a real local stack, where PostgREST and Postgres
-// serve the same database.
-//   SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY, DATABASE_TEST_URL
-// Every case runs the same chain through supabase-js (PostgREST) and through
-// Mike's client, and the two results must match.
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
+// Gated: runs only against a real database (scripts/test-stack.sh).
+// Mike's client replaced supabase-js + PostgREST. Every case's result is
+// checked against the snapshot recorded from PostgREST v14.12, run through
+// supabase-js on the same database, when the two were last side by side
+// (__snapshots__/dbClient.conformance.stack.test.ts.snap); a case added since
+// records Mike's own answer.
 const databaseUrl = process.env.DATABASE_TEST_URL;
-const maybeDescribe = url && serviceKey && databaseUrl ? describe : describe.skip;
+const maybeDescribe = databaseUrl ? describe : describe.skip;
 
 const TABLE = "mike_db_conformance";
 
-maybeDescribe("Mike's database client matches PostgREST", () => {
+maybeDescribe("Mike's database client answers as PostgREST did", () => {
   let pool: Pool;
-  let rest: ReturnType<typeof createClient>;
   let db: DbClient;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 2 });
-    rest = createClient(url!, serviceKey!, { auth: { persistSession: false } });
     db = new DbClient(async (sql, params) => (await pool.query(sql, params)).rows);
     await pool.query(`
       DROP TABLE IF EXISTS public.${TABLE};
@@ -40,7 +36,6 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
         created_at timestamptz NOT NULL DEFAULT '2026-10-08T12:00:00Z',
         UNIQUE (name, kind)
       );
-      GRANT ALL ON public.${TABLE} TO service_role;
       CREATE OR REPLACE FUNCTION public.${TABLE}_names(p_kind text) RETURNS SETOF text
         LANGUAGE sql STABLE AS $$ SELECT name FROM public.${TABLE} WHERE kind = p_kind ORDER BY name $$;
       CREATE OR REPLACE FUNCTION public.${TABLE}_rows(p_min integer) RETURNS SETOF public.${TABLE}
@@ -59,15 +54,7 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
         LANGUAGE sql IMMUTABLE AS $$ SELECT 'two:' || p_a || p_b $$;
       CREATE OR REPLACE FUNCTION public.${TABLE}_opt(p_a integer, p_b text DEFAULT 'd') RETURNS text
         LANGUAGE sql IMMUTABLE AS $$ SELECT p_a || p_b $$;
-      GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
-      NOTIFY pgrst, 'reload schema';
     `);
-    // PostgREST reloads its schema cache asynchronously.
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      const { error } = await rest.from(TABLE).select("id").limit(1);
-      if (!error) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
   });
 
   afterAll(async () => {
@@ -79,8 +66,7 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
       DROP FUNCTION IF EXISTS public.${TABLE}_touch(uuid);
       DROP FUNCTION IF EXISTS public.${TABLE}_pick(integer);
       DROP FUNCTION IF EXISTS public.${TABLE}_pick(integer, text);
-      DROP FUNCTION IF EXISTS public.${TABLE}_opt(integer, text);
-      NOTIFY pgrst, 'reload schema';`);
+      DROP FUNCTION IF EXISTS public.${TABLE}_opt(integer, text);`);
     await pool?.end();
   });
 
@@ -90,27 +76,25 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
     { id: "00000000-0000-4000-8000-000000000003", name: "gamma", n: null, big: 3, amount: 0.1, flag: null, tags: null, meta: { nested: { x: [1, 2] } }, events: [], kind: "folder" },
   ];
 
-  /** Run the same chain on both clients, resetting the table first when it writes. */
-  async function both(build: (client: any) => PromiseLike<any>, options: { reset?: boolean } = {}) {
-    const results = [];
-    for (const client of [rest, db]) {
-      if (options.reset || results.length === 0) {
-        await pool.query(`DELETE FROM public.${TABLE}`);
-        await (db as any).from(TABLE).insert(seed);
-      }
-      const result = await build(client);
-      results.push({
-        data: result.data,
-        count: result.count ?? null,
-        error: result.error ? { code: result.error.code } : null,
-      });
-    }
-    return { rest: results[0], mike: results[1] };
+  /** Run a chain on a freshly seeded table and shape its result for comparison. */
+  async function run(build: (client: any) => PromiseLike<any>) {
+    await pool.query(`DELETE FROM public.${TABLE}`);
+    await (db as any).from(TABLE).insert(seed);
+    const result = await build(db);
+    return {
+      data: result.data,
+      count: result.count ?? null,
+      error: result.error ? { code: result.error.code } : null,
+    };
   }
 
-  async function same(build: (client: any) => PromiseLike<any>, options: { reset?: boolean } = {}) {
-    const { rest: viaRest, mike } = await both(build, { reset: true, ...options });
-    expect(mike).toEqual(viaRest);
+  /** `unordered`: rows with no ORDER BY come back in whatever order the heap holds them. */
+  async function same(build: (client: any) => PromiseLike<any>, options: { unordered?: boolean } = {}) {
+    const mike = await run(build);
+    if (options.unordered && Array.isArray(mike.data)) {
+      mike.data.sort((a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    }
+    expect(mike).toMatchSnapshot();
     return mike;
   }
 
@@ -137,6 +121,8 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
     await same((c) => c.from(TABLE).select("name").match({ kind: "folder" }).order("name"));
     await same((c) => c.from(TABLE).select("name").or("kind.eq.file,kind.is.null").order("name"));
     await same((c) => c.from(TABLE).select("name").in("id", [seed[0].id, seed[2].id]).or(`kind.is.null,kind.neq.file`));
+    await same((c) => c.from(TABLE).select("name").filter("meta->>k", "eq", "1"));
+    await same((c) => c.from(TABLE).select("name").eq("meta->nested->x->>1", "2"));
   });
 
   it("orders with nulls placement, limits and ranges", async () => {
@@ -180,7 +166,7 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
     await same((c) => c.from(TABLE).update({ kind: null }).in("name", ["beta", "gamma"]));
     await same((c) => c.from(TABLE).update({ events: [{ type: "error", message: "m" }] }).eq("id", seed[0].id).select("events").single());
     await same((c) => c.from(TABLE).delete().eq("name", "beta"));
-    await same((c) => c.from(TABLE).delete().or("kind.eq.file,kind.is.null").select("name"));
+    await same((c) => c.from(TABLE).delete().or("kind.eq.file,kind.is.null").select("name"), { unordered: true });
   });
 
   it("calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing", async () => {
@@ -196,8 +182,7 @@ maybeDescribe("Mike's database client matches PostgREST", () => {
     await same((c) => c.rpc(`${TABLE}_pick`, { p_a: 1, p_b: "x" }));
     await same((c) => c.rpc(`${TABLE}_opt`, { p_a: 2 }));
     await same((c) => c.rpc(`${TABLE}_opt`, { p_a: 2, p_b: "e" }));
-    const missing = await both((c) => c.rpc(`${TABLE}_nope`, { p: 1 }), { reset: true });
-    expect(missing.mike.error).toEqual({ code: "PGRST202" });
-    expect(missing.rest.error).toEqual({ code: "PGRST202" });
+    const missing = await same((c) => c.rpc(`${TABLE}_nope`, { p: 1 }));
+    expect(missing.error).toEqual({ code: "PGRST202" });
   });
 });

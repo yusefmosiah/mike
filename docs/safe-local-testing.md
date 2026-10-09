@@ -8,18 +8,19 @@ documents only.
 
 Create separate test resources for Mike:
 
-- a throwaway Supabase project
+- a throwaway Postgres database and GoTrue auth server (the Docker Compose
+  stack runs both)
 - a throwaway S3-compatible storage bucket, such as Cloudflare R2
 - disposable model-provider API keys with low spending limits
 - a test email account
 
-Do not use production Supabase projects, production storage buckets, firm API
+Do not use production databases, production storage buckets, firm API
 keys, or real client documents for initial testing.
 
 ## Keep Secrets Out of the Frontend
 
-The browser does not need Supabase configuration. Session handling and all
-Supabase keys stay server-side.
+The browser does not need auth configuration. Session handling and all auth
+keys stay server-side.
 
 For frontend testing, `frontend/.env.local` should normally contain only:
 
@@ -27,11 +28,11 @@ For frontend testing, `frontend/.env.local` should normally contain only:
 API_BASE_URL=http://localhost:3001
 ```
 
-Keep the Supabase service-role key in `backend/.env` only:
+Keep the GoTrue service-role key and the database URL in `backend/.env` only:
 
 ```env
-SUPABASE_SECRET_KEY=your-supabase-service-role-key
-SUPABASE_PUBLISHABLE_KEY=your-supabase-anon-key
+AUTH_SERVICE_KEY=your-service-role-jwt
+DATABASE_URL=postgres://postgres:your-password@localhost:54322/postgres
 ```
 
 Model-provider keys such as `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and
@@ -66,7 +67,7 @@ output.
 If you do not want to use model-provider keys yet, use dummy provider values and
 test only the non-LLM flows first:
 
-- account creation against a test Supabase project
+- account creation against the test auth server
 - project creation
 - file upload with synthetic documents
 - folder organization
@@ -80,7 +81,7 @@ with synthetic documents.
 After testing, delete:
 
 - uploaded objects from the storage bucket
-- test Supabase rows or the whole test Supabase project
+- test database rows, or the whole test database
 - disposable model-provider keys
 - local `.env` files that contain secrets
 

@@ -6,7 +6,7 @@ import {
 import { NonRetryableJobError } from "../../lib/dbq/runner";
 import { deleteFile } from "../../lib/storage";
 import { type Db, type DbJob } from "../../lib/dbq/types";
-import { authAdmin } from "../../lib/supabase";
+import { authAdmin } from "../../lib/gotrue";
 
 export async function handleAccountDelete(db: Db, job: DbJob): Promise<void> {
     const userId = job.payload.userId as string | undefined;

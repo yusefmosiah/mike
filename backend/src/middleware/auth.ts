@@ -1,10 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import type { ParamsFlatDictionary } from "express-serve-static-core";
-import type { User } from "@supabase/supabase-js";
-import { authAdmin, createServerSupabase, type AuthAdmin, type Db } from "../lib/supabase";
+import type { User } from "@supabase/auth-js";
+import { createServerSupabase, type Db } from "../lib/supabase";
+import { authAdmin, type AuthAdmin } from "../lib/gotrue";
 import { syncProfileEmail } from "../lib/userLookup";
 import { sendInternalError } from "../lib/httpError";
-import { createRequestSupabase } from "../lib/authSession";
+import { createRequestAuth } from "../lib/authSession";
 import { requestOriginIsTrusted } from "../lib/origins";
 import { devLog, isDev } from "../lib/log";
 import { setCurrentUser } from "../lib/observability/sentry";
@@ -151,11 +152,11 @@ export async function requireAuth(
     }
 
     try {
-      const authClient = createRequestSupabase(req, res);
-      const result = await authClient.auth.getUser();
+      const authClient = createRequestAuth(req, res);
+      const result = await authClient.getUser();
       user = result.data.user;
       if (user) {
-        const sessionResult = await authClient.auth.getSession();
+        const sessionResult = await authClient.getSession();
         token = sessionResult.data.session?.access_token ?? "";
         res.locals.authClient = authClient;
         res.locals.authSource = "cookie";

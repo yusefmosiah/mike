@@ -68,32 +68,14 @@ jobs:
           # --diff-filter=A`). A shallow clone has neither.
           fetch-depth: 0
 
-      # Pinned to match stack-tests.yml so both workflows test against the
-      # same Postgres; bump the two together.
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.108.0
-
-      # Same minimal service set as stack-tests.yml: Postgres for the
-      # schemas under test, GoTrue because schema.sql references auth.users
-      # (foreign keys and the signup trigger), Kong/PostgREST as the
-      # non-excludable plumbing around them.
-      - name: Start local Supabase stack
+      # The same Postgres + GoTrue as stack-tests.yml, from docker-compose.yml:
+      # Postgres for the schemas under test, GoTrue because schema.sql
+      # references auth.users (foreign keys and the signup trigger).
+      - name: Start Postgres and GoTrue
         run: |
-          supabase init
-          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
-          # low ports avoid intermittent collisions with runner outbound traffic.
-          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
-          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
-          # Allow the pinned CLI to recover when one public registry is throttled.
-          env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
-            -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
-
-      - name: Export stack connection env
-        run: |
-          STATUS="$(supabase status -o json)"
-          read_key() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(String(JSON.parse(s)['$1']??'')))" <<<"$STATUS"; }
-          echo "SUPABASE_TEST_DB_URL=$(read_key DB_URL)" >> "$GITHUB_ENV"
+          DB_PORT=21322 AUTH_PORT=21321 MAILPIT_PORT=21325 MAILPIT_SMTP_PORT=21326 \
+            docker compose -p mike-drift up -d --wait db auth
+          echo "DATABASE_TEST_URL=postgres://postgres:postgres@127.0.0.1:21322/postgres" >> "$GITHUB_ENV"
 
       # Both databases are built in the same Postgres instance (so role OIDs
       # and versions are identical), one after the other, each starting from
@@ -103,16 +85,16 @@ jobs:
       # with `drop trigger if exists` first).
       - name: Build upgraded and fresh databases, fingerprint both
         run: |
-          test -n "$SUPABASE_TEST_DB_URL"
+          test -n "$DATABASE_TEST_URL"
 
           reset_public() {
-            psql "$SUPABASE_TEST_DB_URL" -X --set ON_ERROR_STOP=1 \
+            psql "$DATABASE_TEST_URL" -X --set ON_ERROR_STOP=1 \
               -c 'drop schema public cascade;' \
               -c 'create schema public;' \
               -c 'grant usage on schema public to anon, authenticated, service_role;'
           }
           fingerprint() {
-            psql "$SUPABASE_TEST_DB_URL" -XAtq \
+            psql "$DATABASE_TEST_URL" -XAtq \
               --set ON_ERROR_STOP=1 \
               -f backend/scripts/schema-fingerprint.sql > "$1"
           }
@@ -120,22 +102,22 @@ jobs:
           echo "::group::Upgraded path: baseline schema.sql ($BASELINE_REF) + migrations added since"
           reset_public
           git show "$BASELINE_REF:backend/schema.sql" > /tmp/baseline-schema.sql
-          psql "$SUPABASE_TEST_DB_URL" -X --set ON_ERROR_STOP=1 --file /tmp/baseline-schema.sql
+          psql "$DATABASE_TEST_URL" -X --set ON_ERROR_STOP=1 --file /tmp/baseline-schema.sql
           for migration in $(git diff --name-only --diff-filter=A "$BASELINE_REF" HEAD -- backend/migrations | LC_ALL=C sort); do
             echo "Applying $migration"
-            psql "$SUPABASE_TEST_DB_URL" -X --set ON_ERROR_STOP=1 --file "$migration"
+            psql "$DATABASE_TEST_URL" -X --set ON_ERROR_STOP=1 --file "$migration"
           done
           fingerprint /tmp/upgraded.txt
           echo "::endgroup::"
 
           echo "::group::Fresh path: current schema.sql"
           reset_public
-          psql "$SUPABASE_TEST_DB_URL" -X --set ON_ERROR_STOP=1 --file backend/schema.sql
+          psql "$DATABASE_TEST_URL" -X --set ON_ERROR_STOP=1 --file backend/schema.sql
           fingerprint /tmp/fresh.txt
           echo "::endgroup::"
 
       - name: Document lifecycle transactions
-        run: psql "$SUPABASE_TEST_DB_URL" -X --set ON_ERROR_STOP=1 -f backend/scripts/test-document-lifecycle.sql
+        run: psql "$DATABASE_TEST_URL" -X --set ON_ERROR_STOP=1 -f backend/scripts/test-document-lifecycle.sql
 
       - name: Concurrent document lifecycle operations
         run: node backend/scripts/test-document-lifecycle-concurrency.mjs

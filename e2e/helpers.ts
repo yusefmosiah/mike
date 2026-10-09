@@ -110,7 +110,7 @@ export async function createProject(
        so allow extra time for navigation when a file is attached.
 
        (The modal's FileDirectory used to fan out a getProject() request per
-       existing project on open, which could overwhelm the local Supabase
+       existing project on open, which could overwhelm the local database
        gateway and required settle-waits plus a submit-retry loop here. The
        directory now loads via one batched listProjects?include=documents
        request, so a single submit is reliable.)

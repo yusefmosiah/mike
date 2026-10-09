@@ -13,9 +13,8 @@ import {
 
 const validProduction = {
   NODE_ENV: "production",
-  SUPABASE_URL: "https://project.supabase.co",
-  SUPABASE_PUBLISHABLE_KEY: "publishable-key",
-  SUPABASE_SECRET_KEY: "service-role-key",
+  AUTH_URL: "https://auth.example.test",
+  AUTH_SERVICE_KEY: "service-role-key",
   DATABASE_URL: "postgres://mike@db.example.test:5432/mike",
   FRONTEND_URL: "https://app.example.test",
   API_PUBLIC_URL: "https://app.example.test/api",
@@ -68,9 +67,9 @@ describe("runtime authentication configuration", () => {
     expect(() =>
       validateRuntimeConfiguration({
         ...validProduction,
-        SUPABASE_SECRET_KEY: undefined,
+        AUTH_SERVICE_KEY: undefined,
       }),
-    ).toThrow(/^(?![\s\S]*NODE_ENV)[\s\S]*SUPABASE_SECRET_KEY is required$/);
+    ).toThrow(/^(?![\s\S]*NODE_ENV)[\s\S]*AUTH_SERVICE_KEY is required \(a service-role JWT for GoTrue\)$/);
   });
 
   it("does not weaken the https rule for production URLs", () => {
@@ -103,12 +102,14 @@ describe("runtime authentication configuration", () => {
     ).toThrow(/AUTH_HANDOFF_ENCRYPTION_SECRET is required/);
   });
 
-  it("accepts the legacy anon key name for the user-session client", () => {
+  it("accepts a deployment still configured with SUPABASE_URL and its secret key", () => {
     expect(() =>
       validateRuntimeConfiguration({
         ...validProduction,
-        SUPABASE_PUBLISHABLE_KEY: undefined,
-        SUPABASE_ANON_KEY: "legacy-anon-key",
+        AUTH_URL: undefined,
+        AUTH_SERVICE_KEY: undefined,
+        SUPABASE_URL: "https://project.supabase.co",
+        SUPABASE_SECRET_KEY: "service-role-key",
       }),
     ).not.toThrow();
   });
@@ -234,8 +235,8 @@ it("identifies invalid configuration fields without sending their values", () =>
   try {
     validateRuntimeConfiguration({
       NODE_ENV: "production",
-      SUPABASE_URL: "PRIVATE_URL",
-      SUPABASE_SECRET_KEY: "PRIVATE_KEY",
+      AUTH_URL: "PRIVATE_URL",
+      AUTH_SERVICE_KEY: "PRIVATE_KEY",
     });
   } catch (error) {
     failure = error;
@@ -244,7 +245,7 @@ it("identifies invalid configuration fields without sending their values", () =>
   expect(event.tags).toEqual({
     failure_code: "configuration_invalid",
     configuration_fields:
-      "API_PUBLIC_URL,FRONTEND_URL,SUPABASE_PUBLISHABLE_KEY,SUPABASE_URL",
+      "API_PUBLIC_URL,AUTH_URL,DATABASE_URL,FRONTEND_URL",
   });
   expect(JSON.stringify(event)).not.toContain("PRIVATE");
 });

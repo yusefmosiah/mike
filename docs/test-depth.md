@@ -121,19 +121,18 @@ missed an SLO we never agreed on".
 ### Running locally against the local stack
 
 1. Start the backend as usual (see `docs/safe-local-testing.md` — a
-   disposable Supabase project and low-limit provider keys; the test
+   disposable database and auth server and low-limit provider keys; the test
    creates real chats and burns real tokens on whatever it hits).
 2. Raise the chat rate limit for the run, or the harness trips it from a
    single IP immediately: `RATE_LIMIT_CHAT_MAX=100000` in `backend/.env`
    (default is 30 per 15 min per IP).
-3. Get an access token for a test user, e.g. with the Supabase JS client:
+3. Get an access token for a test user from GoTrue's password grant
+   (`AUTH_URL` from `backend/.env`; locally `http://localhost:54321`):
 
-   ```js
-   const { data } = await supabase.auth.signInWithPassword({
-     email: "test@example.com",
-     password: "...",
-   });
-   console.log(data.session.access_token);
+   ```bash
+   curl -s "$AUTH_URL/token?grant_type=password" \
+     -H 'content-type: application/json' \
+     -d '{"email":"test@example.com","password":"..."}' | jq -r .access_token
    ```
 
 4. Run k6 (native binary, or the docker image if you don't have k6):

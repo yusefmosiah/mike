@@ -16,7 +16,7 @@ import {
     type AccountDeletionOrgBlocker,
 } from "./user.dataCleanup";
 import { type Db, errorMessage } from "./user.shared";
-import { authAdmin } from "../../lib/supabase";
+import { authAdmin } from "../../lib/gotrue";
 
 /**
  * Turn the sole-admin blockers into instructions the user can actually act

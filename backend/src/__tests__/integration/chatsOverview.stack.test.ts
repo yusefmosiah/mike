@@ -1,22 +1,19 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { GoTrueClient } from "@supabase/auth-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 
-// Gated: runs only against a real (local) Supabase stack.
-//   supabase start, then export:
-//     SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY
-// or use scripts/test-stack.sh which reads them from `supabase status`.
+// Gated: runs only against a real Postgres + GoTrue (npm run test:stack,
+// which starts both and sets DATABASE_TEST_URL, AUTH_TEST_URL and
+// AUTH_TEST_SERVICE_KEY).
 //
 // Pins the email-aware chat overview against creator, direct grant, project,
-// and organization access on a real PostgREST stack.
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+// and organization access on a real database.
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
 const db = stackDb()!;
 
 maybeDescribe("get_chats_overview — role-aware grants", () => {
-    let admin: SupabaseClient;
+    let admin: GoTrueClient;
     let callerId = "";
     let callerEmail = "";
     let strangerId = "";
@@ -52,13 +49,11 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
             .sort();
 
     beforeAll(async () => {
-        admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
+        admin = stackAuth();
 
         const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         callerEmail = `chats-caller-${suffix}@test.local`;
-        const caller = await admin.auth.admin.createUser({
+        const caller = await admin.admin.createUser({
             email: callerEmail,
             password: "StackTest1!",
             email_confirm: true,
@@ -68,7 +63,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         }
         callerId = caller.data.user.id;
 
-        const stranger = await admin.auth.admin.createUser({
+        const stranger = await admin.admin.createUser({
             email: `chats-stranger-${suffix}@test.local`,
             password: "StackTest1!",
             email_confirm: true,
@@ -208,8 +203,8 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
             .from("organizations")
             .delete()
             .in("id", [sharedOrgId, foreignOrgId]);
-        if (callerId) await admin.auth.admin.deleteUser(callerId);
-        if (strangerId) await admin.auth.admin.deleteUser(strangerId);
+        if (callerId) await admin.admin.deleteUser(callerId);
+        if (strangerId) await admin.admin.deleteUser(strangerId);
     });
 
     it("returns the full email-aware set with effective roles", async () => {

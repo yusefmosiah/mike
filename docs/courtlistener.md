@@ -17,7 +17,7 @@ Live requests remain subject to CourtListener's API limits.
 
 ## Optional bulk data
 
-Set `COURTLISTENER_BULK_DATA_ENABLED=true` to make Mike try local Supabase and
+Set `COURTLISTENER_BULK_DATA_ENABLED=true` to make Mike try local Postgres and
 R2 data before falling back to CourtListener's API:
 
 - Citation metadata is read from `public.courtlistener_citation_index`.

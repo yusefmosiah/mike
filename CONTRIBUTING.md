@@ -9,7 +9,7 @@ Thanks for helping improve Mike. Please keep contributions small, focused, and e
 - Keep each PR focused on one bug, feature, or cleanup.
 - Update docs or env examples when changing setup, config, or user-facing behavior.
 - Keep self-hosting changes compatible with the supported Docker Compose,
-  Supabase, S3-compatible storage, and Ollama paths. Explain any new local
+  Postgres + GoTrue, S3-compatible storage, and Ollama paths. Explain any new local
   infrastructure or migration requirements in the same PR.
 - Do not commit secrets, API keys, private documents, or local `.env` files.
 
@@ -113,7 +113,7 @@ npm run build --prefix frontend
 npm test --prefix backend            # backend unit + route integration tests (vitest)
 npm test --prefix frontend           # frontend component/hook tests (vitest + jsdom)
 npm run test:e2e                     # Playwright end-to-end suite — see docs/e2e-ci.md
-npm run test:stack --prefix backend  # gated: real-Supabase auth/access tests (run `supabase start` first)
+npm run test:stack --prefix backend  # gated: real Postgres + GoTrue auth/access tests (starts them in Docker)
 ```
 
 - New features and bug fixes should come with a test at the lowest layer that
@@ -123,5 +123,5 @@ npm run test:stack --prefix backend  # gated: real-Supabase auth/access tests (r
   (`.github/workflows/ci.yml`), and the Playwright suite in a full local stack
   (`.github/workflows/e2e.yml`). The CI workflow will also run the optional
   offline eval harness if `evals/run.mjs` is added to the tree.
-- Tests that need a live Supabase or an LLM key are env-gated and skip cleanly
+- Tests that need a live database, auth server, or LLM key are env-gated and skip cleanly
   when the environment is absent — a plain `npm test` should always be green.

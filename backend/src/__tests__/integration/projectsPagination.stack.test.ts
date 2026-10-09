@@ -1,6 +1,6 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { GoTrueClient } from "@supabase/auth-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 
 // The RPCs return `any`; naming the row shape is what lets tsc check the
 // property reads below instead of silently widening them.
@@ -11,11 +11,9 @@ type ProjectRow = {
     organization_name: string | null;
 };
 
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
-/* supabase-js types an rpc() result's `data` as `any`, so the `.map()` /
+/* Mike's client types an rpc() result's `data` as `any`, so the `.map()` /
    `.every()` callbacks below get no inferred parameter type (and, under
    noImplicitAny, no type check at all). Name the handful of overview columns
    these assertions actually read. */
@@ -37,17 +35,15 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     const myProjectIds = Array.from({ length: 25 }, () => crypto.randomUUID());
     const sharedProjectIds = Array.from({ length: 5 }, () => crypto.randomUUID());
     const tiedCreatedAt = "2026-07-27T00:00:00.000Z";
-    let admin: SupabaseClient;
+    let admin: GoTrueClient;
 
     beforeAll(async () => {
-        admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
+        admin = stackAuth();
 
         const suffix = Date.now();
         ownerEmail = `pagination-owner-${suffix}@test.local`;
         const otherUserEmail = `pagination-other-${suffix}@test.local`;
-        const owner = await admin.auth.admin.createUser({
+        const owner = await admin.admin.createUser({
             email: ownerEmail,
             password: "StackTest1!",
             email_confirm: true,
@@ -57,7 +53,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         }
         ownerId = owner.data.user.id;
 
-        const otherUser = await admin.auth.admin.createUser({
+        const otherUser = await admin.admin.createUser({
             email: otherUserEmail,
             password: "StackTest1!",
             email_confirm: true,
@@ -152,8 +148,8 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         await db.from("projects").delete().eq("id", ownedSharedProjectId);
         await db.from("projects").delete().eq("id", orgProjectId);
         await db.from("organizations").delete().eq("id", orgId);
-        if (otherUserId) await admin.auth.admin.deleteUser(otherUserId);
-        if (ownerId) await admin.auth.admin.deleteUser(ownerId);
+        if (otherUserId) await admin.admin.deleteUser(otherUserId);
+        if (ownerId) await admin.admin.deleteUser(ownerId);
     });
 
     it("paginates tied rows deterministically without duplicates", async () => {

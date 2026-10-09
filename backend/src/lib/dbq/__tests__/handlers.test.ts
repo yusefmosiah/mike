@@ -4,8 +4,7 @@ import type { AuditEventInput } from "../../audit";
 
 // GoTrue is reached through authAdmin(); it answers with the current fake db's `auth`.
 const authRef = vi.hoisted(() => ({ current: undefined as unknown }));
-vi.mock("../../supabase", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../supabase")>()),
+vi.mock("../../gotrue", () => ({
     authAdmin: () => authRef.current,
 }));
 

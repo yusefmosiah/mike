@@ -1,22 +1,18 @@
-import { createClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 import { createBranch, forkChat, setLeafAndPath } from "../../modules/chat/chat.branches";
 import { getChatMessages } from "../../modules/chat/chat.messages";
 import { linkedPrompt } from "../../modules/chat/chat.tree";
 import type { Db } from "../../lib/supabase";
 
-// Gated: runs only against a real (local) Supabase stack.
-//   SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY (scripts/test-stack.sh)
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+// Gated: runs only against a real Postgres + GoTrue (npm run test:stack,
+// which starts both and sets DATABASE_TEST_URL, AUTH_TEST_URL and
+// AUTH_TEST_SERVICE_KEY).
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
 maybeDescribe("chat branching against Postgres", () => {
     const db = stackDb() as unknown as Db;
-    const admin = (url && serviceKey
-        ? createClient(url, serviceKey, { auth: { persistSession: false } })
-        : null)!;
+    const admin = stackAuth();
     let userId = "";
     let userEmail = "";
     const chats: string[] = [];
@@ -55,7 +51,7 @@ maybeDescribe("chat branching against Postgres", () => {
 
     beforeAll(async () => {
         userEmail = `branches-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
-        const created = await admin.auth.admin.createUser({
+        const created = await admin.admin.createUser({
             email: userEmail,
             password: "StackTest1!",
             email_confirm: true,
@@ -66,7 +62,7 @@ maybeDescribe("chat branching against Postgres", () => {
 
     afterAll(async () => {
         if (chats.length) await db.from("chats").delete().in("id", chats);
-        if (userId) await admin.auth.admin.deleteUser(userId);
+        if (userId) await admin.admin.deleteUser(userId);
     });
 
     it("opening a prompt version shows its newest answer, not the bare prompt", async () => {

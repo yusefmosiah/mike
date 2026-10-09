@@ -195,6 +195,8 @@ function mockSupabase() {
 
 vi.mock("../../lib/supabase", () => ({
     createServerSupabase: vi.fn(() => mockSupabase()),
+}));
+vi.mock("../../lib/gotrue", () => ({
     authAdmin: vi.fn(() => mockSupabase().auth),
 }));
 

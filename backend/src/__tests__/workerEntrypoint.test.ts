@@ -36,8 +36,8 @@ describe("standalone worker entrypoint", () => {
                     ...process.env,
                     QUEUE_DRIVER: "postgres",
                     DB_JOBS_POLL_MS: "60000",
-                    SUPABASE_URL: "http://127.0.0.1:9",
-                    SUPABASE_SECRET_KEY: "not-a-real-key",
+                    AUTH_URL: "http://127.0.0.1:9",
+                    AUTH_SERVICE_KEY: "not-a-real-key",
                 },
             },
         );
@@ -64,10 +64,10 @@ describe("standalone worker entrypoint", () => {
     // Bare-metal deployments configure the backend through backend/.env, not
     // through a container's environment block — and the API entrypoint reads
     // it (app.ts imports dotenv/config first). The worker entrypoint must do
-    // the same, or `node dist/worker.js` dies at boot on the Supabase config
-    // check on exactly the installs the split topology is documented for.
-    // Compose masks the gap, so this spawns the worker with NO Supabase
-    // variables in the environment and only a .env file in cwd to read.
+    // the same, or `node dist/worker.js` boots without its configuration on
+    // exactly the installs the split topology is documented for. Compose
+    // masks the gap, so this spawns the worker with NO auth variables in the
+    // environment and only a .env file in cwd to read.
     it("reads .env from the working directory like the API entrypoint", async () => {
         const workDir = mkdtempSync(path.join(os.tmpdir(), "worker-dotenv-"));
         writeFileSync(
@@ -75,15 +75,15 @@ describe("standalone worker entrypoint", () => {
             [
                 "QUEUE_DRIVER=postgres",
                 "DB_JOBS_POLL_MS=60000",
-                "SUPABASE_URL=http://127.0.0.1:9",
-                "SUPABASE_SECRET_KEY=not-a-real-key",
+                "AUTH_URL=http://127.0.0.1:9",
+                "AUTH_SERVICE_KEY=not-a-real-key",
                 "",
             ].join("\n"),
         );
 
         const env = { ...process.env };
-        delete env.SUPABASE_URL;
-        delete env.SUPABASE_SECRET_KEY;
+        delete env.AUTH_URL;
+        delete env.AUTH_SERVICE_KEY;
         delete env.QUEUE_DRIVER;
         delete env.REDIS_URL;
 

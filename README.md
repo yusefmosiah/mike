@@ -5,8 +5,8 @@
 Mike (MikeOSS) is an open-source legal AI platform for document review,
 drafting, and legal research.
 
-It combines a Next.js frontend, an Express backend, Supabase Auth/Postgres,
-and Cloudflare R2-compatible object storage.
+It combines a Next.js frontend, an Express backend, Postgres, the GoTrue auth
+server, and Cloudflare R2-compatible object storage.
 
 Website: [mikeoss.com](https://mikeoss.com)
 
@@ -24,7 +24,7 @@ Website: [mikeoss.com](https://mikeoss.com)
 
 ## Quick start
 
-The included Docker Compose stack runs Mike, Supabase, RustFS object storage,
+The included Docker Compose stack runs Mike, Postgres, GoTrue, RustFS object storage,
 and local email capture without requiring managed infrastructure.
 
 1. Copy the local environment templates:

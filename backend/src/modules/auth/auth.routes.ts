@@ -7,10 +7,10 @@
 // in auth.service.ts.
 
 import { Router, type Request, type Response } from "express";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AuthClient } from "../../lib/gotrue";
 import {
   clearRequestAuthCookies,
-  createRequestSupabase,
+  createRequestAuth,
   publicAuthUser,
 } from "../../lib/authSession";
 import { ssoConfiguration, ssoDomainSchema } from "../../lib/ssoConfig";
@@ -116,8 +116,8 @@ function invalidBody(res: Response) {
   });
 }
 
-function cookieClient(req: Request, res: Response): SupabaseClient | null {
-  const client = res.locals.authClient as SupabaseClient | undefined;
+function cookieClient(req: Request, res: Response): AuthClient | null {
+  const client = res.locals.authClient as AuthClient | undefined;
   if (!client || res.locals.authSource !== "cookie") {
     res.status(401).json({
       code: "cookie_session_required",
@@ -133,7 +133,7 @@ authRouter.post("/login", asyncRoute(async (req, res) => {
   if (!parsed.success) return invalidBody(res);
 
   try {
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await signInWithPassword(client, parsed.data);
     if (error || !data.user || !data.session) return authError(res, error);
     res.json({ user: publicAuthUser(data.user) });
@@ -147,7 +147,7 @@ authRouter.post("/signup", asyncRoute(async (req, res) => {
   if (!parsed.success) return invalidBody(res);
 
   try {
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await signUpWithPassword(
       client,
       parsed.data,
@@ -190,7 +190,7 @@ async function startSso(req: Request, res: Response) {
           detail: "Single sign-on is not available for this domain.",
         });
     }
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await startSsoSignIn(
       client,
       domain,
@@ -221,7 +221,7 @@ authRouter.post("/oauth", asyncRoute(async (req, res) => {
   if (req.body?.provider === "sso") return startSso(req, res);
   if (req.body?.provider !== "google") return invalidBody(res);
   try {
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await startGoogleOAuth(
       client,
       callbackUrl(
@@ -244,7 +244,7 @@ authRouter.post("/exchange", asyncRoute(async (req, res) => {
   const parsed = exchangeSchema.safeParse(req.body);
   if (!parsed.success) return invalidBody(res);
   try {
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await exchangeCodeForSession(
       client,
       parsed.data.code,
@@ -298,7 +298,7 @@ authRouter.post("/handoff", asyncRoute(async (req, res) => {
       return;
     }
 
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     const { data, error } = await applyHandoffSession(client, {
       accessToken: handoff.accessToken,
       refreshToken: handoff.refreshToken,
@@ -326,7 +326,7 @@ authRouter.post("/password-reset", asyncRoute(async (req, res) => {
   const email = emailSchema.safeParse(req.body?.email);
   if (email.success) {
     try {
-      const client = createRequestSupabase(req, res);
+      const client = createRequestAuth(req, res);
       await sendPasswordReset(
         client,
         email.data,
@@ -349,7 +349,7 @@ authRouter.get("/session", requireAuth, asyncRoute(async (_req, res) => {
 
 authRouter.post("/logout", asyncRoute(async (req, res) => {
   try {
-    const client = createRequestSupabase(req, res);
+    const client = createRequestAuth(req, res);
     await signOut(client, req.body?.scope === "global" ? "global" : "local");
   } catch (error) {
     // Local cookie removal must not depend on the upstream revocation request.

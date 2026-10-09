@@ -1,15 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackConfigured, stackDb } from "./stackDb";
 
 // Stack-level test for the DB queue's claim SQL. These are properties of the
 // Postgres functions themselves — FOR UPDATE SKIP LOCKED partitioning, stale
 // reclaim, and the attempt budget applying to a job that crashed its worker —
-// so a mock proves nothing. Gated exactly like stack.supabase.test.ts: run a
-// local stack, then export
-//   SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY, SUPABASE_TEST_ANON_KEY
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+// so a mock proves nothing. Gated like every stack suite: npm run test:stack
+// starts Postgres + GoTrue and sets DATABASE_TEST_URL, AUTH_TEST_URL and
+// AUTH_TEST_SERVICE_KEY.
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
 /** Stale threshold used by the calls below (seconds). */
 const STALE = 600;

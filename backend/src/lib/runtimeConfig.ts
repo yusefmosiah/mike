@@ -170,12 +170,39 @@ function requireHttps(url: URL | null, name: string, errors: string[]) {
   }
 }
 
-export function supabaseSessionConfiguration(
+export interface AuthServerConfiguration {
+  /** GoTrue's base URL as this process reaches it (no trailing slash). */
+  url: string;
+  /** GoTrue's base URL as a browser reaches it: OAuth redirects go here. */
+  publicUrl: string;
+  /** Sent as `apikey` on user calls, for a GoTrue behind a gateway that requires one. */
+  apiKey: string;
+  /** A service-role JWT signed with GoTrue's secret: admin API access. */
+  serviceKey: string;
+}
+
+/**
+ * Where the auth server (GoTrue) is. AUTH_URL is GoTrue itself; a deployment
+ * still configured with SUPABASE_URL reaches the same GoTrue at /auth/v1 behind
+ * Supabase's gateway, which also wants its keys as `apikey`.
+ */
+export function authServerConfiguration(
   env: NodeJS.ProcessEnv = process.env,
-) {
+): AuthServerConfiguration {
+  const direct = required(env, ["AUTH_URL"]);
+  const supabase = required(env, ["SUPABASE_URL"]);
+  const url = (
+    direct || (supabase ? `${supabase.replace(/\/+$/, "")}/auth/v1` : "")
+  ).replace(/\/+$/, "");
   return {
-    url: required(env, ["SUPABASE_URL"]),
-    key: required(env, ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]),
+    url,
+    publicUrl: required(env, ["AUTH_PUBLIC_URL"]).replace(/\/+$/, "") || url,
+    apiKey: direct
+      ? required(env, ["AUTH_API_KEY"])
+      : required(env, ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]),
+    serviceKey: direct
+      ? required(env, ["AUTH_SERVICE_KEY"])
+      : required(env, ["SUPABASE_SECRET_KEY"]),
   };
 }
 
@@ -198,9 +225,9 @@ export function authHandoffEncryptionSecret(
 }
 
 /**
- * The direct Postgres connection the chat runtime (Pi Durable) keeps its
- * transcripts in. PI_DURABLE_DATABASE_URL is the name it had while it was
- * opt-in.
+ * The Postgres database: application tables and chat transcripts (Pi
+ * Durable) alike. PI_DURABLE_DATABASE_URL is the name it had while only the
+ * chat runtime used it.
  */
 export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return env.DATABASE_URL?.trim() || env.PI_DURABLE_DATABASE_URL?.trim() || undefined;
@@ -215,19 +242,18 @@ export function validateRuntimeConfiguration(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   const errors: string[] = [];
-  const session = supabaseSessionConfiguration(env);
+  const auth = authServerConfiguration(env);
 
-  if (!session.url) errors.push("SUPABASE_URL is required");
-  if (!session.key) {
-    errors.push("SUPABASE_PUBLISHABLE_KEY (or SUPABASE_ANON_KEY) is required");
+  if (!auth.url) errors.push("AUTH_URL is required (the GoTrue auth server)");
+  if (!auth.serviceKey) {
+    errors.push("AUTH_SERVICE_KEY is required (a service-role JWT for GoTrue)");
   }
-  if (!env.SUPABASE_SECRET_KEY?.trim()) {
-    errors.push("SUPABASE_SECRET_KEY is required");
+  if (auth.url) parsedUrl(auth.url, "AUTH_URL", errors);
+  if (env.AUTH_PUBLIC_URL?.trim()) {
+    parsedUrl(env.AUTH_PUBLIC_URL.trim(), "AUTH_PUBLIC_URL", errors);
   }
-
-  if (session.url) parsedUrl(session.url, "SUPABASE_URL", errors);
   if (!databaseUrl(env)) {
-    errors.push("DATABASE_URL is required (a direct Postgres connection for chat transcripts)");
+    errors.push("DATABASE_URL is required (the Postgres database)");
   }
 
   if (env.AUTH_HANDOFF_ENCRYPTION_SECRET?.trim()) {

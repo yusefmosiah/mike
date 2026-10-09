@@ -1,27 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 import {
     filterAccessibleDocumentIds,
     listAccessibleProjectIds,
 } from "../../lib/access";
 
-// Gated: runs only against a real (local) Supabase stack.
-//   supabase start, then export:
-//     SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY
-// or use scripts/test-stack.sh which reads them from `supabase status`.
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
+// Gated: runs only against a real Postgres + GoTrue (npm run test:stack,
+// which starts both and sets DATABASE_TEST_URL, AUTH_TEST_URL and
+// AUTH_TEST_SERVICE_KEY).
 
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
 const db = stackDb()!;
 
-maybeDescribe("Supabase access integration", () => {
+maybeDescribe("access integration", () => {
     it("proves tabular document filtering drops foreign document IDs", async () => {
-        const admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false },
-        });
+        const admin = stackAuth();
         const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const ownerEmail = `owner-${suffix}@example.com`;
         const reviewerEmail = `reviewer-${suffix}@example.com`;
@@ -33,7 +27,7 @@ maybeDescribe("Supabase access integration", () => {
         const privateDocId = crypto.randomUUID();
 
         try {
-            const owner = await admin.auth.admin.createUser({
+            const owner = await admin.admin.createUser({
                 email: ownerEmail,
                 password: "StackTest1!",
                 email_confirm: true,
@@ -43,7 +37,7 @@ maybeDescribe("Supabase access integration", () => {
             }
             ownerId = owner.data.user.id;
 
-            const reviewer = await admin.auth.admin.createUser({
+            const reviewer = await admin.admin.createUser({
                 email: reviewerEmail,
                 password: "StackTest1!",
                 email_confirm: true,
@@ -132,8 +126,8 @@ maybeDescribe("Supabase access integration", () => {
                 .from("projects")
                 .delete()
                 .in("id", [sharedProjectId, privateProjectId]);
-            if (reviewerId) await admin.auth.admin.deleteUser(reviewerId);
-            if (ownerId) await admin.auth.admin.deleteUser(ownerId);
+            if (reviewerId) await admin.admin.deleteUser(reviewerId);
+            if (ownerId) await admin.admin.deleteUser(ownerId);
         }
     });
 });

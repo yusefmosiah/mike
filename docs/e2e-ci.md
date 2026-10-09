@@ -10,19 +10,20 @@ makes that check *required*.
 
 On every `pull_request`, including stacked PRs targeting another feature branch,
 on manual `workflow_dispatch`, and **nightly at 03:47 UTC** (a `schedule` cron,
-so drift that lands between PRs — dependency bumps, Supabase CLI changes,
+so drift that lands between PRs — dependency bumps, image changes,
 selector-breaking UI tweaks — is caught within a day), the `e2e / playwright`
 matrix:
 
 1. installs the root (Playwright), `backend/`, and `frontend/` dependencies;
 2. boots **RustFS** (S3-compatible object storage — several specs upload documents);
-3. boots **local Supabase** (Auth + Postgres) via the Supabase CLI and loads the
+3. boots **Postgres and GoTrue** from `docker-compose.yml` and loads the
    current fresh-install shape from `backend/schema.sql`. It intentionally does
    not replay historical migrations on top: doing so can replace current
    functions with older definitions. The separate schema-drift workflow proves
    that the supported upgrade path (its pinned baseline plus later migrations)
    converges with this fresh-install path;
-4. writes `backend/.env` and `frontend/.env.local` from the live Supabase values;
+4. writes `backend/.env` (`AUTH_URL`, `AUTH_SERVICE_KEY`, `DATABASE_URL`) and
+   `frontend/.env.local` for those services;
 5. builds the backend and runs the pinned `sync:workflows` release job, matching
    production ordering so the default and add-on catalog exists before startup;
 6. serves the production build (`next build` / `next start`) in one job and
@@ -42,7 +43,7 @@ Each Playwright worker signs in as its **own** user, following Playwright's
 pattern. Worker 0 is the historical `e2e@mike.local` (or `E2E_EMAIL` /
 `E2E_PASSWORD`); worker *n* is `e2e-wn@mike.local` with the same password
 (`workerAccount()` in `e2e/users.ts`). The worker-scoped fixture in
-`e2e/fixtures.ts` creates the account through the local Supabase admin API,
+`e2e/fixtures.ts` creates the account through the local GoTrue admin API,
 signs in once, finishes onboarding and reuses the session for every test in
 that worker. Separate users have separate project, chat and workflow lists and
 separate sessions, so workers can't race on each other's data. Tests inside a
@@ -230,6 +231,8 @@ npx playwright install --with-deps chromium
 npm run test:e2e            # or test:e2e:ui / test:e2e:headed
 ```
 
-`e2e/auth.setup.ts` reads `SUPABASE_URL` / `SUPABASE_SECRET_KEY` from the
-environment or `backend/.env`, so a running local Supabase + a populated
-`backend/.env` is all the setup needs.
+`e2e/auth.setup.ts` reads `AUTH_URL` / `AUTH_SERVICE_KEY` from the
+environment or `backend/.env`, so a running local GoTrue + a populated
+`backend/.env` is all the setup needs. `npm run test:e2e:local`
+(`scripts/e2e-local-stack.sh`) starts Postgres and GoTrue under their own
+Compose project and writes those values for you.

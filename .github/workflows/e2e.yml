@@ -1,8 +1,8 @@
 # End-to-end Playwright suite (auth, chat, projects, tabular reviews, workflows).
 #
 # This workflow is what makes the e2e suite a MERGE GATE: it runs on every pull
-# request into a protected branch, boots a full local stack (Supabase + backend
-# API + Next.js web + RustFS object storage), runs Playwright, and fails the check
+# request into a protected branch, boots a full local stack (Postgres + GoTrue +
+# backend API + Next.js web + RustFS object storage), runs Playwright, and fails the check
 # when any spec fails. To have a red run actually BLOCK a merge you must also mark
 # this job "e2e / playwright" as a required status check in branch protection —
 # see docs/e2e-ci.md ("Make it merge-blocking").
@@ -26,7 +26,7 @@ on:
   # Include stacked PRs whose base is another feature branch.
   pull_request:
   # Nightly run against the default branch, so drift that lands BETWEEN pull
-  # requests (a dependency bump, a Supabase CLI change, an upstream UI tweak
+  # requests (a dependency bump, an image change, an upstream UI tweak
   # breaking a selector) is caught within a day instead of surfacing on the next
   # unrelated PR. 03:47 UTC is a quiet hour for GitHub's cron pool (on-the-hour
   # slots are congested and can be delayed or dropped). Scheduled runs exercise
@@ -54,7 +54,7 @@ jobs:
   synthetic:
     # The Playwright `synthetic` project (assistant-streaming and
     # tabular-chat-lifecycle) mocks every /api call inside the browser, so it
-    # needs only the web app: no Supabase, backend or account. Running it here
+    # needs only the web app: no database, backend or account. Running it here
     # keeps the full-stack job short. The streaming tests are slow by design
     # (4x CPU throttling, hundreds of SSE chunks; up to ~2 min each), and share
     # nothing. Four of them on one 4-vCPU runner slowed each other ~2.5x
@@ -240,45 +240,22 @@ jobs:
           AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://localhost:9000 s3 ls s3://mike
 
-      # Supabase (Auth + Postgres). This layout ships no supabase/ config dir
-      # (the app targets a hosted Supabase project), so we scaffold one with
-      # `supabase init` purely to boot the CLI's local stack, then load the
-      # repository's own fresh-database schema — exactly what the README tells a
-      # human to run on a new database (backend/schema.sql).
-      # Kept serial on purpose: booting it in the background alongside the
-      # installs and builds saved ~1.7 min but hung at "Starting database..."
-      # past 10 min in 1 of ~6 runs (the serial step never exceeded 2.5 min
-      # across 82 runs), which a merge gate can't afford.
-      - name: Start local Supabase
-        uses: supabase/setup-cli@v3
-        with:
-          # Keep CI reproducible and avoid the GitHub API call needed to resolve
-          # `latest`, which can fail when the shared runner hits its rate limit.
-          version: 2.108.0
-      - name: Init + start Supabase, load fresh schema
+      # Postgres + GoTrue from docker-compose.yml (the images the product
+      # ships), then the repository's own fresh-database schema — exactly what
+      # a new install runs (backend/schema.sql). Low dedicated ports avoid
+      # intermittent collisions with runner outbound traffic in Linux's
+      # ephemeral range.
+      - name: Start Postgres and GoTrue, load fresh schema
         run: |
-          supabase init --force --with-vscode-settings=false || supabase init --force
-          # E2E uses Auth, Postgres, PostgREST, and Kong only. Document storage
-          # is provided by RustFS above, and no spec reads local email. Excluding
-          # the unused services also avoids Mailpit claiming host port 54324,
-          # which can collide with runner processes before Playwright starts.
-          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
-          # low ports avoid intermittent collisions with runner outbound traffic.
-          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
-          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
-          # Allow the pinned CLI to recover when one public registry is throttled.
-          env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
-            -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
-          DB_URL=$(supabase status -o json | jq -r '.DB_URL')
+          DB_PORT=21322 AUTH_PORT=21321 MAILPIT_PORT=21325 MAILPIT_SMTP_PORT=21326 \
+          AUTH_PUBLIC_URL=http://localhost:21321 \
+            docker compose -p mike-e2e up -d --wait db auth
           # A fresh database runs the current schema exactly once. Historical
           # migrations only upgrade older deployments; replaying them on top of
           # schema.sql can overwrite current functions with obsolete definitions.
           # The schema-drift workflow separately proves that the real upgrade path
           # (pinned baseline + migrations) converges with this fresh-install path.
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f backend/schema.sql
-          # PostgREST cached its schema when `supabase start` booted it (before
-          # the DDL above). Tell it to reload so the new tables/grants are visible.
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "NOTIFY pgrst, 'reload schema';"
+          psql "postgres://postgres:postgres@127.0.0.1:21322/postgres" -v ON_ERROR_STOP=1 -f backend/schema.sql
 
       # The web client talks to its own /api gateway. Only the Next server
       # needs the upstream backend origin. Written before the build because
@@ -301,12 +278,10 @@ jobs:
         if: matrix.renderer == 'production'
         run: npm run build --prefix frontend
 
-      - name: Wire env from Supabase
+      - name: Wire backend env
         run: |
-          API_URL=$(supabase status -o json | jq -r '.API_URL')
-          ANON_KEY=$(supabase status -o json | jq -r '.ANON_KEY')
-          SERVICE_KEY=$(supabase status -o json | jq -r '.SERVICE_ROLE_KEY')
-          DB_URL=$(supabase status -o json | jq -r '.DB_URL')
+          # The compose file's local demo service-role key, signed with its GoTrue secret.
+          SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
           # dotenv is last-wins: start from the committed example (so any key we
           # don't override keeps a sane placeholder) then append the real values.
           cp backend/.env.example backend/.env
@@ -314,11 +289,9 @@ jobs:
             echo "PORT=3001"
             echo "FRONTEND_URL=http://localhost:3000"
             echo "API_PUBLIC_URL=http://localhost:3000/api"
-            echo "SUPABASE_URL=$API_URL"
-            echo "SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
-            echo "SUPABASE_SECRET_KEY=$SERVICE_KEY"
-            # Chat transcripts (Pi Durable) live in the same database.
-            echo "DATABASE_URL=$DB_URL"
+            echo "AUTH_URL=http://localhost:21321"
+            echo "AUTH_SERVICE_KEY=$SERVICE_KEY"
+            echo "DATABASE_URL=postgres://postgres:postgres@127.0.0.1:21322/postgres"
             # Both secrets are consumed lazily by download-token signing and API-key
             # encryption; supply CI dummies well over any length floor.
             echo "DOWNLOAD_SIGNING_SECRET=ci-download-signing-secret-0123456789abcdef"

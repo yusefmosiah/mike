@@ -4,37 +4,35 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   authClient,
-  createRequestSupabase,
+  createRequestAuth,
   clearRequestAuthCookies,
   issueAuthHandoff,
   consumeAuthHandoff,
 } = vi.hoisted(() => ({
   authClient: {
-    auth: {
-      getUser: vi.fn(),
-      getSession: vi.fn(),
-      signInWithPassword: vi.fn(),
-      signUp: vi.fn(),
-      signInWithOAuth: vi.fn(),
-      signInWithSSO: vi.fn(),
-      exchangeCodeForSession: vi.fn(),
-      resetPasswordForEmail: vi.fn(),
-      signOut: vi.fn(),
-      setSession: vi.fn(),
-      mfa: {
-        verify: vi.fn(),
-        challengeAndVerify: vi.fn(),
-      },
+    getUser: vi.fn(),
+    getSession: vi.fn(),
+    signInWithPassword: vi.fn(),
+    signUp: vi.fn(),
+    signInWithOAuth: vi.fn(),
+    signInWithSSO: vi.fn(),
+    exchangeCodeForSession: vi.fn(),
+    resetPasswordForEmail: vi.fn(),
+    signOut: vi.fn(),
+    setSession: vi.fn(),
+    mfa: {
+      verify: vi.fn(),
+      challengeAndVerify: vi.fn(),
     },
   },
-  createRequestSupabase: vi.fn(),
+  createRequestAuth: vi.fn(),
   clearRequestAuthCookies: vi.fn(),
   issueAuthHandoff: vi.fn(),
   consumeAuthHandoff: vi.fn(),
 }));
 
 vi.mock("../../../lib/authSession", () => ({
-  createRequestSupabase,
+  createRequestAuth,
   clearRequestAuthCookies,
   publicAuthUser: (user: {
     id: string;
@@ -82,14 +80,14 @@ describe("auth routes", () => {
     delete process.env.WORD_ADDIN_URL;
     for (const key of ["SSO_ENABLED", "SSO_ALLOWED_DOMAINS"])
       delete process.env[key];
-    createRequestSupabase.mockReset().mockReturnValue(authClient);
+    createRequestAuth.mockReset().mockReturnValue(authClient);
     clearRequestAuthCookies.mockReset();
     issueAuthHandoff.mockReset();
     consumeAuthHandoff.mockReset();
-    for (const method of Object.values(authClient.auth)) {
+    for (const method of Object.values(authClient)) {
       if (typeof method === "function") method.mockReset();
     }
-    for (const method of Object.values(authClient.auth.mfa)) {
+    for (const method of Object.values(authClient.mfa)) {
       method.mockReset();
     }
   });
@@ -102,11 +100,11 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(403);
     expect(response.body.code).toBe("untrusted_origin");
-    expect(createRequestSupabase).not.toHaveBeenCalled();
+    expect(createRequestAuth).not.toHaveBeenCalled();
   });
 
   it("establishes a server session without returning tokens", async () => {
-    authClient.auth.signInWithPassword.mockResolvedValue({
+    authClient.signInWithPassword.mockResolvedValue({
       data: { user, session },
       error: null,
     });
@@ -130,7 +128,7 @@ describe("auth routes", () => {
   });
 
   it("keeps OAuth redirects on the requesting client origin", async () => {
-    authClient.auth.signInWithOAuth.mockResolvedValue({
+    authClient.signInWithOAuth.mockResolvedValue({
       data: { url: "https://accounts.google.test/authorize" },
       error: null,
     });
@@ -145,7 +143,7 @@ describe("auth routes", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(authClient.auth.signInWithOAuth).toHaveBeenCalledWith({
+    expect(authClient.signInWithOAuth).toHaveBeenCalledWith({
       provider: "google",
       options: {
         redirectTo:
@@ -161,13 +159,13 @@ describe("auth routes", () => {
       .set("Origin", origin)
       .send({ provider: "sso", email: "lawyer@example.com" });
     expect(response.status).toBe(403);
-    expect(createRequestSupabase).not.toHaveBeenCalled();
+    expect(createRequestAuth).not.toHaveBeenCalled();
   });
 
   it("extracts a normalized email domain and uses the shared callback", async () => {
     process.env.SSO_ENABLED = "true";
     process.env.SSO_ALLOWED_DOMAINS = "example.com, other.example";
-    authClient.auth.signInWithSSO.mockResolvedValue({
+    authClient.signInWithSSO.mockResolvedValue({
       data: { url: "https://idp.example/saml" },
       error: null,
     });
@@ -181,7 +179,7 @@ describe("auth routes", () => {
         callbackPath: "https://attacker.example",
       });
     expect(response.body).toEqual({ url: "https://idp.example/saml" });
-    expect(authClient.auth.signInWithSSO).toHaveBeenCalledWith({
+    expect(authClient.signInWithSSO).toHaveBeenCalledWith({
       domain: "example.com",
       options: {
         redirectTo: `${origin}/auth/callback?next=%2Fonboarding%2Fprofile`,
@@ -198,7 +196,7 @@ describe("auth routes", () => {
       .send({ provider: "sso" });
     expect(missing.body.code).toBe("invalid_request");
     process.env.SSO_ALLOWED_DOMAINS = "default.example,other.example";
-    authClient.auth.signInWithSSO.mockResolvedValue({
+    authClient.signInWithSSO.mockResolvedValue({
       data: { url: "https://idp.example/saml" },
       error: null,
     });
@@ -211,7 +209,7 @@ describe("auth routes", () => {
         next: "/projects",
       });
     expect(response.status).toBe(200);
-    expect(authClient.auth.signInWithSSO).toHaveBeenCalledWith(
+    expect(authClient.signInWithSSO).toHaveBeenCalledWith(
       expect.objectContaining({
         domain: "other.example",
         options: expect.objectContaining({
@@ -239,7 +237,7 @@ describe("auth routes", () => {
       .set("Origin", origin)
       .send({ provider: "sso", email });
     expect(response.status).toBe(400);
-    expect(createRequestSupabase).not.toHaveBeenCalled();
+    expect(createRequestAuth).not.toHaveBeenCalled();
   });
 
   it("enforces exact domain allowlisting and trusted origins", async () => {
@@ -261,7 +259,7 @@ describe("auth routes", () => {
       .set("Origin", "https://attacker.example")
       .send({ provider: "sso", email: "lawyer@example.com" });
     expect(response.status).toBe(403);
-    expect(createRequestSupabase).not.toHaveBeenCalled();
+    expect(createRequestAuth).not.toHaveBeenCalled();
   });
 
   it("fails closed for an invalid domain allowlist", async () => {
@@ -273,14 +271,14 @@ describe("auth routes", () => {
       .send({ provider: "sso", email: "lawyer@example.com" });
     expect(response.status).toBe(500);
     expect(response.body.code).toBe("internal_error");
-    expect(createRequestSupabase).not.toHaveBeenCalled();
+    expect(createRequestAuth).not.toHaveBeenCalled();
   });
 
   it.each([400, 404, 429, 500])(
     "sanitizes provider errors (%s)",
     async (status) => {
       process.env.SSO_ENABLED = "true";
-      authClient.auth.signInWithSSO.mockResolvedValue({
+      authClient.signInWithSSO.mockResolvedValue({
         data: null,
         error: { status, message: "private provider diagnostics" },
       });
@@ -295,10 +293,10 @@ describe("auth routes", () => {
 
   it("sanitizes thrown failures and missing redirects", async () => {
     process.env.SSO_ENABLED = "true";
-    authClient.auth.signInWithSSO.mockRejectedValueOnce(
+    authClient.signInWithSSO.mockRejectedValueOnce(
       new Error("private diagnostics"),
     );
-    authClient.auth.signInWithSSO.mockResolvedValueOnce({
+    authClient.signInWithSSO.mockResolvedValueOnce({
       data: {},
       error: null,
     });
@@ -313,7 +311,7 @@ describe("auth routes", () => {
   });
 
   it("does not reveal whether a password-reset email exists", async () => {
-    authClient.auth.resetPasswordForEmail.mockRejectedValue(
+    authClient.resetPasswordForEmail.mockRejectedValue(
       new Error("account not found"),
     );
 
@@ -327,7 +325,7 @@ describe("auth routes", () => {
   });
 
   it("always clears local cookies during logout", async () => {
-    authClient.auth.signOut.mockRejectedValue(
+    authClient.signOut.mockRejectedValue(
       new Error("upstream unavailable"),
     );
 
@@ -350,7 +348,7 @@ describe("auth routes", () => {
   ] as const)(
     "does not expose tokens from %s",
     async (path, method, extraBody) => {
-      authClient.auth.mfa[method].mockResolvedValue({
+      authClient.mfa[method].mockResolvedValue({
         data: {
           access_token: "mfa-access-token",
           refresh_token: "mfa-refresh-token",
@@ -384,7 +382,7 @@ describe("auth routes", () => {
 
   it("exchanges Word OAuth sessions for an opaque handoff ticket", async () => {
     process.env.WORD_ADDIN_URL = wordOrigin;
-    authClient.auth.exchangeCodeForSession.mockResolvedValue({
+    authClient.exchangeCodeForSession.mockResolvedValue({
       data: { user, session },
       error: null,
     });
@@ -415,7 +413,7 @@ describe("auth routes", () => {
       accessToken: "handoff-access-token",
       refreshToken: "handoff-refresh-token",
     });
-    authClient.auth.setSession.mockResolvedValue({
+    authClient.setSession.mockResolvedValue({
       data: { user, session },
       error: null,
     });
@@ -426,7 +424,7 @@ describe("auth routes", () => {
       .send({ ticket: "b".repeat(43), requestId: "request-id-123456" });
 
     expect(response.status).toBe(200);
-    expect(authClient.auth.setSession).toHaveBeenCalledWith({
+    expect(authClient.setSession).toHaveBeenCalledWith({
       access_token: "handoff-access-token",
       refresh_token: "handoff-refresh-token",
     });

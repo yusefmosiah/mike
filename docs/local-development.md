@@ -1,13 +1,13 @@
 # Local development
 
 The recommended local setup uses Docker Compose to run the application and its
-infrastructure together. No managed Supabase project or object-storage account
+infrastructure together. No managed database, auth, or object-storage account
 is required.
 
 The stack includes:
 
 - the Mike frontend and backend;
-- Supabase Postgres, Auth, data API, and gateway;
+- Postgres, and GoTrue for authentication;
 - RustFS for S3-compatible object storage; and
 - Mailpit for local authentication email.
 
@@ -29,8 +29,8 @@ Edit `backend/.env`:
 - Add an Anthropic, Gemini, or OpenAI API key, unless you plan to use Ollama
   exclusively.
 
-Docker Compose supplies the local Supabase and object-storage settings, so
-leave those values unchanged. Then start the stack:
+Docker Compose supplies the local database, auth, and object-storage settings,
+so leave those values unchanged. Then start the stack:
 
 ```bash
 docker compose up --build
@@ -38,25 +38,46 @@ docker compose up --build
 
 Open [http://localhost:3000](http://localhost:3000) and sign up.
 
+An install created before Mike dropped Supabase keeps its data in the old
+`db_data` volume and will not start until that data is moved; see
+[Moving a Docker Compose install off the Supabase Postgres image](deployment.md#moving-a-docker-compose-install-off-the-supabase-postgres-image).
+
+### Run the backend or frontend outside Docker
+
+Start only the infrastructure, then point `backend/.env` at it:
+
+```bash
+docker compose up -d db auth mailpit storage createbucket redis
+```
+
+```env
+AUTH_URL=http://localhost:54321
+AUTH_SERVICE_KEY=<the AUTH_SERVICE_KEY default in docker-compose.yml>
+DATABASE_URL=postgres://postgres:postgres@localhost:54322/postgres
+```
+
+Load the schema once (`docker compose up db-init` does it, or run
+`backend/schema.sql` with `psql`), then `npm run dev --prefix backend`.
+
 ## Local service endpoints
 
 | Service | Address | Notes |
 | --- | --- | --- |
 | Mike | `http://localhost:3000` | Main application |
-| Supabase API | `http://localhost:54321` | Auth and data API gateway |
+| GoTrue | `http://localhost:54321` | Auth server (confirmation links, OAuth callbacks) |
 | Postgres | `localhost:54322` | Host access for database tools |
 | RustFS console | `http://localhost:9001` | `rustfsadmin` / `rustfsadmin` |
 | Mailpit | `http://localhost:8025` | Captured local auth email |
 
-The Supabase JWT secret and anon/`service_role` keys in `docker-compose.yml`
-and `.env.example` are well-known local demo values. They are convenient for
+The GoTrue JWT secret and `service_role` key in `docker-compose.yml` are
+well-known local demo values. They are convenient for
 localhost but must be regenerated before exposing an instance anywhere.
 
 ## Local registration and email
 
 By default, a local email-and-password registration is automatically confirmed
-and the new user is signed in. Supabase Auth sends authentication email; the
-Mike backend does not send it directly.
+and the new user is signed in. GoTrue sends authentication email; the Mike
+backend does not send it directly.
 
 To exercise the confirmation-email flow, set
 `GOTRUE_MAILER_AUTOCONFIRM=false` in the root `.env`, then recreate Auth:
@@ -73,13 +94,12 @@ it off only when you specifically want to test the confirmation flow.
 
 ## Local Google authentication
 
-Google OAuth works with either local Supabase option. Create a Google **Web
-application** OAuth client and keep its secret out of Git.
-
-For Docker Compose, register this Google authorized redirect URI:
+Create a Google **Web application** OAuth client and keep its secret out of
+Git. Register this Google authorized redirect URI (GoTrue's callback,
+`AUTH_PUBLIC_URL` + `/callback`):
 
 ```text
-http://localhost:54321/auth/v1/callback
+http://localhost:54321/callback
 ```
 
 Google OAuth is enabled by default. Set the client values in the root `.env`,
@@ -94,22 +114,9 @@ GOTRUE_EXTERNAL_GOOGLE_SECRET=<client-secret>
 docker compose up -d --force-recreate auth
 ```
 
-For the Supabase CLI stack, register
-`http://127.0.0.1:54321/auth/v1/callback`, then set
-`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` and
-`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_SECRET` in `backend/.env`. Google OAuth
-is enabled by default; set `[auth.external.google].enabled` to `false` in
-`backend/supabase/config.toml` to opt out locally. Restart the stack after a
-configuration change:
-
-```bash
-cd backend
-supabase stop
-supabase start
-```
-
-The checked-in configuration already allows the web callback and the local
-Word dialog callback at `https://localhost:3200/oauth-dialog.html`. Add your
+The Compose GoTrue allows any redirect target locally, including the web
+callback and the Word dialog callback at
+`https://localhost:3200/oauth-dialog.html`. Add your
 Google account as an OAuth test user while the Google app remains in testing.
 
 ## Local models with Ollama

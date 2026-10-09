@@ -246,7 +246,8 @@ remaining inline queries per routes file and only ever goes down.
 
 `lib/` holds two kinds of code:
 
-- **Infrastructure:** `supabase`, `storage`, `queue/`, `dbq/` (durable jobs),
+- **Infrastructure:** `supabase` and `db/` (the database handle), `gotrue`
+  (the auth server's clients), `storage`, `queue/`, `dbq/` (durable jobs),
   `llm/`, `mcp/`, `httpError`, `serviceResult`, `pagination`, `search`,
   `privateIp`, `origins`, `runtimeConfig`, `courtlistener` (an external API
   client), `convert`, `pdfjs`, `zipExport`, `concurrency`.

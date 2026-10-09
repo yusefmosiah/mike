@@ -1,13 +1,19 @@
 # Manual and production deployment
 
-Use this path when connecting Mike to managed Supabase and S3-compatible
-storage instead of the infrastructure bundled with Docker Compose.
+Use this path when connecting Mike to your own Postgres, GoTrue auth server,
+and S3-compatible storage instead of the infrastructure bundled with Docker
+Compose. Mike needs only those three: Postgres for its data, GoTrue (the auth
+server Supabase maintains) for accounts and sessions, and a bucket for files.
+A hosted Supabase project is one way to get the first two together; Mike uses
+nothing else from it.
 
 ## Prerequisites
 
 - Node.js 22 or newer
 - npm and Git
-- A Supabase project
+- A Postgres 17 database Mike can reach directly
+- A GoTrue auth server (v2.189.0 is the pinned, tested version) using the same
+  database, or a hosted Supabase project, which provides both
 - A Cloudflare R2, MinIO, or other S3-compatible bucket
 - At least one supported model-provider API key, or an accessible Ollama server
 - Optional: a CourtListener API token for case-law tools
@@ -15,7 +21,16 @@ storage instead of the infrastructure bundled with Docker Compose.
 
 ## Database setup
 
-For a fresh Supabase database, run the contents of `backend/schema.sql` in the
+GoTrue creates its own `auth` schema, including `auth.users`, the first time it
+starts; Mike's schema references it. On a database of your own, first run
+`docker/db-init/roles.sql` as a superuser: it creates GoTrue's
+`supabase_auth_admin` role and `auth` schema, plus the `anon`, `authenticated`
+and `service_role` roles that `schema.sql` grants to (Mike never uses them;
+they exist so its grants and row-level security apply unchanged). Point GoTrue
+at the database as `supabase_auth_admin` and start it once. A hosted Supabase
+project already has all of this.
+
+Then, for a fresh database, run `backend/schema.sql` once, with `psql` or the
 Supabase SQL editor. The schema file contains the complete current database
 shape.
 
@@ -30,6 +45,36 @@ expected starting schema, and a successful fresh install from `schema.sql` is
 not evidence that an older database has completed every upgrade step. The
 repository's schema-drift CI separately checks that its pinned historical
 baseline converges with the fresh schema after all later migrations run.
+
+### Moving a Docker Compose install off the Supabase Postgres image
+
+Compose installs used to run `supabase/postgres` on the `db_data` volume, with
+PostgREST and a gateway in front. The stack now runs stock Postgres on a new
+`postgres_data` volume and reaches GoTrue directly. An upgraded install whose
+data is still in `db_data` refuses to start (the `legacy-data-check` service
+says so) rather than coming up empty. Move the data once:
+
+```bash
+docker compose down
+scripts/migrate-supabase-db.sh
+docker compose up -d
+```
+
+The script starts the old image read-only on `db_data`, dumps the `auth`
+(accounts), `public` (application data) and `pi_durable` (chat transcripts)
+schemas, restores them into `postgres_data`, and hands the `auth` schema back to
+GoTrue's role. Supabase's own schemas held nothing of Mike's and stay behind,
+as do grants to roles only the Supabase image had. It refuses to write into a
+database that already holds Mike data, and never deletes `db_data`; remove that
+volume yourself once the new stack checks out. Text sorts by the database's
+libc collation now rather than ICU, so the order of some names in sorted lists
+can change slightly.
+
+Also update anything that pointed at the old gateway on port 54321: GoTrue now
+answers there directly, without the `/auth/v1` prefix. In particular, register
+`http://localhost:54321/callback` (or `AUTH_PUBLIC_URL` + `/callback`) as the
+Google OAuth redirect URI, and rename `SUPABASE_PUBLIC_URL` to
+`AUTH_PUBLIC_URL` in the root `.env` (the old name still works).
 
 ### After the organization-access upgrade: `tabular_review_legacy_shares`
 
@@ -92,7 +137,7 @@ cp frontend/.env.local.example frontend/.env.local
 
 Edit both files with the credentials and URLs for your deployment. At runtime,
 the frontend server needs only `API_BASE_URL`; browsers call the same-origin
-`/api` gateway and receive no Supabase URL, key, or session token. The variable
+`/api` gateway and receive no auth URL, key, or session token. The variable
 is not needed while building the frontend.
 
 Use:
@@ -100,15 +145,27 @@ Use:
 - `NODE_ENV=production` so startup enforces HTTPS and secure-cookie invariants
   (the backend Docker image sets this by default; see
   [Running the backend image](#running-the-backend-image));
-- the Supabase project URL for backend `SUPABASE_URL`;
-- the anon/publishable key for backend `SUPABASE_PUBLISHABLE_KEY`;
-- the service-role key for backend `SUPABASE_SECRET_KEY`;
+- GoTrue's base URL, as the backend reaches it, for backend `AUTH_URL`
+  (for a hosted Supabase project, `https://<project-ref>.supabase.co/auth/v1`);
+- a `service_role` JWT signed with GoTrue's JWT secret for backend
+  `AUTH_SERVICE_KEY` (a hosted Supabase project's service-role key);
+- GoTrue's browser-reachable base URL for backend `AUTH_PUBLIC_URL`, when it
+  differs from `AUTH_URL` (OAuth sign-in sends the browser there);
+- for a hosted Supabase project, its publishable/anon key for backend
+  `AUTH_API_KEY` (its gateway requires an `apikey` header; a GoTrue reached
+  directly does not);
 - a direct Postgres connection string for backend `DATABASE_URL` (see below);
   and
 - the internal Mike backend origin for frontend `API_BASE_URL`.
 
-Chat runs on Pi Durable, which keeps every conversation's model transcript, and
-any turn in flight, in its own schema of the same database (`pi_durable`, or
+A deployment configured before Mike talked to GoTrue directly can keep
+`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`: without
+`AUTH_URL`, the backend reaches GoTrue at `SUPABASE_URL/auth/v1` with those
+keys. Move to the `AUTH_*` names at your convenience.
+
+Mike queries Postgres over `DATABASE_URL` and nothing else; it does not use
+PostgREST or a Supabase data API. Chat runs on Pi Durable, which keeps every
+conversation's model transcript, and any turn in flight, in its own schema of the same database (`pi_durable`, or
 `PI_DURABLE_SCHEMA`). The backend creates the schema on first use. It needs a
 direct, session-mode connection, not a transaction pooler, because it holds an
 advisory lock on the schema for as long as it runs. Run one backend process per
@@ -120,7 +177,7 @@ its `/api` prefix (for example, `https://app.example.com/api`). OAuth providers,
 including MCP connectors, must return through that public gateway; never use an
 internal container hostname such as `http://backend:3001` for callbacks.
 
-Never expose Supabase session tokens, the service-role key, model-provider
+Never expose auth session tokens, the service-role key, model-provider
 keys, or storage secrets in frontend JavaScript.
 
 Production web auth cookies are `Secure`, `HttpOnly`, `SameSite=Lax`, path `/`,
@@ -138,7 +195,7 @@ that expires after two minutes. Apply
 `20260825_01_auth_handoff_tickets.sql` before enabling this flow.
 
 The first deployment intentionally signs out sessions created by older builds:
-the web app deletes legacy Supabase local/session-storage entries and the Word
+the web app deletes legacy auth local/session-storage entries and the Word
 add-in deletes legacy OfficeRuntime access/refresh tokens. Users authenticate
 once to establish the new cookie; tokens are not copied through JavaScript.
 
@@ -237,27 +294,29 @@ what is scrubbed, and how to verify are in [observability.md](observability.md).
 
 ## Authentication email
 
-Supabase Auth sends signup, email-change, and password-recovery messages.
-Configure production SMTP in the Supabase dashboard; Mike does not require a
-Resend API key for these messages.
+GoTrue sends signup, email-change, and password-recovery messages. Configure
+production SMTP through its `GOTRUE_SMTP_*` variables (on a hosted Supabase
+project, in its dashboard); Mike does not require a Resend API key for these
+messages.
 
-In **Authentication > URL Configuration**, set the Site URL to the deployed
-frontend origin and add that origin's `/auth/callback` URL to the redirect
-allow list. For example:
+Set GoTrue's Site URL (`GOTRUE_SITE_URL`) to the deployed frontend origin and
+add that origin's `/auth/callback` URL to its redirect allow list
+(`GOTRUE_URI_ALLOW_LIST`; on hosted Supabase, **Authentication > URL
+Configuration**). For example:
 
 ```text
 https://your-mike.example/auth/callback
 ```
 
 Enable email confirmation for production signups. Keep secure email change
-enabled so Supabase requires confirmation from both the current and proposed
+enabled so GoTrue requires confirmation from both the current and proposed
 addresses. Set the minimum password length to 10; this applies when passwords
 are created or changed and does not invalidate existing shorter passwords. The
 same callback handles signup confirmation, confirmed email
 changes, and password-recovery links before sending the user to the appropriate
 Mike page.
 
-Review the Supabase email templates after changing the public Site URL, and
+Review GoTrue's email templates after changing the public Site URL, and
 test every link against the deployed frontend before inviting users. Existing
 deployments must also apply the latest migration so confirmed email changes are
 mirrored into `user_profiles`.
@@ -265,17 +324,20 @@ mirrored into `user_profiles`.
 ## Google authentication
 
 Create a **Web application** OAuth client in Google Auth Platform. Its
-authorized redirect URI is the Supabase Auth callback shown on the Google
-provider page, not Mike's frontend callback. For hosted Supabase it normally
-has this form:
+authorized redirect URI is GoTrue's callback, not Mike's frontend callback:
+`AUTH_PUBLIC_URL` + `/callback`, for example
 
 ```text
-https://<project-ref>.supabase.co/auth/v1/callback
+https://auth.example.com/callback
 ```
 
-Enable Google under **Supabase > Authentication > Providers**, then enter the
-Google client ID and secret. In **Authentication > URL Configuration**, allow
-both deployed Mike clients:
+(for hosted Supabase, `https://<project-ref>.supabase.co/auth/v1/callback`).
+Compose installs that registered `http://localhost:54321/auth/v1/callback`
+before the Compose gateway was removed must register the new URL.
+
+Enable Google in GoTrue (`GOTRUE_EXTERNAL_GOOGLE_*`; on hosted Supabase,
+**Authentication > Providers**) with the client ID and secret, and allow both
+deployed Mike clients as redirect targets:
 
 ```text
 https://your-mike.example/auth/callback
@@ -285,13 +347,13 @@ https://your-word-addin.example/oauth-dialog.html
 The Word add-in completes authentication in an Office Dialog. The dialog gives
 the task pane only an opaque, short-lived, single-use handoff ticket. The task
 pane redeems it through the same-origin add-in proxy, and the backend writes its
-HttpOnly cookie. No Supabase access or refresh token enters add-in JavaScript or
+HttpOnly cookie. No access or refresh token enters add-in JavaScript or
 OfficeRuntime storage. The add-in also does not retain Google's provider access
 token or request Google Drive or Gmail access.
 
 ## Enterprise SSO (SAML)
 
-Self-hosted Mike can use SAML providers registered in Supabase Auth (GoTrue),
+Self-hosted Mike can use SAML providers registered in GoTrue,
 including Okta, Microsoft Entra ID, and Google Workspace SAML. The login page
 offers an SSO entry point; the backend permits the flow only when SSO is
 enabled. The existing email/password and Google methods remain available; this
@@ -301,11 +363,10 @@ feature does not enforce SSO-only access.
 
 For the Compose GoTrue service, uncomment the SAML environment entries in
 `docker-compose.yml`. Set `GOTRUE_SAML_ENABLED=true`, provide
-`GOTRUE_SAML_PRIVATE_KEY`, and set `GOTRUE_SAML_EXTERNAL_URL` to the public Auth
-base URL, for example `https://auth.example.com/auth/v1`. The `/auth/v1` suffix
-is required behind the Compose gateway: GoTrue appends `/sso/saml/acs` and
-`/sso/saml/metadata` to this base. Keep `SUPABASE_PUBLIC_URL` as the gateway
-origin. Configure these values in the root Compose `.env` or shell environment;
+`GOTRUE_SAML_PRIVATE_KEY`, and set `GOTRUE_SAML_EXTERNAL_URL` to GoTrue's public
+base URL (the Compose file uses `AUTH_PUBLIC_URL`), for example
+`https://auth.example.com`. GoTrue appends `/sso/saml/acs` and
+`/sso/saml/metadata` to this base. Configure these values in the root Compose `.env` or shell environment;
 `backend/.env` is loaded by the backend service, not the Auth service.
 
 The pinned GoTrue version expects a standard base64-encoded **PKCS#1 DER RSA
@@ -334,11 +395,11 @@ configuration instead of configuring GoTrue container variables.
 Import the service provider metadata from:
 
 ```text
-https://auth.example.com/auth/v1/sso/saml/metadata
+https://auth.example.com/sso/saml/metadata
 ```
 
 Use its entity ID/audience and assertion consumer service (ACS) URL in your
-IdP. The ACS is `https://auth.example.com/auth/v1/sso/saml/acs`, not Mike's
+IdP. The ACS is `https://auth.example.com/sso/saml/acs`, not Mike's
 frontend callback. Configure the IdP to supply an email attribute and assign
 the intended users or groups to the application.
 
@@ -355,7 +416,7 @@ machine. Replace these placeholders; the bearer token must be an administrative
 
 ```bash
 curl --fail-with-body --request POST \
-  'https://auth.example.com/auth/v1/admin/sso/providers' \
+  'https://auth.example.com/admin/sso/providers' \
   --header 'Authorization: Bearer <SERVICE_ROLE_JWT>' \
   --header 'apikey: <SERVICE_ROLE_JWT>' \
   --header 'Content-Type: application/json' \
@@ -370,8 +431,8 @@ curl --fail-with-body --request POST \
 Use `metadata_xml` instead of `metadata_url` when importing XML. Match the
 attribute mapping to the IdP's actual attribute name. The `domains` field maps
 an exact domain to this provider; add all domains your users will enter. List
-providers with `GET /auth/v1/admin/sso/providers`; use
-`PUT /auth/v1/admin/sso/providers/<provider-id>` to update an existing provider
+providers with `GET /admin/sso/providers`; use
+`PUT /admin/sso/providers/<provider-id>` to update an existing provider
 instead of repeating creation. Keep admin access restricted.
 
 ### Enable Mike and verify sign-in
@@ -395,7 +456,7 @@ The allowlist controls Mike's sign-in initiation, not account authorization or
 direct access to GoTrue; enforce membership and access policy at the IdP and
 Auth service.
 
-Mike calls GoTrue's `/sso` API using the server-side Supabase SDK, which sends
+Mike calls GoTrue's `/sso` API using GoTrue's server-side client, which sends
 `skip_http_redirect: true` and a PKCE challenge. After IdP authentication,
 GoTrue redirects to Mike's existing `/auth/callback`; the backend exchanges
 the code using its HttpOnly verifier cookie and establishes the normal session.
@@ -409,11 +470,11 @@ identities can be separate accounts from existing email/Google identities; do
 not assume matching emails link accounts or transfer project access.
 
 Cloudflare Access or IAP in front of Mike is complementary perimeter access
-control. It does not establish Mike's Supabase session and is not a substitute
+control. It does not establish Mike's session and is not a substitute
 for this SAML integration. Ensure the IdP/browser can reach the required SAML
 endpoints through any perimeter controls.
 
-References: [Supabase signInWithSSO](https://supabase.com/docs/reference/javascript/auth-signinwithsso),
+References: [auth-js signInWithSSO](https://supabase.com/docs/reference/javascript/auth-signinwithsso),
 [GoTrue SSO API](https://github.com/supabase/auth/blob/v2.189.0/internal/api/sso.go),
 [SAML configuration](https://github.com/supabase/auth/blob/v2.189.0/internal/conf/saml.go),
 and [provider administration](https://github.com/supabase/auth/blob/v2.189.0/internal/api/ssoadmin.go).
@@ -544,7 +605,8 @@ of on the next fresh install.
 ## Deployment safety
 
 - Generate unique, high-entropy signing and encryption secrets.
-- Use production Supabase credentials rather than the local demo values.
+- Use your own GoTrue JWT secret and service-role key, and a real database
+  password, rather than the local demo values.
 - Keep backend secrets out of `NEXT_PUBLIC_*` variables.
 - Configure spending limits for model-provider keys where supported.
 - Confirm LibreOffice is available to the backend and worker if document

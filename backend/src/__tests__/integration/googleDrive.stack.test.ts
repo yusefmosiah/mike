@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { asRole, stackAuth, stackConfigured, stackDb } from "./stackDb";
 
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const anonKey = process.env.SUPABASE_TEST_ANON_KEY;
-const suite = url && serviceKey && anonKey ? describe : describe.skip;
+// Gated: npm run test:stack starts Postgres + GoTrue and sets
+// DATABASE_TEST_URL, AUTH_TEST_URL and AUTH_TEST_SERVICE_KEY.
+const suite = stackConfigured ? describe : describe.skip;
 
 suite("Google Drive: real database atomic lifecycle and authorization", () => {
-    let admin: SupabaseClient;
-    let owner: SupabaseClient;
-    let anon: SupabaseClient;
+    const admin = stackDb()!;
+    const auth = stackAuth();
     let userId = "";
     const patch = {
         encrypted_access_token: "encrypted-access",
@@ -23,18 +21,9 @@ suite("Google Drive: real database atomic lifecycle and authorization", () => {
         expires_at: "2099-01-01T00:00:00Z",
     };
     beforeAll(async () => {
-        admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
-        anon = createClient(url!, anonKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
-        owner = createClient(url!, anonKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
         const email = `drive-${randomUUID()}@test.local`;
         const password = `Test-${randomUUID()}!`;
-        const created = await admin.auth.admin.createUser({
+        const created = await auth.admin.createUser({
             email,
             password,
             email_confirm: true,
@@ -42,11 +31,6 @@ suite("Google Drive: real database atomic lifecycle and authorization", () => {
         if (created.error || !created.data.user)
             throw created.error ?? new Error("No test user");
         userId = created.data.user.id;
-        const signedIn = await owner.auth.signInWithPassword({
-            email,
-            password,
-        });
-        if (signedIn.error) throw signedIn.error;
     });
     beforeEach(async () => {
         const result = await admin.rpc("disconnect_google_drive", {
@@ -55,7 +39,7 @@ suite("Google Drive: real database atomic lifecycle and authorization", () => {
         expect(result.error).toBeNull();
     });
     afterAll(async () => {
-        if (userId) await admin.auth.admin.deleteUser(userId);
+        if (userId) await auth.admin.deleteUser(userId);
     });
     // Drive's pending sign-ins share the Gmail/Calendar state table.
     const STATES = "google_workspace_oauth_states";
@@ -146,30 +130,30 @@ suite("Google Drive: real database atomic lifecycle and authorization", () => {
         const hash = await state();
         expect((await complete(hash)).data).toBe(true);
         await state();
-        for (const client of [anon, owner]) {
+        for (const [role, caller] of [["anon", null], ["authenticated", userId]] as const) {
             for (const table of [
                 "user_google_drive_tokens",
                 STATES,
             ]) {
-                const result = await client.from(table).select("*");
-                expect(result.error).not.toBeNull();
-                expect(result.data).toBeNull();
+                const result = await asRole(role, caller, `select * from public.${table}`);
+                expect(result.code).toBeDefined();
+                expect(result.rows).toEqual([]);
             }
             expect(
                 (
-                    await client.rpc("disconnect_google_drive", {
-                        p_user_id: userId,
-                    })
-                ).error,
-            ).not.toBeNull();
+                    await asRole(role, caller, "select public.disconnect_google_drive($1)", [userId])
+                ).code,
+            ).toBeDefined();
             expect(
                 (
-                    await client.rpc("complete_google_drive_oauth", {
-                        p_state_hash: hash,
-                        p_tokens: patch,
-                    })
-                ).error,
-            ).not.toBeNull();
+                    await asRole(
+                        role,
+                        caller,
+                        "select public.complete_google_drive_oauth($1, $2::jsonb)",
+                        [hash, JSON.stringify(patch)],
+                    )
+                ).code,
+            ).toBeDefined();
         }
         expect(await rows("user_google_drive_tokens")).toHaveLength(1);
     });

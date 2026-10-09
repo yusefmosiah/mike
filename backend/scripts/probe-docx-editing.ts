@@ -22,8 +22,9 @@ import path from "node:path";
 
 const LOCAL_SERVICE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
-process.env.SUPABASE_URL ??= "http://localhost:54321";
-process.env.SUPABASE_SECRET_KEY ??= LOCAL_SERVICE_KEY;
+process.env.AUTH_URL ??= "http://localhost:54321";
+process.env.AUTH_SERVICE_KEY ??= LOCAL_SERVICE_KEY;
+process.env.DATABASE_URL ??= "postgres://postgres:postgres@localhost:54322/postgres";
 process.env.R2_ENDPOINT_URL ??= "http://localhost:9000";
 process.env.R2_ACCESS_KEY_ID ??= "rustfsadmin";
 process.env.R2_SECRET_ACCESS_KEY ??= "rustfsadmin";

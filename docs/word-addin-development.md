@@ -16,7 +16,7 @@ The add-in uses the same backend-managed session and Mike API as the web app:
 
 Password and Google sign-in both produce the same HttpOnly cookie session.
 Google sign-in uses a non-iframe Office Dialog that starts and finishes at
-`https://localhost:3200/oauth-dialog.html`; the intermediate Supabase and
+`https://localhost:3200/oauth-dialog.html`; the intermediate GoTrue and
 Google pages run outside the task pane. No access or refresh token is available
 to task-pane JavaScript or OfficeRuntime storage. The dialog returns only a
 request-bound, single-use handoff ticket; the task pane redeems it and receives
@@ -54,7 +54,7 @@ steps manually:
    ```
 
    The browser-facing API URL remains on the HTTPS dev server; the proxy target
-   points to the backend, whose `.env` contains the Supabase configuration.
+   points to the backend, whose `.env` contains the auth configuration.
    Shell variables override `.env` for CI and deployment.
 
    When the backend uses local object storage, also set
@@ -163,9 +163,10 @@ Set `AUTH_HANDOFF_ENCRYPTION_SECRET` and apply
 sign-in. The backend rejects missing or weak handoff configuration at startup.
 
 For Google sign-in, add
-`https://word.example.com/oauth-dialog.html` to the Supabase Auth redirect
-allow list. Google's own authorized redirect URI remains the Supabase callback,
-for example `https://<project-ref>.supabase.co/auth/v1/callback`.
+`https://word.example.com/oauth-dialog.html` to GoTrue's redirect allow list
+(`GOTRUE_URI_ALLOW_LIST`). Google's own authorized redirect URI remains
+GoTrue's callback, `AUTH_PUBLIC_URL` + `/callback` (on a hosted Supabase
+project, `https://<project-ref>.supabase.co/auth/v1/callback`).
 
 ## Chat and storage behavior
 
@@ -190,7 +191,7 @@ therefore initially share the source document's chat history.
 ## Automated tests
 
 The Playwright suite uses a mocked Office.js host and stubbed backend, so it
-does not require Word, Supabase, or a live Mike API:
+does not require Word, a database, or a live Mike API:
 
 ```bash
 cd word-addin
@@ -275,9 +276,8 @@ lsof -nP -iTCP:3200 -sTCP:LISTEN
 
 ### The task pane is blank or login fails
 
-Inspect the task pane console, confirm the backend is running, and verify the
-Supabase URL and publishable key in `.env` match the frontend configuration.
-The URL must not end with a slash.
+Inspect the task pane console, confirm the backend is running, and verify that
+the backend's `.env` points `AUTH_URL` at a running GoTrue.
 
 ### Tracked-edit review is unavailable
 

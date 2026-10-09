@@ -24,8 +24,7 @@ const storage = vi.hoisted(() => ({
     ),
 }));
 // The run owner's email comes from GoTrue, through authAdmin().
-vi.mock("../../../lib/supabase", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../../lib/supabase")>()),
+vi.mock("../../../lib/gotrue", () => ({
     authAdmin: () => ({
         admin: {
             getUserById: async (_id: string) => ({

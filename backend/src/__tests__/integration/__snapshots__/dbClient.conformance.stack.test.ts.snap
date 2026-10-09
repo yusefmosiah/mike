@@ -1,0 +1,810 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 1`] = `
+{
+  "count": null,
+  "data": [
+    "alpha",
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 2`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "amount": 12.5,
+      "big": 9007199254740,
+      "created_at": "2026-10-08T12:00:00+00:00",
+      "events": [
+        {
+          "text": "hi",
+          "type": "content",
+        },
+      ],
+      "flag": true,
+      "id": "00000000-0000-4000-8000-000000000001",
+      "kind": "file",
+      "meta": {
+        "k": 1,
+      },
+      "n": 1,
+      "name": "alpha",
+      "tags": [
+        "a",
+        "b",
+      ],
+    },
+    {
+      "amount": null,
+      "big": null,
+      "created_at": "2026-10-08T12:00:00+00:00",
+      "events": null,
+      "flag": false,
+      "id": "00000000-0000-4000-8000-000000000002",
+      "kind": null,
+      "meta": null,
+      "n": 2,
+      "name": "beta",
+      "tags": [],
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 3`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "label": "ALPHA",
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "label": "BETA",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 4`] = `
+{
+  "count": null,
+  "data": 1,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 5`] = `
+{
+  "count": null,
+  "data": {
+    "doc": {
+      "a": [
+        1,
+        {
+          "b": null,
+        },
+      ],
+    },
+    "tags": [
+      "x",
+      "y,z",
+    ],
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 6`] = `
+{
+  "count": null,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 7`] = `
+{
+  "count": null,
+  "data": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "label": "ALPHA",
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 8`] = `
+{
+  "count": null,
+  "data": "one:1",
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 9`] = `
+{
+  "count": null,
+  "data": "two:1x",
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 10`] = `
+{
+  "count": null,
+  "data": "2d",
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 11`] = `
+{
+  "count": null,
+  "data": "2e",
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > calls functions: set of scalars, set of rows, table, scalar, jsonb, void, missing 12`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "PGRST202",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > counts exactly, with and without rows 1`] = `
+{
+  "count": 2,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > counts exactly, with and without rows 2`] = `
+{
+  "count": 3,
+  "data": [
+    {
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 1`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 2`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "beta",
+    },
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 3`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 4`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 5`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 6`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 7`] = `
+{
+  "count": null,
+  "data": [],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 8`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 9`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 10`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 11`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 12`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 13`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 14`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 15`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 16`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > filters: eq, neq, gt/gte/lt/lte, in, is, not, like/ilike, match, or 17`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > inserts, with and without returning, and reports constraint violations 1`] = `
+{
+  "count": null,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > inserts, with and without returning, and reports constraint violations 2`] = `
+{
+  "count": null,
+  "data": {
+    "kind": "file",
+    "meta": {
+      "a": [
+        1,
+      ],
+    },
+    "name": "delta",
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > inserts, with and without returning, and reports constraint violations 3`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "n": 5,
+      "name": "e1",
+    },
+    {
+      "n": 6,
+      "name": "e2",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > inserts, with and without returning, and reports constraint violations 4`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "23505",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > inserts, with and without returning, and reports constraint violations 5`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "23502",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > orders with nulls placement, limits and ranges 1`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "n": null,
+      "name": "gamma",
+    },
+    {
+      "n": 1,
+      "name": "alpha",
+    },
+    {
+      "n": 2,
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > orders with nulls placement, limits and ranges 2`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "n": 2,
+      "name": "beta",
+    },
+    {
+      "n": 1,
+      "name": "alpha",
+    },
+    {
+      "n": null,
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > orders with nulls placement, limits and ranges 3`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > orders with nulls placement, limits and ranges 4`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "beta",
+    },
+    {
+      "name": "gamma",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > selects columns, aliases and every column type as PostgREST serializes them 1`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "amount": 12.5,
+      "big": 9007199254740,
+      "created_at": "2026-10-08T12:00:00+00:00",
+      "events": [
+        {
+          "text": "hi",
+          "type": "content",
+        },
+      ],
+      "flag": true,
+      "id": "00000000-0000-4000-8000-000000000001",
+      "kind": "file",
+      "meta": {
+        "k": 1,
+      },
+      "n": 1,
+      "name": "alpha",
+      "tags": [
+        "a",
+        "b",
+      ],
+    },
+    {
+      "amount": null,
+      "big": null,
+      "created_at": "2026-10-08T12:00:00+00:00",
+      "events": null,
+      "flag": false,
+      "id": "00000000-0000-4000-8000-000000000002",
+      "kind": null,
+      "meta": null,
+      "n": 2,
+      "name": "beta",
+      "tags": [],
+    },
+    {
+      "amount": 0.1,
+      "big": 3,
+      "created_at": "2026-10-08T12:00:00+00:00",
+      "events": [],
+      "flag": null,
+      "id": "00000000-0000-4000-8000-000000000003",
+      "kind": "folder",
+      "meta": {
+        "nested": {
+          "x": [
+            1,
+            2,
+          ],
+        },
+      },
+      "n": null,
+      "name": "gamma",
+      "tags": null,
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > selects columns, aliases and every column type as PostgREST serializes them 2`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "label": "gamma",
+      "meta": {
+        "nested": {
+          "x": [
+            1,
+            2,
+          ],
+        },
+      },
+      "tags": null,
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "label": "beta",
+      "meta": null,
+      "tags": [],
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "label": "alpha",
+      "meta": {
+        "k": 1,
+      },
+      "tags": [
+        "a",
+        "b",
+      ],
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 1`] = `
+{
+  "count": null,
+  "data": {
+    "name": "alpha",
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 2`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "PGRST116",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 3`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "PGRST116",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 4`] = `
+{
+  "count": null,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 5`] = `
+{
+  "count": null,
+  "data": {
+    "name": "beta",
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > single and maybeSingle, including their errors 6`] = `
+{
+  "count": null,
+  "data": null,
+  "error": {
+    "code": "PGRST116",
+  },
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > updates and deletes, with and without returning 1`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "meta": {
+        "changed": true,
+      },
+      "n": 7,
+      "name": "alpha",
+      "tags": [
+        "z",
+      ],
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > updates and deletes, with and without returning 2`] = `
+{
+  "count": null,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > updates and deletes, with and without returning 3`] = `
+{
+  "count": null,
+  "data": {
+    "events": [
+      {
+        "message": "m",
+        "type": "error",
+      },
+    ],
+  },
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > updates and deletes, with and without returning 4`] = `
+{
+  "count": null,
+  "data": null,
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > updates and deletes, with and without returning 5`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "name": "alpha",
+    },
+    {
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > upserts on a named conflict target or the primary key, merging or ignoring 1`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "n": 42,
+      "name": "alpha",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > upserts on a named conflict target or the primary key, merging or ignoring 2`] = `
+{
+  "count": null,
+  "data": [],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > upserts on a named conflict target or the primary key, merging or ignoring 3`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "n": 2,
+      "name": "beta2",
+    },
+  ],
+  "error": null,
+}
+`;
+
+exports[`Mike's database client answers as PostgREST did > upserts on a named conflict target or the primary key, merging or ignoring 4`] = `
+{
+  "count": null,
+  "data": [
+    {
+      "n": 1,
+      "name": "new",
+    },
+    {
+      "n": 2,
+      "name": "beta",
+    },
+  ],
+  "error": null,
+}
+`;

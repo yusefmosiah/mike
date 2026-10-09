@@ -1,8 +1,8 @@
 import type { Request, Response as ExpressResponse } from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRequestSupabase } from "../authSession";
+import { createRequestAuth } from "../authSession";
 
-// Exercise the real SSR/Auth SDK; only the upstream HTTP boundary is mocked.
+// Exercise the real GoTrue client; only the upstream HTTP boundary is mocked.
 describe("SSO PKCE session", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -11,8 +11,7 @@ describe("SSO PKCE session", () => {
 
   it("sends a PKCE challenge and persists an HttpOnly verifier for the callback", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("SUPABASE_URL", "https://auth.example.test");
-    vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", "test-key");
+    vi.stubEnv("AUTH_URL", "https://auth.example.test");
     const upstream = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ url: "https://idp.example/saml" }), {
         status: 200,
@@ -20,7 +19,7 @@ describe("SSO PKCE session", () => {
       }),
     );
     vi.stubGlobal("fetch", upstream);
-    const cookies: string[] = [];
+    const headers: Record<string, unknown> = {};
     const req = {
       headers: { cookie: "" },
       get: vi.fn((name: string) =>
@@ -30,13 +29,13 @@ describe("SSO PKCE session", () => {
       ),
     } as unknown as Request;
     const res = {
-      append: vi.fn((name: string, value: string) => {
-        if (name === "Set-Cookie") cookies.push(value);
+      getHeader: (name: string) => headers[name],
+      setHeader: vi.fn((name: string, value: unknown) => {
+        headers[name] = value;
       }),
-      setHeader: vi.fn(),
     } as unknown as ExpressResponse;
-    const client = createRequestSupabase(req, res);
-    const { data, error } = await client.auth.signInWithSSO({
+    const client = createRequestAuth(req, res);
+    const { data, error } = await client.signInWithSSO({
       domain: "example.com",
       options: {
         redirectTo: "https://app.example.test/auth/callback",
@@ -47,7 +46,7 @@ describe("SSO PKCE session", () => {
     expect(data).toEqual({ url: "https://idp.example/saml" });
     expect(upstream).toHaveBeenCalledTimes(1);
     const [url, init] = upstream.mock.calls[0];
-    expect(url).toBe("https://auth.example.test/auth/v1/sso");
+    expect(url).toBe("https://auth.example.test/sso");
     const body = JSON.parse(init.body);
     expect(body).toMatchObject({
       domain: "example.com",
@@ -58,6 +57,7 @@ describe("SSO PKCE session", () => {
     expect(body.redirect_to).toContain(
       "https://app.example.test/auth/callback",
     );
+    const cookies = (headers["Set-Cookie"] as string[] | undefined) ?? [];
     const verifier = cookies.find((cookie) =>
       cookie.includes("-code-verifier="),
     );

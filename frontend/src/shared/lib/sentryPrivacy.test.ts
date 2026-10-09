@@ -216,8 +216,8 @@ it('separates diagnostic probes and allowlists configuration field names', () =>
   const probe = diagnosticEvent({ tags: diagnosticErrorTags({ code: 'sentry_test' }) });
   expect(probe.tags).toEqual({ diagnostic_test: 'true' });
   expect(probe.message).toBe('Diagnostic test in application');
-  expect(diagnosticErrorTags({ configurationFields: ['SUPABASE_URL', 'private-value', 'SUPABASE_URL'] })).toEqual({ configuration_fields: 'SUPABASE_URL' });
-  expect(diagnosticEvent({ tags: { configuration_fields: 'SUPABASE_URL,private' } }).tags).toEqual({});
+  expect(diagnosticErrorTags({ configurationFields: ['AUTH_URL', 'private-value', 'AUTH_URL'] })).toEqual({ configuration_fields: 'AUTH_URL' });
+  expect(diagnosticEvent({ tags: { configuration_fields: 'AUTH_URL,private' } }).tags).toEqual({});
 });
 
 

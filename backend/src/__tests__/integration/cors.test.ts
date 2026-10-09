@@ -1,22 +1,23 @@
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 
-// requireAuth reads SUPABASE_URL / SUPABASE_SECRET_KEY from process.env at
+// requireAuth reads AUTH_URL / AUTH_SERVICE_KEY from process.env at
 // request time (not import time), so setting them here is early enough even
 // though imported modules evaluate before this assignment runs.
-process.env.SUPABASE_URL = "http://supabase.test.local";
-process.env.SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
-process.env.SUPABASE_SECRET_KEY = "test-service-key";
+process.env.AUTH_URL = "http://auth.test.local";
+process.env.AUTH_SERVICE_KEY = "test-service-key";
 
-// Mock the supabase-js client factory so the real requireAuth middleware never
-// makes a network call (same shape as health.test.ts).
-vi.mock("@supabase/supabase-js", () => ({
-    createClient: vi.fn(() => ({
-        auth: {
+// Mock GoTrue's client so the real requireAuth middleware never makes a
+// network call.
+vi.mock("@supabase/auth-js", () => ({
+    GoTrueClient: vi.fn(function () {
+        return {
             getUser: () =>
                 Promise.resolve({ data: { user: null }, error: null }),
-        },
-    })),
+            getSession: () =>
+                Promise.resolve({ data: { session: null }, error: null }),
+        };
+    }),
 }));
 
 import { app, configuredAllowedOrigins } from "../../app";

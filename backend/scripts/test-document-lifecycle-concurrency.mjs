@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 
-const url = new URL(process.env.SUPABASE_TEST_DB_URL ?? "postgres://invalid");
+const url = new URL(process.env.DATABASE_TEST_URL ?? "postgres://invalid");
 if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
   throw new Error(
-    "SUPABASE_TEST_DB_URL must name a disposable loopback database",
+    "DATABASE_TEST_URL must name a disposable loopback database",
   );
 }
 const env = {

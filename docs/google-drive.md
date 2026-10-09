@@ -157,7 +157,7 @@ and [first-sheet-only CSV export](https://developers.google.com/workspace/drive/
 
    For a hosted test instance use
    `https://YOUR_HOST/api/user/integrations/google-drive/oauth/callback`.
-   This is separate from the Supabase Google **sign-in** callback. Keep existing
+   This is separate from the GoTrue Google **sign-in** callback. Keep existing
    callbacks if using the same client for both. Mike email/password login works
    independently of the Google Drive connection.
 3. Configure `https://www.googleapis.com/auth/drive`, `openid`, and
@@ -298,9 +298,9 @@ npm run build --prefix frontend
 git diff --check
 ```
 
-`googleDrive.supabase.test.ts` additionally exercises real database transactions,
+`googleDrive.stack.test.ts` additionally exercises real database transactions,
 concurrent completion/disconnect, rollback, and anon/owner grant denial. It runs
-in the Supabase stack CI job; local setup is documented in
+in the stack-tests CI job; local setup is documented in
 [safe local testing](safe-local-testing.md) and [the stack harness](../backend/scripts/test-stack.sh).
 `e2e/google-drive.spec.ts` exercises the real page, popup, cancellation, polling,
 the Manage dialog and Delete in Chromium with mocked Google integration endpoints. It runs

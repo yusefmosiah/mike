@@ -68,7 +68,7 @@ export default defineConfig({
 
         /* Specs that mock every /api call inside the browser and need no
            backend, database or account. Kept in their own project so CI can
-           run them on runners that skip the Supabase/API stack, and fully
+           run them on runners that skip the database/API stack, and fully
            parallel because nothing is shared between their tests. */
         {
             name: "synthetic",
@@ -80,8 +80,8 @@ export default defineConfig({
 
     /* Start the backend and the Next.js dev server when running locally.
        The backend command first runs the local-stack setup (Docker check,
-       supabase start, schema + migrations + grants, env wiring) so a plain
-       `npm run test:e2e` works against a ready local Supabase — see
+       Postgres + GoTrue, schema + migrations, env wiring) so a plain
+       `npm run test:e2e` works against a ready local stack — see
        scripts/e2e-local-stack.sh. Idempotent: a few seconds when already up. */
     webServer: process.env.CI
         ? undefined

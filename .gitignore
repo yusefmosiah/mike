@@ -23,11 +23,9 @@ test-results/
 playwright-report/
 e2e/.auth/
 
-# Local Supabase scaffold. Keep the shared project configuration reproducible,
-# while excluding CLI state and other generated local files.
+# Leftover Supabase CLI scaffolds from before Mike dropped Supabase.
 /supabase/
-backend/supabase/*
-!backend/supabase/config.toml
+backend/supabase/
 
 # dev-cycle scratch files
 .current-issue.md

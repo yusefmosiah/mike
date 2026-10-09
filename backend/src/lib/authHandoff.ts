@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/auth-js";
 import { createServerSupabase } from "./supabase";
 import { authHandoffEncryptionSecret } from "./runtimeConfig";
 import type { Db } from "./supabase";

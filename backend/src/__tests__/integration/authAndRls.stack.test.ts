@@ -1,27 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { GoTrueClient } from "@supabase/auth-js";
+import { asRole, stackAuth, stackConfigured, stackDb, stackUserAuth } from "./stackDb";
 
-// Stack-level integration test: exercises the REAL Supabase stack (GoTrue auth +
-// Postgres RLS) rather than mocks. This is the harness that makes pinning a fixed
-// Supabase version set safe — it's what you re-run on every image bump to prove
-// the auth↔API contract and the deny-all RLS firewall still hold. It also anchors
-// the security model's central claim: RLS denies the user/anon path, and the API
-// reaches data only via the service-role key.
+// Stack-level integration test: exercises a REAL GoTrue and Postgres rather
+// than mocks. It is what you re-run on every GoTrue or Postgres bump to prove
+// the auth↔API contract still holds, and it anchors the security model's
+// central claim: Mike reaches data only over its own connection, and every
+// table denies the `anon` and `authenticated` roles. Mike never uses those
+// roles; a hosted Supabase exposes them through its data API, so the deny-all
+// firewall must hold for a deployment that keeps its database there.
 //
-// Gated: skipped unless a stack is provided (default CI unit run skips it).
-// Locally: `supabase start`, then export the printed keys as:
-//   SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY, SUPABASE_TEST_ANON_KEY
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const anonKey = process.env.SUPABASE_TEST_ANON_KEY;
-const maybeDescribe = url && serviceKey && anonKey ? describe : describe.skip;
+// Gated: npm run test:stack starts Postgres + GoTrue and sets
+// DATABASE_TEST_URL, AUTH_TEST_URL and AUTH_TEST_SERVICE_KEY.
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
 // Every public table the app owns (backend/schema.sql + migrations). The
 // anon/user path must never return rows from any of these (deny-all); a
 // regression that ships a table without RLS — or with a permissive policy —
-// trips the leak sweep below. A table missing from an older local stack
-// returns an error (no rows), which never counts as a leak.
+// trips the leak sweep below. A query the role may not run at all returns an
+// error (no rows), which never counts as a leak.
 const PUBLIC_TABLES = [
   "chat_messages",
   "chats",
@@ -62,37 +60,28 @@ const PUBLIC_TABLES = [
   "workflows",
 ];
 
-maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => {
+maybeDescribe("auth contract + RLS deny-all firewall", () => {
   const password = "StackTest1!";
   const emailA = `stack-a-${Date.now()}@test.local`;
   const emailB = `stack-b-${Date.now()}@test.local`;
+  const admin = stackDb()!; // Mike's own connection: the app's data path
 
-  let admin: SupabaseClient; // service-role: BYPASSRLS, the app's data path
+  let auth: GoTrueClient; // service role: token checks, user admin
   let userA = "";
   let userB = "";
   let tokenA = "";
   let projectId = "";
 
-  // A client acting as a signed-in end user (anon key + the user's JWT): this is
-  // the path RLS must fence off.
-  const asUser = (token: string) =>
-    createClient(url!, anonKey!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
   beforeAll(async () => {
-    admin = createClient(url!, serviceKey!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    auth = stackAuth();
 
-    const a = await admin.auth.admin.createUser({
+    const a = await auth.admin.createUser({
       email: emailA,
       password,
       email_confirm: true,
       user_metadata: { full_name: "Google Stack User" },
     });
-    const b = await admin.auth.admin.createUser({
+    const b = await auth.admin.createUser({
       email: emailB,
       password,
       email_confirm: true,
@@ -103,16 +92,14 @@ maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => 
     userB = b.data.user.id;
 
     // Sign in as A to get a real access token (the token the API middleware
-    // validates via auth.getUser).
-    const signIn = await createClient(url!, anonKey!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    }).auth.signInWithPassword({ email: emailA, password });
+    // validates via getUser).
+    const signIn = await stackUserAuth().signInWithPassword({ email: emailA, password });
     if (signIn.error || !signIn.data.session) {
       throw signIn.error ?? new Error("no session for A");
     }
     tokenA = signIn.data.session.access_token;
 
-    // Seed one row owned by A via the service role (the app's real write path).
+    // Seed one row owned by A (the app's real write path).
     const proj = await admin
       .from("projects")
       .insert({ user_id: userA, name: "Stack Test Project" })
@@ -124,12 +111,12 @@ maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => 
 
   afterAll(async () => {
     if (projectId) await admin.from("projects").delete().eq("id", projectId);
-    if (userA) await admin.auth.admin.deleteUser(userA);
-    if (userB) await admin.auth.admin.deleteUser(userB);
+    if (userA) await auth.admin.deleteUser(userA);
+    if (userB) await auth.admin.deleteUser(userB);
   });
 
   it("auth contract: the access token resolves to its user (middleware path)", async () => {
-    const { data, error } = await admin.auth.getUser(tokenA);
+    const { data, error } = await auth.getUser(tokenA);
     expect(error).toBeNull();
     expect(data.user?.id).toBe(userA);
     expect(data.user?.email).toBe(emailA);
@@ -145,39 +132,22 @@ maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => 
     expect(data?.display_name).toBe("Google Stack User");
   });
 
-  it("RLS: the service role sees seeded rows the owner cannot see via the user path", async () => {
-    // Service role (app data path) sees the project…
+  it("RLS: the app sees seeded rows the owner cannot see via the user path", async () => {
     const svc = await admin.from("projects").select("id").eq("id", projectId);
     expect(svc.error).toBeNull();
     expect(svc.data ?? []).toHaveLength(1);
 
-    // …but the owner, going through the user/anon path, sees zero rows —
-    // deny-all RLS is the firewall; the app must use the service role.
-    const owner = await asUser(tokenA)
-      .from("projects")
-      .select("id")
-      .eq("id", projectId);
-    expect(owner.data ?? []).toHaveLength(0);
+    // …but the owner, going through the user path, sees zero rows.
+    const owner = await asRole("authenticated", userA, "select id from public.projects where id = $1", [projectId]);
+    expect(owner.rows).toHaveLength(0);
 
-    // And the owner's profile (if any) is equally invisible to the user path.
-    const prof = await asUser(tokenA)
-      .from("user_profiles")
-      .select("user_id")
-      .eq("user_id", userA);
-    expect(prof.data ?? []).toHaveLength(0);
+    const prof = await asRole("authenticated", userA, "select user_id from public.user_profiles where user_id = $1", [userA]);
+    expect(prof.rows).toHaveLength(0);
   });
 
   it("tenant isolation: user B cannot read user A's project via the user path", async () => {
-    const signInB = await createClient(url!, anonKey!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    }).auth.signInWithPassword({ email: emailB, password });
-    const tokenB = signInB.data.session!.access_token;
-
-    const cross = await asUser(tokenB)
-      .from("projects")
-      .select("id")
-      .eq("id", projectId);
-    expect(cross.data ?? []).toHaveLength(0);
+    const cross = await asRole("authenticated", userB, "select id from public.projects where id = $1", [projectId]);
+    expect(cross.rows).toHaveLength(0);
   });
 
   it("allows multiple independent upload sessions for one user", async () => {
@@ -402,32 +372,25 @@ maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => 
         expect(stored.error).toBeNull();
         expect(stored.data).toMatchObject({ ...row, ...patch });
 
-        const signedInB = await createClient(url!, anonKey!, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        }).auth.signInWithPassword({ email: emailB, password });
-        expect(signedInB.error).toBeNull();
-        const clients = [
-          createClient(url!, anonKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          }),
-          asUser(tokenA),
-          asUser(signedInB.data.session!.access_token),
-        ];
-        for (const client of clients) {
-          const read = await client.from(table).select("*").eq("id", rowId);
-          expect(read.error?.code).toBe("42501");
-          expect(read.data).toBeNull();
-          const insert = await client
-            .from(table)
-            .insert({ ...row, id: randomUUID() });
-          expect(insert.error?.code).toBe("42501");
-          const update = await client
-            .from(table)
-            .update({ user_id: userB })
-            .eq("id", rowId);
-          expect(update.error?.code).toBe("42501");
-          const deletion = await client.from(table).delete().eq("id", rowId);
-          expect(deletion.error?.code).toBe("42501");
+        const callers = [
+          ["anon", null],
+          ["authenticated", userA],
+          ["authenticated", userB],
+        ] as const;
+        for (const [role, caller] of callers) {
+          const read = await asRole(role, caller, `select * from public.${table} where id = $1`, [rowId]);
+          expect(read.code).toBe("42501");
+          const insert = await asRole(
+            role,
+            caller,
+            `insert into public.${table} select * from json_populate_record(null::public.${table}, $1)`,
+            [JSON.stringify({ ...row, id: randomUUID() })],
+          );
+          expect(insert.code).toBe("42501");
+          const update = await asRole(role, caller, `update public.${table} set user_id = $1 where id = $2`, [userB, rowId]);
+          expect(update.code).toBe("42501");
+          const deletion = await asRole(role, caller, `delete from public.${table} where id = $1`, [rowId]);
+          expect(deletion.code).toBe("42501");
         }
 
         const unchanged = await admin
@@ -452,11 +415,10 @@ maybeDescribe("Supabase stack — auth contract + RLS deny-all firewall", () => 
   );
 
   it("leak sweep: no public table returns rows to the authenticated user path", async () => {
-    const client = asUser(tokenA);
     const leaks: string[] = [];
     for (const table of PUBLIC_TABLES) {
-      const { data } = await client.from(table).select("*").limit(1);
-      if ((data ?? []).length > 0) leaks.push(table);
+      const { rows } = await asRole("authenticated", userA, `select * from public.${table} limit 1`);
+      if (rows.length > 0) leaks.push(table);
     }
     // Any table returning rows to a normal user means RLS is missing or a
     // policy is permissive — the exact regression this guards against.

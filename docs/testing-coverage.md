@@ -21,9 +21,9 @@ nested feature directories, `modules/<domain>/__tests__/`, and
 the module layering described in `docs/backend-architecture.md`.
 Read a couple of the existing suites first (`lib/__tests__/access.test.ts`,
 `lib/__tests__/userDataCleanup.test.ts`) and match their conventions: plain
-in-memory Supabase query mocks for unit tests, no real network, one `describe`
+in-memory database query mocks for unit tests, no real network, one `describe`
 block per function or concern, and assertions on current behavior. Tests that
-need a real local Supabase stack are explicitly gated.
+need a real local Postgres + GoTrue stack are explicitly gated.
 
 ## Coverage evidence and regression priorities
 

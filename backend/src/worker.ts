@@ -12,9 +12,9 @@
 // Load backend/.env before anything reads process.env, exactly like the API
 // entrypoint does (app.ts's first import). Without this, `node dist/worker.js`
 // on a bare-metal install — where configuration lives in .env, not in a
-// container's environment block — dies at boot on the Supabase client's
-// "SUPABASE_URL and SUPABASE_SECRET_KEY must be set" check. Compose deployments
-// never noticed because compose injects real environment variables.
+// container's environment block — boots without its database and auth
+// configuration. Compose deployments never noticed because compose injects
+// real environment variables.
 // instrument.ts loads dotenv itself and must precede every other import so
 // Sentry can hook the HTTP client and queue libraries this process uses.
 import "./instrument";

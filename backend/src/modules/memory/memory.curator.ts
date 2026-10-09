@@ -15,7 +15,7 @@ import {
   type UserModelSettings,
 } from "../user/user.service";
 import { DbJobDeferredError, type Db, type DbJob } from "../../lib/dbq/types";
-import { authAdmin } from "../../lib/supabase";
+import { authAdmin } from "../../lib/gotrue";
 import { ensureMemoryFile, getMemoryCurrent, MemoryConversationNotQuietError, MemoryDisabledError, MemoryEpochSupersededError, MemoryJobSupersededError, MemoryValidationError, writeMemoryFile, type MemoryFileRow, type MemoryScope, type MemorySurface } from "../../lib/memory/files";
 import { MEMORY_INACTIVITY_MS } from "../../lib/memory/schedule";
 

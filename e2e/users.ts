@@ -25,7 +25,7 @@ export function workerAccount(parallelIndex: number): E2eAccount {
 }
 
 /**
- * Read a key out of backend/.env so the setup can reach Supabase with the
+ * Read a key out of backend/.env so the setup can reach GoTrue with the
  * service-role key without requiring the operator to export it manually.
  */
 export function readApiEnv(key: string): string | undefined {
@@ -34,7 +34,7 @@ export function readApiEnv(key: string): string | undefined {
     try {
         const contents = fs.readFileSync(envPath, "utf8");
         // dotenv semantics: a later assignment wins over an earlier one. CI
-        // does `cp .env.example .env` (which ships a PLACEHOLDER SUPABASE_URL)
+        // does `cp .env.example .env` (which ships PLACEHOLDER values)
         // and then APPENDS the real values, so returning the FIRST match would
         // hand back the placeholder (getaddrinfo ENOTFOUND your-project...).
         // Iterate every line and keep the LAST matching value, mirroring how
@@ -52,21 +52,26 @@ export function readApiEnv(key: string): string | undefined {
 }
 
 /**
- * Idempotently create a confirmed Supabase user via the admin API. If the user
+ * Idempotently create a confirmed user through GoTrue's admin API. If the user
  * already exists the admin endpoint returns a 422 which we treat as success.
  */
 export async function ensureUser(email: string, password: string) {
-    const supabaseUrl =
-        readApiEnv("SUPABASE_URL") ?? "http://127.0.0.1:54321";
-    const serviceKey = readApiEnv("SUPABASE_SECRET_KEY");
+    // AUTH_URL is GoTrue itself; an env still on SUPABASE_URL reaches the same
+    // GoTrue at /auth/v1 behind Supabase's gateway.
+    const legacyUrl = readApiEnv("SUPABASE_URL");
+    const authUrl =
+        readApiEnv("AUTH_URL") ??
+        (legacyUrl ? `${legacyUrl}/auth/v1` : "http://127.0.0.1:54321");
+    const serviceKey =
+        readApiEnv("AUTH_SERVICE_KEY") ?? readApiEnv("SUPABASE_SECRET_KEY");
     if (!serviceKey) {
         throw new Error(
-            "SUPABASE_SECRET_KEY not found (checked env and backend/.env); " +
+            "AUTH_SERVICE_KEY not found (checked env and backend/.env); " +
                 "cannot bootstrap E2E users",
         );
     }
 
-    const res = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+    const res = await fetch(`${authUrl}/admin/users`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

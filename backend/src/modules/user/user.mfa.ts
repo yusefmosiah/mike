@@ -7,7 +7,7 @@
 
 import { getUserApiKeyStatus } from "./user.apiKeyStore";
 import { type Db } from "./user.shared";
-import { authAdmin } from "../../lib/supabase";
+import { authAdmin } from "../../lib/gotrue";
 import { ensureProfileRow, loadProfile } from "./user.profile";
 
 async function userHasVerifiedTotpFactor(db: Db, userId: string) {

@@ -120,9 +120,8 @@ describe("failBoot (MIKE-BACKEND-2 / -3)", () => {
     try {
       validateRuntimeConfiguration({
         NODE_ENV: "production",
-        SUPABASE_URL: "https://PRIVATE-HOST.supabase.co",
-        SUPABASE_PUBLISHABLE_KEY: "PRIVATE_PUBLISHABLE",
-        SUPABASE_SECRET_KEY: "PRIVATE_SECRET",
+        AUTH_URL: "https://PRIVATE-HOST.example",
+        AUTH_SERVICE_KEY: "PRIVATE_SECRET",
         FRONTEND_URL: "http://PRIVATE-FRONTEND.example",
       });
     } catch (error) {
@@ -155,7 +154,7 @@ describe("failBoot (MIKE-BACKEND-2 / -3)", () => {
       component: "boot",
       stage: "runtime-config",
       failure_code: "configuration_invalid",
-      configuration_fields: "API_PUBLIC_URL,FRONTEND_URL",
+      configuration_fields: "API_PUBLIC_URL,DATABASE_URL,FRONTEND_URL",
     });
     expect(event.level).toBe("fatal");
     const exception = (event.exception as { values: { value: string }[] })

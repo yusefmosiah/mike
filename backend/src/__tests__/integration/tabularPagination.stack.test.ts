@@ -1,16 +1,14 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { GoTrueClient } from "@supabase/auth-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { stackDb } from "./stackDb";
+import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 
 // The RPCs return `any`; naming the row shape is what lets tsc check the id
 // reads below instead of silently widening them.
 type IdRow = { id: string };
 
-const url = process.env.SUPABASE_TEST_URL;
-const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+const maybeDescribe = stackConfigured ? describe : describe.skip;
 
-/* supabase-js types an rpc() result's `data` as `any`, so the `.map()` /
+/* Mike's client types an rpc() result's `data` as `any`, so the `.map()` /
    `.every()` callbacks below get no inferred parameter type (and, under
    noImplicitAny, no type check at all). Name the handful of overview columns
    these assertions actually read. */
@@ -33,15 +31,13 @@ maybeDescribe("Supabase tabular-review pagination", () => {
         crypto.randomUUID(),
     );
     const tiedCreatedAt = "2026-07-27T00:00:00.000Z";
-    let admin: SupabaseClient;
+    let admin: GoTrueClient;
 
     beforeAll(async () => {
-        admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
+        admin = stackAuth();
 
         ownerEmail = `pagination-${Date.now()}@test.local`;
-        const owner = await admin.auth.admin.createUser({
+        const owner = await admin.admin.createUser({
             email: ownerEmail,
             password: "StackTest1!",
             email_confirm: true,
@@ -100,7 +96,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
             .delete()
             .in("id", standaloneReviewIds);
         await db.from("projects").delete().eq("id", projectId);
-        if (ownerId) await admin.auth.admin.deleteUser(ownerId);
+        if (ownerId) await admin.admin.deleteUser(ownerId);
     });
 
     it("paginates tied rows deterministically without duplicates", async () => {
@@ -339,17 +335,15 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
     const inProjectReviewId = crypto.randomUUID();
     const colleagueEmail = `org-vis-colleague-${suffix}@test.local`;
     const memberEmail = `org-vis-member-${suffix}@test.local`;
-    let admin: SupabaseClient;
+    let admin: GoTrueClient;
     let colleagueId = "";
     let memberId = "";
     let orgId = "";
 
     beforeAll(async () => {
-        admin = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
+        admin = stackAuth();
 
-        const colleague = await admin.auth.admin.createUser({
+        const colleague = await admin.admin.createUser({
             email: colleagueEmail,
             password: `pw-${suffix}-A1!`,
             email_confirm: true,
@@ -358,7 +352,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
             throw colleague.error ?? new Error("no colleague user");
         colleagueId = colleague.data.user.id;
 
-        const member = await admin.auth.admin.createUser({
+        const member = await admin.admin.createUser({
             email: memberEmail,
             password: `pw-${suffix}-B1!`,
             email_confirm: true,
@@ -420,8 +414,8 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
         // Signup no longer provisions an organization, so the only org to
         // clean up is the one this suite created above. Deleting the users
         // is enough for everything else.
-        if (colleagueId) await admin.auth.admin.deleteUser(colleagueId);
-        if (memberId) await admin.auth.admin.deleteUser(memberId);
+        if (colleagueId) await admin.admin.deleteUser(colleagueId);
+        if (memberId) await admin.admin.deleteUser(memberId);
     });
 
     it("shows a colleague's org reviews to a plain member via the paginated overview RPC", async () => {

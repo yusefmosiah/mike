@@ -26,7 +26,7 @@ scrolling to the last row and column.
 Tests live next to the code they test (`*.test.ts` / `*.test.tsx`). Read a
 couple of the existing suites first (`src/app/lib/mikeApi.test.ts`,
 `src/app/hooks/useAssistantChat.sse.test.ts`) and match their conventions:
-mock `global fetch` and the Supabase client module — no network, no real
+mock `global fetch` — no network, no real
 backend — one `describe` block per function or concern, and tests that assert
 current behavior.
 
@@ -43,7 +43,7 @@ It uses the real Next.js/React renderer, fails on browser console errors and
 uncaught exceptions, and requires no model-provider key. It belongs to the
 Playwright `synthetic` project (specs that mock every `/api` call in the
 browser), which CI runs as the **Assistant streaming (production, …)** jobs on
-every PR, without the Supabase/API stack. The **development** variants rerun it
+every PR, without the database/API stack. The **development** variants rerun it
 on `next dev`, because React's passive-update-depth warning is
 development-only; that job runs nightly, on manual dispatch, and on PRs
 labelled `stress` (see [e2e-ci.md](e2e-ci.md#development-stress-jobs)). Add the

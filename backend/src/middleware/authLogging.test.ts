@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../lib/log", () => ({ devLog: mocks.devLog, isDev: true }));
 vi.mock("../lib/supabase", () => ({
   createServerSupabase: () => ({}),
+}));
+vi.mock("../lib/gotrue", () => ({
   authAdmin: () => ({
     mfa: { getAuthenticatorAssuranceLevel: mocks.assurance },
     getUser: async () => ({ data: { user: { factors: [] } }, error: null }),

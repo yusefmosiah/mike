@@ -81,9 +81,8 @@ maybeDescribe("document-lifecycle boot gate", () => {
             WORKERS_MODE: "inline",
             QUEUE_DRIVER: "postgres",
             DB_JOBS_POLL_MS: "60000",
-            SUPABASE_URL: "http://127.0.0.1:9",
-            SUPABASE_SECRET_KEY: "not-a-real-key",
-            SUPABASE_PUBLISHABLE_KEY: "not-a-real-key",
+            AUTH_URL: "http://127.0.0.1:9",
+            AUTH_SERVICE_KEY: "not-a-real-key",
             DATABASE_URL: database.url,
         });
         expect(output).toMatch(/document-lifecycle migration is not applied/);
@@ -98,8 +97,8 @@ maybeDescribe("document-lifecycle boot gate", () => {
         const { code, output } = await runEntrypoint("src/worker.ts", {
             QUEUE_DRIVER: "postgres",
             DB_JOBS_POLL_MS: "60000",
-            SUPABASE_URL: "http://127.0.0.1:9",
-            SUPABASE_SECRET_KEY: "not-a-real-key",
+            AUTH_URL: "http://127.0.0.1:9",
+            AUTH_SERVICE_KEY: "not-a-real-key",
             DATABASE_URL: database.url,
         });
         expect(output).toMatch(/document-lifecycle migration is not applied/);

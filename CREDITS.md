@@ -53,7 +53,7 @@ infrastructure, and development workflow, including optional local integrations.
 | [Ollama](https://github.com/ollama/ollama) | Optional local language-model inference. |
 | [Zod](https://github.com/colinhacks/zod) | Runtime schema validation. |
 | [PostgreSQL](https://www.postgresql.org/) | Persistent application data. |
-| [Supabase](https://github.com/supabase/supabase) and [Supabase Auth](https://github.com/supabase/auth) | Database tooling, authentication, and client libraries. |
+| [Supabase Auth (GoTrue)](https://github.com/supabase/auth) and [auth-js](https://github.com/supabase/supabase-js/tree/master/packages/core/auth-js) | The authentication server and its client library. |
 | [PostgREST](https://github.com/PostgREST/postgrest) | REST access to PostgreSQL in the local stack. |
 | [Redis](https://github.com/redis/redis), [BullMQ](https://github.com/taskforcesh/bullmq), and [ioredis](https://github.com/redis/ioredis) | Background queues and their Redis transport. |
 | [RustFS](https://github.com/rustfs/rustfs) | S3-compatible object storage in the local stack. |

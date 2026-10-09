@@ -30,7 +30,7 @@ import {
     type ProjectAccess,
 } from "../../lib/access";
 import type { Db, DbJob } from "../../lib/dbq/types";
-import { authAdmin } from "../../lib/supabase";
+import { authAdmin } from "../../lib/gotrue";
 import { enqueueStorageCleanup } from "../../lib/dbq/enqueue";
 import { attachActiveVersionPaths, contentSha256 } from "../../lib/documentVersions";
 import { isSpreadsheetDocumentType } from "../../lib/documentTypes";

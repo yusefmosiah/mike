@@ -30,7 +30,7 @@ Gmail Trash is recoverable through Gmail; permanently deleting received/sent mai
    http://localhost:3000/api/user/integrations/google-calendar/oauth/callback
    ```
 
-   Production uses the corresponding `<API_PUBLIC_URL>/user/integrations/.../oauth/callback`. The Next.js gateway on 3000 forwards to Express on 3001. SSO retains its separate Supabase callback; adding these callbacks does not change sign-in behavior.
+   Production uses the corresponding `<API_PUBLIC_URL>/user/integrations/.../oauth/callback`. The Next.js gateway on 3000 forwards to Express on 3001. SSO retains its separate GoTrue callback; adding these callbacks does not change sign-in behavior.
 4. Set `GOOGLE_WORKSPACE_OAUTH_CLIENT_ID` and `GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET` in backend environment. If both are absent, the complete Drive/MCP credential profile is reused. An incomplete dedicated pair fails closed. Preserve the encryption secret used by the parent integration; never rotate it as a setup workaround.
 5. Add these consent scopes. Mike requests all of them on connect; the write permission is the one users or administrators may withhold:
 
@@ -60,7 +60,7 @@ For each production installation:
 
 1. Apply the Drive and Workspace migrations through the normal deployment procedure; configure a stable encryption secret and keep all OAuth secrets on the backend.
 2. Enable Drive, Gmail, and Calendar REST APIs in that installation's project and configure the read and write scopes above. An organization that must not grant write access can block the write scopes in its Workspace admin console; connections then work read-only.
-3. Set `FRONTEND_URL` and `API_PUBLIC_URL` to the installation's public HTTPS origins. Register all three exact callback URLs derived from `API_PUBLIC_URL`, ending in `/user/integrations/{google-drive,gmail,google-calendar}/oauth/callback`. For a same-origin gateway, `API_PUBLIC_URL=https://mike.example.com/api`; for a separate public API, it may be `https://api.example.com`. Preserve the separate Supabase SSO callback if Google sign-in is enabled.
+3. Set `FRONTEND_URL` and `API_PUBLIC_URL` to the installation's public HTTPS origins. Register all three exact callback URLs derived from `API_PUBLIC_URL`, ending in `/user/integrations/{google-drive,gmail,google-calendar}/oauth/callback`. For a same-origin gateway, `API_PUBLIC_URL=https://mike.example.com/api`; for a separate public API, it may be `https://api.example.com`. Preserve the separate GoTrue sign-in callback if Google sign-in is enabled.
 4. Complete the audience-specific Google and Workspace-admin steps above, restart Mike, and run the acceptance checklist with synthetic data using that installation's own client.
 5. Verify connection with and without write access, direct writes, approval/rejection with **Ask for permission for write actions** on, token refresh after restart, account replacement, and Delete. Keep the resulting proof with the deployment record.
 
@@ -110,6 +110,6 @@ npm run typecheck --prefix frontend
 npm run lint --prefix frontend
 ```
 
-The database script uses a new throwaway PostgreSQL container, no host ports, and removes it on exit. It verifies actual grants/RLS configuration, cross-provider and replayed authorization, write access following the granted scopes, settings surviving a reconnect, and migration replay. It never connects to your configured Supabase database.
+The database script uses a new throwaway PostgreSQL container, no host ports, and removes it on exit. It verifies actual grants/RLS configuration, cross-provider and replayed authorization, write access following the granted scopes, settings surviving a reconnect, and migration replay. It never connects to your configured database.
 
-PR #434 contains the complete integration and targets `main`. It includes both migrations and all three service connections; there is no separate child PR to merge. CI verifies application builds/tests, production images, schema drift, security, Supabase, browser behavior, and the Word add-in.
+PR #434 contains the complete integration and targets `main`. It includes both migrations and all three service connections; there is no separate child PR to merge. CI verifies application builds/tests, production images, schema drift, security, the database and auth stack, browser behavior, and the Word add-in.
