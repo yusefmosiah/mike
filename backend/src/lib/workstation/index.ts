@@ -8,3 +8,5 @@ export {
   type RunCommandResult,
   type WorkstationTarget,
 } from "./exec";
+export { requestSnapshot, snapshotOncePerTurn, type SnapshotResult } from "./snapshot";
+export { connectVsockMux } from "./vsockMux";

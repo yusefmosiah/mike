@@ -25,6 +25,8 @@ export type WorkstationTarget = {
    * loopback-forwarded port on the developer's machine).
    */
   knownHostsFile?: string;
+  /** Host snapshot service for this VM (see ./snapshot.ts). */
+  snapshot?: { socketPath: string; vm: string };
 };
 
 export type RunCommandInput = {

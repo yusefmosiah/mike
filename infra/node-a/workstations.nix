@@ -9,6 +9,10 @@
 #  - Network: a tap per VM with NAT to the internet. The VM cannot reach this
 #    host (input from ws-* is dropped), other VMs, or private and link-local
 #    ranges. An egress proxy with logging is phase 4.
+#  - The Mike backend (a container) reaches a VM through
+#    /run/mike-workstations/<vm>.sock, a socket-activated relay to the VM's
+#    vsock socket, and asks for snapshots on /run/mike-workstations/control.sock.
+#    Only that directory is shared with it, not the VM's state directory.
 { config, lib, pkgs, microvm, ... }:
 
 let
@@ -102,6 +106,41 @@ let
       esac
     '';
   };
+  relayDir = "/run/mike-workstations";
+  vmNames = lib.attrNames workstations;
+
+  # One request per connection on stdin: `snapshot <vm> <turn|daily>`.
+  # Answers `ok <vm>/<snapshot>` or `error <reason>`. A turn snapshot taken in
+  # the last two minutes is reused; retention is the newest 48 turn and 14
+  # daily snapshots per VM (manual ones are never pruned).
+  wsControl = pkgs.writeShellApplication {
+    name = "ws-control";
+    runtimeInputs = [ wsTools pkgs.btrfs-progs pkgs.coreutils pkgs.util-linux ];
+    text = ''
+      read -r -t 10 verb vm label || { echo "error bad request"; exit 0; }
+      [ "$verb" = snapshot ] || { echo "error unknown request"; exit 0; }
+      case "$vm" in ${lib.concatStringsSep "|" vmNames}) ;; *) echo "error unknown vm"; exit 0 ;; esac
+      case "$label" in turn) keep=48 ;; daily) keep=14 ;; *) echo "error bad label"; exit 0 ;; esac
+      dir="${snapshotDir}/$vm"
+      exec 9>"/run/lock/ws-control-$vm.lock"
+      flock 9
+      shopt -s nullglob
+      export LC_ALL=C
+      # Names start with a UTC timestamp, so glob order is age order.
+      snaps=("$dir"/*-"$label")
+      cutoff=$(date -u -d '2 minutes ago' +%Y%m%dT%H%M%SZ)
+      if [ "$label" = turn ] && [ ''${#snaps[@]} -gt 0 ]; then
+        latest=$(basename "''${snaps[-1]}")
+        if [[ "$latest" > "$cutoff" ]]; then echo "ok $vm/$latest"; exit 0; fi
+      fi
+      if ! out=$(ws snapshot "$vm" "$label" 2>/dev/null); then echo "error snapshot failed"; exit 0; fi
+      snaps=("$dir"/*-"$label")
+      for (( i = 0; i < ''${#snaps[@]} - keep; i++ )); do
+        btrfs subvolume delete "''${snaps[i]}" >/dev/null
+      done
+      echo "ok $vm/$(basename "$out")"
+    '';
+  };
 in
 {
   imports = [ microvm.nixosModules.host ];
@@ -146,5 +185,50 @@ in
     '';
   };
 
-  environment.systemPackages = [ wsTools ];
+  systemd.sockets = {
+    ws-control = {
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ "${relayDir}/control.sock" ];
+      socketConfig = { Accept = true; SocketMode = "0600"; DirectoryMode = "0700"; MaxConnections = 8; };
+    };
+  } // lib.mapAttrs' (name: _: lib.nameValuePair "ws-relay-${name}" {
+    wantedBy = [ "sockets.target" ];
+    listenStreams = [ "${relayDir}/${name}.sock" ];
+    socketConfig = { Accept = true; SocketMode = "0600"; DirectoryMode = "0700"; MaxConnections = 32; };
+  }) workstations;
+
+  systemd.services = {
+    "ws-control@" = {
+      description = "Workstation snapshot request";
+      serviceConfig = {
+        ExecStart = "${wsControl}/bin/ws-control";
+        StandardInput = "socket";
+        StandardOutput = "socket";
+        StandardError = "journal";
+        RuntimeMaxSec = 300;
+      };
+    };
+    # A daily snapshot of every VM, kept for two weeks.
+    ws-daily-snapshot = {
+      description = "Daily workstation snapshots";
+      serviceConfig.Type = "oneshot";
+      script = lib.concatMapStringsSep "\n" (name: "echo 'snapshot ${name} daily' | ${wsControl}/bin/ws-control") vmNames;
+    };
+  } // lib.mapAttrs' (name: _: lib.nameValuePair "ws-relay-${name}@" {
+    description = "Relay to workstation ${name}'s vsock socket";
+    serviceConfig = {
+      # Bytes only: the client does Cloud Hypervisor's CONNECT handshake.
+      ExecStart = "${pkgs.socat}/bin/socat STDIO UNIX-CONNECT:${stateDir}/${name}/notify.vsock";
+      StandardInput = "socket";
+      StandardOutput = "socket";
+      StandardError = "journal";
+    };
+  }) workstations;
+
+  systemd.timers.ws-daily-snapshot = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "daily"; RandomizedDelaySec = "30m"; Persistent = true; };
+  };
+
+  environment.systemPackages = [ wsTools wsControl ];
 }

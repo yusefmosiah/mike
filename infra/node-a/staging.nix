@@ -7,6 +7,7 @@
 #   /var/lib/mike-staging/secrets.env  compose-level secrets, generated once
 #   /var/lib/mike-staging/app.env      backend secrets, generated once
 #   /var/lib/mike-staging/backend.env  model and search keys, copied in by the operator
+#   /var/lib/mike-staging/workstation.env  the owner's workstation VM, written by owner-link
 #   mike-staging deploy | up | down | ps | logs [svc] | owner-link <email>
 { config, lib, pkgs, ... }:
 
@@ -75,6 +76,7 @@ let
         done
         # A private stack reports errors to no one.
         echo "SENTRY_DISABLED=true" >> ${root}/src/.env
+        echo "CODE_MODE_ENABLED=true" >> ${root}/src/.env
       }
 
       cmd=''${1:-}
@@ -99,9 +101,23 @@ let
           api=http://127.0.0.1:54321
           curl -fsS -X POST "$api/admin/users" -H "Authorization: Bearer $service_key" -H 'Content-Type: application/json' \
             -d "$(jq -n --arg e "$email" '{email:$e, email_confirm:true}')" >/dev/null 2>&1 || true
-          curl -fsS -X POST "$api/admin/generate_link" -H "Authorization: Bearer $service_key" -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg e "$email" --arg r "https://${domain}/auth/callback" '{type:"magiclink", email:$e, redirect_to:$r}')" \
-            | jq -r '.action_link // .properties.action_link' ;;
+          link=$(curl -fsS -X POST "$api/admin/generate_link" -H "Authorization: Bearer $service_key" -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg e "$email" --arg r "https://${domain}/auth/callback" '{type:"magiclink", email:$e, redirect_to:$r}')")
+          # The owner gets the host's workstation VM (infra/node-a/workstations.nix).
+          user_id=$(jq -r '.id // .user.id // empty' <<<"$link")
+          if [ -n "$user_id" ] && ! grep -qs "^WORKSTATION_USER_IDS=$user_id\$" ${root}/workstation.env; then
+            umask 077
+            {
+              echo "WORKSTATION_USER_IDS=$user_id"
+              echo "WORKSTATION_NAME=ws-owner"
+              echo "WORKSTATION_SSH_PROXY_COMMAND=node /app/dist/lib/workstation/vsockProxy.js /run/mike-workstations/ws-owner.sock 22"
+              echo "WORKSTATION_SSH_IDENTITY_FILE=/run/workstation-key/harness_ed25519"
+              echo "WORKSTATION_SNAPSHOT_SOCKET=/run/mike-workstations/control.sock"
+            } > ${root}/workstation.env
+            write_backend_env
+            compose up -d backend >&2
+          fi
+          jq -r '.action_link // .properties.action_link' <<<"$link" ;;
         *) echo "usage: mike-staging deploy|up|down|ps|logs [svc]|compose ...|owner-link <email>" >&2; exit 2 ;;
       esac
     '';

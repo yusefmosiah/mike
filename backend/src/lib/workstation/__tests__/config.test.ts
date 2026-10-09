@@ -18,6 +18,7 @@ describe("workstationFor", () => {
       identityFile: "/keys/dev",
       proxyCommand: undefined,
       knownHostsFile: undefined,
+      snapshot: undefined,
     });
   });
 
@@ -34,5 +35,13 @@ describe("workstationFor", () => {
   it("connects through a vsock proxy without a host", () => {
     const target = workstationFor("user-a", { ...base, WORKSTATION_SSH_HOST: "", WORKSTATION_SSH_PORT: "", WORKSTATION_SSH_PROXY_COMMAND: "systemd-ssh-proxy vsock-mux/run/a.sock 22" });
     expect(target).toMatchObject({ host: "workstation", port: undefined, proxyCommand: "systemd-ssh-proxy vsock-mux/run/a.sock 22" });
+  });
+
+  it("names the host snapshot service when both socket and VM are set", () => {
+    expect(workstationFor("user-a", { ...base, WORKSTATION_SNAPSHOT_SOCKET: "/run/mike-workstations/control.sock", WORKSTATION_NAME: "ws-owner" })?.snapshot).toEqual({
+      socketPath: "/run/mike-workstations/control.sock",
+      vm: "ws-owner",
+    });
+    expect(workstationFor("user-a", { ...base, WORKSTATION_SNAPSHOT_SOCKET: "/run/x.sock" })?.snapshot).toBeUndefined();
   });
 });

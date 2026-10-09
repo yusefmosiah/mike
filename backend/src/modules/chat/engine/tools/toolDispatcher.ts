@@ -15,7 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
-import { runInWorkstation, workstationFor } from "../../../../lib/workstation";
+import { runInWorkstation, snapshotOncePerTurn, workstationFor } from "../../../../lib/workstation";
 import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
@@ -1681,6 +1681,7 @@ export async function runToolCalls(
         });
       } else {
         const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
+        await snapshotOncePerTurn(turnEditState, target.snapshot);
         const result = await runInWorkstation(target, {
           command: String(args.command ?? ""),
           cwd: typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined,

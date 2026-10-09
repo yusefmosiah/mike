@@ -196,6 +196,40 @@ btrfs on md RAID1; ZFS is not available there, so snapshots are btrfs).
 Still open for phase 4: the logging egress proxy and outbound PII checks.
 The NAT path is filtered but not proxied.
 
+**Harness link on staging, 2026-10-09 (node-a, not accepted).** The staging
+backend (a container under Podman) reaches `ws-owner` through
+`/run/mike-workstations/ws-owner.sock`, a socket-activated `socat` relay to
+the VM's vsock socket; only that directory and the harness key (read-only)
+are mounted into the container. `vsockProxy.js` does Cloud Hypervisor's
+`CONNECT 22` handshake as the ssh ProxyCommand. Each turn's first
+`run_command` asks `/run/mike-workstations/control.sock` for a snapshot;
+the host flushes the guest, reuses a turn snapshot under two minutes old,
+keeps the newest 48 turn snapshots and 14 daily ones (a daily timer), and
+never prunes manual ones.
+
+Control socket, from the host:
+
+```
+snapshot ws-owner turn    -> ok ws-owner/20261009T174847Z-turn
+snapshot ws-owner turn    -> ok ws-owner/20261009T174847Z-turn   (reused)
+snapshot ws-other turn    -> error unknown vm
+snapshot ws-owner ../etc  -> error bad label
+rm -rf /                  -> error unknown request
+```
+
+From inside `mike-backend-1`, through the compiled harness library
+(`snapshotOncePerTurn`, then `runInWorkstation` with the relay proxy):
+
+```
+snapshot: {"ok":true,"snapshot":"ws-owner/20261009T174847Z-turn"}
+{"ok":true,"exitCode":0,"stdout":"ws-owner\nagent\n3.1.5\n200\nhost-blocked\n",...,"durationMs":4105}
+```
+
+(hostname, user, openpyxl version, `https://example.com` status, and a
+`curl` to the Podman gateway's backend port that failed.) No chat turn has
+used it yet: `WORKSTATION_USER_IDS` is written by `mike-staging owner-link`
+when the owner's account is created, and that has not happened.
+
 ## Open questions for the owner
 
 - Which machine is the first Linux host for phases 3 and 4? Cloud Hypervisor

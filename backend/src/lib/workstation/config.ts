@@ -13,6 +13,8 @@ type Env = Record<string, string | undefined>;
 export function workstationFor(userId: string, env: Env = process.env): WorkstationTarget | null {
   const users = (env.WORKSTATION_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
   if (!users.includes(userId)) return null;
+  const snapshotSocket = env.WORKSTATION_SNAPSHOT_SOCKET?.trim();
+  const vm = env.WORKSTATION_NAME?.trim();
   const identityFile = env.WORKSTATION_SSH_IDENTITY_FILE?.trim();
   const proxyCommand = env.WORKSTATION_SSH_PROXY_COMMAND?.trim() || undefined;
   const host = env.WORKSTATION_SSH_HOST?.trim() || (proxyCommand ? "workstation" : "");
@@ -25,5 +27,6 @@ export function workstationFor(userId: string, env: Env = process.env): Workstat
     identityFile,
     proxyCommand,
     knownHostsFile: env.WORKSTATION_SSH_KNOWN_HOSTS?.trim() || undefined,
+    snapshot: snapshotSocket && vm ? { socketPath: snapshotSocket, vm } : undefined,
   };
 }

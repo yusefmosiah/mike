@@ -39,6 +39,11 @@ services:
       # Presigned upload URLs point at the public origin; Caddy routes
       # path-style S3 requests (/mike/...?X-Amz-...) to RustFS unchanged.
       - R2_PUBLIC_ENDPOINT_URL=${FRONTEND_URL:?}
+    volumes:
+      # Workstation VMs (infra/node-a/workstations.nix): the vsock relays and
+      # the snapshot socket, and the harness's ssh key, read-only.
+      - /run/mike-workstations:/run/mike-workstations
+      - /var/lib/mike-workstations/harness_ed25519:/run/workstation-key/harness_ed25519:ro
   frontend:
     environment:
       - API_BASE_URL=http://backend:3001
