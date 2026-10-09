@@ -524,7 +524,9 @@ The transport is selected automatically; `QUEUE_DRIVER=postgres` forces the
 database queue even when `REDIS_URL` is set.
 
 By default, workers run in a worker thread inside the backend process, so no
-extra process management is needed. To run them on separate hardware, start
+extra process management is needed. (Under tsx — `npm run dev` and the local
+test harnesses — they run inline on the main thread instead: tsx cannot load
+the ESM model runtime inside a worker thread.) To run them on separate hardware, start
 `node dist/worker.js` (any number of instances — work is partitioned safely)
 and set `WORKERS_MODE=none` on the API process. The compose file contains a
 commented `worker` service demonstrating this.

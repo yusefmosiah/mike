@@ -53,25 +53,27 @@ async function validateBootConfiguration(): Promise<void> {
  *   "none"  — not here at all: a standalone worker process (src/worker.ts)
  *            runs them — a separate container or machine on the same
  *            Postgres/Redis.
+ *
+ * Under tsx (`npm run dev`, the local e2e and stack harnesses) "thread" runs
+ * inline: tsx's ESM hooks do not reach a worker thread, so the thread could
+ * not load the ESM-only model runtime (`import("./pi/runtime.mjs")` resolves
+ * to a .mts only tsx can map) and every job that calls a model failed with
+ * ERR_MODULE_NOT_FOUND. Compiled builds keep the thread.
  */
+const RUNNING_UNDER_TSX = __filename.endsWith(".ts");
 const WORKERS_MODE = (() => {
   const raw = process.env.WORKERS_MODE;
-  return raw === "inline" || raw === "none" ? raw : "thread";
+  if (raw === "inline" || raw === "none") return raw;
+  return RUNNING_UNDER_TSX ? "inline" : "thread";
 })();
 
 let workerThread: ThreadWorker | null = null;
 let shuttingDown = false;
 
 function spawnWorkerThread(): void {
-  // In dev (tsx) this file is .ts and the thread entry must be too, loaded
-  // through tsx's CJS require hook; in prod both are compiled .js in dist.
-  const isTs = __filename.endsWith(".ts");
-  const entry = path.join(
-    __dirname,
-    isTs ? "workerThread.ts" : "workerThread.js",
-  );
-  workerThread = new ThreadWorker(entry, {
-    execArgv: isTs ? ["--require", "tsx/cjs"] : [],
+  // Only compiled builds spawn the thread (see WORKERS_MODE).
+  workerThread = new ThreadWorker(path.join(__dirname, "workerThread.js"), {
+    execArgv: [],
   });
   workerThread.on("error", (err) => {
     // An uncaught throw inside the thread. The thread's own Sentry client
