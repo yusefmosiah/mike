@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Db } from "../../supabase";
 import type { AuditEventInput } from "../../audit";
 
+// GoTrue is reached through authAdmin(); it answers with the current fake db's `auth`.
+const authRef = vi.hoisted(() => ({ current: undefined as unknown }));
+vi.mock("../../supabase", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../supabase")>()),
+    authAdmin: () => authRef.current,
+}));
+
 // Every stub below carries the argument list of the function it replaces.
 // That is what makes `mock.calls[n][m]` a real argument rather than an
 // element of an untyped rest array — the assertions read those positions.
@@ -208,12 +215,14 @@ function makeDb(selectData: unknown[] = []) {
         };
         return b;
     }
+    const auth = { admin: { deleteUser: authDeleteUser } };
+    authRef.current = auth;
     return {
         deletes,
         selects,
         trace,
         from,
-        auth: { admin: { deleteUser: authDeleteUser } },
+        auth,
     };
 }
 

@@ -15,6 +15,7 @@ import {
   type UserModelSettings,
 } from "../user/user.service";
 import { DbJobDeferredError, type Db, type DbJob } from "../../lib/dbq/types";
+import { authAdmin } from "../../lib/supabase";
 import { ensureMemoryFile, getMemoryCurrent, MemoryConversationNotQuietError, MemoryDisabledError, MemoryEpochSupersededError, MemoryJobSupersededError, MemoryValidationError, writeMemoryFile, type MemoryFileRow, type MemoryScope, type MemorySurface } from "../../lib/memory/files";
 import { MEMORY_INACTIVITY_MS } from "../../lib/memory/schedule";
 
@@ -349,7 +350,7 @@ function timestampMicros(value: string): bigint | null {
 }
 
 async function actorEmail(db: Db, userId: string): Promise<string | null> {
-  const { data, error } = await db.auth.admin.getUserById(userId);
+  const { data, error } = await authAdmin().admin.getUserById(userId);
   if (error) throw new Error("Memory curator could not resolve the actor");
   return data.user?.email?.trim().toLowerCase() ?? null;
 }

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stackDb } from "./stackDb";
 
 // The RPCs return `any`; naming the row shape is what lets tsc check the id
 // reads below instead of silently widening them.
@@ -7,7 +8,7 @@ type IdRow = { id: string };
 
 const url = process.env.SUPABASE_TEST_URL;
 const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey ? describe : describe.skip;
+const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
 
 /* supabase-js types an rpc() result's `data` as `any`, so the `.map()` /
    `.every()` callbacks below get no inferred parameter type (and, under
@@ -18,6 +19,8 @@ type OverviewRow = {
     project_id: string | null;
     columns_config: unknown[] | null;
 };
+
+const db = stackDb()!;
 
 maybeDescribe("Supabase tabular-review pagination", () => {
     let ownerId = "";
@@ -48,14 +51,14 @@ maybeDescribe("Supabase tabular-review pagination", () => {
         }
         ownerId = owner.data.user.id;
 
-        const project = await admin.from("projects").insert({
+        const project = await db.from("projects").insert({
             id: projectId,
             user_id: ownerId,
             name: "Pagination integration project",
         });
         if (project.error) throw project.error;
 
-        const projectReviews = await admin.from("tabular_reviews").insert(
+        const projectReviews = await db.from("tabular_reviews").insert(
             projectReviewIds.map((id, index) => ({
                 id,
                 project_id: projectId,
@@ -76,7 +79,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
         );
         if (projectReviews.error) throw projectReviews.error;
 
-        const standaloneReviews = await admin.from("tabular_reviews").insert(
+        const standaloneReviews = await db.from("tabular_reviews").insert(
             standaloneReviewIds.map((id) => ({
                 id,
                 user_id: ownerId,
@@ -92,11 +95,11 @@ maybeDescribe("Supabase tabular-review pagination", () => {
 
     afterAll(async () => {
         if (!admin) return;
-        await admin
+        await db
             .from("tabular_reviews")
             .delete()
             .in("id", standaloneReviewIds);
-        await admin.from("projects").delete().eq("id", projectId);
+        await db.from("projects").delete().eq("id", projectId);
         if (ownerId) await admin.auth.admin.deleteUser(ownerId);
     });
 
@@ -110,12 +113,12 @@ maybeDescribe("Supabase tabular-review pagination", () => {
             p_sort_key: "name",
             p_sort_direction: "asc",
         };
-        const firstPage = await admin.rpc("get_tabular_reviews_overview", {
+        const firstPage = await db.rpc("get_tabular_reviews_overview", {
             ...commonArgs,
             p_limit: 20,
             p_offset: 0,
         });
-        const secondPage = await admin.rpc("get_tabular_reviews_overview", {
+        const secondPage = await db.rpc("get_tabular_reviews_overview", {
             ...commonArgs,
             p_limit: 20,
             p_offset: 20,
@@ -139,7 +142,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
         // global tabular-reviews list send: a scope with no project_id, so
         // it must filter across every project the user can see rather than
         // just the one seeded project.
-        const inProject = await admin.rpc("get_tabular_reviews_overview", {
+        const inProject = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: null,
@@ -150,7 +153,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
             p_sort_key: "created",
             p_sort_direction: "desc",
         });
-        const standalone = await admin.rpc("get_tabular_reviews_overview", {
+        const standalone = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: null,
@@ -190,7 +193,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     });
 
     it("applies scope and search before limiting rows", async () => {
-        const result = await admin.rpc("get_tabular_reviews_overview", {
+        const result = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: null,
@@ -212,7 +215,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     it.each(["%", "_"])(
         "treats %s as a literal search character",
         async (searchTerm) => {
-            const reviews = await admin.rpc("get_tabular_reviews_overview", {
+            const reviews = await db.rpc("get_tabular_reviews_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_project_id: null,
@@ -223,7 +226,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
                 p_sort_key: "created",
                 p_sort_direction: "desc",
             });
-            const ids = await admin.rpc("get_tabular_review_ids_overview", {
+            const ids = await db.rpc("get_tabular_review_ids_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_project_id: null,
@@ -241,7 +244,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     );
 
     it("sorts the complete filtered set before pagination", async () => {
-        const result = await admin.rpc("get_tabular_reviews_overview", {
+        const result = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: projectId,
@@ -265,7 +268,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     it("returns ids + owner for every matching review within one page", async () => {
         // Backs the "select all matching" bulk action: needs only id +
         // user_id, not the full review payload, for the entire filtered set.
-        const result = await admin.rpc("get_tabular_review_ids_overview", {
+        const result = await db.rpc("get_tabular_review_ids_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: null,
@@ -291,7 +294,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
         const pageSize = 10;
         const collected: string[] = [];
         for (let offset = 0; offset < projectReviewIds.length; offset += pageSize) {
-            const page = await admin.rpc("get_tabular_review_ids_overview", {
+            const page = await db.rpc("get_tabular_review_ids_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_project_id: null,
@@ -309,7 +312,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     });
 
     it("keeps the legacy three-argument RPC callable", async () => {
-        const result = await admin.rpc("get_tabular_reviews_overview", {
+        const result = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_project_id: null,
@@ -367,7 +370,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
         // `organizations` carries no `personal` flag: personal content is
         // simply `org_id is null`, so there is no hidden per-account org to
         // distinguish a real firm from.
-        const org = await admin
+        const org = await db
             .from("organizations")
             .insert({ name: `org-vis-${suffix}` })
             .select("id")
@@ -378,13 +381,13 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
         // Exactly two org roles survive: admin and member. Seeding the
         // retired 'owner' here would be refused by the org_members role
         // check constraint before a single assertion ran.
-        const members = await admin.from("org_members").insert([
+        const members = await db.from("org_members").insert([
             { org_id: orgId, user_id: colleagueId, role: "admin" },
             { org_id: orgId, user_id: memberId, role: "member" },
         ]);
         if (members.error) throw members.error;
 
-        const project = await admin.from("projects").insert({
+        const project = await db.from("projects").insert({
             id: projectId,
             user_id: colleagueId,
             name: `org-vis-project-${suffix}`,
@@ -394,7 +397,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
 
         // Organization-scoped reviews inherit through a project. The schema
         // deliberately rejects an org_id on a standalone review.
-        const reviews = await admin.from("tabular_reviews").insert({
+        const reviews = await db.from("tabular_reviews").insert({
             id: inProjectReviewId,
             project_id: projectId,
             user_id: colleagueId,
@@ -408,12 +411,12 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
 
     afterAll(async () => {
         if (!admin) return;
-        await admin
+        await db
             .from("tabular_reviews")
             .delete()
             .eq("id", inProjectReviewId);
-        await admin.from("projects").delete().eq("id", projectId);
-        if (orgId) await admin.from("organizations").delete().eq("id", orgId);
+        await db.from("projects").delete().eq("id", projectId);
+        if (orgId) await db.from("organizations").delete().eq("id", orgId);
         // Signup no longer provisions an organization, so the only org to
         // clean up is the one this suite created above. Deleting the users
         // is enough for everything else.
@@ -426,7 +429,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
         // nine named arguments (see lib/tabularReviewsOverview.ts). The
         // member is neither owner nor directly granted, so the row is visible
         // only through the org-membership branch.
-        const result = await admin.rpc("get_tabular_reviews_overview", {
+        const result = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: memberId,
             p_user_email: memberEmail,
             p_project_id: null,
@@ -455,7 +458,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
         // this guards against the two drifting apart: if the org branch were
         // missing here, bulk selection would silently omit rows the member
         // can see in the list.
-        const result = await admin.rpc("get_tabular_review_ids_overview", {
+        const result = await db.rpc("get_tabular_review_ids_overview", {
             p_user_id: memberId,
             p_user_email: memberEmail,
             p_project_id: null,
@@ -475,7 +478,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
     it("keeps the paginated overview and the ids overview in visibility lockstep", async () => {
         // The drift the two RPCs are prone to, asserted directly: everything
         // the member sees in the list must also be bulk-selectable.
-        const overview = await admin.rpc("get_tabular_reviews_overview", {
+        const overview = await db.rpc("get_tabular_reviews_overview", {
             p_user_id: memberId,
             p_user_email: memberEmail,
             p_project_id: null,
@@ -486,7 +489,7 @@ maybeDescribe("Supabase tabular-review org visibility", () => {
             p_sort_key: "created",
             p_sort_direction: "desc",
         });
-        const ids = await admin.rpc("get_tabular_review_ids_overview", {
+        const ids = await db.rpc("get_tabular_review_ids_overview", {
             p_user_id: memberId,
             p_user_email: memberEmail,
             p_project_id: null,

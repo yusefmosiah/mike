@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createClient } = vi.hoisted(() => ({
-  createClient: vi.fn((url: string, key: string) => ({ url, key })),
+  createClient: vi.fn((url: string, key: string) => ({ auth: { url, key } })),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({ createClient }));
 
-import { createServerSupabase } from "../supabase";
+import { DbClient } from "../db";
+import { authAdmin, createServerSupabase } from "../supabase";
 
-describe("createServerSupabase", () => {
+describe("authAdmin", () => {
   beforeEach(() => {
     createClient.mockClear();
     process.env.SUPABASE_URL = `https://${crypto.randomUUID()}.supabase.test`;
@@ -16,8 +17,8 @@ describe("createServerSupabase", () => {
   });
 
   it("reuses one admin client for the same configuration", () => {
-    const first = createServerSupabase();
-    const second = createServerSupabase();
+    const first = authAdmin();
+    const second = authAdmin();
 
     expect(second).toBe(first);
     expect(createClient).toHaveBeenCalledTimes(1);
@@ -34,10 +35,10 @@ describe("createServerSupabase", () => {
   });
 
   it("creates a new client when the configuration changes", () => {
-    const first = createServerSupabase();
+    const first = authAdmin();
     process.env.SUPABASE_SECRET_KEY = crypto.randomUUID();
 
-    const second = createServerSupabase();
+    const second = authAdmin();
 
     expect(second).not.toBe(first);
     expect(createClient).toHaveBeenCalledTimes(2);
@@ -46,9 +47,17 @@ describe("createServerSupabase", () => {
   it("rejects missing server configuration", () => {
     delete process.env.SUPABASE_URL;
 
-    expect(() => createServerSupabase()).toThrow(
+    expect(() => authAdmin()).toThrow(
       "SUPABASE_URL and SUPABASE_SECRET_KEY must be set",
     );
+    expect(createClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("createServerSupabase", () => {
+  it("is the shared Postgres client, not a Supabase client", () => {
+    expect(createServerSupabase()).toBeInstanceOf(DbClient);
+    expect(createServerSupabase()).toBe(createServerSupabase());
     expect(createClient).not.toHaveBeenCalled();
   });
 });

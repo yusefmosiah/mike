@@ -6,6 +6,7 @@ import {
 import { NonRetryableJobError } from "../../lib/dbq/runner";
 import { deleteFile } from "../../lib/storage";
 import { type Db, type DbJob } from "../../lib/dbq/types";
+import { authAdmin } from "../../lib/supabase";
 
 export async function handleAccountDelete(db: Db, job: DbJob): Promise<void> {
     const userId = job.payload.userId as string | undefined;
@@ -161,7 +162,7 @@ export async function handleAccountDelete(db: Db, job: DbJob): Promise<void> {
     // The data cascade removes personal content and detaches retained
     // organization content first. Version triggers preserve cleanup intent;
     // only after that work succeeds do we remove the authentication identity.
-    const { error } = await db.auth.admin.deleteUser(userId);
+    const { error } = await authAdmin().admin.deleteUser(userId);
     // "not found" is success: a previous attempt got this far before dying.
     if (error && !/not\s*found/i.test(error.message))
         throw new Error(`Failed to delete auth user: ${error.message}`);

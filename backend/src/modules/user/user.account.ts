@@ -16,6 +16,7 @@ import {
     type AccountDeletionOrgBlocker,
 } from "./user.dataCleanup";
 import { type Db, errorMessage } from "./user.shared";
+import { authAdmin } from "../../lib/supabase";
 
 /**
  * Turn the sole-admin blockers into instructions the user can actually act
@@ -103,7 +104,7 @@ export async function deleteUserAccount(
                 { userId },
             );
             await deleteUserAccountData(db, userId, userEmail);
-            const { error } = await db.auth.admin.deleteUser(userId);
+            const { error } = await authAdmin().admin.deleteUser(userId);
             if (error) return { ok: false, error };
             return { ok: true };
         }
@@ -122,7 +123,7 @@ export async function deleteUserAccount(
         // it must not fail a deletion that is already durably scheduled.
         if (token) {
             try {
-                await db.auth.admin.signOut(token, "global");
+                await authAdmin().admin.signOut(token, "global");
             } catch (signOutErr) {
                 console.error("[user/account] session revoke failed", {
                     userId,

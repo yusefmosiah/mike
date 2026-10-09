@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stackDb } from "./stackDb";
 
 // Gated: runs only against a real (local) Supabase stack.
 //   supabase start, then export:
@@ -10,7 +11,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // and organization access on a real PostgREST stack.
 const url = process.env.SUPABASE_TEST_URL;
 const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey ? describe : describe.skip;
+const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+
+const db = stackDb()!;
 
 maybeDescribe("get_chats_overview — role-aware grants", () => {
     let admin: SupabaseClient;
@@ -75,7 +78,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         }
         strangerId = stranger.data.user.id;
 
-        const orgs = await admin.from("organizations").insert([
+        const orgs = await db.from("organizations").insert([
             {
                 id: sharedOrgId,
                 name: `shared-${suffix}`,
@@ -89,14 +92,14 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         ]);
         if (orgs.error) throw orgs.error;
 
-        const members = await admin.from("org_members").insert([
+        const members = await db.from("org_members").insert([
             { org_id: sharedOrgId, user_id: callerId, role: "member" },
             { org_id: sharedOrgId, user_id: strangerId, role: "admin" },
             { org_id: foreignOrgId, user_id: strangerId, role: "admin" },
         ]);
         if (members.error) throw members.error;
 
-        const projects = await admin.from("projects").insert([
+        const projects = await db.from("projects").insert([
             { id: myProjectId, user_id: callerId, name: `mine-${suffix}` },
             {
                 id: sharedOrgProjectId,
@@ -119,7 +122,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         if (projects.error) throw projects.error;
 
         // Direct project sharing is a role-carrying grant row.
-        const grants = await admin.from("project_access_grants").insert([
+        const grants = await db.from("project_access_grants").insert([
             {
                 project_id: grantedProjectId,
                 email: callerEmail.toLowerCase(),
@@ -134,7 +137,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         // resolveContentOrgId stamps real rows is what makes the "the chat's
         // own org branch can never add a row" claim in 20260902_05's header
         // testable rather than merely asserted.
-        const chatRows = await admin.from("chats").insert([
+        const chatRows = await db.from("chats").insert([
             {
                 id: chats.mine,
                 project_id: null,
@@ -180,7 +183,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         ]);
         if (chatRows.error) throw chatRows.error;
 
-        const chatGrant = await admin.from("chat_access_grants").insert({
+        const chatGrant = await db.from("chat_access_grants").insert({
             chat_id: chats.sharedDirectly,
             email: callerEmail.toLowerCase(),
             role: "editor",
@@ -191,8 +194,8 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
 
     afterAll(async () => {
         if (!admin) return;
-        await admin.from("chats").delete().in("id", allChatIds);
-        await admin
+        await db.from("chats").delete().in("id", allChatIds);
+        await db
             .from("projects")
             .delete()
             .in("id", [
@@ -201,7 +204,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
                 grantedProjectId,
                 foreignOrgProjectId,
             ]);
-        await admin
+        await db
             .from("organizations")
             .delete()
             .in("id", [sharedOrgId, foreignOrgId]);
@@ -210,7 +213,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
     });
 
     it("returns the full email-aware set with effective roles", async () => {
-        const current = await admin.rpc("get_chats_overview", {
+        const current = await db.rpc("get_chats_overview", {
             p_user_id: callerId,
             p_user_email: callerEmail,
             p_limit: null,
@@ -250,13 +253,13 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
 
     it("persists message activity and orders refreshed history by it", async () => {
         const staleAt = "2000-01-01T00:00:00.000Z";
-        const stale = await admin
+        const stale = await db
             .from("chats")
             .update({ updated_at: staleAt })
             .eq("id", chats.inMyProject);
         if (stale.error) throw stale.error;
 
-        const message = await admin.from("chat_messages").insert({
+        const message = await db.from("chat_messages").insert({
             chat_id: chats.inMyProject,
             author_user_id: callerId,
             role: "user",
@@ -264,7 +267,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         });
         if (message.error) throw message.error;
 
-        const refreshed = await admin.rpc("get_chats_overview", {
+        const refreshed = await db.rpc("get_chats_overview", {
             p_user_id: callerId,
             p_user_email: callerEmail,
             p_limit: null,
@@ -286,7 +289,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
     });
 
     it("pages with a stable activity cursor without repeating rows", async () => {
-        const first = await admin.rpc("get_chats_overview", {
+        const first = await db.rpc("get_chats_overview", {
             p_user_id: callerId,
             p_user_email: callerEmail,
             p_limit: 2,
@@ -299,7 +302,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
         expect(firstRows).toHaveLength(2);
 
         const cursor = firstRows.at(-1)!;
-        const second = await admin.rpc("get_chats_overview", {
+        const second = await db.rpc("get_chats_overview", {
             p_user_id: callerId,
             p_user_email: callerEmail,
             p_limit: 2,
@@ -315,7 +318,7 @@ maybeDescribe("get_chats_overview — role-aware grants", () => {
     });
 
     it("clamps and applies paging", async () => {
-        const page = await admin.rpc("get_chats_overview", {
+        const page = await db.rpc("get_chats_overview", {
             p_user_id: callerId,
             p_user_email: callerEmail,
             p_limit: 1,

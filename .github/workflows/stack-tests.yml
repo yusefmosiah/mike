@@ -79,6 +79,8 @@ jobs:
             echo "SUPABASE_TEST_SERVICE_ROLE_KEY=$(read_key SERVICE_ROLE_KEY)"
             echo "SUPABASE_TEST_ANON_KEY=$(read_key ANON_KEY)"
             echo "SUPABASE_TEST_DB_URL=$(read_key DB_URL)"
+            # Mike's queries go straight to Postgres; the suites use the same database.
+            echo "DATABASE_TEST_URL=$(read_key DB_URL)"
           } >> "$GITHUB_ENV"
 
       # Same bootstrap a fresh local checkout gets from test-stack.sh: load

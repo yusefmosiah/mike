@@ -7,10 +7,11 @@
 
 import { getUserApiKeyStatus } from "./user.apiKeyStore";
 import { type Db } from "./user.shared";
+import { authAdmin } from "../../lib/supabase";
 import { ensureProfileRow, loadProfile } from "./user.profile";
 
 async function userHasVerifiedTotpFactor(db: Db, userId: string) {
-    const { data, error } = await db.auth.admin.getUserById(userId);
+    const { data, error } = await authAdmin().admin.getUserById(userId);
     if (error) return { ok: false as const, error };
 
     const factors = data.user?.factors ?? [];

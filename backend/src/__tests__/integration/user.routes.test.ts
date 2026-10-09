@@ -195,6 +195,7 @@ function mockSupabase() {
 
 vi.mock("../../lib/supabase", () => ({
     createServerSupabase: vi.fn(() => mockSupabase()),
+    authAdmin: vi.fn(() => mockSupabase().auth),
 }));
 
 // The DB-queue runner's enabled flag is what the account-delete and export

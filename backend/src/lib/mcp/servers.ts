@@ -440,14 +440,16 @@ export async function buildUserMcpTools(
     userId: string,
     db: Db = createServerSupabase(),
 ): Promise<OpenAIToolSchema[]> {
-    const { data, error } = await db
+    const connectors = await enabledConnectors(db, userId);
+    if (!connectors) return [];
+    if (connectors.size === 0) return [];
+    const { data: tools, error } = await db
         .from("user_mcp_connector_tools")
         .select(
-            "openai_tool_name, tool_name, title, description, input_schema, annotations, requires_confirmation, enabled, user_mcp_connectors!inner(id, user_id, name, enabled, read_only)",
+            "connector_id, openai_tool_name, tool_name, title, description, input_schema, annotations, requires_confirmation, enabled",
         )
         .eq("enabled", true)
-        .eq("user_mcp_connectors.user_id", userId)
-        .eq("user_mcp_connectors.enabled", true);
+        .in("connector_id", [...connectors.keys()]);
     if (error) {
         console.error("[mcp-connectors] failed to load tools", {
             userId,
@@ -455,8 +457,12 @@ export async function buildUserMcpTools(
         });
         return [];
     }
+    const data = (tools ?? []).map((row) => ({
+        ...row,
+        user_mcp_connectors: connectors.get(row.connector_id as string),
+    }));
 
-    return (data ?? []).filter((row) => {
+    return data.filter((row) => {
         const joined = row.user_mcp_connectors as { read_only?: boolean } | { read_only?: boolean }[];
         const connector = Array.isArray(joined) ? joined[0] : joined;
         return !(connector?.read_only && mcpToolRequiresWriteAccess(row));
@@ -486,28 +492,48 @@ export async function buildUserMcpTools(
     });
 }
 
+/** The caller's enabled connectors by id; null when they cannot be read. */
+async function enabledConnectors(
+    db: Db,
+    userId: string,
+): Promise<Map<string, ConnectorRow> | null> {
+    const { data, error } = await db
+        .from("user_mcp_connectors")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("enabled", true);
+    if (error) {
+        console.error("[mcp-connectors] failed to load connectors", {
+            userId,
+            error: error.message,
+        });
+        return null;
+    }
+    return new Map(
+        ((data ?? []) as ConnectorRow[]).map((row) => [row.id, row]),
+    );
+}
+
 async function resolveCallableTool(
     userId: string,
     openaiToolName: string,
     db: Db,
 ): Promise<{ connector: ConnectorRow; tool: ToolCacheRow } | null> {
+    const connectors = await enabledConnectors(db, userId);
+    if (!connectors || connectors.size === 0) return null;
     const { data, error } = await db
         .from("user_mcp_connector_tools")
-        .select("*, user_mcp_connectors!inner(*)")
+        .select("*")
         .eq("openai_tool_name", openaiToolName)
         .eq("enabled", true)
-        .eq("user_mcp_connectors.user_id", userId)
-        .eq("user_mcp_connectors.enabled", true)
+        .in("connector_id", [...connectors.keys()])
         .single();
     if (error || !data) return null;
-    const row = data as ToolCacheRow & {
-        user_mcp_connectors: ConnectorRow | ConnectorRow[];
-    };
-    const connector = Array.isArray(row.user_mcp_connectors)
-        ? row.user_mcp_connectors[0]
-        : row.user_mcp_connectors;
-    if (connector.read_only && mcpToolRequiresWriteAccess(row)) return null;
-    return { connector, tool: row };
+    const tool = data as ToolCacheRow & { connector_id: string };
+    const connector = connectors.get(tool.connector_id);
+    if (!connector) return null;
+    if (connector.read_only && mcpToolRequiresWriteAccess(tool)) return null;
+    return { connector, tool };
 }
 
 function stringifyMcpResult(result: unknown): string {

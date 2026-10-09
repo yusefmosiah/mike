@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
+import { stackDb } from "./stackDb";
 import {
     filterAccessibleDocumentIds,
     listAccessibleProjectIds,
@@ -12,7 +13,9 @@ import {
 const url = process.env.SUPABASE_TEST_URL;
 const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
 
-const maybeDescribe = url && serviceKey ? describe : describe.skip;
+const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
+
+const db = stackDb()!;
 
 maybeDescribe("Supabase access integration", () => {
     it("proves tabular document filtering drops foreign document IDs", async () => {
@@ -52,7 +55,7 @@ maybeDescribe("Supabase access integration", () => {
 
             // Sharing is a `project_access_grants` row keyed on lowercase
             // email. Only the shared project receives a grant.
-            const projectsInsert = await admin.from("projects").insert([
+            const projectsInsert = await db.from("projects").insert([
                 {
                     id: sharedProjectId,
                     user_id: ownerId,
@@ -71,7 +74,7 @@ maybeDescribe("Supabase access integration", () => {
                 );
             }
 
-            const grantInsert = await admin
+            const grantInsert = await db
                 .from("project_access_grants")
                 .insert({
                     project_id: sharedProjectId,
@@ -88,7 +91,7 @@ maybeDescribe("Supabase access integration", () => {
 
             // filename/file_type live on document_versions in this schema —
             // the documents rows only need identity + ownership columns.
-            const documentsInsert = await admin.from("documents").insert([
+            const documentsInsert = await db.from("documents").insert([
                 {
                     id: sharedDocId,
                     user_id: ownerId,
@@ -111,7 +114,7 @@ maybeDescribe("Supabase access integration", () => {
                 listAccessibleProjectIds(
                     reviewerId,
                     reviewerEmail,
-                    admin as any,
+                    db as any,
                 ),
             ).resolves.toContain(sharedProjectId);
 
@@ -120,12 +123,12 @@ maybeDescribe("Supabase access integration", () => {
                     [sharedDocId, privateDocId],
                     reviewerId,
                     reviewerEmail,
-                    admin as any,
+                    db as any,
                 ),
             ).resolves.toEqual([sharedDocId]);
         } finally {
-            await admin.from("documents").delete().in("id", [sharedDocId, privateDocId]);
-            await admin
+            await db.from("documents").delete().in("id", [sharedDocId, privateDocId]);
+            await db
                 .from("projects")
                 .delete()
                 .in("id", [sharedProjectId, privateProjectId]);

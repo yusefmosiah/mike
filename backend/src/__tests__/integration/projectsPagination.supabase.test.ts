@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stackDb } from "./stackDb";
 
 // The RPCs return `any`; naming the row shape is what lets tsc check the
 // property reads below instead of silently widening them.
@@ -12,7 +13,7 @@ type ProjectRow = {
 
 const url = process.env.SUPABASE_TEST_URL;
 const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey ? describe : describe.skip;
+const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
 
 /* supabase-js types an rpc() result's `data` as `any`, so the `.map()` /
    `.every()` callbacks below get no inferred parameter type (and, under
@@ -23,6 +24,8 @@ type OverviewRow = {
     name: string;
     is_owner: boolean;
 };
+
+const db = stackDb()!;
 
 maybeDescribe("Supabase projects-overview pagination", () => {
     let ownerId = "";
@@ -67,20 +70,20 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         }
         otherUserId = otherUser.data.user.id;
 
-        const organization = await admin.from("organizations").insert({
+        const organization = await db.from("organizations").insert({
             id: orgId,
             name: "Pagination Test Firm",
             created_by: ownerId,
         });
         if (organization.error) throw organization.error;
-        const membership = await admin.from("org_members").insert({
+        const membership = await db.from("org_members").insert({
             org_id: orgId,
             user_id: ownerId,
             role: "admin",
         });
         if (membership.error) throw membership.error;
 
-        const myProjects = await admin.from("projects").insert(
+        const myProjects = await db.from("projects").insert(
             myProjectIds.map((id) => ({
                 id,
                 user_id: ownerId,
@@ -92,7 +95,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         );
         if (myProjects.error) throw myProjects.error;
 
-        const ownedSharedProject = await admin.from("projects").insert({
+        const ownedSharedProject = await db.from("projects").insert({
             id: ownedSharedProjectId,
             user_id: ownerId,
             name: "Owned Collaborative Project",
@@ -102,7 +105,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         });
         if (ownedSharedProject.error) throw ownedSharedProject.error;
 
-        const sharedProjects = await admin.from("projects").insert(
+        const sharedProjects = await db.from("projects").insert(
             sharedProjectIds.map((id) => ({
                 id,
                 user_id: otherUserId,
@@ -114,7 +117,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         );
         if (sharedProjects.error) throw sharedProjects.error;
 
-        const orgProject = await admin.from("projects").insert({
+        const orgProject = await db.from("projects").insert({
             id: orgProjectId,
             user_id: ownerId,
             org_id: orgId,
@@ -125,7 +128,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         });
         if (orgProject.error) throw orgProject.error;
 
-        const grants = await admin.from("project_access_grants").insert([
+        const grants = await db.from("project_access_grants").insert([
             {
                 project_id: ownedSharedProjectId,
                 email: otherUserEmail,
@@ -144,11 +147,11 @@ maybeDescribe("Supabase projects-overview pagination", () => {
 
     afterAll(async () => {
         if (!admin) return;
-        await admin.from("projects").delete().in("id", myProjectIds);
-        await admin.from("projects").delete().in("id", sharedProjectIds);
-        await admin.from("projects").delete().eq("id", ownedSharedProjectId);
-        await admin.from("projects").delete().eq("id", orgProjectId);
-        await admin.from("organizations").delete().eq("id", orgId);
+        await db.from("projects").delete().in("id", myProjectIds);
+        await db.from("projects").delete().in("id", sharedProjectIds);
+        await db.from("projects").delete().eq("id", ownedSharedProjectId);
+        await db.from("projects").delete().eq("id", orgProjectId);
+        await db.from("organizations").delete().eq("id", orgId);
         if (otherUserId) await admin.auth.admin.deleteUser(otherUserId);
         if (ownerId) await admin.auth.admin.deleteUser(ownerId);
     });
@@ -164,12 +167,12 @@ maybeDescribe("Supabase projects-overview pagination", () => {
             p_practice: null,
             p_owner_user_id: null,
         };
-        const firstPage = await admin.rpc("get_projects_overview", {
+        const firstPage = await db.rpc("get_projects_overview", {
             ...commonArgs,
             p_limit: 20,
             p_offset: 0,
         });
-        const secondPage = await admin.rpc("get_projects_overview", {
+        const secondPage = await db.rpc("get_projects_overview", {
             ...commonArgs,
             p_limit: 20,
             p_offset: 20,
@@ -187,7 +190,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     });
 
     it("filters by scope: mine vs shared", async () => {
-        const mine = await admin.rpc("get_projects_overview", {
+        const mine = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "mine",
@@ -199,7 +202,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
             p_practice: null,
             p_owner_user_id: null,
         });
-        const shared = await admin.rpc("get_projects_overview", {
+        const shared = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "shared",
@@ -235,7 +238,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     });
 
     it("separates collaborative projects from projects with no other users", async () => {
-        const collaborative = await admin.rpc("get_projects_overview", {
+        const collaborative = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "collaborative",
@@ -247,7 +250,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
             p_practice: null,
             p_owner_user_id: null,
         });
-        const privateProjects = await admin.rpc("get_projects_overview", {
+        const privateProjects = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "private",
@@ -259,7 +262,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
             p_practice: null,
             p_owner_user_id: null,
         });
-        const collaborativeIdRows = await admin.rpc(
+        const collaborativeIdRows = await db.rpc(
             "get_project_ids_overview",
             {
                 p_user_id: ownerId,
@@ -272,7 +275,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
                 p_offset: 0,
             },
         );
-        const privateIdRows = await admin.rpc("get_project_ids_overview", {
+        const privateIdRows = await db.rpc("get_project_ids_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "private",
@@ -341,7 +344,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     });
 
     it("filters by exact practice and owner match", async () => {
-        const byPractice = await admin.rpc("get_projects_overview", {
+        const byPractice = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "all",
@@ -353,7 +356,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
             p_practice: "Corporate",
             p_owner_user_id: null,
         });
-        const byOwner = await admin.rpc("get_projects_overview", {
+        const byOwner = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "all",
@@ -379,7 +382,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     it.each(["%", "_"])(
         "treats %s as a literal search character",
         async (searchTerm) => {
-            const projects = await admin.rpc("get_projects_overview", {
+            const projects = await db.rpc("get_projects_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_scope: "all",
@@ -391,7 +394,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
                 p_practice: null,
                 p_owner_user_id: null,
             });
-            const ids = await admin.rpc("get_project_ids_overview", {
+            const ids = await db.rpc("get_project_ids_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_scope: "all",
@@ -410,7 +413,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     );
 
     it("sorts the complete filtered set before pagination", async () => {
-        const result = await admin.rpc("get_projects_overview", {
+        const result = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "mine",
@@ -431,7 +434,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     it("returns ids + owner for every matching project within one page", async () => {
         // Backs the "select all matching" bulk action: needs only id +
         // user_id, not the full project payload, for the entire filtered set.
-        const result = await admin.rpc("get_project_ids_overview", {
+        const result = await db.rpc("get_project_ids_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
             p_scope: "mine",
@@ -458,7 +461,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
         const pageSize = 10;
         const collected: string[] = [];
         for (let offset = 0; offset < myProjectIds.length; offset += pageSize) {
-            const page = await admin.rpc("get_project_ids_overview", {
+            const page = await db.rpc("get_project_ids_overview", {
                 p_user_id: ownerId,
                 p_user_email: ownerEmail,
                 p_scope: "mine",
@@ -477,7 +480,7 @@ maybeDescribe("Supabase projects-overview pagination", () => {
     });
 
     it("keeps the legacy two-argument RPC callable", async () => {
-        const result = await admin.rpc("get_projects_overview", {
+        const result = await db.rpc("get_projects_overview", {
             p_user_id: ownerId,
             p_user_email: ownerEmail,
         });

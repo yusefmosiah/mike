@@ -68,12 +68,19 @@ function fixture(
   const chain = {
     select: () => chain,
     eq: () => chain,
+    in: () => chain,
+    // The caller's enabled connectors, read before the tool is resolved.
+    then: (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({
+        data: table === "user_mcp_connectors" ? [{ ...connector }] : [],
+        error: null,
+      }).then(resolve),
     maybeSingle: async () => ({
       data: table === "user_mcp_oauth_tokens" ? { ...token } : null,
       error: null,
     }),
     single: async () => ({
-      data: { ...tool, user_mcp_connectors: { ...connector } },
+      data: { ...tool },
       error: null,
     }),
     insert: async () => ({ error: null }),

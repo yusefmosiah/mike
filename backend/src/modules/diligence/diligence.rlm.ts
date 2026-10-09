@@ -30,6 +30,7 @@ import {
     type ProjectAccess,
 } from "../../lib/access";
 import type { Db, DbJob } from "../../lib/dbq/types";
+import { authAdmin } from "../../lib/supabase";
 import { enqueueStorageCleanup } from "../../lib/dbq/enqueue";
 import { attachActiveVersionPaths, contentSha256 } from "../../lib/documentVersions";
 import { isSpreadsheetDocumentType } from "../../lib/documentTypes";
@@ -669,7 +670,7 @@ async function persistMemo(
 }
 
 async function actorEmail(db: Db, userId: string): Promise<string | null> {
-    const { data, error } = await db.auth.admin.getUserById(userId);
+    const { data, error } = await authAdmin().admin.getUserById(userId);
     if (error) throw new Error("RLM run could not resolve the acting user");
     return data.user?.email?.trim().toLowerCase() ?? null;
 }

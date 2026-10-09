@@ -65,20 +65,25 @@ function makeTool(): ToolCacheRow {
     };
 }
 
-// Minimal Supabase-shaped stub: `resolveCallableTool` issues a long
-// select/eq/single chain, and `insertMcpAuditLog` issues an insert. We record
-// audit inserts so the F8 size assertion can read them back.
+// Minimal db stub: a tool is resolved as the caller's enabled connectors,
+// then the tool among theirs (select/eq/in/single), and `insertMcpAuditLog`
+// issues an insert. We record audit inserts so the F8 size assertion can read
+// them back.
 function makeDb(
     tool: ToolCacheRow,
     connector: ConnectorRow,
     auditRows: Record<string, unknown>[],
 ): Db {
-    const toolRow = { ...tool, user_mcp_connectors: connector };
-    const chain = {
-        select: () => chain,
-        eq: () => chain,
-        single: () => Promise.resolve({ data: toolRow, error: null }),
-        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [toolRow], error: null }).then(resolve),
+    const toolRow = { ...tool, connector_id: connector.id };
+    const query = (rows: unknown[]) => {
+        const chain = {
+            select: () => chain,
+            eq: () => chain,
+            in: () => chain,
+            single: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
+            then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve),
+        };
+        return chain;
     };
     return {
         from(table: string) {
@@ -90,7 +95,8 @@ function makeDb(
                     },
                 };
             }
-            return chain;
+            if (table === "user_mcp_connectors") return query([connector]);
+            return query([toolRow]);
         },
     } as unknown as Db;
 }

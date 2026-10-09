@@ -1,44 +1,43 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createDb, type DbClient } from "./db";
 
 /**
  * The server-side database handle every service function takes as its first
  * argument. One name for the whole backend: services and job handlers accept
  * a `Db`, route handlers obtain one from `createServerSupabase()` and pass it
- * down. Declaring the alias here (instead of a private
- * `type Db = ReturnType<typeof createServerSupabase>` in every file) keeps
- * the seam explicit and lets tests substitute a fake with a single cast.
+ * down. Declaring the alias here keeps the seam explicit and lets tests
+ * substitute a fake with a single cast.
+ *
+ * It is Mike's own client over a direct Postgres connection (lib/db), shaped
+ * like the supabase-js query builder it replaced.
  */
-export type Db = SupabaseClient<any, "public", any>;
+export type Db = DbClient;
 
-let cachedAdminClient:
-  | {
-      url: string;
-      key: string;
-      client: SupabaseClient<any, "public", any>;
-    }
-  | undefined;
-
-/**
- * Server-side Supabase client using the service role key.
- * Bypasses RLS — only use in API routes after verifying the user.
- */
+/** The shared database handle. Queries bypass RLS: use only after authorizing the caller. */
 export function createServerSupabase(): Db {
+  return createDb();
+}
+
+/** GoTrue's API with the service role: token checks, user lookups, account deletion. */
+export type AuthAdmin = SupabaseClient["auth"];
+
+let cachedAuthAdmin: { url: string; key: string; auth: AuthAdmin } | undefined;
+
+export function authAdmin(): AuthAdmin {
   const url = process.env.SUPABASE_URL || "";
   const key = process.env.SUPABASE_SECRET_KEY || "";
   if (!url || !key) {
     throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY must be set");
   }
-
-  if (cachedAdminClient?.url === url && cachedAdminClient.key === key) {
-    return cachedAdminClient.client;
+  if (cachedAuthAdmin?.url === url && cachedAuthAdmin.key === key) {
+    return cachedAuthAdmin.auth;
   }
-
-  const client = createClient(url, key, {
+  const { auth } = createClient(url, key, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
-  cachedAdminClient = { url, key, client };
-  return client;
+  cachedAuthAdmin = { url, key, auth };
+  return auth;
 }

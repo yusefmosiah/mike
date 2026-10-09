@@ -8,11 +8,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../lib/log", () => ({ devLog: mocks.devLog, isDev: true }));
 vi.mock("../lib/supabase", () => ({
-  createServerSupabase: () => ({
-    auth: {
-      mfa: { getAuthenticatorAssuranceLevel: mocks.assurance },
-      getUser: async () => ({ data: { user: { factors: [] } }, error: null }),
-    },
+  createServerSupabase: () => ({}),
+  authAdmin: () => ({
+    mfa: { getAuthenticatorAssuranceLevel: mocks.assurance },
+    getUser: async () => ({ data: { user: { factors: [] } }, error: null }),
   }),
 }));
 import { requireMfaIfEnrolled } from "./auth";

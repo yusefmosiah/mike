@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import type { ParamsFlatDictionary } from "express-serve-static-core";
-import { createServerSupabase, type Db } from "../lib/supabase";
+import type { User } from "@supabase/supabase-js";
+import { authAdmin, createServerSupabase, type AuthAdmin, type Db } from "../lib/supabase";
 import { syncProfileEmail } from "../lib/userLookup";
 import { sendInternalError } from "../lib/httpError";
 import { createRequestSupabase } from "../lib/authSession";
@@ -35,6 +36,7 @@ async function enforceLoginMfaIfEnabled(
   req: Request,
   res: Response,
   admin: Db,
+  authApi: AuthAdmin,
   token: string,
 ) {
   if (isLoginMfaBootstrapRoute(req)) return true;
@@ -62,7 +64,7 @@ async function enforceLoginMfaIfEnabled(
   if (profile?.mfa_on_login !== true) return true;
 
   const { data: assurance, error: assuranceError } =
-    await admin.auth.mfa.getAuthenticatorAssuranceLevel(token);
+    await authApi.mfa.getAuthenticatorAssuranceLevel(token);
 
   if (assuranceError) {
     devLog("[auth/mfa] login assurance lookup failed", {
@@ -107,6 +109,15 @@ function getAdminClient(res: Response) {
   }
 }
 
+function getAuthAdmin(res: Response) {
+  try {
+    return authAdmin();
+  } catch {
+    res.status(500).json({ detail: "Server auth is not configured" });
+    return null;
+  }
+}
+
 export async function requireAuth(
   req: Request<ParamsFlatDictionary>,
   res: Response,
@@ -115,16 +126,17 @@ export async function requireAuth(
   const auth = req.headers.authorization ?? "";
   const admin = getAdminClient(res);
   if (!admin) return;
+  const authApi = getAuthAdmin(res);
+  if (!authApi) return;
 
   let token = "";
-  let user: Awaited<ReturnType<typeof admin.auth.getUser>>["data"]["user"] =
-    null;
+  let user: User | null = null;
 
   if (auth.startsWith("Bearer ")) {
     // Temporary compatibility path for older Word add-ins, load tests, and
     // API clients. Updated browser clients authenticate with HttpOnly cookies.
     token = auth.slice(7).trim();
-    const result = await admin.auth.getUser(token);
+    const result = await authApi.getUser(token);
     user = result.data.user;
   } else {
     if (
@@ -178,7 +190,7 @@ export async function requireAuth(
       error: syncError.message,
     });
   }
-  if (!(await enforceLoginMfaIfEnabled(req, res, admin, token))) {
+  if (!(await enforceLoginMfaIfEnabled(req, res, admin, authApi, token))) {
     return;
   }
   next();
@@ -199,10 +211,10 @@ export async function requireMfaIfEnrolled(
     return;
   }
 
-  const admin = getAdminClient(res);
-  if (!admin) return;
+  const authApi = getAuthAdmin(res);
+  if (!authApi) return;
   const { data, error } =
-    await admin.auth.mfa.getAuthenticatorAssuranceLevel(token);
+    await authApi.mfa.getAuthenticatorAssuranceLevel(token);
 
   if (error) {
     devLog("[auth/mfa] assurance lookup failed", {
@@ -229,7 +241,7 @@ export async function requireMfaIfEnrolled(
   });
 
   if (isDev) {
-    const { data: userData, error: userError } = await admin.auth.getUser(token);
+    const { data: userData, error: userError } = await authApi.getUser(token);
     devLog("[auth/mfa] user factors", {
       method: req.method,
       path: req.originalUrl.split("?")[0],

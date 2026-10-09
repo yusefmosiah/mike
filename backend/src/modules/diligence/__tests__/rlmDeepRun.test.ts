@@ -23,6 +23,19 @@ const storage = vi.hoisted(() => ({
             `documents/${userId}/${docId}/source.${filename.split(".").pop() ?? "bin"}`,
     ),
 }));
+// The run owner's email comes from GoTrue, through authAdmin().
+vi.mock("../../../lib/supabase", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../../../lib/supabase")>()),
+    authAdmin: () => ({
+        admin: {
+            getUserById: async (_id: string) => ({
+                data: { user: { email: "owner@example.com" } },
+                error: null,
+            }),
+        },
+    }),
+}));
+
 vi.mock("../../../lib/storage", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../../lib/storage")>();
     return {
@@ -105,18 +118,7 @@ function makeFakeDb(spec: {
         calls.push({ table: fn, op: "rpc", payload: args, filters: [] });
         return Promise.resolve(spec.rpc?.(fn, args) ?? { data: null, error: null });
     };
-    const db = {
-        from,
-        rpc,
-        auth: {
-            admin: {
-                getUserById: async (_id: string) => ({
-                    data: { user: { email: "owner@example.com" } },
-                    error: null,
-                }),
-            },
-        },
-    } as unknown as Db;
+    const db = { from, rpc } as unknown as Db;
     return { db, calls };
 }
 

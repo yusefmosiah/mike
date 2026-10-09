@@ -1,5 +1,5 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { stackDb } from "./stackDb";
 
 // Stack-level test for the DB queue's claim SQL. These are properties of the
 // Postgres functions themselves — FOR UPDATE SKIP LOCKED partitioning, stale
@@ -9,14 +9,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 //   SUPABASE_TEST_URL, SUPABASE_TEST_SERVICE_ROLE_KEY, SUPABASE_TEST_ANON_KEY
 const url = process.env.SUPABASE_TEST_URL;
 const serviceKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
-const maybeDescribe = url && serviceKey ? describe : describe.skip;
+const maybeDescribe = url && serviceKey && process.env.DATABASE_TEST_URL ? describe : describe.skip;
 
 /** Stale threshold used by the calls below (seconds). */
 const STALE = 600;
 const STALE_AGO = new Date(Date.now() - (STALE + 60) * 1000).toISOString();
 
 maybeDescribe("db_jobs claim SQL", () => {
-    let db: SupabaseClient;
+    const db = stackDb()!;
     const created: string[] = [];
 
     const insertJob = async (row: Record<string, unknown>) => {
@@ -50,9 +50,6 @@ maybeDescribe("db_jobs claim SQL", () => {
     };
 
     beforeAll(() => {
-        db = createClient(url!, serviceKey!, {
-            auth: { persistSession: false, autoRefreshToken: false },
-        });
     });
 
     afterAll(async () => {

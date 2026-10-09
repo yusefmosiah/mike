@@ -309,6 +309,7 @@ services:
     environment:
       - SUPABASE_URL=http://gateway:8000
       - SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@db:5432/postgres}
       - R2_ENDPOINT_URL=http://storage:9000
       - R2_ACCESS_KEY_ID=rustfsadmin
       - R2_SECRET_ACCESS_KEY=rustfsadmin
@@ -411,6 +412,7 @@ services:
   #   environment:
   #     - SUPABASE_URL=http://gateway:8000
   #     - SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+  #     - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@db:5432/postgres}
   #     - R2_ENDPOINT_URL=http://storage:9000
   #     - R2_ACCESS_KEY_ID=rustfsadmin
   #     - R2_SECRET_ACCESS_KEY=rustfsadmin

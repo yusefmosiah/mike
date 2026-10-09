@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import path from "node:path";
+import { Client } from "pg";
 
 // The document-lifecycle guard exists to stop code from serving requests the
 // database cannot back (deletes that orphan storage, uploads that fail on a
@@ -12,28 +12,38 @@ import path from "node:path";
 // check was still in flight, so a destructive request or a claimed job could
 // land in the window between "listening" and "exit(1)".
 //
-// This spawns the real entrypoints against a stub PostgREST that answers the
-// probe with 0 ("migration not applied") and asserts that neither process
-// ever reports listening or starting its runner before it exits 1.
-const backendRoot = path.resolve(__dirname, "..", "..");
+// This spawns the real entrypoints against a scratch database whose probe
+// answers 0 ("migration not applied") and asserts that neither process ever
+// reports listening or starting its runner before it exits 1.
+//
+// Gated: it needs a Postgres it may create a database in (DATABASE_TEST_URL,
+// set by scripts/test-stack.sh).
+const adminUrl = process.env.DATABASE_TEST_URL;
+const maybeDescribe = adminUrl ? describe : describe.skip;
+const backendRoot = path.resolve(__dirname, "..", "..", "..");
 
-function stubSupabase(): Promise<{ server: Server; url: string }> {
-    const server = createServer((req, res) => {
-        if (req.method === "POST" && req.url?.startsWith("/rest/v1/rpc/document_lifecycle_version")) {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end("0");
-            return;
-        }
-        res.writeHead(404, { "content-type": "application/json" });
-        res.end('{"message":"stub: not found"}');
-    });
-    return new Promise((resolve) => {
-        server.listen(0, "127.0.0.1", () => {
-            const address = server.address();
-            const port = typeof address === "object" && address ? address.port : 0;
-            resolve({ server, url: `http://127.0.0.1:${port}` });
-        });
-    });
+/** A fresh database with only the lifecycle probe, answering "not applied". */
+async function scratchDatabase(): Promise<{ url: string; drop: () => Promise<void> }> {
+    const name = `mike_gate_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const admin = new Client({ connectionString: adminUrl });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE ${name}`);
+    await admin.end();
+    const url = new URL(adminUrl!);
+    url.pathname = `/${name}`;
+    const scratch = new Client({ connectionString: url.toString() });
+    await scratch.connect();
+    await scratch.query("CREATE FUNCTION public.document_lifecycle_version() RETURNS integer LANGUAGE sql AS 'SELECT 0'");
+    await scratch.end();
+    return {
+        url: url.toString(),
+        drop: async () => {
+            const cleanup = new Client({ connectionString: adminUrl });
+            await cleanup.connect();
+            await cleanup.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+            await cleanup.end();
+        },
+    };
 }
 
 async function runEntrypoint(
@@ -56,26 +66,25 @@ async function runEntrypoint(
     return { code, output };
 }
 
-let stub: Server | null = null;
-afterEach(() => {
-    stub?.close();
-    stub = null;
+let drop: (() => Promise<void>) | null = null;
+afterEach(async () => {
+    await drop?.();
+    drop = null;
 });
 
-describe("document-lifecycle boot gate", () => {
+maybeDescribe("document-lifecycle boot gate", () => {
     it("API: refuses to listen or start workers when the migration is missing", async () => {
-        const { server, url } = await stubSupabase();
-        stub = server;
+        const database = await scratchDatabase();
+        drop = database.drop;
         const { code, output } = await runEntrypoint("src/index.ts", {
             PORT: "0",
             WORKERS_MODE: "inline",
             QUEUE_DRIVER: "postgres",
             DB_JOBS_POLL_MS: "60000",
-            SUPABASE_URL: url,
+            SUPABASE_URL: "http://127.0.0.1:9",
             SUPABASE_SECRET_KEY: "not-a-real-key",
             SUPABASE_PUBLISHABLE_KEY: "not-a-real-key",
-            // Never opened: the gate refuses before the chat runtime starts.
-            DATABASE_URL: "postgres://unused@127.0.0.1:9/unused",
+            DATABASE_URL: database.url,
         });
         expect(output).toMatch(/document-lifecycle migration is not applied/);
         expect(output).not.toMatch(/Mike backend running on port/);
@@ -84,13 +93,14 @@ describe("document-lifecycle boot gate", () => {
     }, 60_000);
 
     it("worker: refuses to start the runner when the migration is missing", async () => {
-        const { server, url } = await stubSupabase();
-        stub = server;
+        const database = await scratchDatabase();
+        drop = database.drop;
         const { code, output } = await runEntrypoint("src/worker.ts", {
             QUEUE_DRIVER: "postgres",
             DB_JOBS_POLL_MS: "60000",
-            SUPABASE_URL: url,
+            SUPABASE_URL: "http://127.0.0.1:9",
             SUPABASE_SECRET_KEY: "not-a-real-key",
+            DATABASE_URL: database.url,
         });
         expect(output).toMatch(/document-lifecycle migration is not applied/);
         expect(output).not.toMatch(/\[dbq\] runner started/);

@@ -34,7 +34,9 @@ if [[ -z "$SUPABASE_TEST_URL" || -z "$SUPABASE_TEST_SERVICE_ROLE_KEY" || -z "$SU
     echo "Could not read API_URL/DB_URL/SERVICE_ROLE_KEY/ANON_KEY from 'supabase status'." >&2
     exit 1
 fi
-export SUPABASE_TEST_URL SUPABASE_TEST_SERVICE_ROLE_KEY SUPABASE_TEST_ANON_KEY
+# Mike's queries go straight to Postgres; the suites use the same database.
+DATABASE_TEST_URL="$SUPABASE_TEST_DB_URL"
+export SUPABASE_TEST_URL SUPABASE_TEST_SERVICE_ROLE_KEY SUPABASE_TEST_ANON_KEY DATABASE_TEST_URL
 
 if ! command -v psql >/dev/null 2>&1; then
     echo "psql not found. Install PostgreSQL's client tools before running stack tests." >&2

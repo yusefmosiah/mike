@@ -187,7 +187,9 @@ nothing that could ever attach.
 ### The service contract
 
 A service function takes the database handle first (`db: Db`, exported from
-`lib/supabase.ts`), then request-derived primitives, and returns a
+`lib/supabase.ts`: a supabase-js–shaped query builder over a direct Postgres
+connection, implemented in `lib/db/`), then request-derived primitives, and
+returns a
 discriminated union rather than throwing or writing a response:
 
 ```ts

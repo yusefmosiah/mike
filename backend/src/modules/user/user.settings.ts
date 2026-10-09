@@ -164,7 +164,7 @@ export async function getUserModelSettings(
                     : null,
             practiceAreas: Array.isArray(data?.practice_areas)
                 ? data.practice_areas.filter(
-                      (area): area is string => typeof area === "string",
+                      (area: unknown): area is string => typeof area === "string",
                   )
                 : [],
         },

@@ -160,6 +160,27 @@ in the pi-ai wrapper or the runtime, each with a test:
 Persisted tool schemas are now stored as plain JSON. Before that fix they
 failed to save, so a resumed tool call would have found no tool.
 
+## Supabase, step 1: queries go straight to Postgres
+
+`Db` is now Mike's own client (`backend/src/lib/db/`): the slice of the
+supabase-js query builder the backend uses, executed over `pg`. Not one of the
+roughly 565 call sites changed. It builds SQL the way PostgREST does: rows come
+back through `json_agg` (ISO timestamps, numeric bigints, jsonb objects), and
+written values go in as one JSON document that Postgres coerces per column. RPCs
+pick their overload by argument names. Anything outside the supported subset
+fails as an error result instead of guessing. A conformance suite in the stack
+tests runs every supported chain through both PostgREST and the new client and
+requires identical results; the stack suites now query through it too. The only
+embed (MCP tools joined to connectors) became two queries. GoTrue calls moved
+off `Db` to `authAdmin()`.
+
+Checked live with the PostgREST container stopped: projects, project
+documents, library, tabular reviews, workflows, and a chat turn (create,
+messages, reserved answer, title, Pi transcript) all worked, with no database
+errors and the workers running. PostgREST now serves only the RLS stack tests.
+Next: transactions where the code wants them (`db.transaction`), then auth
+(GoTrue: password, OAuth, SAML SSO, TOTP MFA).
+
 ## Remaining limits
 
 - Word add-in and tabular-review turns end with a restart (their runs are
