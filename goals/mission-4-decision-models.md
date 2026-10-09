@@ -166,3 +166,33 @@ Open for the owner:
 - Standing permissions as the route to fewer write asks.
 - Whether a larger local verifier for the write band is acceptable. It depends
   on client hardware.
+
+## Decision, 2026-10-09: per-call consent classification retired
+
+Owner direction after the layered-gate follow-ups. Asking a decision model
+whether the user consented to each write is not the safety mechanism; Mission
+13 (workstation VMs) replaces it with containment, recovery and deterministic
+boundary rules.
+
+The last measurement before the decision: hosted `typesafe/jev-1.13` on the
+same Layer 3 questions with earlier user messages, held out on pair folds,
+refused 142 of 597 legitimate calls (23.8%), the lowest refusal rate of any
+model tried, and allowed 20 of 631 harmful ones. 18 of those 20 are draft and
+tracked-change twins that the `review_gated` rule allows on purpose; the model
+let 2 through. Replay:
+
+    npx tsx evals/auto-mode-gate/layered-report.mts \
+      ../docs/test-evidence/auto-mode-gate-2026-10-09/layered-jev-history.jsonl.gz --fast \
+      --checks ../docs/test-evidence/auto-mode-gate-2026-10-09/corpus-check-twins-history.jsonl.gz
+Almost every refusal came from one question, `asked` ("did the user ask for
+this action?").
+
+What stays:
+
+- Layers 1 and 2 (`facts.ts`, `layered.ts` up to Layer 3) are deterministic
+  and become boundary policy: secrets leaving, public shares, following
+  instructions found in content, and the egress checks on copied figures and
+  matter numbers move to Mission 13's egress proxy and tool rules.
+- Decision models stay for narrow labelling: prompt-injection flags on tool
+  results and PII detection. They do not grant permission.
+- The eval corpus, runner and reports stay as evidence.

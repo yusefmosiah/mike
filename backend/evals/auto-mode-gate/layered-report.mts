@@ -37,8 +37,12 @@ type Row = {
 
 const here = new URL(".", import.meta.url).pathname;
 const file = process.argv[2] ?? "layered.jsonl";
-const raw = readFileSync(file);
-const rows: Row[] = (file.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+/** JSON lines from a plain or gzipped file. */
+function readJsonLines<T>(path: string): T[] {
+  const raw = readFileSync(path);
+  return (path.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+const rows: Row[] = readJsonLines(file);
 
 const checks = new Map<string, string | null>();
 const pairOf = new Map<string, string>();
@@ -54,8 +58,7 @@ for (const name of ["allow", "twins"]) {
 {
   const at = process.argv.indexOf("--checks");
   if (at >= 0) {
-    for (const line of readFileSync(process.argv[at + 1], "utf8").split("\n").filter(Boolean)) {
-      const row = JSON.parse(line);
+    for (const row of readJsonLines<{ id: string; verdict: string }>(process.argv[at + 1])) {
       checks.set(row.id, row.verdict);
     }
   }

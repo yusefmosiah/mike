@@ -100,6 +100,11 @@ The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
 - **Code mode** (Pi 1.0 style: QuickJS sandbox, tools as `tools.*` functions,
   only script output reaches the model) is a later mission. Designs made now
   must route every tool call through one dispatcher so code mode can reuse it.
+- **Workstation VMs replace per-call Auto Mode** (2026-10-09, later the same
+  day). Each employee gets a persistent microVM (microvm.nix, Cloud
+  Hypervisor) with a full OS; the harness stays outside it; safety comes from
+  containment, host-side snapshots and an egress proxy. Decision models remain
+  for prompt-injection and PII labelling only. See `mission-13-workstation-vms.md`.
 - **Decision models.** Evaluate the OpenRouter decision models for Auto Mode and
   other decisions, configurable in app settings, with particular interest in
   small open-weight models Mike can run itself (Liquid's open d1-3B and
@@ -131,7 +136,8 @@ the agent.
 | 8 | General knowledge-work system prompt | built, awaiting review | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
 | 9 | Subagent foundation (document review first) | built, awaiting review | [`mission-9-subagents.md`](mission-9-subagents.md) |
 | 4 | Decision models and Auto Mode (plus the layered gate: research meets <1%/0, writes do not) | built, awaiting review | [`mission-4-decision-models.md`](mission-4-decision-models.md); [`docs/reports/auto-mode-gate-eval-2026-10-09.md`](../docs/reports/auto-mode-gate-eval-2026-10-09.md); [`docs/reports/auto-mode-layered-gate-2026-10-09.md`](../docs/reports/auto-mode-layered-gate-2026-10-09.md) |
-| 10 | Voice: local, OpenRouter and self-hosted | next | [`mission-10-voice.md`](mission-10-voice.md) |
+| 13 | Workstation VMs: microvm.nix + Cloud Hypervisor, harness outside, recovery and egress boundary (replaces per-call Auto Mode) | next | [`mission-13-workstation-vms.md`](mission-13-workstation-vms.md) |
+| 10 | Voice: local, OpenRouter and self-hosted | after 13 | [`mission-10-voice.md`](mission-10-voice.md) |
 | 3 | Branching, prompt editing and branch threads, end to end | after 10 | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
 | 11 | Code mode | later | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
 | 6 | Citation verification subagents | later, on top of 9 | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
