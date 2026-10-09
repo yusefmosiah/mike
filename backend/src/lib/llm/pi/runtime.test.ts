@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -9,6 +9,7 @@ import {
   completeTextOnPi,
   forkChatLineageOnPi,
   interruptedTurnsOnPi,
+  finishTurnOnPi,
   piRuntime,
   resetPiRuntime,
   streamChatWithToolsOnPi,
@@ -29,9 +30,13 @@ type Seen = { users: string[]; toolResults: string[]; text: string };
 let requests: Seen[];
 
 /** The scripted model: answers with what it was shown, and reads a document when asked to. */
-function setup() {
+function setup(options: { tokensPerSecond?: number } = {}) {
   requests = [];
-  const faux = fauxProvider({ provider: "opencode-go", models: [{ id: "test-model", input: ["text"] }] });
+  const faux = fauxProvider({
+    provider: "opencode-go",
+    models: [{ id: "test-model", input: ["text"] }],
+    ...(options.tokensPerSecond ? { tokensPerSecond: options.tokensPerSecond, tokenSize: { min: 4, max: 4 } } : {}),
+  });
   const models = createModels();
   models.setProvider(faux.provider);
   const respond = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => {
@@ -54,6 +59,9 @@ function setup() {
     }
     if (last?.role === "user" && text(last.content).includes("read NDA")) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" });
+    }
+    if (firstUser.includes("long list")) {
+      return fauxAssistantMessage([fauxText(`attempt ${requests.length}: ${"clause. ".repeat(40)}`)]);
     }
     return fauxAssistantMessage([fauxText(`answer ${requests.length}`)]);
   };
@@ -285,9 +293,51 @@ describe("Pi runtime: turns, branches and memory", () => {
     // The caller saw the tool the turn had already started, then the answer.
     expect(shown[0]).toBe("tool:read_document");
     expect(shown.join("")).toContain("answer");
-    expect(await interruptedTurnsOnPi()).toEqual([]);
     expect((await lineage()).messages.a1).toBeDefined();
+    // Answered, but resumable until the caller has stored it.
+    expect(await interruptedTurnsOnPi()).toHaveLength(1);
+    await finishTurnOnPi("a1");
+    expect(await interruptedTurnsOnPi()).toEqual([]);
   });
+
+  it("an answer finished but not yet stored when the process died is returned again, not regenerated", async () => {
+    const durableTurn = { context: { surface: "chat" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    const first = await turn([{ role: "user", content: "Please read NDA" }], identity, { durableTurn });
+    const sent = requests.length;
+    await resetPiRuntime(current); // died before storing the answer
+
+    const shown: string[] = [];
+    const again = await turn([{ role: "user", content: "Please read NDA" }], identity, {
+      durableTurn: { ...durableTurn, resume: true },
+      callbacks: { onContentDelta: (d) => shown.push(d) },
+    });
+    expect(again.fullText).toBe(first.fullText);
+    expect(shown.join("")).toBe(first.fullText);
+    expect(requests).toHaveLength(sent);
+  });
+
+  it("an answer cut off mid-stream restarts cleanly: the partial before the crash is not shown", async () => {
+    current = setup({ tokensPerSecond: 40 });
+    await resetPiRuntime(current);
+    const durableTurn = { context: { surface: "chat" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    let streamed = "";
+    void turn([{ role: "user", content: "write a long list" }], identity, {
+      durableTurn,
+      callbacks: { onContentDelta: (d) => (streamed += d) },
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(streamed).toContain("attempt 1"), { timeout: 2000 });
+    await resetPiRuntime(current); // died mid-answer
+
+    let shown = "";
+    const resumed = await turn([{ role: "user", content: "write a long list" }], identity, {
+      durableTurn: { ...durableTurn, resume: true },
+      callbacks: { onContentDelta: (d) => (shown += d) },
+    });
+    expect(resumed.fullText).toMatch(/^attempt 2: /);
+    expect(shown).toBe(resumed.fullText);
+  }, 15_000);
 
   it("an interrupted turn can be given up, which stops its run", async () => {
     void turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {

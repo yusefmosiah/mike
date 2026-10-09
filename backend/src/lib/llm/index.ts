@@ -54,6 +54,16 @@ export async function interruptedTurns(): Promise<InterruptedTurn[]> {
     }));
 }
 
+/**
+ * A durable turn's outcome is stored: forget it. Until then an answered turn
+ * stays resumable, so a crash before the store drives it again.
+ */
+export async function finishTurn(assistantMessageId: string): Promise<void> {
+    if (!piRuntimeEnabled()) return;
+    const { finishTurnOnPi } = await import("./pi/runtime.mjs");
+    await finishTurnOnPi(assistantMessageId);
+}
+
 /** Give up an interrupted turn: stop its run and forget it. */
 export async function abandonTurn(assistantMessageId: string): Promise<void> {
     if (!piRuntimeEnabled()) return;

@@ -769,6 +769,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   const onAbort = () => void conversation.abort(background);
   params.abortSignal?.addEventListener("abort", onAbort, { once: true });
   const releaseKeys = useRequestKeys(providerSession, params.apiKeys);
+  let answered = false;
   try {
     if (resumed) {
       // What the turn committed before the restart reaches the caller first,
@@ -777,7 +778,8 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       for (const entry of earlier.items) {
         const message = entry.kind === "pi.assistant" ? entry.model?.[0] : undefined;
         replayedThrough = Math.max(replayedThrough, entry.id);
-        if (message?.role !== "assistant") continue;
+        // A message the crash cut off was resent whole; only finished ones count.
+        if (message?.role !== "assistant" || message.stopReason === "aborted") continue;
         adopt(message);
         sent = [];
         emit();
@@ -817,14 +819,17 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       const text = message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
       if (!fullText.endsWith(text)) fullText = text;
     }
+    answered = true;
     return { fullText };
   } finally {
     params.abortSignal?.removeEventListener("abort", onAbort);
     releaseKeys();
     bindings.delete(conversation.id);
     await stream.stop();
-    // The turn ended in this process (answered, failed or stopped): nothing to resume.
-    if (turnKey) await forgetTurn(harness, turnKey).catch(() => undefined);
+    // A failed or stopped turn has nothing to resume. An answered one stays
+    // recorded until the caller has stored it (`finishTurnOnPi`): a crash in
+    // between drives it again, and the resubmission returns the same answer.
+    if (turnKey && !answered) await forgetTurn(harness, turnKey).catch(() => undefined);
   }
 }
 
@@ -845,6 +850,12 @@ export async function interruptedTurnsOnPi(): Promise<Array<DurableTurnRecord & 
   return Object.entries(turns)
     .map(([assistantMessageId, record]) => ({ ...record, assistantMessageId }))
     .sort((a, b) => a.startedAt - b.startedAt);
+}
+
+/** The caller has stored a durable turn's outcome: it no longer needs resuming. */
+export async function finishTurnOnPi(assistantMessageId: string): Promise<void> {
+  const { harness } = await piRuntime();
+  await forgetTurn(harness, assistantMessageId);
 }
 
 /** Stop an interrupted turn's run and forget it. */

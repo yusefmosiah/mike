@@ -12,7 +12,7 @@ import {
     type AssistantTurnRun,
 } from "../../lib/assistantTurnRuns";
 import { enqueueChatTurnAudit } from "../../lib/audit";
-import { abandonTurn, interruptedTurns } from "../../lib/llm";
+import { abandonTurn, finishTurn, interruptedTurns } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
 import { drainReceiptsSince } from "../../lib/llm/attestation";
 import {
@@ -543,6 +543,13 @@ export async function driveChatTurn(
                 /* ignore */
             }
         } finally {
+            // The outcome is stored (or could not be): a restart must not drive
+            // this turn again.
+            if (args.durableContext && assistantMessageId) {
+                await finishTurn(assistantMessageId).catch((error) =>
+                    console.error("[chat/stream] failed to finish a durable turn", safeError(error)),
+                );
+            }
             stream.finish();
         }
     } finally {
@@ -584,7 +591,7 @@ function isResumeContext(value: unknown): value is ChatTurnResumeContext {
  * builds the turn from (document context, prompts), so it must be the same
  * shape a request carries.
  */
-function transcriptFromRows(rows: TreeRow[]): ChatMessage[] {
+export function transcriptFromRows(rows: TreeRow[]): ChatMessage[] {
     return rows.map((row): ChatMessage => {
         if (row.role !== "assistant") {
             return {
@@ -634,8 +641,12 @@ export async function resumeInterruptedChatTurns(db: Db): Promise<void> {
         console.error("[chat/resume] could not read interrupted turns", safeError(error));
         return;
     }
+    // Project chat turns are the project-chat module's to resume.
+    const own = pending.filter(
+        (turn) => (turn.context as { surface?: unknown } | null)?.surface !== "project-chat",
+    );
     // Concurrently: each drive lasts as long as its turn's generation.
-    await Promise.all(pending.map(async (turn) => {
+    await Promise.all(own.map(async (turn) => {
         const context = turn.context;
         if (!isResumeContext(context)) {
             await abandonTurn(turn.assistantMessageId).catch(() => undefined);

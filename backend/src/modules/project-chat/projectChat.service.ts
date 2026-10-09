@@ -4,10 +4,13 @@
 // (`db`) plus request-derived primitives, does the pre-stream DB orchestration,
 // and RETURNS the prepared data (or a typed error). It never touches req/res.
 //
-// IMPORTANT: the SSE streaming loop (header flush, runLLMStream, abort
-// handling, assistant-message persistence) stays in the route — its ordering
-// is delicate. Only the pre-stream preparation lives here.
+// The generation itself (runLLMStream, abort handling, assistant-message
+// persistence) is projectChat.turn.ts, driven by the route for a request and
+// by resumeInterruptedProjectChatTurns after a restart.
 
+import { randomUUID } from "node:crypto";
+import { abandonTurn, interruptedTurns } from "../../lib/llm";
+import { safeError } from "../../lib/safeError";
 import type { Db } from "../../lib/supabase";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import type { McpToolEvent } from "@mike/contracts";
@@ -21,12 +24,13 @@ import {
     appendAskInputsResponseToAssistantMessage,
     linkedPrompt,
     resolveLeaf,
+    transcriptFromRows,
+    walkActivePath,
     runApprovedConnectorActions,
     setLeaf,
     generateSpotlightNonce,
     spotlightFilename,
     type AskInputsResponseRequest,
-    type AssistantEvent,
     type ChatDocumentReference,
     type ChatMessage,
 } from "../chat/chat.service";
@@ -52,9 +56,19 @@ import {
 // this reaches chat via `chat.service` and re-exports the function by name —
 // the route imports everything it needs from its own service.
 import { updateChatTitle, type ChatWriteResult } from "../chat/chat.service";
+import {
+    driveProjectChatTurn,
+    insertAssistantMessage,
+    type ProjectChatTurnResumeContext,
+} from "./projectChat.turn";
 
 export { updateChatTitle };
 export type { ChatWriteResult };
+export {
+    driveProjectChatTurn,
+    insertAssistantMessage,
+    type ProjectChatTurnResumeContext,
+} from "./projectChat.turn";
 
 const PROJECT_SYSTEM_PROMPT_EXTRA = `PROJECT CONTEXT:
 You are operating within a project folder that contains a collection of legal documents the user has organised for a single matter. The user's questions will usually refer to one or more documents in this project — your job is to find the relevant files to work on. Use list_documents to see what is available and fetch_documents / read_document to pull in any documents you need before answering.
@@ -63,69 +77,6 @@ A document may currently be displayed in the user's side panel; when provided, t
 
 REPLICATING A DOCUMENT:
 Copies created with replicate_document are saved as project documents in this project. After replication, use the returned doc_id for any requested edits.`;
-
-// Persist the assistant's turn for a project chat.
-//
-// The streaming route reaches this from three places — the completed turn,
-// the partial saved after a client abort, and the error turn — which all
-// wrote the same row with the same "empty array means NULL" normalisation.
-// That normalisation lives here so every caller stores an identical shape.
-//
-// Unlike the global /chat stream, this route does not pre-reserve an
-// assistant message id, so the turn is a plain insert rather than an update.
-// The id is still generated up front so the client can associate the streamed
-// UI with the durable row, and `memory_input_message_id` links the turn back
-// to the user message that opened it for the memory curator.
-export async function insertAssistantMessage(
-    db: Db,
-    args: {
-        chatId: string;
-        assistantMessageId: string | null;
-        events: AssistantEvent[];
-        citations: unknown[];
-        authorUserId: string;
-        inputMessageId: string | null;
-        /**
-         * Tree parent for the row. Defaults to the user input message that
-         * opened the turn; callers that know a different parent pass it.
-         */
-        parentMessageId?: string | null;
-    },
-): Promise<ChatWriteResult> {
-    const { error } = await db.from("chat_messages").insert({
-        id: args.assistantMessageId,
-        chat_id: args.chatId,
-        role: "assistant",
-        content: args.events.length ? args.events : null,
-        citations: args.citations.length ? args.citations : null,
-        author_user_id: args.authorUserId,
-        memory_input_message_id: args.inputMessageId,
-        parent_message_id: args.parentMessageId ?? args.inputMessageId,
-    });
-
-    if (error) return { ok: false, error };
-
-    // Advance the caller's leaf onto the saved answer, so a reload resolves
-    // to it instead of stopping at the user row. Bookkeeping only: the row
-    // above is durable, so a failed leaf move must not fail the save; the
-    // leaf then stays on the user row (degraded, still visible).
-    if (args.assistantMessageId) {
-        try {
-            await setLeaf(
-                db,
-                args.chatId,
-                args.authorUserId,
-                args.assistantMessageId,
-            );
-        } catch (leafError) {
-            console.error(
-                "[project-chat/stream] failed to move chat leaf",
-                leafError,
-            );
-        }
-    }
-    return { ok: true };
-}
 
 export type PreparedProjectChatStream = {
     chatId: string;
@@ -655,5 +606,144 @@ export async function prepareProjectChatStream(
             }
         }
         throw error;
+    }
+}
+
+const RESTART_FAILURE_MESSAGE =
+    "This answer was interrupted by a server restart and could not be resumed. Please try again.";
+
+function isProjectResumeContext(value: unknown): value is ProjectChatTurnResumeContext {
+    if (!value || typeof value !== "object") return false;
+    const context = value as Record<string, unknown>;
+    return (
+        context.surface === "project-chat" &&
+        typeof context.userId === "string" &&
+        typeof context.projectId === "string" &&
+        typeof context.chatId === "string" &&
+        typeof context.turnUserMessageId === "string"
+    );
+}
+
+/**
+ * Drive again every project chat turn a previous process left in flight. Each
+ * is prepared from storage as its request would be (project access checked
+ * again, documents reloaded), then driven into a server-owned run a reloading
+ * client attaches to. A turn that can no longer be driven is stopped and an
+ * answer row saying so is stored under its prompt.
+ */
+export async function resumeInterruptedProjectChatTurns(db: Db): Promise<void> {
+    let pending;
+    try {
+        pending = await interruptedTurns();
+    } catch (error) {
+        console.error("[project-chat/resume] could not read interrupted turns", safeError(error));
+        return;
+    }
+    const own = pending.filter(
+        (turn) => (turn.context as { surface?: unknown } | null)?.surface === "project-chat",
+    );
+    await Promise.all(own.map(async (turn) => {
+        const context = turn.context;
+        if (!isProjectResumeContext(context)) {
+            await abandonTurn(turn.assistantMessageId).catch(() => undefined);
+            return;
+        }
+        try {
+            const resumed = await resumeProjectChatTurn(db, turn.assistantMessageId, context);
+            if (!resumed) {
+                await abandonTurn(turn.assistantMessageId).catch(() => undefined);
+                await failInterruptedProjectTurn(db, turn.assistantMessageId, context);
+            }
+        } catch (error) {
+            console.error("[project-chat/resume] failed to resume a turn", safeError(error));
+            await abandonTurn(turn.assistantMessageId).catch(() => undefined);
+            await failInterruptedProjectTurn(db, turn.assistantMessageId, context);
+        }
+    }));
+}
+
+async function resumeProjectChatTurn(
+    db: Db,
+    assistantMessageId: string,
+    context: ProjectChatTurnResumeContext,
+): Promise<boolean> {
+    // Stored before the process died: nothing left to drive.
+    if (await answerRowExists(db, assistantMessageId)) {
+        await abandonTurn(assistantMessageId);
+        return true;
+    }
+    const path = await walkActivePath(db, context.chatId, context.turnUserMessageId);
+    const prompt = path.at(-1);
+    // The prompt must still be the stored row the turn answers; prepare would
+    // otherwise insert a new one.
+    if (!prompt || prompt.id !== context.turnUserMessageId) return false;
+    if (!(await linkedPrompt(db, context.chatId, prompt.id, prompt.content))) return false;
+
+    const prep = await prepareProjectChatStream(db, {
+        userId: context.userId,
+        userEmail: context.userEmail ?? undefined,
+        projectId: context.projectId,
+        messages: transcriptFromRows(path),
+        chatId: context.chatId,
+        inputMessageId: randomUUID(),
+        linkOnlyToMessageId: context.turnUserMessageId,
+        displayed_doc: context.displayedDoc ?? undefined,
+        attached_documents: context.attachedDocuments ?? undefined,
+        askInputsResponse: null,
+        autoMode: context.autoMode,
+        requestedModel: context.model ?? undefined,
+        requestedReasoning: (context.reasoning ?? undefined) as Parameters<
+            typeof prepareProjectChatStream
+        >[1]["requestedReasoning"],
+        requestedTimeZone: context.timeZone ?? undefined,
+    });
+    if (!prep.ok || prep.prepared.turnUserMessageId !== context.turnUserMessageId) return false;
+
+    const outcome = await driveProjectChatTurn(db, {
+        prepared: prep.prepared,
+        userId: context.userId,
+        userEmail: context.userEmail ?? undefined,
+        projectId: context.projectId,
+        assistantMessageId,
+        inputMessageId: null,
+        askInputsResponse: null,
+        durableContext: context,
+        resume: true,
+        // Nobody is attached yet: a reloading client finds the run through
+        // GET /chat/:id and attaches to it like any other.
+        open: (run) => ({ signal: run.signal, write: run.write, finish: run.finish }),
+    });
+    return outcome.ok;
+}
+
+async function answerRowExists(db: Db, id: string): Promise<boolean> {
+    const { data, error } = await db
+        .from("chat_messages")
+        .select("id")
+        .eq("id", id)
+        .maybeSingle();
+    if (error) throw error;
+    return !!data;
+}
+
+/** Store the failure as the turn's answer, so a reload shows why it ended. */
+async function failInterruptedProjectTurn(
+    db: Db,
+    assistantMessageId: string,
+    context: ProjectChatTurnResumeContext,
+): Promise<void> {
+    try {
+        if (await answerRowExists(db, assistantMessageId)) return;
+        const saved = await insertAssistantMessage(db, {
+            chatId: context.chatId,
+            assistantMessageId,
+            events: [{ type: "error", message: RESTART_FAILURE_MESSAGE }],
+            citations: [],
+            authorUserId: context.userId,
+            inputMessageId: context.turnUserMessageId,
+        });
+        if (!saved.ok) throw saved.error;
+    } catch (error) {
+        console.error("[project-chat/resume] failed to store the interruption", safeError(error));
     }
 }

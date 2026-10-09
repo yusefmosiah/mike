@@ -6,7 +6,7 @@ export {
   getAccessibleChat,
 } from "./chat.access";
 export { getChatMessages } from "./chat.messages";
-export { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
+export { linkedPrompt, resolveLeaf, setLeaf, walkActivePath } from "./chat.tree";
 export { isMessageId } from "./chat.branches";
 export {
   listChats,
@@ -26,6 +26,7 @@ export { type PreparedChatStream, prepareChatStream } from "./chat.prepare";
 export {
   driveChatTurn,
   resumeInterruptedChatTurns,
+  transcriptFromRows,
   type ChatTurnResumeContext,
 } from "./chat.turn";
 export {
