@@ -40,7 +40,7 @@ in the overnight report (`docs/reports/overnight-2026-10-09.md`) once written.
 "Built" means source implemented and exercised locally; nothing here is owner
 accepted until the owner says so.
 
-Built on `feat/pi-runtime` (local, unpushed), awaiting owner review:
+On `main` (pushed 2026-10-09, `1e35b24`), awaiting owner review:
 
 - **Pi runtime (Mission 7).** Every model call runs on pi-ai behind Pi Durable
   (`backend/src/lib/llm/pi/`); the AI SDK loop is gone. The database client
@@ -117,10 +117,12 @@ The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
 
 ## Agenda
 
-One mission at a time, in this order. Each runs on its own branch off
-`feat/pi-runtime`, is merged locally only when its tests pass, and is reported
-with the commands run and what they printed. No push, no deployment, and no
-mission marked accepted by the agent.
+One mission at a time, in this order. Work lands on `main` as soon as it is
+good (owner direction, 2026-10-09): a short-lived branch off `main` per change,
+fast-forwarded into `main` and pushed to `origin/main` once its tests pass, so
+no long-running branch builds up. Each landing is reported with the commands
+run and what they printed. No deployment, and no mission marked accepted by
+the agent.
 
 | # | Mission | State | File |
 |---|---|---|---|
