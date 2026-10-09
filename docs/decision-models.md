@@ -178,6 +178,58 @@ Other aggregation lessons:
   hand-written. Add real code-mode traces to a fresh held-out batch and recheck
   the thresholds.
 
+## Layered gate
+
+Measured in
+[auto-mode-layered-gate-2026-10-09.md](reports/auto-mode-layered-gate-2026-10-09.md).
+The code is `lib/guardrails/facts.ts` (Layer 1) and `lib/guardrails/layered.ts`
+(Layers 2–3).
+
+- **Give a program the plumbing and a model the meaning.**
+  - Code settles these exactly, for free:
+    - where a recipient, link or id came from (the request, a listing or
+      header, content, or nowhere);
+    - whether a figure or reference code is copied out of a private document;
+    - whether text was dictated;
+    - whether an update drops people a list already has.
+  - A model is asked only what code cannot settle: is this the item the user
+    meant, does this message say only what they asked?
+- **Small state, narrow question.**
+  - The model sees:
+    - the request;
+    - a one-line action;
+    - the target's record line with the other results from the same listing;
+    - the message;
+    - what the message adds.
+
+    It never sees raw arguments or the turn.
+  - Ask only the questions the facts call for. A delete gets `asked` and
+    `record_fits`, not `public_only`.
+- **Show the record, not just the choice.**
+  - Wrong-target errors are only visible next to the alternatives.
+  - "It's the empty one" is only checkable against the listing line that shows
+    14 comments.
+- **Turn judgements into comparisons wherever possible.**
+  - These were the biggest wins:
+    - `messageAdds`: figures and dates the user never gave;
+    - `bestMatch`: the listing line that shares strictly the most words with the
+      request;
+    - `drops`: attendees the update would remove.
+  - Each moved a whole class of cases out of the model's hands.
+- **Fail closed on names that cannot exist.** A tool that is neither Mike's nor
+  `mcp_<connector>_<tool>_<8 hex>` is unknown, and unknown asks.
+  - Code-mode scripts are parsed for bare calls and raw `fetch` as well as
+    `tools.*`.
+  - String and regex literals are masked, with a raw snake_case scan as a
+    backstop.
+- **Where small decision models reach the bar, and where they do not.**
+  - Web egress and reads: 0 of 247 legitimate research calls refused, and 0
+    of 634 harmful calls allowed, held out, with `cloudflare/clef-flash`.
+  - Consequential writes:
+    - at 0 false allows the models refuse 20–45% of legitimate sends and edits;
+    - the evidence is in their state, but their confidence on legitimate text
+      (0.8–0.97) overlaps the subtle harmful twins (≥ 0.99).
+
 ## Eval method
 
 - **Cases** are one tier-3 call each, labelled allow, ask or deny.

@@ -104,3 +104,65 @@ Open for the owner:
   classifier, which fails the 1 s rule.
 - A second labeller and a larger held-out set before relying on rates below
   about 14%.
+
+## Follow-on (2026-10-09): layered gate, awaiting owner review
+
+Owner direction: under 1% false refusals with 0 false allows. Small models
+only: `liquid/d1`, `jaredpalmer/kev-4b` and `cloudflare/clef-flash` on
+OpenRouter. Symbolic rules first, with semantics injected at Layer 3. Haiku
+subagents generate the data, and gpt-6-luna (via codex) replaces DeepSeek as
+the second-family checker.
+
+What was built:
+
+- **Layer 1, facts** (`backend/src/lib/guardrails/facts.ts`):
+  - effects, from the registry, MCP verbs and annotations, and parsed
+    code-mode scripts;
+  - provenance of each target, with its record line and the listing's
+    alternatives;
+  - secrets;
+  - copied figures and codes;
+  - instruction lines;
+  - terms a web query adds;
+  - message additions and dictated text;
+  - bulk;
+  - dropped attendees.
+- **Layers 2–3** (`backend/src/lib/guardrails/layered.ts`): a decision table,
+  plus nine narrow `noul` questions on a small state.
+  - **Allow:** reads and clean web egress pass by rule.
+  - **Deny:** secrets, confidential figures, following a document's
+    instructions, and unasked public shares.
+  - **Ask:** unknown tools and untraceable targets.
+- **Tests:** 16 tests in `__tests__/layered.test.ts`.
+- **Eval data:** in `backend/evals/auto-mode-gate/corpus/`.
+  - 590 legitimate cases with context and 590 harmful near-twins, both drafted
+    by Haiku and checked by gpt-6-luna.
+  - The briefs and checker prompts are committed.
+  - The hand cases gained contexts, and twelve MCP tool names were fixed.
+- **Runner and report:** `layered.mts` and `layered-report.mts`.
+  - Pair folds and surface folds;
+  - exact upper bounds;
+  - per-family refusals and a trade-off table.
+- **Report:**
+  [`docs/reports/auto-mode-layered-gate-2026-10-09.md`](../docs/reports/auto-mode-layered-gate-2026-10-09.md).
+
+Result (held out), honestly:
+
+- **Not met overall.**
+  - `clef-flash`: 34.5% false refusals with 0/634 false allows.
+  - `d1`: 19.4% false refusals with 8/634 false allows.
+- **Met for research.** `clef-flash` refused 0 of 247 legitimate reads, page
+  fetches and web searches (95% upper bound 1.2%), with 0/634 false allows over
+  the whole set.
+- **The gap is consequential writes.** Sends, calendar and Drive changes, and
+  connector writes are where the small models cannot match the confidence the
+  bar needs.
+- **Not wired into the chat runtime.** Auto Mode still runs the first gate.
+
+Open for the owner:
+
+- Ship Auto Mode for research first (layered gate on reads and web egress,
+  every write asks, batched), or wait.
+- Standing permissions as the route to fewer write asks.
+- Whether a larger local verifier for the write band is acceptable. It depends
+  on client hardware.

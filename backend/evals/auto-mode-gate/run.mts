@@ -9,8 +9,13 @@
  * Variants:
  *  - gate:       GATE_QUESTIONS (src/lib/guardrails/decisions.ts), raw answers stored.
  *  - legacy:     the first two-question gate (serves_request, safe), for comparison.
+ *  - followup:   FOLLOWUP_QUESTIONS, the second look, asked of every case so
+ *                any escalation band can be replayed.
  *  - classifier: the on-route completion classifier (classifyToolCall without a
  *                decision model), verdict stored.
+ *
+ * `--set generated.json` runs the generated legitimate corpus (generate.mts;
+ * only cases its checker kept) instead of the hand-written cases.
  *
  * Needs OPENROUTER_API_KEY (and the classifier route's key for `classifier`).
  * Spend is printed at the end; a full run of every model costs well under $1.
@@ -18,7 +23,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { classifyToolCall, DEFAULT_CLASSIFIER_MODEL, redactArgs } from "../../src/lib/guardrails/classifier.ts";
-import { askGateQuestions, askNoulQuestions } from "../../src/lib/guardrails/decisions.ts";
+import { FOLLOWUP_QUESTIONS, askDecisionQuestions, askGateQuestions } from "../../src/lib/guardrails/decisions.ts";
 import { CASES, type GateCase } from "./cases.mts";
 
 const LEGACY_QUESTIONS = {
@@ -65,7 +70,14 @@ const out = flag("out", "results.jsonl");
 const concurrency = Number(flag("concurrency", "4"));
 const timeoutMs = Number(flag("timeout", "30000"));
 const only = flag("cases", "");
-const cases = only ? CASES.filter((c) => only.split(",").includes(c.id)) : CASES;
+const setFile = flag("set", "");
+type GeneratedCase = { id: string; batch: string; user_request: string; tool: string; arguments: Record<string, unknown>; tools_already_used: string[]; check: { legitimate: boolean } };
+const baseCases: GateCase[] = setFile
+  ? (JSON.parse(readFileSync(setFile, "utf8")) as { cases: GeneratedCase[] }).cases
+      .filter((c) => c.check.legitimate)
+      .map((c) => ({ id: `G:${c.id}`, family: `G:${c.batch}`, category: "A", label: "allow", user_request: c.user_request, tool: c.tool, arguments: c.arguments, tools_already_used: c.tools_already_used }))
+  : CASES;
+const cases = only ? baseCases.filter((c) => only.split(",").includes(c.id)) : baseCases;
 
 // Resume: skip calls already recorded in the output file.
 const done = new Set<string>();
@@ -90,7 +102,7 @@ type Job = { variant: string; model: string; c: GateCase; rep: number };
 const jobs: Job[] = [];
 for (const variant of variants) {
   const variantModels = variant === "classifier" ? [flag("classifier-model", DEFAULT_CLASSIFIER_MODEL)] : models;
-  const variantRepeats = variant === "gate" ? repeats : 1;
+  const variantRepeats = variant === "gate" || variant === "followup" ? repeats : 1;
   for (const model of variantModels)
     for (let rep = 0; rep < variantRepeats; rep++)
       for (const c of cases) if (!done.has(`${variant}|${model}|${c.id}|${rep}`)) jobs.push({ variant, model, c, rep });
@@ -118,8 +130,10 @@ async function runJob({ variant, model, c, rep }: Job) {
   } else {
     const asked =
       variant === "legacy"
-        ? await askNoulQuestions({ model, state, timeoutMs }, LEGACY_QUESTIONS as never)
-        : await askGateQuestions({ model, state, timeoutMs });
+        ? await askDecisionQuestions({ model, state, timeoutMs }, LEGACY_QUESTIONS as never)
+        : variant === "followup"
+          ? await askDecisionQuestions({ model, state, timeoutMs }, FOLLOWUP_QUESTIONS as never)
+          : await askGateQuestions({ model, state, timeoutMs });
     spend += asked.usage?.cost ?? 0;
     row = asked.ok
       ? { ...base, ok: true, answers: asked.answers, usage: asked.usage, latencyMs: asked.latencyMs }
