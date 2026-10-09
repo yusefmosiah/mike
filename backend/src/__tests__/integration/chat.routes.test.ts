@@ -2296,7 +2296,7 @@ async function scriptPiModel(modelId: string, steps: (faux: FauxSteps) => unknow
     const { resetPiRuntime } = await import("../../lib/llm/pi/runtime.mjs");
     const helpers: FauxSteps = {
         call: (id, name, args) =>
-            fauxAssistantMessage([{ ...fauxToolCall(name, args), id }], { stopReason: "toolUse" }),
+            fauxAssistantMessage([{ ...fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1]), id }], { stopReason: "toolUse" }),
         text: (text) => fauxAssistantMessage([fauxText(text)]),
     };
     const requests: unknown[] = [];

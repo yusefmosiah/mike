@@ -41,7 +41,7 @@ vi.mock("../../../lib/storage", async (importOriginal) => {
         ...actual,
         downloadFile: (...args: unknown[]) => storage.downloadFile(...args),
         uploadFile: (...args: unknown[]) => storage.uploadFile(...args),
-        storageKey: (...args: unknown[]) => storage.storageKey(...args),
+        storageKey: (...args: Parameters<typeof storage.storageKey>) => storage.storageKey(...args),
     };
 });
 

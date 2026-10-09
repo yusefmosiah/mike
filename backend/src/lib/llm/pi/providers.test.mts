@@ -4,9 +4,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Context } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
-import { queryReceipts } from "../attestation";
-import { resetModelRegistryCache } from "../registry";
-import { providerFailureStatus } from "../providerErrors";
+import { queryReceipts } from "../attestation/index.js";
+import { resetModelRegistryCache } from "../registry.js";
+import { providerFailureStatus } from "../providerErrors.js";
 import { createMikeModels, providerError, tolerantMessage, useRequestKeys } from "./providers.mjs";
 
 /** A local OpenAI-compatible endpoint: records each request and answers with the next scripted text. */

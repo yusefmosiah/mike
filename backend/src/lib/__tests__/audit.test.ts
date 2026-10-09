@@ -62,7 +62,7 @@ describe("recordChatTurn attested receipts", () => {
                 request_id: "request-1",
             },
         });
-        expect(Object.keys(inserts[1].detail)).toHaveLength(6);
+        expect(Object.keys(inserts[1].detail as object)).toHaveLength(6);
     });
 
     it("emits no receipt rows when the turn produced none", async () => {

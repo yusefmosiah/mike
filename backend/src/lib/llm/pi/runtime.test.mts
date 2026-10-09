@@ -14,7 +14,7 @@ import {
   resetPiRuntime,
   streamChatWithToolsOnPi,
 } from "./runtime.mjs";
-import type { LlmMessage, OpenAIToolSchema, StreamChatParams } from "../types";
+import type { LlmMessage, OpenAIToolSchema, StreamChatParams } from "../types.js";
 
 const MODEL = "opencode-go/test-model";
 const readDocument: OpenAIToolSchema = {
@@ -335,7 +335,7 @@ describe("Pi runtime: turns, branches and memory", () => {
     const durableTurn = { context: { surface: "chat", note: "how to drive me again" } };
     const identity = { user: "u1", parent: null, assistant: "a1" };
     // Built in code like Mike's own schemas: not strict JSON until stored.
-    const tools = [{ ...readDocument, function: { ...readDocument.function, strict: undefined } }] as OpenAIToolSchema[];
+    const tools = [{ ...readDocument, function: { ...readDocument.function, strict: undefined } }] as unknown as OpenAIToolSchema[];
     // The process dies while the tool runs: the request never settles.
     void turn([{ role: "user", content: "Please read NDA" }], identity, {
       durableTurn,

@@ -12,7 +12,7 @@ import {
   streamChatWithToolsOnPi,
   subagentTranscriptOnPi,
 } from "./runtime.mjs";
-import type { OpenAIToolSchema, StreamChatParams, SubagentHost, SubagentSpec } from "../types";
+import type { OpenAIToolSchema, StreamChatParams, SubagentHost, SubagentSpec } from "../types.js";
 
 const MODEL = "opencode-go/test-model";
 const CHILD_MARK = "You are a document reviewer";
@@ -114,7 +114,8 @@ function spec(overrides: Partial<SubagentSpec> = {}): SubagentSpec {
   };
 }
 
-function host(overrides: Partial<SubagentHost> = {}) {
+// started/finished stay the test's own mocks, so their calls can be read back.
+function host(overrides: Partial<Omit<SubagentHost, "started" | "finished">> = {}) {
   return {
     toolDescription: "Delegate (test).",
     prepare: vi.fn(async (input: Record<string, unknown>) => spec({ task: String(input.task) })),

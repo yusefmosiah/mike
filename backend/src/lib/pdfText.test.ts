@@ -122,7 +122,7 @@ import { extractPdfText, needsOcr } from "./pdfText";
 
 async function freshExtractPdfText() {
   vi.resetModules();
-  return (await import("./pdfText")).extractPdfText;
+  return (await import("./pdfText.js")).extractPdfText;
 }
 
 function withPdf(

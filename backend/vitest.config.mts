@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.mts"],
     exclude: ["dist/**", "node_modules/**"],
     // Generous timeouts so cold-start module transform/import latency
     // can't cause spurious timeout failures on a cold CI runner. Warm
@@ -23,7 +23,7 @@ export default defineConfig({
       // Test files and their fixtures are the measuring instrument, not
       // the thing measured. (Spelled out rather than left to vitest's
       // defaults because setting `exclude` at all replaces them.)
-      exclude: ["src/**/__tests__/**", "src/**/*.test.ts", "**/*.d.ts"],
+      exclude: ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.mts", "**/*.d.ts"],
       // No-regression RATCHET floor, not a target. The measured scope
       // spans well-tested libs (access, storage keys/dispositions,
       // downloadTokens, api-key provider/env checks, chat doc
