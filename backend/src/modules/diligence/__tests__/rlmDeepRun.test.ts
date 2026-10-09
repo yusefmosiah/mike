@@ -1,6 +1,6 @@
 // Unit tests for the rlm.deep_run job handler.
 //
-// The handler is exercised end to end against a scripted Supabase stand-in and
+// The handler is exercised end to end against a scripted database stand-in and
 // injected model/sandbox services, so the tests pin the run's invariants:
 //   * unattended — the wave calls advertise exactly the sandbox tool, never a
 //     pause/ask surface;
@@ -12,7 +12,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { DbJob } from "../../../lib/dbq/types";
 import type { ProjectAccess } from "../../../lib/access";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { contentSha256 } from "../../../lib/documentVersions";
 
 const storage = vi.hoisted(() => ({
@@ -65,7 +65,7 @@ type RecordedCall = {
     filters: Array<[string, ...unknown[]]>;
 };
 
-/** Minimal Supabase stand-in: per-table result queues, every settled call
+/** Minimal database stand-in: per-table result queues, every settled call
  *  recorded so tests can assert scope, payloads, and filter order. */
 function makeFakeDb(spec: {
     tables?: Record<string, QueryResult[]>;

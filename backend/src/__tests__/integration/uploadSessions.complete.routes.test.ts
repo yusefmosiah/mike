@@ -89,8 +89,8 @@ function queryFor(table: string) {
   return query;
 }
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: () => ({
+vi.mock("../../lib/db", () => ({
+  createDb: () => ({
     from: (table: string) => queryFor(table),
     rpc: mocks.rpc,
   }),

@@ -3,7 +3,7 @@ import { type ExtractionJobData } from "../../lib/queue/extractionQueue";
 import { publishCellUpdate as defaultPublish, type RunProgressUpdate } from "../../lib/queue/runProgress";
 import { assistantStreamErrorPayload } from "../chat/chat.service";
 import { extractRowColumns, finalizeCell, finishGenerationIfIdle, loadReviewRow, renewGeneration, validateSelectedModel, TABULAR_GENERATION_HEARTBEAT_MS, type Column } from "./tabular.service";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 
 export interface ExtractionDeps {
     db: Db;
@@ -12,7 +12,7 @@ export interface ExtractionDeps {
 }
 
 function defaultDeps(): ExtractionDeps {
-    return { db: createServerSupabase(), publish: defaultPublish };
+    return { db: createDb(), publish: defaultPublish };
 }
 
 /**

@@ -38,10 +38,6 @@ docker compose up --build
 
 Open [http://localhost:3000](http://localhost:3000) and sign up.
 
-An install created before Mike dropped Supabase keeps its data in the old
-`db_data` volume and will not start until that data is moved; see
-[Moving a Docker Compose install off the Supabase Postgres image](deployment.md#moving-a-docker-compose-install-off-the-supabase-postgres-image).
-
 ### Run the backend or frontend outside Docker
 
 Start only the infrastructure, then point `backend/.env` at it:

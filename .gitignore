@@ -23,9 +23,6 @@ test-results/
 playwright-report/
 e2e/.auth/
 
-# Leftover Supabase CLI scaffolds from before Mike dropped Supabase.
-/supabase/
-backend/supabase/
 
 # dev-cycle scratch files
 .current-issue.md

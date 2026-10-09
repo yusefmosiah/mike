@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ConnectorApprovalItem } from "@mike/contracts";
 import type { OpenAIToolSchema } from "../llm";
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 import {
     authConfigPatch,
     decryptAuthConfig,
@@ -51,7 +51,7 @@ export { startUserMcpConnectorOAuth, validateRemoteMcpUrl };
 async function withMcpClient<T>(
     connector: ConnectorRow,
     callback: (client: Client) => Promise<T>,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<T> {
     await validateRemoteMcpUrl(connector.server_url);
     const authConfig = decryptAuthConfig(connector);
@@ -106,7 +106,7 @@ async function withMcpClient<T>(
 
 export async function listUserMcpConnectors(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
     options: { includeTools?: boolean } = {},
 ): Promise<McpConnectorSummary[]> {
     const { data: connectors, error } = await db
@@ -193,7 +193,7 @@ export async function listUserMcpConnectors(
 export async function getUserMcpConnector(
     userId: string,
     connectorId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<McpConnectorSummary> {
     const connector = await loadConnector(userId, connectorId, db);
     const { data: tools, error: toolsError } = await db
@@ -218,7 +218,7 @@ export async function createUserMcpConnector(
         bearerToken?: string | null;
         headers?: Record<string, unknown>;
     },
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<McpConnectorSummary> {
     const name = input.name.trim().slice(0, 80);
     if (!name) throw new Error("Connector name is required.");
@@ -260,7 +260,7 @@ export async function updateUserMcpConnector(
         bearerToken?: string | null;
         headers?: Record<string, unknown>;
     },
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<McpConnectorSummary> {
     const update: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
@@ -319,7 +319,7 @@ export async function updateUserMcpConnector(
 export async function completeUserMcpConnectorOAuth(
     state: string,
     code: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{
     userId: string;
     connectorId: string;
@@ -341,7 +341,7 @@ export async function completeUserMcpConnectorOAuth(
 export async function deleteUserMcpConnector(
     userId: string,
     connectorId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const { error } = await db
         .from("user_mcp_connectors")
@@ -354,7 +354,7 @@ export async function deleteUserMcpConnector(
 export async function refreshUserMcpConnectorTools(
     userId: string,
     connectorId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<McpConnectorSummary> {
     const connector = await loadConnector(userId, connectorId, db);
     const now = new Date().toISOString();
@@ -420,7 +420,7 @@ export async function setUserMcpToolEnabled(
     connectorId: string,
     toolId: string,
     enabled: boolean,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<McpConnectorSummary> {
     await loadConnector(userId, connectorId, db);
     const { error } = await db
@@ -438,7 +438,7 @@ export async function setUserMcpToolEnabled(
 
 export async function buildUserMcpTools(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<OpenAIToolSchema[]> {
     const connectors = await enabledConnectors(db, userId);
     if (!connectors) return [];
@@ -578,7 +578,7 @@ export async function planMcpToolCall(
     userId: string,
     openaiToolName: string,
     args: Record<string, unknown>,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<ConnectorCallPlan> {
     const resolved = await resolveCallableTool(userId, openaiToolName, db);
     if (!resolved) return { type: "result", ...unavailableTool(openaiToolName) };
@@ -628,7 +628,7 @@ export async function executeMcpToolCall(
     userId: string,
     openaiToolName: string,
     args: Record<string, unknown>,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{
     content: string;
     event: McpToolEvent;
@@ -652,7 +652,7 @@ export async function executeMcpToolCall(
 export async function executeApprovedMcpToolCall(
     userId: string,
     item: ConnectorApprovalItem,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ content: string; event: McpToolEvent }> {
     const resolved =
         item.binding.type === "mcp"

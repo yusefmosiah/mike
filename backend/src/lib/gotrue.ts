@@ -14,11 +14,10 @@ export type AuthAdmin = GoTrueClient;
  * cookies). PKCE, and no background refresh: a request handler is short-lived.
  */
 export function createAuthClient(storage: SupportedStorage, storageKey: string): AuthClient {
-  const { url, apiKey } = authServerConfiguration();
+  const { url } = authServerConfiguration();
   if (!url) throw new Error("AUTH_URL must be set");
   return new GoTrueClient({
     url,
-    headers: apiKey ? { apikey: apiKey, Authorization: `Bearer ${apiKey}` } : {},
     storage,
     storageKey,
     flowType: "pkce",
@@ -41,7 +40,7 @@ export function authAdmin(): AuthAdmin {
   }
   const auth = new GoTrueClient({
     url,
-    headers: { apikey: key, Authorization: `Bearer ${key}` },
+    headers: { Authorization: `Bearer ${key}` },
     persistSession: false,
     autoRefreshToken: false,
     detectSessionInUrl: false,

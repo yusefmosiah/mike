@@ -20,8 +20,6 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     volumes:
-      # A new volume name: the one the Supabase Postgres image used (db_data)
-      # is left untouched. scripts/migrate-supabase-db.sh moves its data here.
       - postgres_data:/var/lib/postgresql/data
       - ./docker/db-init/roles.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
     healthcheck:
@@ -31,48 +29,25 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # --- One-shot: refuse to start on an empty database while this install's
-  # data is still in the volume the Supabase Postgres image used (db_data).
-  # Starting fresh next to it would look like every account and document had
-  # vanished; scripts/migrate-supabase-db.sh moves the data over instead.
-  legacy-data-check:
-    image: postgres:17.6
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DB: postgres://postgres:postgres@db:5432/postgres
-    volumes:
-      - db_data:/legacy-supabase-db:ro
-    entrypoint: ["bash", "-c"]
-    command:
-      - |
-        if [ -f /legacy-supabase-db/PG_VERSION ] && ! psql "$$DB" -tAc "select to_regclass('public.user_profiles')" | grep -q user_profiles; then
-          echo "This install's data is still in the Supabase Postgres volume (db_data)." >&2;
-          echo "Stop the stack and move it with: scripts/migrate-supabase-db.sh (see docs/deployment.md)." >&2;
-          exit 1;
-        fi
-    restart: "no"
-
   # --- Auth (GoTrue). Auto-runs its migrations to build auth.users.
   auth:
     image: supabase/gotrue:v2.189.0
     ports:
       # Public: confirmation links, password resets and OAuth callbacks send
       # the browser here.
-      - "${AUTH_PORT:-${GATEWAY_PORT:-54321}}:9999"
+      - "${AUTH_PORT:-54321}:9999"
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: "9999"
       # Must be the browser-reachable URL of this service — confirmation links
       # are built from it, so a localhost value makes signup uncompletable
-      # off-machine. SUPABASE_PUBLIC_URL is its earlier name.
-      API_EXTERNAL_URL: ${AUTH_PUBLIC_URL:-${SUPABASE_PUBLIC_URL:-http://localhost:54321}}
+      # off-machine.
+      API_EXTERNAL_URL: ${AUTH_PUBLIC_URL:-http://localhost:54321}
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:postgres@db:5432/postgres
+      GOTRUE_DB_DATABASE_URL: postgres://gotrue:postgres@db:5432/postgres
       GOTRUE_SITE_URL: ${FRONTEND_URL:-http://localhost:3000}
       GOTRUE_URI_ALLOW_LIST: "*"
-      GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      GOTRUE_JWT_SECRET: mike-local-gotrue-jwt-secret-not-for-production
       GOTRUE_JWT_EXP: "3600"
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
@@ -86,12 +61,12 @@ services:
       GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOTRUE_EXTERNAL_GOOGLE_ENABLED:-true}
       GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID:-}
       GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOTRUE_EXTERNAL_GOOGLE_SECRET:-}
-      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${AUTH_PUBLIC_URL:-${SUPABASE_PUBLIC_URL:-http://localhost:54321}}/callback
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${AUTH_PUBLIC_URL:-http://localhost:54321}/callback
       # Enterprise SAML is opt-in. Set these in the Compose environment/root
       # .env (not backend/.env); see docs/deployment.md for provider setup.
       # GOTRUE_SAML_ENABLED: "true"
       # GOTRUE_SAML_PRIVATE_KEY: ${GOTRUE_SAML_PRIVATE_KEY:-}
-      # GOTRUE_SAML_EXTERNAL_URL: ${AUTH_PUBLIC_URL:-${SUPABASE_PUBLIC_URL:-http://localhost:54321}}
+      # GOTRUE_SAML_EXTERNAL_URL: ${AUTH_PUBLIC_URL:-http://localhost:54321}
       # Keep local signup frictionless by default. Set this to false to exercise
       # the confirmation-email flow; the message will be caught by Mailpit.
       GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
@@ -104,8 +79,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      legacy-data-check:
-        condition: service_completed_successfully
       mailpit:
         condition: service_started
     healthcheck:
@@ -300,7 +273,7 @@ services:
         required: false
     environment:
       - AUTH_URL=http://auth:9999
-      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y}
       - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@db:5432/postgres}
       - R2_ENDPOINT_URL=http://storage:9000
       - R2_ACCESS_KEY_ID=rustfsadmin
@@ -345,8 +318,8 @@ services:
       - LLM_MAX_OUTPUT_TOKENS=${LLM_MAX_OUTPUT_TOKENS:-}
       # GoTrue, reached directly. OAuth sends the browser to the public URL.
       - AUTH_URL=http://auth:9999
-      - AUTH_PUBLIC_URL=${AUTH_PUBLIC_URL:-${SUPABASE_PUBLIC_URL:-http://localhost:54321}}
-      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      - AUTH_PUBLIC_URL=${AUTH_PUBLIC_URL:-http://localhost:54321}
+      - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y}
       # Postgres: the app tables, with chat transcripts in the pi_durable
       # schema (Pi Durable) next to them.
       - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@db:5432/postgres}
@@ -400,7 +373,7 @@ services:
   #       required: false
   #   environment:
   #     - AUTH_URL=http://auth:9999
-  #     - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+  #     - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y}
   #     - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@db:5432/postgres}
   #     - R2_ENDPOINT_URL=http://storage:9000
   #     - R2_ACCESS_KEY_ID=rustfsadmin
@@ -449,8 +422,5 @@ services:
 
 volumes:
   postgres_data:
-  # The Supabase Postgres image's volume: read by legacy-data-check and
-  # scripts/migrate-supabase-db.sh, never written.
-  db_data:
   storage_data:
   redis_data:

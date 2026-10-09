@@ -44,7 +44,7 @@ export type ProjectsDbFailure = { ok: false; error: unknown };
 // same response. The directory pickers (useDirectoryData) previously fanned
 // out one GET /projects/:id per project to obtain those documents; with N
 // projects that burst — auth check plus several DB queries per request —
-// could overwhelm the Supabase gateway. Batching keeps it at one request
+// could overwhelm the database. Batching keeps it at one request
 // and a fixed number of queries regardless of project count.
 // Pagination is opt-in (`filters` is only passed when the request carried
 // pagination/search/sort/scope query params). ProjectsOverview.tsx sends

@@ -30,9 +30,7 @@ concurrency:
 
 jobs:
   stack:
-    # The check's name predates the move off Supabase; branch protection may
-    # require it by this name, so rename it only together with that rule.
-    name: Supabase stack integration tests
+    name: Stack integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

@@ -7,7 +7,7 @@
 
 import { listAccessibleProjectIds } from "./access";
 import { normalizeDisplayName } from "./userLookup";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 /** One CSV export is a single flat page; this caps the artifact size. */
 export const AUDIT_EXPORT_LIMIT = 2000;
@@ -138,8 +138,8 @@ type EventsResult = {
 };
 
 /**
- * The slice of the PostgREST builder this query uses. Spelled out rather than
- * inferred: the generated Supabase types recurse through every filter method,
+ * The slice of the query builder this query uses. Spelled out rather than
+ * inferred: the builder's generic types recurse through every filter method,
  * and threading them through a helper that applies six of them in a loop
  * makes the checker give up ("type instantiation is excessively deep").
  */

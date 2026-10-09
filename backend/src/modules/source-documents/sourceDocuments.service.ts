@@ -1,7 +1,7 @@
 // Business logic + data-access for the source-documents module.
 //
 // Service layer behind sourceDocuments.routes.ts. It takes an explicit
-// Supabase client (`db`) plus request-derived primitives, hydrates an opaque
+// Database client (`db`) plus request-derived primitives, hydrates an opaque
 // source-document id from its provider, normalizes the payload, and RETURNS a
 // typed result. It never touches req/res.
 //
@@ -9,7 +9,7 @@
 // because an upstream provider failure answers 502, a status the shared
 // vocabulary does not carry.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { getCourtlistenerCaseOpinions } from "../../lib/courtlistener";
 import { getUserModelSettings } from "../user/user.service";
 import {
@@ -61,7 +61,7 @@ export async function getSourceDocument(
   }
 
   try {
-    // One Supabase client for the whole request: the settings lookup used to
+    // One database client for the whole request: the settings lookup used to
     // build a second one by omitting `db`.
     const settings = await getUserModelSettings(args.userId, db);
     const fetchKey = `${args.userId}:${args.documentId}`;

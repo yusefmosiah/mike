@@ -187,8 +187,7 @@ nothing that could ever attach.
 ### The service contract
 
 A service function takes the database handle first (`db: Db`, exported from
-`lib/supabase.ts`: a supabase-js–shaped query builder over a direct Postgres
-connection, implemented in `lib/db/`), then request-derived primitives, and
+`lib/db/`: a chainable query builder over a direct Postgres connection), then request-derived primitives, and
 returns a
 discriminated union rather than throwing or writing a response:
 
@@ -246,7 +245,7 @@ remaining inline queries per routes file and only ever goes down.
 
 `lib/` holds two kinds of code:
 
-- **Infrastructure:** `supabase` and `db/` (the database handle), `gotrue`
+- **Infrastructure:** `db/` (the database handle), `gotrue`
   (the auth server's clients), `storage`, `queue/`, `dbq/` (durable jobs),
   `llm/`, `mcp/`, `httpError`, `serviceResult`, `pagination`, `search`,
   `privateIp`, `origins`, `runtimeConfig`, `courtlistener` (an external API

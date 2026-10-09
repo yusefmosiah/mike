@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Db } from "../../supabase";
+import type { Db } from "../../db";
 type Row = Record<string, unknown>;
 /** Query fake for service tests; transaction guarantees are tested in Postgres. */
 export function workspaceDb() {

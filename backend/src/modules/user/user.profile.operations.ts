@@ -122,7 +122,7 @@ export type RecordPasswordSetResult =
     | { ok: false; kind: "db_error"; detail: string }
     | { ok: false; kind: "not_recorded"; detail: string };
 
-// Record password capability only after verifying Supabase's auth.users row.
+// Record password capability only after verifying GoTrue's auth.users row.
 export async function recordPasswordSet(
     db: Db,
     userId: string,
@@ -141,7 +141,7 @@ export async function recordPasswordSet(
         return {
             ok: false,
             kind: "not_recorded",
-            detail: "Supabase has not recorded a password for this account",
+            detail: "GoTrue has not recorded a password for this account",
         };
     }
 

@@ -2,7 +2,7 @@
 // Business logic + data-access for the chat module.
 //
 // These functions are the service layer behind chat.routes.ts. They take an
-// explicit Supabase client (`db`) plus request-derived primitives, perform the
+// explicit database client (`db`) plus request-derived primitives, perform the
 // chat orchestration / DB work, and RETURN values or typed error results. They
 // never touch req/res — the thin route handlers map the results onto HTTP
 // status codes, headers, and response bodies.
@@ -12,7 +12,7 @@
 // its ordering is delicate. Only the NON-streaming logic and the pre-stream
 // DB preparation live here. `prepareChatStream` returns the prepared data the
 // route needs to run the stream; it does not stream.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import { buildDocContext, buildMessages, buildUserPersonalisationPrompt, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
 import type { McpToolEvent } from "@mike/contracts";

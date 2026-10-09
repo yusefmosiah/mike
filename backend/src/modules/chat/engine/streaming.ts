@@ -11,7 +11,7 @@ import { resolveRequestedModel } from "../../../lib/routerModels";
 import { UserFacingError } from "../../../lib/userFacingError";
 import { InvalidApiKeyError } from "../../../lib/llm/apiKeyErrors";
 import { reportError } from "../../../lib/observability/sentry";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { buildUserMcpTools, type McpToolEvent } from "../../../lib/mcpConnectors";
 import type { SourceDocument } from "../../../lib/sourceDocuments";
 import { buildGoogleDriveTools } from "../../../lib/integrations/googleDrive";

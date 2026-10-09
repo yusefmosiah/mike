@@ -1,7 +1,7 @@
 // Business logic + data-access for the documents module.
 //
 // These functions are the service layer behind documents.routes.ts. They take
-// an explicit Supabase client (`db`) plus request-derived primitives, perform
+// an explicit database client (`db`) plus request-derived primitives, perform
 // the storage / version / conversion orchestration, and RETURN values or
 // typed error results. They never touch req/res — the thin route handlers map
 // the results onto HTTP status codes, headers, and response bodies.

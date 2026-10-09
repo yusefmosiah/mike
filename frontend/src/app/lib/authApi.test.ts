@@ -3,7 +3,6 @@ import {
     AuthApiError,
     challengeAndVerifyMfa,
     challengeMfa,
-    clearLegacyBrowserAuthStorage,
     enrollMfa,
     exchangeAuthCode,
     getAuthSession,
@@ -297,24 +296,5 @@ describe("cookie auth client", () => {
             code: null,
             message: "Authentication could not be completed.",
         });
-    });
-
-    it("removes legacy Supabase sessions without touching unrelated settings", () => {
-        window.localStorage.setItem("sb-project-auth-token", "access-token");
-        window.sessionStorage.setItem("supabase.auth.session", "refresh-token");
-        window.localStorage.setItem("sidebarOpen", "true");
-
-        clearLegacyBrowserAuthStorage();
-
-        expect(window.localStorage.getItem("sb-project-auth-token")).toBeNull();
-        expect(
-            window.sessionStorage.getItem("supabase.auth.session"),
-        ).toBeNull();
-        expect(window.localStorage.getItem("sidebarOpen")).toBe("true");
-    });
-
-    it("is a no-op during server rendering", () => {
-        vi.stubGlobal("window", undefined);
-        expect(() => clearLegacyBrowserAuthStorage()).not.toThrow();
     });
 });

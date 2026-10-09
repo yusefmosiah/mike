@@ -1,7 +1,7 @@
 // Business logic + data-access for the models module.
 //
 // Service layer behind models.routes.ts. Each function takes an explicit
-// Supabase client (`db`) plus request-derived primitives, talks to the
+// Database client (`db`) plus request-derived primitives, talks to the
 // provider catalog APIs, and RETURNS a typed result. It never touches
 // req/res — the route maps the result onto status codes and JSON.
 //
@@ -11,7 +11,7 @@
 // hosted catalog requested under strict private mode answers 403 — none of
 // which exists in the shared vocabulary.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { ollamaAuthHeaders as authHeaders } from "../../lib/llm/endpoints";
 import { isSupportedOpenCodeGoModel } from "../../lib/llm/models";
 import { configuredEndpointSummaries } from "../../lib/llm/registry";

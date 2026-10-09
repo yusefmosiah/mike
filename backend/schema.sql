@@ -1,5 +1,5 @@
--- Mike Supabase schema
--- Use this for a fresh Supabase database. Existing deployments should instead
+-- Mike database schema
+-- Use this for a fresh database. Existing deployments should instead
 -- apply the dated incremental migration files in backend/migrations that are
 -- newer than the version of Mike they currently have deployed.
 
@@ -171,7 +171,7 @@ create trigger on_auth_user_email_updated
   execute procedure public.handle_user_email_updated();
 
 -- Short-lived OAuth handoffs let an Office dialog establish a separate,
--- partitioned HttpOnly session in the embedded Word task pane. Supabase tokens
+-- partitioned HttpOnly session in the embedded Word task pane. GoTrue tokens
 -- are encrypted at rest and the opaque browser-visible ticket is single-use.
 create table if not exists public.auth_handoff_tickets (
   id uuid primary key default gen_random_uuid(),
@@ -813,8 +813,8 @@ grant select, insert, update, delete on public.document_chunks to service_role;
 -- in the ranker, so this arm only has to surface genuinely similar wording.
 --
 -- The search path names both schemas pg_trgm can live in: this repo installs
--- it into public (self-hosted schema.sql / migrations), while hosted Supabase
--- pre-installs it in `extensions`. Listing both resolves word_similarity and
+-- it into public (schema.sql / migrations), while some managed Postgres
+-- services pre-install it in `extensions`. Listing both resolves word_similarity and
 -- the <% operator in either deployment.
 create or replace function public.search_document_chunks_trgm(
   p_query text,
@@ -4771,9 +4771,8 @@ $$;
 -- Direct client grant hardening
 -- ---------------------------------------------------------------------------
 --
--- The frontend uses Supabase directly only for authentication. Application
--- data access goes through the backend API with the service role after the
--- backend verifies the user's JWT. Do not grant the browser anon/authenticated
+-- Application data access goes through the backend API on its own database
+-- connection after the backend verifies the user's JWT. Do not grant the browser anon/authenticated
 -- roles direct table privileges for backend-owned data.
 
 -- Audit history of user actions (queried via the service-role backend only).

@@ -1,5 +1,5 @@
 import { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "../documents/documents.service";
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { assertStorageConfigured, deleteFile, deleteFileBestEffort, listFiles } from "../../lib/storage";
 import { NonRetryableJobError } from "../../lib/dbq/runner";
 import { removeGrantsForEmail } from "../../lib/projectAccess";

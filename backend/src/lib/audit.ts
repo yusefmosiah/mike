@@ -3,7 +3,7 @@
 // or block the user-facing path — failures are logged and swallowed.
 
 import { enqueueDbJob } from "./dbq/enqueue";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 export type AuditStatus = "completed" | "cancelled" | "failed";
 

@@ -22,7 +22,7 @@ import {
 import { titleModelForChat } from "../../lib/modelSelection";
 import { safeError } from "../../lib/safeError";
 import { stopOutcomeFrame } from "../../lib/streamRuns";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
     appendAssistantEventsToMessage,
     AssistantStreamError,

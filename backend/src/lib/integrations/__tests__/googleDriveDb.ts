@@ -1,4 +1,4 @@
-import type { Db } from "../../supabase";
+import type { Db } from "../../db";
 import { randomUUID } from "node:crypto";
 
 type Row = Record<string, unknown>;

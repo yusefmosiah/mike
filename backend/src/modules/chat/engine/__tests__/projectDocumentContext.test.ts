@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildProjectDocContext } from "../contextBuilders";
-import type { createServerSupabase } from "../../../../lib/supabase";
+import type { createDb } from "../../../../lib/db";
 
 function contextDatabase() {
   const documents = [
@@ -76,7 +76,7 @@ function contextDatabase() {
     return query;
   });
   return {
-    db: { from } as unknown as ReturnType<typeof createServerSupabase>,
+    db: { from } as unknown as ReturnType<typeof createDb>,
     documents,
     from,
   };

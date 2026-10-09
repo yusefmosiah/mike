@@ -26,7 +26,7 @@ import {
   headFile,
   StorageOperationError,
 } from "../../lib/storage";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
   uploadSessionExpiresAt,
   UPLOAD_URL_TTL_SECONDS,

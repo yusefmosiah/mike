@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { RunProgressUpdate } from "../../lib/queue/runProgress";
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(),
 }));
 
 const loadReviewRow = vi.fn();
@@ -48,7 +48,7 @@ type SelectResponse =
     | { data: unknown }
     | ((call: Call) => { data: unknown; error?: unknown });
 
-// Minimal chainable Supabase test double. `responses[table].select` feeds
+// Minimal chainable database test double. `responses[table].select` feeds
 // select/single reads (a function form can answer per-filter, which the lease's
 // "is this generation idle?" probe needs); update/insert resolve empty and are
 // recorded in `calls`. `rpc` records lease calls in `rpcs`.

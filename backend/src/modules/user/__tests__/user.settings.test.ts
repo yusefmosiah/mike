@@ -17,7 +17,7 @@ vi.mock("../../../lib/routerModels", async () => ({
         getAllUserRouterModels(...args),
 }));
 
-vi.mock("../../../lib/supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../../lib/db", () => ({ createDb: vi.fn() }));
 
 import { getUserModelSettings } from "../user.settings";
 

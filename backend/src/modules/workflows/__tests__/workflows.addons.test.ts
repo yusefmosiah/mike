@@ -1,5 +1,5 @@
 // Unit tests for the add-on catalog service functions. They drive the four
-// exported functions against a fake `db` (no Supabase, no network) and assert
+// exported functions against a fake `db` (no database, no network) and assert
 // the two things the HTTP layer can no longer see for itself: the exact
 // filters sent to the database, and the typed result each branch returns.
 
@@ -36,7 +36,7 @@ vi.mock("../../../lib/dbq/enqueue", () => ({
   enqueueStorageCleanup: (...args: unknown[]) => enqueueStorageCleanup(...args),
 }));
 
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import {
   getWorkflowAddon,
   importWorkflowAddon,

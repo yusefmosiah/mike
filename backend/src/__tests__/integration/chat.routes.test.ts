@@ -99,7 +99,7 @@ afterEach(() => {
     expect(unexpectedFetch).not.toHaveBeenCalled();
 });
 
-// A permissive, chainable Supabase stub. Every query-builder method returns the
+// A permissive, chainable database stub. Every query-builder method returns the
 // same object (so arbitrary chains work), the object is awaitable (thenable),
 // and the terminal single()/maybeSingle() resolve to a chat row. The chat
 // routes only read `.id`/`.title` and check `.error`, so this is enough to let
@@ -305,7 +305,7 @@ function makeQuery(table: string) {
     return q;
 }
 
-function mockSupabase() {
+function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
     rpc: vi.fn((name: string, args: unknown) => {
@@ -337,8 +337,8 @@ function mockSupabase() {
     };
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => mockDb()),
 }));
 
 vi.mock("../../lib/memory/schedule", () => ({
@@ -350,7 +350,7 @@ vi.mock("../../lib/memory/schedule", () => ({
     scheduleMemoryConsolidation(...args),
 }));
 
-// Authenticate every request as user "u1" without exercising the real Supabase
+// Authenticate every request as user "u1" without exercising the real
 // JWT path. requireMfaIfEnrolled must be exported too — userRouter (mounted by
 // the app) imports it at module load.
 vi.mock("../../middleware/auth", () => ({
@@ -419,7 +419,7 @@ vi.mock("../../lib/llm", async (importOriginal) => {
 
 import { app } from "../../app";
 import { resetAssistantTurnRunsForTests } from "../../lib/assistantTurnRuns";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 
 const VALID_BODY = {
     messages: [{ role: "user", content: "hello" }],
@@ -2069,7 +2069,7 @@ describe("PATCH /word-chat/:chatId/model", () => {
 //
 // Scenario: chat "chat-1" lives in project "proj-1", created by "colleague-1",
 // inside org "org-1". The authenticated caller is "u1" (see the auth mock).
-// A table-aware supabase stub lets us vary how u1 reaches the project: a
+// A table-aware database stub lets us vary how u1 reaches the project: a
 // direct 'viewer' grant (may read, must not write), or org membership, which
 // inherits project member and may write. The security property under test:
 // POST /chat with an existing chat_id and POST /chat/:chatId/generate-title
@@ -2328,7 +2328,7 @@ async function seedResolvableModel() {
 }
 
 describe("chat writes are gated on content.edit (org RBAC)", () => {
-    const mockedCreate = vi.mocked(createServerSupabase);
+    const mockedCreate = vi.mocked(createDb);
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -2341,7 +2341,7 @@ describe("chat writes are gated on content.edit (org RBAC)", () => {
 
     afterEach(() => {
         // Restore the permissive default stub for the other describe blocks.
-        mockedCreate.mockImplementation(() => mockSupabase() as never);
+        mockedCreate.mockImplementation(() => mockDb() as never);
     });
 
     it("403s a personal-project Viewer POSTing to an existing chat", async () => {
@@ -2553,7 +2553,7 @@ describe("chat writes are gated on content.edit (org RBAC)", () => {
 // rename the chat must not be able to re-share or erase it.
 // ---------------------------------------------------------------------------
 describe("chat grants, deletion and roster", () => {
-    const mockedCreate = vi.mocked(createServerSupabase);
+    const mockedCreate = vi.mocked(createDb);
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -2562,7 +2562,7 @@ describe("chat grants, deletion and roster", () => {
     });
 
     afterEach(() => {
-        mockedCreate.mockImplementation(() => mockSupabase() as never);
+        mockedCreate.mockImplementation(() => mockDb() as never);
     });
 
     const chatWrites = (op: "update" | "delete") =>

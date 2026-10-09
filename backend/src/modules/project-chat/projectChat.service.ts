@@ -1,6 +1,6 @@
 // Business logic + data-access for the project-chat module.
 //
-// Service layer behind projectChat.routes.ts. Takes an explicit Supabase client
+// Service layer behind projectChat.routes.ts. Takes an explicit database client
 // (`db`) plus request-derived primitives, does the pre-stream DB orchestration,
 // and RETURNS the prepared data (or a typed error). It never touches req/res.
 //
@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { abandonTurn, interruptedTurns } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import type { McpToolEvent } from "@mike/contracts";
 import {

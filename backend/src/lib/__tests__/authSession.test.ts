@@ -30,9 +30,9 @@ function storageOf(client: unknown) {
   return (client as { storage: { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void } }).storage;
 }
 
-// What @supabase/ssr wrote before Mike talked to GoTrue directly: `base64-` +
+// The stored format, built independently of authSession: `base64-` +
 // base64url(JSON), split into numbered chunks past 3180 characters.
-function ssrCookies(name: string, value: string): string {
+function chunkedCookies(name: string, value: string): string {
   const encoded = `base64-${Buffer.from(value, "utf8").toString("base64url")}`;
   if (encoded.length <= 3180) return `${name}=${encoded}`;
   const parts: string[] = [];
@@ -101,10 +101,10 @@ describe("backend-managed auth cookies", () => {
     expect(cookie).toContain("Partitioned");
   });
 
-  it("reads sessions and PKCE verifiers in the cookie format @supabase/ssr wrote", () => {
+  it("reads sessions and PKCE verifiers from chunked base64 cookies", () => {
     const cookie = [
-      ssrCookies("mike-session", session),
-      ssrCookies("mike-session-code-verifier", '"verifier"'),
+      chunkedCookies("mike-session", session),
+      chunkedCookies("mike-session-code-verifier", '"verifier"'),
       "unrelated=keep",
     ].join("; ");
     expect(cookie).toContain("mike-session.1=");
@@ -117,14 +117,14 @@ describe("backend-managed auth cookies", () => {
     const res = fakeResponse();
     storageOf(createRequestAuth(requestWithCookies(""), res as never)).setItem("mike-session", session);
     const cookie = res.setCookies().map((header) => header.split(";")[0]).join("; ");
-    expect(cookie).toBe(ssrCookies("mike-session", session));
+    expect(cookie).toBe(chunkedCookies("mike-session", session));
     const next = storageOf(createRequestAuth(requestWithCookies(cookie), fakeResponse() as never));
     expect(next.getItem("mike-session")).toBe(session);
   });
 
   it("treats chunks from two different writes as no session", () => {
-    const older = ssrCookies("mike-session", session).split("; ");
-    const newer = ssrCookies("mike-session", session.replace("refresh", "rotated")).split("; ");
+    const older = chunkedCookies("mike-session", session).split("; ");
+    const newer = chunkedCookies("mike-session", session.replace("refresh", "rotated")).split("; ");
     const mixed = [older[0], newer[1]].join("; ");
     const storage = storageOf(createRequestAuth(requestWithCookies(mixed), fakeResponse() as never));
     expect(storage.getItem("mike-session")).toBeNull();
@@ -134,7 +134,7 @@ describe("backend-managed auth cookies", () => {
     const res = fakeResponse();
     res.headers["Set-Cookie"] = ["other=1; Path=/"];
     const storage = storageOf(
-      createRequestAuth(requestWithCookies(ssrCookies("mike-session", session)), res as never),
+      createRequestAuth(requestWithCookies(chunkedCookies("mike-session", session)), res as never),
     );
     storage.setItem("mike-session", '"short"');
     storage.setItem("mike-session", '"shorter"');
@@ -156,7 +156,7 @@ describe("backend-managed auth cookies", () => {
   it("expires every chunk when the session is removed, and reads it as gone", () => {
     const res = fakeResponse();
     const storage = storageOf(
-      createRequestAuth(requestWithCookies(ssrCookies("mike-session", session)), res as never),
+      createRequestAuth(requestWithCookies(chunkedCookies("mike-session", session)), res as never),
     );
     storage.removeItem("mike-session");
     expect(res.setCookies()).toHaveLength(3);
@@ -166,7 +166,7 @@ describe("backend-managed auth cookies", () => {
 
   it("does not rewrite a cookie the browser already holds", () => {
     const res = fakeResponse();
-    const cookie = ssrCookies("mike-session-code-verifier", '"verifier"');
+    const cookie = chunkedCookies("mike-session-code-verifier", '"verifier"');
     storageOf(createRequestAuth(requestWithCookies(cookie), res as never)).setItem(
       "mike-session-code-verifier",
       '"verifier"',

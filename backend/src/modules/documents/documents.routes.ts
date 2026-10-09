@@ -10,7 +10,7 @@ import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import { buildContentDisposition, createFileReadStream } from "../../lib/storage";
 import { sendDocumentDisplay } from "../../lib/documentDisplay";
@@ -37,7 +37,7 @@ export const documentsRouter = Router();
 // GET /single-documents
 documentsRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listSingleDocuments(userId, db);
     if (!result.ok) return void sendInternalError(res, result.error);
     res.json(result.docs);
@@ -50,7 +50,7 @@ documentsRouter.get("/:documentId", requireAuth, asyncRoute(async (req, res) => 
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await getDocument(documentId, userId, userEmail, db);
     if (!result.ok)
@@ -67,7 +67,7 @@ documentsRouter.delete("/:documentId", requireAuth, asyncRoute(async (req, res) 
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await deleteDocument(documentId, userId, db, userEmail);
     if (!result.ok) {
@@ -88,7 +88,7 @@ documentsRouter.get("/:documentId/display", requireAuth, asyncRoute(async (req, 
     const { documentId } = req.params;
     const versionIdParam =
         typeof req.query.version_id === "string" ? req.query.version_id : null;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await getDisplayableVersion(
         documentId,
@@ -118,7 +118,7 @@ documentsRouter.get("/:documentId/file", requireAuth, asyncRoute(async (req, res
     const { documentId } = req.params;
     const versionIdParam =
         typeof req.query.version_id === "string" ? req.query.version_id : null;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await getFileStreamSource(
         documentId,
@@ -171,7 +171,7 @@ documentsRouter.post("/download-zip", requireAuth, asyncRoute(async (req, res) =
             .status(400)
             .json({ detail: "document_ids or folder_ids is required" });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await resolveZipExportDocuments(
         { documentIds, folderIds, userId, userEmail },
         db,
@@ -228,7 +228,7 @@ documentsRouter.get("/:documentId/url", requireAuth, asyncRoute(async (req, res)
     const { documentId } = req.params;
     const versionIdParam =
         typeof req.query.version_id === "string" ? req.query.version_id : null;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await getDownloadUrl(
         documentId,
@@ -251,7 +251,7 @@ documentsRouter.get("/:documentId/versions", requireAuth, asyncRoute(async (req,
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await listVersions(documentId, userId, userEmail, db);
     if (!result.ok)
@@ -277,7 +277,7 @@ documentsRouter.post(
             typeof req.body?.source_document_id === "string"
                 ? req.body.source_document_id
                 : "";
-        const db = createServerSupabase();
+        const db = createDb();
 
         if (!sourceDocumentId) {
             return void res
@@ -335,7 +335,7 @@ documentsRouter.patch(
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
         const { documentId, versionId } = req.params;
-        const db = createServerSupabase();
+        const db = createDb();
 
         const result = await renameVersion(
             {
@@ -365,7 +365,7 @@ documentsRouter.delete(
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
         const { documentId, versionId } = req.params;
-        const db = createServerSupabase();
+        const db = createDb();
 
         const result = await deleteVersion(
             documentId,
@@ -404,7 +404,7 @@ documentsRouter.get(
         const { documentId } = req.params;
         const versionIdParam =
             typeof req.query.version_id === "string" ? req.query.version_id : null;
-        const db = createServerSupabase();
+        const db = createDb();
 
         const result = await getTrackedChangeIds(
             documentId,
@@ -429,7 +429,7 @@ async function handleEditResolution(
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { documentId, editId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await resolveEdit(
         mode,

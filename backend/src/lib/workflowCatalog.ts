@@ -1,4 +1,4 @@
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 export type WorkflowCatalogContributor = {
   name: string;

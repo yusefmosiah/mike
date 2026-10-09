@@ -56,14 +56,8 @@ export function readApiEnv(key: string): string | undefined {
  * already exists the admin endpoint returns a 422 which we treat as success.
  */
 export async function ensureUser(email: string, password: string) {
-    // AUTH_URL is GoTrue itself; an env still on SUPABASE_URL reaches the same
-    // GoTrue at /auth/v1 behind Supabase's gateway.
-    const legacyUrl = readApiEnv("SUPABASE_URL");
-    const authUrl =
-        readApiEnv("AUTH_URL") ??
-        (legacyUrl ? `${legacyUrl}/auth/v1` : "http://127.0.0.1:54321");
-    const serviceKey =
-        readApiEnv("AUTH_SERVICE_KEY") ?? readApiEnv("SUPABASE_SECRET_KEY");
+    const authUrl = readApiEnv("AUTH_URL") ?? "http://127.0.0.1:54321";
+    const serviceKey = readApiEnv("AUTH_SERVICE_KEY");
     if (!serviceKey) {
         throw new Error(
             "AUTH_SERVICE_KEY not found (checked env and backend/.env); " +
@@ -75,7 +69,6 @@ export async function ensureUser(email: string, password: string) {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            apikey: serviceKey,
             Authorization: `Bearer ${serviceKey}`,
         },
         body: JSON.stringify({

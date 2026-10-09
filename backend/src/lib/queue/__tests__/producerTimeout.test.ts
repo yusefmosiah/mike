@@ -32,7 +32,7 @@ describe("producer-side Redis delivery is deadline-bounded", () => {
     }, 10_000);
 
     it("enqueueDbJob still resolves — the durable row is what matters", async () => {
-        // Minimal chainable Supabase double: the insert succeeds, so the only
+        // Minimal chainable database double: the insert succeeds, so the only
         // thing that can stall enqueueDbJob is the Redis delivery below it.
         const q: Record<string, unknown> = {};
         for (const m of ["select", "eq", "in", "limit"]) q[m] = () => q;

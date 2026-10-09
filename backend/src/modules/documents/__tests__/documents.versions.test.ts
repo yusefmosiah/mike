@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import type { ProjectRole } from "../../../lib/permissions";
 const mocks = vi.hoisted(() => ({
   access: vi.fn(),

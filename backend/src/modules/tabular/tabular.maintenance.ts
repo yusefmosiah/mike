@@ -29,7 +29,7 @@
 //   while the cell still carries that stamp. Clearing the stamp is also what
 //   lets the dead run's lease go, so the sweep calls `finishGenerationIfIdle`
 //   once per generation it touched.
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { getExtractionQueue, extractionJobId } from "../../lib/queue/extractionQueue";
 import { withRedisTimeout } from "../../lib/queue/connection";
 // KNOWN LAYERING INVERSION: lib/ normally must not import from modules/, but
@@ -87,7 +87,7 @@ async function hasActiveGenerationLease(
  * enabled — see the safety model above.
  */
 export async function sweepStaleGeneratingCells(
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<number> {
     if (process.env.ASYNC_TABULAR_EXTRACTION !== "true") return 0;
 

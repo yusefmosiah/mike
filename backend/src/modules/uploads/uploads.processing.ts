@@ -44,7 +44,7 @@ import {
   uploadFileFromPath,
   versionStorageKey,
 } from "../../lib/storage";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { UPLOAD_VERIFICATION_LEASE_SECONDS } from "./uploads.manifest";
 
 type UploadSessionRow = {
@@ -1158,7 +1158,7 @@ function startUploadProcessingWorker(options: {
   const tick = async () => {
     if (stopped) return;
     try {
-      const db = createServerSupabase();
+      const db = createDb();
       if (options.runCleanup && Date.now() - lastCleanupAt >= 60_000) {
         await Promise.all([
           cleanupUploadSessions(db),

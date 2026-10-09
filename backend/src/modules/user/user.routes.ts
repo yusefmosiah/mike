@@ -22,7 +22,7 @@ import crypto from "crypto";
 import { Router } from "express";
 import { requireAuth, requireMfaIfEnrolled } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { recordAudit } from "../../lib/audit";
 import { sendInternalError } from "../../lib/httpError";
 import { dbJobsEnabled } from "../../lib/dbq/runner";
@@ -164,7 +164,7 @@ function mcpOAuthPopupCsp(nonce: string) {
 // POST /user/profile
 userRouter.post("/profile", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await bootstrapUserProfile(db, userId);
     if (!result.ok) return void sendInternalError(res, result.error);
     res.json({ ok: true });
@@ -177,7 +177,7 @@ userRouter.get("/lookup", requireAuth, asyncRoute(async (req, res) => {
         return void res.status(400).json({ detail: "email is required" });
     }
 
-    const db = createServerSupabase();
+    const db = createDb();
     res.json(await lookupUserByEmail(db, email));
 }));
 
@@ -194,7 +194,7 @@ userRouter.get("/lookup", requireAuth, asyncRoute(async (req, res) => {
 // GET /user/invitations — live invitations addressed to the caller's email.
 userRouter.get("/invitations", requireAuth, asyncRoute(async (_req, res) => {
     const userEmail = res.locals.userEmail as string | undefined;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listMyInvitations(db, { userEmail });
     if (!result.ok) return sendOrgFailure(res, result);
     res.json(result.invitations);
@@ -207,7 +207,7 @@ userRouter.post(
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await acceptInvitation(db, {
             userId,
             userEmail,
@@ -225,7 +225,7 @@ userRouter.post(
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await declineInvitation(db, {
             userId,
             userEmail,
@@ -239,7 +239,7 @@ userRouter.post(
 // GET /user/profile
 userRouter.get("/profile", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await getUserProfile(db, userId);
     if (!result.ok) return void sendInternalError(res, result.error);
     res.json(result.body);
@@ -251,7 +251,7 @@ userRouter.patch("/profile", requireAuth, asyncRoute(async (req, res) => {
     const parsed = validateProfilePayload(req.body);
     if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await updateUserProfile(
         db,
         userId,
@@ -268,17 +268,17 @@ userRouter.post("/onboarding", requireAuth, asyncRoute(async (req, res) => {
     if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });
 
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await completeUserOnboarding(db, userId, parsed.update);
     if (!result.ok) return void res.status(500).json({ detail: result.detail });
     res.json(result.body);
 }));
 
 // POST /user/security/password-set
-// Record password capability only after verifying Supabase's auth.users row.
+// Record password capability only after verifying GoTrue's auth.users row.
 userRouter.post("/security/password-set", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await recordPasswordSet(db, userId);
     if (!result.ok) {
         if (result.kind === "not_recorded")
@@ -299,7 +299,7 @@ userRouter.patch(
         if (!parsed.ok)
             return void res.status(400).json({ detail: parsed.detail });
 
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await setMfaOnLogin(db, userId, parsed.value);
         if (!result.ok) {
             if (result.kind === "no_factor")
@@ -313,7 +313,7 @@ userRouter.patch(
 // GET /user/api-keys
 userRouter.get("/api-keys", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const status = await getApiKeyStatus(db, userId);
     res.json(status);
 }));
@@ -333,7 +333,7 @@ userRouter.put(
 
         const apiKey =
             typeof req.body?.api_key === "string" ? req.body.api_key : null;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await saveApiKey(db, { userId, provider, apiKey });
         if (!result.ok) {
             return void sendInternalError(res, result.error);
@@ -345,7 +345,7 @@ userRouter.put(
 // GET /user/mcp-connectors
 userRouter.get("/mcp-connectors", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listMcpConnectors(db, userId);
     if (!result.ok) return void sendInternalError(res, result.error);
     res.json(result.connectors);
@@ -357,7 +357,7 @@ userRouter.get(
     requireAuth,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await getMcpConnector(
             db,
             userId,
@@ -391,7 +391,7 @@ userRouter.post(
             !Array.isArray(req.body.headers)
                 ? (req.body.headers as Record<string, unknown>)
                 : undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await createMcpConnector(db, userId, {
             name,
             serverUrl,
@@ -428,7 +428,7 @@ userRouter.patch(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const body = req.body ?? {};
         if (body.readOnly !== undefined && typeof body.readOnly !== "boolean")
             return void res.status(400).json({ detail: "readOnly must be a boolean." });
@@ -483,7 +483,7 @@ userRouter.delete(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await deleteMcpConnector(
             db,
             userId,
@@ -501,7 +501,7 @@ userRouter.post(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const redirectUri = `${backendPublicUrl(req)}/user/mcp-connectors/oauth/callback`;
         const result = await startMcpConnectorOAuth(
             db,
@@ -532,7 +532,7 @@ userRouter.get("/mcp-connectors/oauth/callback", asyncRoute(async (req, res) => 
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const error =
         typeof req.query.error === "string" ? req.query.error : undefined;
-    const db = createServerSupabase();
+    const db = createDb();
     try {
         if (error) throw new Error(error);
         if (!state || !code)
@@ -603,7 +603,7 @@ userRouter.get("/integrations/google-drive", requireAuth, async (req, res) => {
             redirectUri = null;
         }
         res.json({
-            ...(await getGoogleDriveStatus(userId, createServerSupabase())),
+            ...(await getGoogleDriveStatus(userId, createDb())),
             redirectUri,
         });
     } catch (err) {
@@ -627,7 +627,7 @@ userRouter.post(
             const result = await startGoogleDriveOAuth(
                 userId,
                 redirectUri,
-                createServerSupabase(),
+                createDb(),
             );
             res.json(result);
         } catch (err) {
@@ -690,7 +690,7 @@ userRouter.get(
             if (!state || !code)
                 throw new Error("OAuth callback is missing state or code.");
             await completeGoogleDriveOAuth(
-                res.locals.userId, state, code, createServerSupabase(),
+                res.locals.userId, state, code, createDb(),
             );
             res.set("Content-Security-Policy", mcpOAuthPopupCsp(nonce))
                 .type("html")
@@ -729,7 +729,7 @@ userRouter.delete(
     async (_req, res) => {
         const userId = res.locals.userId as string;
         try {
-            await disconnectGoogleDrive(userId, createServerSupabase());
+            await disconnectGoogleDrive(userId, createDb());
             res.status(204).end();
         } catch (err) {
             console.error("[google-drive] disconnect failed", {
@@ -754,7 +754,7 @@ userRouter.patch(
             if (req.body?.[key] !== undefined && typeof req.body[key] !== "boolean")
                 return void res.status(400).json({ detail: `${key} must be a boolean.` });
         }
-        const db = createServerSupabase();
+        const db = createDb();
         try {
             await updateGoogleDriveSettings(
                 userId,
@@ -785,7 +785,7 @@ userRouter.patch(
             return void res
                 .status(400)
                 .json({ detail: "enabled must be a boolean." });
-        const db = createServerSupabase();
+        const db = createDb();
         try {
             await setGoogleDriveToolEnabled(
                 userId,
@@ -824,7 +824,7 @@ userRouter.post(
             await cancelGoogleDriveOAuth(
                 res.locals.userId as string,
                 state,
-                createServerSupabase(),
+                createDb(),
             );
             res.status(204).end();
         } catch (error) {
@@ -864,7 +864,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
             try {
                 res.json({
                     ...(await workspaceConnectorStatus(
-                        createServerSupabase(),
+                        createDb(),
                         res.locals.userId,
                         provider,
                     )),
@@ -883,7 +883,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
             try {
                 res.json(
                     await startWorkspaceOAuth(
-                        createServerSupabase(),
+                        createDb(),
                         res.locals.userId,
                         provider,
                         callback(req),
@@ -923,7 +923,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
                         "Google authorization was cancelled or incomplete.",
                     );
                 await completeWorkspaceOAuth(
-                    createServerSupabase(),
+                    createDb(),
                     res.locals.userId,
                     provider,
                     req.query.state,
@@ -963,7 +963,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
                     .json({ detail: "Invalid authorization attempt." });
             try {
                 await cancelWorkspaceOAuth(
-                    createServerSupabase(),
+                    createDb(),
                     res.locals.userId,
                     provider,
                     req.body.state,
@@ -987,7 +987,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
                         .status(400)
                         .json({ detail: `${key} must be a boolean.` });
             }
-            const db = createServerSupabase();
+            const db = createDb();
             try {
                 await updateWorkspaceSettings(db, res.locals.userId, provider, {
                     enabled: body.enabled,
@@ -1019,7 +1019,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
                     .json({ detail: "enabled must be a boolean." });
             if (!workspaceToolList(provider, null).some((t) => t.name === toolName))
                 return void res.status(404).json({ detail: "Unknown tool." });
-            const db = createServerSupabase();
+            const db = createDb();
             try {
                 await setWorkspaceToolEnabled(
                     db,
@@ -1047,7 +1047,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
         asyncRoute(async (_req, res) => {
             try {
                 await disconnectWorkspace(
-                    createServerSupabase(),
+                    createDb(),
                     res.locals.userId,
                     provider,
                 );
@@ -1065,7 +1065,7 @@ userRouter.post(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await refreshMcpConnectorTools(
             db,
             userId,
@@ -1102,7 +1102,7 @@ userRouter.patch(
         if (!parsed.ok)
             return void res.status(400).json({ detail: parsed.detail });
 
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await setMcpToolEnabled(
             db,
             userId,
@@ -1127,7 +1127,7 @@ userRouter.delete(
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
         const token = res.locals.token as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await deleteUserAccount(db, userId, userEmail, token);
         if (!result.ok) {
             if ("kind" in result && result.kind === "org_successor_required")
@@ -1149,7 +1149,7 @@ userRouter.delete(
     requireMfaIfEnrolled,
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await deleteUserChats(db, userId);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.status(204).send();
@@ -1163,7 +1163,7 @@ userRouter.delete(
     requireMfaIfEnrolled,
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await deleteUserProjectsData(db, userId);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.status(204).send();
@@ -1177,7 +1177,7 @@ userRouter.delete(
     requireMfaIfEnrolled,
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await deleteUserTabularReviews(db, userId);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.status(204).send();
@@ -1194,7 +1194,7 @@ userRouter.delete(
     requireMfaIfEnrolled,
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
-        const result = await deletePrivateMemories(createServerSupabase(), userId);
+        const result = await deletePrivateMemories(createDb(), userId);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.status(204).send();
     }),
@@ -1208,7 +1208,7 @@ userRouter.get(
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await exportUserAccount(db, userId, userEmail);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1216,7 +1216,7 @@ userRouter.get(
             "Content-Disposition",
             `attachment; filename="${userExportFilename("account", userId)}"`,
         );
-        void recordAudit(createServerSupabase(), {
+        void recordAudit(createDb(), {
             userId,
             userEmail: res.locals.userEmail as string | undefined,
             action: "export.account",
@@ -1234,7 +1234,7 @@ userRouter.get(
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await exportUserChats(db, userId, userEmail);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1242,7 +1242,7 @@ userRouter.get(
             "Content-Disposition",
             `attachment; filename="${userExportFilename("chats", userId)}"`,
         );
-        void recordAudit(createServerSupabase(), {
+        void recordAudit(createDb(), {
             userId,
             userEmail: res.locals.userEmail as string | undefined,
             action: "export.chats",
@@ -1260,7 +1260,7 @@ userRouter.get(
     asyncRoute(async (_req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await exportUserTabularReviews(db, userId, userEmail);
         if (!result.ok) return void sendInternalError(res, result.error);
         res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1268,7 +1268,7 @@ userRouter.get(
             "Content-Disposition",
             `attachment; filename="${userExportFilename("tabular-reviews", userId)}"`,
         );
-        void recordAudit(createServerSupabase(), {
+        void recordAudit(createDb(), {
             userId,
             userEmail: res.locals.userEmail as string | undefined,
             action: "export.tabular",
@@ -1299,7 +1299,7 @@ userRouter.post(
             type?: string;
             params?: Record<string, unknown>;
         };
-        // Validated before the Supabase client is constructed, so a bad
+        // Validated before the database client is constructed, so a bad
         // request is a 400 rather than a connection-time failure.
         const parsed = validateExportRequest({ userId, userEmail, body });
         if (!parsed.ok)
@@ -1316,7 +1316,7 @@ userRouter.post(
                 detail: "Exports are temporarily unavailable. Please try again later.",
             });
 
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await startUserExport(db, {
             userId,
             type: parsed.type,
@@ -1336,7 +1336,7 @@ userRouter.get(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await getUserExportStatus(
             db,
             req.params.exportId,
@@ -1358,7 +1358,7 @@ userRouter.get(
     requireMfaIfEnrolled,
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await loadUserExportArtifact(
             db,
             req.params.exportId,

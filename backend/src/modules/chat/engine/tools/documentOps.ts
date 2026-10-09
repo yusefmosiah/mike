@@ -16,7 +16,7 @@ import {
 import { convertedPdfKey, docxToPdf } from "../../../../lib/convert";
 import { enqueueConversion } from "../../../../lib/queue/conversionQueue";
 import { enqueueDbJob, enqueueStorageCleanup } from "../../../../lib/dbq/enqueue";
-import type { Db } from "../../../../lib/supabase";
+import type { Db } from "../../../../lib/db";
 import { profileAttributionName } from "../../../../lib/userLookup";
 import { extractDocxBodyText } from "../../../../lib/docxTrackedChanges";
 import { applyEdits, type EditOp } from "../../../../lib/docx/edit";

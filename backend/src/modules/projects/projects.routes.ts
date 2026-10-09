@@ -7,7 +7,7 @@
 import { Router, type Response } from "express";
 import { requireAuth, requireMfaIfEnrolled } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import { parsePaginationQuery } from "../../lib/pagination";
 import { normalizeSearchTerm } from "../../lib/search";
@@ -49,7 +49,7 @@ export const projectsRouter = Router();
 // same response. The directory pickers (useDirectoryData) previously fanned
 // out one GET /projects/:id per project to obtain those documents; with N
 // projects that burst — auth check plus several DB queries per request —
-// could overwhelm the Supabase gateway. Batching keeps it at one request
+// could overwhelm the database. Batching keeps it at one request
 // and a fixed number of queries regardless of project count.
 //
 // Pagination is opt-in via query params (limit/offset/search/sort_key or
@@ -74,7 +74,7 @@ projectsRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const includeDocuments = req.query.include === "documents";
-  const db = createServerSupabase();
+  const db = createDb();
 
   // GET /projects?view=directory-search — flat filename/project matches for
   // the document picker. Search results do not pretend that a partially
@@ -146,7 +146,7 @@ projectsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     org_id?: string | null;
     memory_enabled?: boolean;
   };
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await createProject(db, {
     userId,
@@ -171,7 +171,7 @@ projectsRouter.get("/:projectId/directory", requireAuth, asyncRoute(async (req, 
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await getProjectDirectoryLevel(db, {
     projectId,
@@ -192,7 +192,7 @@ projectsRouter.get("/:projectId/directory", requireAuth, asyncRoute(async (req, 
 projectsRouter.get("/filter-options", requireAuth, asyncRoute(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await getProjectFilterOptions(db, { userId, userEmail });
   if (!result.ok) return void sendInternalError(res, result.error);
@@ -206,7 +206,7 @@ projectsRouter.get("/filter-options", requireAuth, asyncRoute(async (req, res) =
 projectsRouter.get("/ids", requireAuth, asyncRoute(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await listProjectIds(db, {
     userId,
@@ -225,7 +225,7 @@ projectsRouter.get("/:projectId", requireAuth, asyncRoute(async (req, res) => {
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await getProjectDetail(db, { projectId, userId, userEmail });
   if (!result.ok) {
@@ -245,7 +245,7 @@ projectsRouter.get("/:projectId/people", requireAuth, asyncRoute(async (req, res
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await getProjectPeople(db, { projectId, userId, userEmail });
   if (!result.ok) {
@@ -286,7 +286,7 @@ projectsRouter.get("/:projectId/access", requireAuth, asyncRoute(async (req, res
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await listProjectAccess(db, { projectId, userId, userEmail });
   if (!result.ok) return void sendProjectAccessFailure(res, result);
@@ -298,7 +298,7 @@ projectsRouter.post("/:projectId/access", requireAuth, asyncRoute(async (req, re
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await grantProjectAccess(db, {
     projectId,
@@ -318,7 +318,7 @@ projectsRouter.delete(
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await revokeProjectAccess(db, {
       projectId,
@@ -345,7 +345,7 @@ projectsRouter.patch("/:projectId", requireAuth, asyncRoute(async (req, res) => 
       detail:
         "shared_with is no longer supported; use the project access endpoints.",
     });
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await updateProject(db, {
     projectId,
@@ -368,7 +368,7 @@ projectsRouter.delete("/:projectId", requireAuth, asyncRoute(async (req, res) =>
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await deleteProject(db, { projectId, userId, userEmail });
   if (!result.ok) {
@@ -386,7 +386,7 @@ projectsRouter.get("/:projectId/documents", requireAuth, asyncRoute(async (req, 
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await listProjectDocuments(db, {
     projectId,
@@ -412,7 +412,7 @@ projectsRouter.get(
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await exportProjectManifest(db, {
       projectId,
@@ -443,7 +443,7 @@ projectsRouter.post(
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { projectId, documentId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await assignOrCopyDocument(db, {
       projectId,
@@ -490,7 +490,7 @@ projectsRouter.patch("/:projectId/documents/:documentId", requireAuth, asyncRout
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, documentId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await renameProjectDocument(db, {
     projectId,
@@ -522,7 +522,7 @@ projectsRouter.get("/:projectId/chats", requireAuth, asyncRoute(async (req, res)
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await listProjectChats(db, { projectId, userId, userEmail });
   if (!result.ok) {
@@ -549,7 +549,7 @@ projectsRouter.post(
       conflict_resolution?: unknown;
     };
 
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await resolveProjectFolderPath(db, {
       projectId,
       userId,
@@ -581,7 +581,7 @@ projectsRouter.post("/:projectId/folders", requireAuth, asyncRoute(async (req, r
   const { name, parent_folder_id } = req.body as { name: string; parent_folder_id?: string | null };
   if (!name?.trim()) return void res.status(400).json({ detail: "name is required" });
 
-  const db = createServerSupabase();
+  const db = createDb();
   const result = await createProjectFolder(db, {
     projectId,
     userId,
@@ -607,7 +607,7 @@ projectsRouter.patch("/:projectId/folders/:folderId", requireAuth, asyncRoute(as
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, folderId } = req.params;
   const body = req.body as { name?: string; parent_folder_id?: string | null };
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await updateProjectFolder(db, {
     projectId,
@@ -637,7 +637,7 @@ projectsRouter.delete("/:projectId/folders/:folderId", requireAuth, asyncRoute(a
   const userId = res.locals.userId as string;
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, folderId } = req.params;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await deleteProjectFolder(db, {
     projectId,
@@ -663,7 +663,7 @@ projectsRouter.patch("/:projectId/documents/:documentId/folder", requireAuth, as
   const userEmail = res.locals.userEmail as string | undefined;
   const { projectId, documentId } = req.params;
   const { folder_id } = req.body as { folder_id: string | null };
-  const db = createServerSupabase();
+  const db = createDb();
 
   const result = await moveProjectDocument(db, {
     projectId,

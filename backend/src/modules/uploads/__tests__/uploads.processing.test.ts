@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   officeFileToPdf: vi.fn(),
   recordAudit: vi.fn(),
   uploadFileFromPath: vi.fn(),
-  createServerSupabase: vi.fn(),
+  createDb: vi.fn(),
   enqueueStorageCleanup: vi.fn(),
   requestDocumentCleanupDelivery: vi.fn(),
   reportError: vi.fn((_error: unknown, _context?: unknown) => null),
@@ -61,8 +61,8 @@ vi.mock("../../../lib/dbq/enqueue", () => ({
   enqueueStorageCleanup: mocks.enqueueStorageCleanup,
   requestDocumentCleanupDelivery: mocks.requestDocumentCleanupDelivery,
 }));
-vi.mock("../../../lib/supabase", () => ({
-  createServerSupabase: mocks.createServerSupabase,
+vi.mock("../../../lib/db", () => ({
+  createDb: mocks.createDb,
 }));
 
 import {
@@ -836,7 +836,7 @@ describe("upload processing", () => {
     vi.useFakeTimers();
     const db = fakeDb();
     db.rpc.mockResolvedValue({ data: null, error: null });
-    mocks.createServerSupabase.mockReturnValue(db);
+    mocks.createDb.mockReturnValue(db);
 
     const stop = startUploadProcessingWorkers({
       concurrency: 16,
@@ -886,7 +886,7 @@ describe("upload processing", () => {
         ? { data: null, error: claimError }
         : { data: null, error: null },
     );
-    mocks.createServerSupabase.mockReturnValue(db);
+    mocks.createDb.mockReturnValue(db);
     const claims = () =>
       db.rpc.mock.calls.filter(([name]) => name === "claim_upload_processing_job")
         .length;

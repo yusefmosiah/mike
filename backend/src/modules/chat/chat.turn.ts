@@ -21,7 +21,7 @@ import {
 } from "../../lib/memory/schedule";
 import { titleModelForChat } from "../../lib/modelSelection";
 import { stopOutcomeFrame } from "../../lib/streamRuns";
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { generateAssistantChatTitle, logChatTitleFailure } from "./chat.title";
 import { updateChatTitle } from "./chat.titles";
 import { prepareChatStream, type PreparedChatStream } from "./chat.prepare";

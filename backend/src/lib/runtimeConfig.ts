@@ -175,34 +175,19 @@ export interface AuthServerConfiguration {
   url: string;
   /** GoTrue's base URL as a browser reaches it: OAuth redirects go here. */
   publicUrl: string;
-  /** Sent as `apikey` on user calls, for a GoTrue behind a gateway that requires one. */
-  apiKey: string;
   /** A service-role JWT signed with GoTrue's secret: admin API access. */
   serviceKey: string;
 }
 
-/**
- * Where the auth server (GoTrue) is. AUTH_URL is GoTrue itself; a deployment
- * still configured with SUPABASE_URL reaches the same GoTrue at /auth/v1 behind
- * Supabase's gateway, which also wants its keys as `apikey`.
- */
+/** Where the auth server (GoTrue) is, and the key to its admin API. */
 export function authServerConfiguration(
   env: NodeJS.ProcessEnv = process.env,
 ): AuthServerConfiguration {
-  const direct = required(env, ["AUTH_URL"]);
-  const supabase = required(env, ["SUPABASE_URL"]);
-  const url = (
-    direct || (supabase ? `${supabase.replace(/\/+$/, "")}/auth/v1` : "")
-  ).replace(/\/+$/, "");
+  const url = required(env, ["AUTH_URL"]).replace(/\/+$/, "");
   return {
     url,
     publicUrl: required(env, ["AUTH_PUBLIC_URL"]).replace(/\/+$/, "") || url,
-    apiKey: direct
-      ? required(env, ["AUTH_API_KEY"])
-      : required(env, ["SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY"]),
-    serviceKey: direct
-      ? required(env, ["AUTH_SERVICE_KEY"])
-      : required(env, ["SUPABASE_SECRET_KEY"]),
+    serviceKey: required(env, ["AUTH_SERVICE_KEY"]),
   };
 }
 

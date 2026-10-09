@@ -8,8 +8,8 @@ import { asRole, stackAuth, stackConfigured, stackDb, stackUserAuth } from "./st
 // the auth↔API contract still holds, and it anchors the security model's
 // central claim: Mike reaches data only over its own connection, and every
 // table denies the `anon` and `authenticated` roles. Mike never uses those
-// roles; a hosted Supabase exposes them through its data API, so the deny-all
-// firewall must hold for a deployment that keeps its database there.
+// roles; the deny-all firewall is defense in depth, so a data API (PostgREST,
+// say) put in front of the database later could still read nothing.
 //
 // Gated: npm run test:stack starts Postgres + GoTrue and sets
 // DATABASE_TEST_URL, AUTH_TEST_URL and AUTH_TEST_SERVICE_KEY.

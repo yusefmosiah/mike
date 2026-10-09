@@ -22,8 +22,8 @@ const completeGoogleDriveOAuth = vi.fn();
 const disconnectGoogleDrive = vi.fn();
 const cancelGoogleDriveOAuth = vi.fn();
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => ({})),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => ({})),
 }));
 
 vi.mock("../../middleware/auth", () => ({

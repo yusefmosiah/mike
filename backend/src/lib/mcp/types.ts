@@ -1,4 +1,4 @@
-export type { Db } from "../supabase";
+export type { Db } from "../db";
 
 export type McpTransport = "streamable_http";
 export type McpAuthType = "none" | "bearer" | "oauth";

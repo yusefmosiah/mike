@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import type { AssistantEvent } from "../../chat/engine/index";
 import { updateChatTitle as chatModuleUpdateChatTitle } from "../../chat/chat.service";
 import {

@@ -8,7 +8,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import { enqueueRlmRun, getRlmRun } from "./diligence.service";
 
@@ -19,7 +19,7 @@ diligenceRouter.post(
     "/runs",
     asyncRoute(async (req, res) => {
         const result = await enqueueRlmRun({
-            db: createServerSupabase(),
+            db: createDb(),
             userId: res.locals.userId as string,
             userEmail: res.locals.userEmail as string | undefined,
             body: req.body,
@@ -33,7 +33,7 @@ diligenceRouter.get(
     "/runs/:jobId",
     asyncRoute(async (req, res) => {
         const result = await getRlmRun({
-            db: createServerSupabase(),
+            db: createDb(),
             jobId: req.params.jobId,
             userId: res.locals.userId as string,
             userEmail: res.locals.userEmail as string | undefined,

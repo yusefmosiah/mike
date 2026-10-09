@@ -11,7 +11,7 @@ separately from the web assistant's chat history.
 
 - Node.js 22 or newer
 - Microsoft Word desktop or Word on the web
-- A running Mike backend and Supabase environment configured according to the
+- A running Mike backend, Postgres and GoTrue configured according to the
   [local development guide](../docs/local-development.md)
 - A Mike account
 - A model-provider API key or an Ollama model reachable by the backend

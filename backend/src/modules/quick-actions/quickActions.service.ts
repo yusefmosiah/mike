@@ -1,7 +1,7 @@
 // Business logic + data-access for the quick-actions module.
 //
 // Service layer behind quickActions.routes.ts. Every function takes an
-// explicit Supabase client (`db`) plus request-derived primitives, validates
+// explicit database client (`db`) plus request-derived primitives, validates
 // the caller's payload, enforces the workflow-access boundary, and RETURNS a
 // `ServiceResult`. It never touches req/res.
 //
@@ -10,7 +10,7 @@
 // route's error middleware turns that into the opaque internal-error body, so
 // the throw is load-bearing and is kept.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { ensureDefaultWorkflows } from "../../lib/workflowCatalog";
 import { checkWorkflowAccess } from "../../lib/access";
 import {

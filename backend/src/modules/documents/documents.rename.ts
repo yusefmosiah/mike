@@ -1,6 +1,6 @@
 // One rename operation for project and library entry points. Scope is applied
 // to BOTH document queries; an id alone never authorizes a mutation.
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { checkProjectAccess } from "../../lib/access";
 import { can, DOCS_ORGANIZE_FORBIDDEN } from "../../lib/permissions";
 import {

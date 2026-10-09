@@ -43,8 +43,8 @@ vi.mock("../../middleware/auth", () => ({
   },
 }));
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: vi.fn(() => database),
+vi.mock("../../lib/db", () => ({
+  createDb: vi.fn(() => database),
 }));
 
 vi.mock("../../lib/access", async (importOriginal) => ({

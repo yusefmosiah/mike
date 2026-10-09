@@ -4,7 +4,7 @@ import { type ConversionJobData } from "../../lib/queue/conversionQueue";
 import { downloadFile, uploadFile } from "../../lib/storage";
 import { docxToPdf, convertedPdfKey } from "../../lib/convert";
 import { reportError } from "../../lib/observability/sentry";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 
 /**
  * Convert one uploaded DOCX/DOC to PDF and finalize the document.
@@ -26,7 +26,7 @@ import { createServerSupabase, type Db } from "../../lib/supabase";
  */
 export async function runConversionJob(
     data: ConversionJobData,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const { documentId, versionId, userId, storagePath } = data;
     const finalize = data.finalizeDocumentStatus !== false;

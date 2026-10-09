@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-import type { Db } from "../../supabase";
+import type { Db } from "../../db";
 import type {
     EnqueueDbJobInput,
     EnqueueDbJobResult,
@@ -31,8 +31,8 @@ const rpc = vi.fn<
         params: Record<string, unknown>,
     ) => Promise<{ data: unknown; error: { message: string } | null }>
 >(async () => ({ data: 0, error: null }));
-vi.mock("../../supabase", () => ({
-    createServerSupabase: () => ({
+vi.mock("../../db", () => ({
+    createDb: () => ({
         rpc: (fn: string, params: Record<string, unknown>) => rpc(fn, params),
     }),
 }));

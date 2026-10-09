@@ -23,8 +23,8 @@ vi.mock("../../middleware/auth", () => ({
   },
 }));
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: () => ({
+vi.mock("../../lib/db", () => ({
+  createDb: () => ({
     rpc: mocks.rpc,
     // Enough of a builder for the destination checks: they read one row and
     // then hand the verdict to lib/access.

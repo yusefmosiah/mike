@@ -88,7 +88,7 @@ import {
   upsertCourtlistenerCases,
   type CourtlistenerTurnState,
 } from "./courtlistenerTurnState";
-import type { Db } from "../../../../lib/supabase";
+import type { Db } from "../../../../lib/db";
 
 function sourceMaterialNotice(
   sourceKind: "document" | "library_template" | "workflow_asset" | undefined,

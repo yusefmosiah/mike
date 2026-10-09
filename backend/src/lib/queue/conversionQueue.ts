@@ -4,7 +4,7 @@ import type IORedis from "ioredis";
 import { getRedisProducerConnection, withRedisTimeout } from "./connection";
 import { redisEnabled } from "../dbq/driver";
 import { enqueueDbJob } from "../dbq/enqueue";
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 
 /** BullMQ queue that runs DOCX/DOC → PDF conversion off the request thread. */
 export const CONVERSION_QUEUE = "document-conversion";
@@ -101,7 +101,7 @@ export function conversionJobId(
  */
 export async function enqueueConversion(data: ConversionJobData) {
     const dbEnqueue = () =>
-        enqueueDbJob(createServerSupabase(), {
+        enqueueDbJob(createDb(), {
             kind: "conversion.convert",
             payload: data as unknown as Record<string, unknown>,
             dedupeKey: conversionJobId(data.versionId, data.storagePath),

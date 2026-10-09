@@ -31,7 +31,7 @@ export function stackDb(): DbClient | null {
 export function stackAuth(): GoTrueClient {
   return new GoTrueClient({
     url: authUrl!,
-    headers: { apikey: authServiceKey!, Authorization: `Bearer ${authServiceKey}` },
+    headers: { Authorization: `Bearer ${authServiceKey}` },
     persistSession: false,
     autoRefreshToken: false,
   });
@@ -45,8 +45,8 @@ export function stackUserAuth(): GoTrueClient {
 /**
  * Run `sql` the way PostgREST runs a request from a browser: as the `anon`
  * role, or as `authenticated` carrying the caller's JWT claims. Mike never
- * queries this way; a hosted Supabase still exposes these roles over its data
- * API, which is why every table must deny them. Rolled back either way.
+ * queries this way; every table denies these roles so a data API put in front
+ * of the database could read nothing. Rolled back either way.
  */
 export async function asRole(
   role: "anon" | "authenticated",

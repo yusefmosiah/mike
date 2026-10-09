@@ -10,7 +10,7 @@
 import { Router, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import {
     listOllamaModels,
@@ -57,7 +57,7 @@ async function sendCatalog(
 ): Promise<void> {
     const userId = res.locals.userId as string;
     try {
-        const result = await lookup(createServerSupabase(), userId);
+        const result = await lookup(createDb(), userId);
         if (!result.ok) return void sendCatalogFailure(res, result);
         res.json({ models: result.models });
     } catch (error) {
@@ -73,7 +73,7 @@ modelsRouter.get("/ollama", requireAuth, asyncRoute(async (_req, res) => {
 // GET /models/configured
 modelsRouter.get("/configured", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const models = await listConfiguredModels(createServerSupabase(), userId);
+    const models = await listConfiguredModels(createDb(), userId);
     res.json({ models });
 }));
 

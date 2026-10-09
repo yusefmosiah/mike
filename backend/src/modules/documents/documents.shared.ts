@@ -3,7 +3,7 @@ import { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "./d
 // Everything public here is re-exported through documents.service.ts,
 // which remains the module's stable facade.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 export type { Db };
 /** Trusted internal delete: callers must establish document access first.
  * Cascading version triggers capture all cleanup keys before rows disappear. */

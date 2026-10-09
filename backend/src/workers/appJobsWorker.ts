@@ -8,7 +8,7 @@ import {
 } from "../lib/queue/appJobsQueue";
 import { processClaimedJob } from "../lib/dbq/runner";
 import { DB_JOB_HANDLERS, DB_JOB_FAILURE_HOOKS } from "../jobs/registry";
-import { createServerSupabase } from "../lib/supabase";
+import { createDb } from "../lib/db";
 import type { Db, DbJob } from "../lib/dbq/types";
 
 /**
@@ -26,7 +26,7 @@ import type { Db, DbJob } from "../lib/dbq/types";
  */
 export async function runAppJobDelivery(
     data: AppJobDelivery,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const { data: rows, error } = await db.rpc("claim_db_job", {
         p_id: data.dbJobId,

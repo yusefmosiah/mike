@@ -10,7 +10,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import { getSourceDocument } from "./sourceDocuments.service";
 
@@ -20,7 +20,7 @@ sourceDocumentsRouter.use(requireAuth);
 
 sourceDocumentsRouter.get("/:documentId", asyncRoute(async (req, res) => {
   try {
-    const result = await getSourceDocument(createServerSupabase(), {
+    const result = await getSourceDocument(createDb(), {
       userId: String(res.locals.userId ?? ""),
       documentId: String(req.params.documentId ?? ""),
     });

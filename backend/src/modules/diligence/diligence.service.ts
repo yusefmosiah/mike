@@ -1,6 +1,6 @@
 // Business logic + stable facade for the diligence module.
 //
-// The service takes an explicit Supabase client plus request-derived
+// The service takes an explicit database client plus request-derived
 // primitives, performs the project-access checks and job enqueue, and returns
 // typed results — the route layer only parses and maps them onto HTTP. The
 // rlm.deep_run job handler and its payload contract are re-exported here so
@@ -24,7 +24,7 @@ import {
     ok,
     type ServiceResult,
 } from "../../lib/serviceResult";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
     DEFAULT_RLM_MODEL,
     RLM_DEEP_RUN_KIND,

@@ -1,4 +1,4 @@
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 
 export type { WordEditApplyMode } from "@mike/contracts";
 import type { WordEditApplyMode } from "@mike/contracts";

@@ -27,7 +27,7 @@ const SCHEMA_OUT_OF_DATE_CODES = new Set([
 
 /**
  * The schema-drift code in an error's cause chain, if any. Reads only the
- * structured `code` of each link (a supabase-js error object, or the Error
+ * structured `code` of each link (a query's error object, or the Error
  * asReportableError wrapped around one), never message text.
  */
 export function schemaOutOfDateCode(error: unknown): string | null {
@@ -52,7 +52,7 @@ export function schemaOutOfDateCode(error: unknown): string | null {
 const SAFE_CODE = /^[A-Za-z0-9_]{2,40}$/;
 
 /**
- * Turn a thrown or returned non-Error (a supabase-js `{ code, message,
+ * Turn a thrown or returned non-Error (a query's `{ code, message,
  * details, hint }`, a string, a storage SDK's plain object) into an Error
  * that is worth reporting:
  *

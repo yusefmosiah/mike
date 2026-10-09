@@ -29,7 +29,7 @@
 //   while the cell still carries that stamp. Clearing the stamp is also what
 //   lets the dead run's lease go, so the sweep calls `finishGenerationIfIdle`
 //   once per generation it touched.
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { getConversionQueue, conversionJobId } from "../../lib/queue/conversionQueue";
 import { withRedisTimeout } from "../../lib/queue/connection";
 import { redisEnabled } from "../../lib/dbq/driver";
@@ -47,7 +47,7 @@ function docStaleMs(): number {
  * skipping any that still have a live conversion job.
  */
 export async function sweepStaleProcessingDocuments(
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<number> {
     const cutoff = new Date(Date.now() - docStaleMs()).toISOString();
     const { data: docs, error } = await db

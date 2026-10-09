@@ -48,7 +48,7 @@ export async function ensureDocumentAccess(
         .eq("id", documentId)
         .single();
     if (!doc) return { ok: false };
-    // `select` is a dynamic string, so supabase-js can't derive the row type.
+    // `select` is a dynamic string, so the client can't derive the row type.
     const d = doc as unknown as DocRow;
     const access = await ensureDocAccess(d, userId, userEmail, db);
     if (!access.ok) return { ok: false };

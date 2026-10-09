@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ reportError: vi.fn() }));
 
-vi.mock("../../supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../db", () => ({ createDb: vi.fn() }));
 vi.mock("../../storage", () => ({ deleteFile: vi.fn() }));
 vi.mock("../../observability/sentry", async (importOriginal) => {
     const actual =

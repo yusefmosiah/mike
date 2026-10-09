@@ -1,5 +1,5 @@
-// Mike's database client: the slice of the supabase-js query builder the
-// backend uses, executed directly on Postgres over `pg`.
+// Mike's database client: a chainable query builder (the API the backend's
+// call sites were written against), executed directly on Postgres over `pg`.
 //
 // It replaces PostgREST without rewriting every call site: `db.from(table)`
 // chains and `db.rpc(fn, args)` keep their shape and their results. Queries
@@ -319,7 +319,7 @@ function overloadFor(overloads: FunctionInfo[], names: string[]): FunctionInfo |
     .sort((a, b) => a.args.size - b.args.size)[0];
 }
 
-/** Rows come back as `any[]`; after `single()`/`maybeSingle()`, one `any` row (as supabase-js typed them). */
+/** Rows come back as `any[]`; after `single()`/`maybeSingle()`, one `any` row. */
 export class QueryBuilder<Data = any[]> implements PromiseLike<DbResult<Data>> {
   private columns: string | undefined;
   private countExact = false;

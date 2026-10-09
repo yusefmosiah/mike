@@ -3,7 +3,7 @@ import type IORedis from "ioredis";
 import { getRedisProducerConnection, withRedisTimeout } from "./connection";
 import { redisEnabled } from "../dbq/driver";
 import { enqueueDbJob } from "../dbq/enqueue";
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 
 /**
  * BullMQ queue that runs tabular-review cell extraction off the request thread.
@@ -106,7 +106,7 @@ export async function enqueueExtraction(data: ExtractionJobData) {
     // frames are skipped in this mode; the SSE views' DB-poll backstops
     // resolve every cell (they already had to, for missed pub/sub frames).
     if (!redisEnabled()) {
-        return enqueueDbJob(createServerSupabase(), {
+        return enqueueDbJob(createDb(), {
             kind: "extraction.extract",
             payload: data as unknown as Record<string, unknown>,
             dedupeKey: extractionJobId(data.reviewId, data.rowId, data.columnIndex),
@@ -165,7 +165,7 @@ export async function removeQueuedExtractionJobs(
             extractionJobId(reviewId, rowId),
             ...columnIndexes.map((c) => extractionJobId(reviewId, rowId, c)),
         ]);
-        const { data, error } = await createServerSupabase().rpc(
+        const { data, error } = await createDb().rpc(
             "cancel_db_jobs",
             { p_dedupe_keys: keys },
         );

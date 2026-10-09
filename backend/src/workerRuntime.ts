@@ -24,7 +24,7 @@ import { enqueueDbJob } from "./lib/dbq/enqueue";
 import { runStaleWorkSweep } from "./jobs/staleWork";
 import { startUploadProcessingWorkers } from "./modules/uploads/uploads.service";
 import { uploadProcessingConfiguration } from "./lib/runtimeConfig";
-import { createServerSupabase } from "./lib/supabase";
+import { createDb } from "./lib/db";
 import { reportError } from "./lib/observability/sentry";
 
 const SWEEP_INTERVAL_MS = (() => {
@@ -55,7 +55,7 @@ let stopUploadWorker: (() => void) | null = null;
  * so nothing it hits may take the worker runtime down.
  */
 async function runMcpTokenRefreshSweep(): Promise<void> {
-    const db = createServerSupabase();
+    const db = createDb();
     const now = Date.now();
     const { data, error } = await db
         .from("user_mcp_oauth_tokens")

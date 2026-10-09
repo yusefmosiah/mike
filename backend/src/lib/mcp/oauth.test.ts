@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock only the two module-internal seams that would otherwise require a live
-// MCP server and Supabase: the SDK's `auth()` driver and `loadConnector`. Their
+// MCP server and database: the SDK's `auth()` driver and `loadConnector`. Their
 // vi.fn()s are created via vi.hoisted so the (hoisted) vi.mock factories below
 // can reference them without a temporal-dead-zone error.
 const { authMock, loadConnectorMock, guardedFetchMock } = vi.hoisted(() => ({

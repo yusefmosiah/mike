@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sealManifest } from "../../lib/manifestSigning";
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 
 const PAGE_SIZE = 1000;
 

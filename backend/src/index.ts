@@ -9,7 +9,7 @@ import { manifestPublicKey } from "./lib/manifestSigning";
 import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
 import { reportError } from "./lib/observability/sentry";
-import { createServerSupabase } from "./lib/supabase";
+import { createDb } from "./lib/db";
 import { resumeInterruptedChatTurns } from "./modules/chat/chat.service";
 import { resumeInterruptedProjectChatTurns } from "./modules/project-chat/projectChat.service";
 import {
@@ -135,8 +135,8 @@ async function main(): Promise<void> {
 
     // Chat turns the previous process left in flight (a deploy, a crash)
     // continue now, into runs a reloading client attaches to.
-    void resumeInterruptedChatTurns(createServerSupabase());
-    void resumeInterruptedProjectChatTurns(createServerSupabase());
+    void resumeInterruptedChatTurns(createDb());
+    void resumeInterruptedProjectChatTurns(createDb());
   });
 }
 

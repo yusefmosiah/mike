@@ -1,5 +1,5 @@
 // workflows listing — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { type PaginationParams } from "../../lib/pagination";
 import { type WorkflowSort } from "../../lib/sort";
 import { buildWorkflowIdsOverviewRpcArgs, buildWorkflowsOverviewRpcArgs, type WorkflowScope } from "./workflows.overview";

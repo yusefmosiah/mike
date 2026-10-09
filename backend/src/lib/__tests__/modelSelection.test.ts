@@ -7,7 +7,7 @@ import {
     titleModelForChat,
 } from "../modelSelection";
 import { resetModelRegistryCache } from "../llm/registry";
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 
 const routerModels = {
     openrouter: ["anthropic/claude-sonnet-4.5"],

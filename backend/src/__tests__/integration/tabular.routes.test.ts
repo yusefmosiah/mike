@@ -4,7 +4,7 @@ import request from "supertest";
 // ---------------------------------------------------------------------------
 // Hoisted mock fns reconfigured per-test. Access helpers + model settings are
 // mocked so the tests drive review-access decisions, document-access filtering
-// and the missing-API-key guard without touching real Supabase / LLM IO. The
+// and the missing-API-key guard without touching a real database or LLM. The
 // streaming endpoints (chat/generate) are only exercised up to their GUARDS —
 // the SSE loop itself is never reached in these tests.
 // ---------------------------------------------------------------------------
@@ -41,8 +41,8 @@ const {
 }));
 
 // ---------------------------------------------------------------------------
-// Configurable Supabase stub (mirrors projects.routes.test). Each test seeds
-// `supabaseState` in beforeEach; terminal query operations resolve to the
+// Configurable database stub (mirrors projects.routes.test). Each test seeds
+// `dbState` in beforeEach; terminal query operations resolve to the
 // per-table result, rpc() resolves to a per-call result. Insert payloads are
 // recorded so tests can assert on what got persisted.
 // ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ type QueryResult = { data: unknown; error: unknown };
 // route that hits the SAME table twice with different outcomes — e.g. DELETE
 // /tabular-review/:reviewId, which now reads the row to derive the caller's
 // role before deleting it.
-let supabaseState: {
+let dbState: {
     rpc: QueryResult;
     rpcCalls: { fn: string; args: unknown }[];
     operations: string[];
@@ -62,8 +62,8 @@ let supabaseState: {
     updates: { table: string; payload: unknown }[];
 };
 
-function resetSupabaseState() {
-    supabaseState = {
+function resetDbState() {
+    dbState = {
         rpc: { data: [], error: null },
         rpcCalls: [],
         operations: [],
@@ -72,10 +72,10 @@ function resetSupabaseState() {
         updates: [],
     };
 }
-resetSupabaseState();
+resetDbState();
 
 function resultForTable(table: string): QueryResult {
-    const entry = supabaseState.tables[table];
+    const entry = dbState.tables[table];
     const resolved = Array.isArray(entry)
         ? entry.length > 1
             ? (entry.shift() as QueryResult)
@@ -120,14 +120,14 @@ function makeQuery(table: string) {
     ];
     for (const m of chain) q[m] = vi.fn(() => q);
     q.insert = vi.fn((payload: unknown) => {
-        supabaseState.inserts.push({ table, payload });
+        dbState.inserts.push({ table, payload });
         return q;
     });
     // Update payloads are recorded alongside inserts: what a route writes on
     // a mutation is exactly as much a part of its contract as what it writes
     // on a create, and a denormalized column can only be checked here.
     q.update = vi.fn((payload: unknown) => {
-        supabaseState.updates.push({ table, payload });
+        dbState.updates.push({ table, payload });
         return q;
     });
     q.single = vi.fn(() => Promise.resolve(resultForTable(table)));
@@ -139,16 +139,16 @@ function makeQuery(table: string) {
     return q;
 }
 
-function mockSupabase() {
+function mockDb() {
     return {
         from: vi.fn((table: string) => {
-            supabaseState.operations.push(`from:${table}`);
+            dbState.operations.push(`from:${table}`);
             return makeQuery(table);
         }),
         rpc: vi.fn((fn: string, args: unknown) => {
-            supabaseState.operations.push(`rpc:${fn}`);
-            supabaseState.rpcCalls.push({ fn, args });
-            return Promise.resolve(supabaseState.rpc);
+            dbState.operations.push(`rpc:${fn}`);
+            dbState.rpcCalls.push({ fn, args });
+            return Promise.resolve(dbState.rpc);
         }),
         auth: {
             getUser: () =>
@@ -157,12 +157,12 @@ function mockSupabase() {
     };
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => mockDb()),
 }));
 
 // The auth stub is the one in ../helpers/authMock, shared with the other route
-// suites. The Supabase stub below is NOT: this suite needs per-table result
+// suites. The database stub below is NOT: this suite needs per-table result
 // QUEUES, an update recorder, and the tabular_reviews model default, none of
 // which the shared one carries.
 vi.mock("../../middleware/auth", async () => {
@@ -176,7 +176,7 @@ vi.mock("../../modules/chat/engine/index", async (importOriginal) => ({
 }));
 
 // Only `extractRowColumns` is replaced: `finalizeCell` stays real so the
-// "stopped cells go back to pending" write lands in the Supabase stub.
+// "stopped cells go back to pending" write lands in the database stub.
 vi.mock("../../modules/tabular/tabular.extractRow", async (importOriginal) => ({
     ...(await importOriginal<
         typeof import("../../modules/tabular/tabular.extractRow")
@@ -228,7 +228,7 @@ const AUTH = ["Authorization", "Bearer test"] as const;
 describe("tabular.routes", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        resetSupabaseState();
+        resetDbState();
         // Default: caller is the owner with full access.
         ensureReviewAccess.mockResolvedValue({
             ok: true,
@@ -274,7 +274,7 @@ describe("tabular.routes", () => {
     // ── GET /tabular-review (overview) ────────────────────────────────────
     describe("GET /tabular-review", () => {
         it("returns the overview rows from the RPC", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [{ id: "r1", title: "Alpha" }],
                 error: null,
             };
@@ -288,7 +288,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 500 with detail when the RPC errors", async () => {
-            supabaseState.rpc = { data: null, error: { message: "boom" } };
+            dbState.rpc = { data: null, error: { message: "boom" } };
 
       const res = await request(app)
         .get("/tabular-review")
@@ -310,7 +310,7 @@ describe("tabular.routes", () => {
             expect(res.status).toBe(400);
             expect(res.body.code).toBe("model_required");
             expect(
-                supabaseState.inserts.some(
+                dbState.inserts.some(
                     (insert) => insert.table === "tabular_reviews",
                 ),
             ).toBe(false);
@@ -333,18 +333,18 @@ describe("tabular.routes", () => {
                 "Tabular reviews cannot be organization-scoped. Create the review inside an organization project instead.",
             );
             expect(
-                supabaseState.inserts.some(
+                dbState.inserts.some(
                     (insert) => insert.table === "tabular_reviews",
                 ),
             ).toBe(false);
         });
 
         it("creates a review (201) and only persists accessible documents", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r9", title: "Gamma", document_ids: ["d1"] },
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [
                     {
                         id: "d1",
@@ -355,7 +355,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-1",
@@ -385,7 +385,7 @@ describe("tabular.routes", () => {
             expect(res.status).toBe(201);
             expect(res.body).toMatchObject({ id: "r9" });
 
-            const reviewInsert = supabaseState.inserts.find(
+            const reviewInsert = dbState.inserts.find(
                 (i) => i.table === "tabular_reviews",
             );
             expect(reviewInsert?.payload).toMatchObject({
@@ -393,7 +393,7 @@ describe("tabular.routes", () => {
                 org_id: null,
             });
             // Cells are created for accessible review rows × columns only (1 × 1).
-            const cellInsert = supabaseState.inserts.find(
+            const cellInsert = dbState.inserts.find(
                 (i) => i.table === "tabular_cells",
             );
             expect(cellInsert?.payload).toEqual([
@@ -408,11 +408,11 @@ describe("tabular.routes", () => {
         });
 
         it("groups project-folder documents into one review row", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r10", title: "Grouped", document_ids: ["d1", "d2", "d3"] },
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [
           {
             id: "d1",
@@ -438,11 +438,11 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.project_subfolders = {
+            dbState.tables.project_subfolders = {
                 data: [{ id: "f1", name: "Contracts", parent_folder_id: null }],
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-folder",
@@ -482,11 +482,11 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(201);
       expect(
-        supabaseState.inserts.find((i) => i.table === "tabular_reviews")
+        dbState.inserts.find((i) => i.table === "tabular_reviews")
           ?.payload,
       ).toMatchObject({ document_grouping: "folder" });
       expect(
-        supabaseState.inserts.find((i) => i.table === "tabular_review_rows")
+        dbState.inserts.find((i) => i.table === "tabular_review_rows")
           ?.payload,
       ).toEqual([
                     {
@@ -509,7 +509,7 @@ describe("tabular.routes", () => {
                     },
                 ]);
       expect(
-        supabaseState.inserts.find(
+        dbState.inserts.find(
           (i) => i.table === "tabular_review_row_sources",
         )?.payload,
       ).toEqual([
@@ -518,7 +518,7 @@ describe("tabular.routes", () => {
                     { row_id: "row-document", document_id: "d3", sort_index: 0 },
                 ]);
       expect(
-        supabaseState.inserts.find((i) => i.table === "tabular_cells")?.payload,
+        dbState.inserts.find((i) => i.table === "tabular_cells")?.payload,
       ).toEqual([
                     {
                         review_id: "r10",
@@ -538,11 +538,11 @@ describe("tabular.routes", () => {
         });
 
         it("groups library file-folder documents into one review row", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r11", title: "Library grouped" },
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [
                     {
                         id: "d1",
@@ -563,7 +563,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.library_folders = {
+            dbState.tables.library_folders = {
                 data: [
                     {
                         id: "lf1",
@@ -573,7 +573,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-library-folder",
@@ -602,7 +602,7 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(201);
             expect(
-                supabaseState.inserts.find(
+                dbState.inserts.find(
                     (insert) => insert.table === "tabular_review_rows",
                 )?.payload,
             ).toEqual([
@@ -617,7 +617,7 @@ describe("tabular.routes", () => {
                 },
             ]);
             expect(
-                supabaseState.inserts.find(
+                dbState.inserts.find(
                     (insert) => insert.table === "tabular_review_row_sources",
                 )?.payload,
             ).toEqual([
@@ -652,7 +652,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 500 when the review insert errors", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: null,
                 error: { message: "insert failed" },
             };
@@ -674,7 +674,7 @@ describe("tabular.routes", () => {
     // ── GET /tabular-review/:reviewId (detail) ────────────────────────────
     describe("GET /tabular-review/:reviewId", () => {
         it("returns 404 when the review does not exist", async () => {
-            supabaseState.tables.tabular_reviews = { data: null, error: null };
+            dbState.tables.tabular_reviews = { data: null, error: null };
 
             const res = await request(app)
                 .get("/tabular-review/r1")
@@ -685,7 +685,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -700,7 +700,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 200 with review/cells/documents + is_owner", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -712,7 +712,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = {
+            dbState.tables.tabular_cells = {
                 data: [
                     {
                         id: "c1",
@@ -724,7 +724,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [{ id: "d1", current_version_id: null }],
                 error: null,
             };
@@ -748,7 +748,7 @@ describe("tabular.routes", () => {
 
     describe("tabular review access grants", () => {
         it("returns the role-aware grant list to an admin", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -757,7 +757,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_access_grants = {
+            dbState.tables.tabular_review_access_grants = {
                 data: [
                     {
                         id: "rg1",
@@ -783,7 +783,7 @@ describe("tabular.routes", () => {
         });
 
         it("rejects a grant addressed to the caller", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -832,7 +832,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when the review does not exist", async () => {
-            supabaseState.tables.tabular_reviews = { data: null, error: null };
+            dbState.tables.tabular_reviews = { data: null, error: null };
 
             const res = await request(app)
                 .patch("/tabular-review/r1")
@@ -847,7 +847,7 @@ describe("tabular.routes", () => {
             // Reshaping a review's grid is content work, so members may do it
             // (Will's review: members "use chats and reviews"). Only viewers,
             // who are read-only by definition, are refused.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: "p1" },
                 error: null,
             };
@@ -872,7 +872,7 @@ describe("tabular.routes", () => {
         // stale copy can still cause account cleanup to retain or delete the
         // wrong data.
         const seedMove = (reviewOrgId: string | null) => {
-            supabaseState.tables.tabular_reviews = [
+            dbState.tables.tabular_reviews = [
                 {
                     data: {
                         id: "r1",
@@ -901,7 +901,7 @@ describe("tabular.routes", () => {
             });
         };
         const movePayload = () =>
-            supabaseState.updates.find((u) => u.table === "tabular_reviews")
+            dbState.updates.find((u) => u.table === "tabular_reviews")
                 ?.payload as Record<string, unknown> | undefined;
 
         it("clears org_id when a review moves into a personal project", async () => {
@@ -985,7 +985,7 @@ describe("tabular.routes", () => {
     // the one the old `.eq("user_id", userId)` filter got wrong.
     describe("DELETE /tabular-review/:reviewId", () => {
         const seedReview = (rows: QueryResult[]) => {
-            supabaseState.tables.tabular_reviews = rows;
+            dbState.tables.tabular_reviews = rows;
         };
         const ownedRow = {
             data: { id: "r1", user_id: "u1", project_id: "p1" },
@@ -1060,7 +1060,7 @@ describe("tabular.routes", () => {
                     "You do not have permission to delete this review",
                 );
                 // Refused before any destructive statement ran.
-                expect(supabaseState.operations).toEqual(["from:tabular_reviews"]);
+                expect(dbState.operations).toEqual(["from:tabular_reviews"]);
             },
         );
 
@@ -1121,7 +1121,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -1137,7 +1137,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 403 for a viewer — clearing cells is member+", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: "p1" },
                 error: null,
             };
@@ -1158,7 +1158,7 @@ describe("tabular.routes", () => {
         });
 
         it("rejects clearing cells while generation holds the review lease", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1179,11 +1179,11 @@ describe("tabular.routes", () => {
                 code: "review_running",
                 detail: "This tabular review is currently running.",
             });
-            expect(supabaseState.operations).not.toContain("from:tabular_cells");
+            expect(dbState.operations).not.toContain("from:tabular_cells");
         });
 
         it("atomically rejects clearing when a run starts after the review read", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1192,7 +1192,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.rpc = { data: "running", error: null };
+            dbState.rpc = { data: "running", error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/clear-cells")
@@ -1201,14 +1201,14 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(409);
             expect(res.body.code).toBe("review_running");
-            expect(supabaseState.rpcCalls[0]?.fn).toBe(
+            expect(dbState.rpcCalls[0]?.fn).toBe(
                 "begin_tabular_review_generation",
             );
-            expect(supabaseState.operations).not.toContain("from:tabular_cells");
+            expect(dbState.operations).not.toContain("from:tabular_cells");
         });
 
         it("returns 204 on success", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1217,7 +1217,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.rpc = { data: "started", error: null };
+            dbState.rpc = { data: "started", error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/clear-cells")
@@ -1225,7 +1225,7 @@ describe("tabular.routes", () => {
                 .send({ row_ids: ["row-1"] });
 
             expect(res.status).toBe(204);
-            expect(supabaseState.rpcCalls.map(({ fn }) => fn)).toEqual([
+            expect(dbState.rpcCalls.map(({ fn }) => fn)).toEqual([
                 "begin_tabular_review_generation",
                 "finish_tabular_review_generation",
             ]);
@@ -1245,7 +1245,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -1261,7 +1261,7 @@ describe("tabular.routes", () => {
         });
 
         it("rejects cell regeneration while generation holds the review lease", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1283,13 +1283,13 @@ describe("tabular.routes", () => {
                 code: "review_running",
                 detail: "This tabular review is currently running.",
             });
-            expect(supabaseState.operations).not.toContain(
+            expect(dbState.operations).not.toContain(
                 "from:tabular_review_rows",
             );
         });
 
         it("atomically rejects regeneration when a run starts after the review read", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1299,7 +1299,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-1",
@@ -1312,11 +1312,11 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_review_row_sources = {
+            dbState.tables.tabular_review_row_sources = {
                 data: [{ row_id: "row-1", document_id: "d1" }],
                 error: null,
             };
-            supabaseState.rpc = { data: "running", error: null };
+            dbState.rpc = { data: "running", error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/regenerate-cell")
@@ -1325,14 +1325,14 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(409);
             expect(res.body.code).toBe("review_running");
-            expect(supabaseState.rpcCalls[0]?.fn).toBe(
+            expect(dbState.rpcCalls[0]?.fn).toBe(
                 "begin_tabular_review_generation",
             );
-            expect(supabaseState.operations).not.toContain("from:tabular_cells");
+            expect(dbState.operations).not.toContain("from:tabular_cells");
         });
 
         it("returns 400 when the column is not configured", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1352,7 +1352,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when a row source document is not accessible", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1361,7 +1361,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-forbidden",
@@ -1374,7 +1374,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_review_row_sources = {
+            dbState.tables.tabular_review_row_sources = {
                 data: [
                     {
                         row_id: "row-forbidden",
@@ -1395,7 +1395,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 422 with missing_api_key when the model key is absent", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1404,7 +1404,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-1",
@@ -1417,7 +1417,7 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_review_row_sources = {
+            dbState.tables.tabular_review_row_sources = {
                 data: [{ row_id: "row-1", document_id: "d1" }],
                 error: null,
             };
@@ -1442,7 +1442,7 @@ describe("tabular.routes", () => {
     // ── POST /tabular-review/:reviewId/generate (streaming GUARDS only) ───
     describe("POST /tabular-review/:reviewId/generate", () => {
         it("returns 404 when the review does not exist", async () => {
-            supabaseState.tables.tabular_reviews = { data: null, error: null };
+            dbState.tables.tabular_reviews = { data: null, error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/generate")
@@ -1453,7 +1453,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -1473,7 +1473,7 @@ describe("tabular.routes", () => {
         // row and stamps an audit event in the caller's name. `access.ok`
         // alone let a review VIEWER do all of that.
         it("refuses a viewer with 403, not 404, and starts nothing", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "other",
@@ -1499,16 +1499,16 @@ describe("tabular.routes", () => {
             expect(res.status).toBe(403);
             expect(res.body.detail).toBe(REVIEW_EDIT_FORBIDDEN);
             // And no side effects: no generation lease, no cells, no audit.
-            expect(supabaseState.rpcCalls).toEqual([]);
-            expect(supabaseState.inserts).toEqual([]);
-            expect(supabaseState.updates).toEqual([]);
+            expect(dbState.rpcCalls).toEqual([]);
+            expect(dbState.inserts).toEqual([]);
+            expect(dbState.updates).toEqual([]);
         });
 
         it("lets an editor past the gate", async () => {
             // Empty columns_config, so the next guard in prepareTabularGenerate
             // answers — which is how the test proves the WRITE gate was
             // passed without entering the streaming loop.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "other",
@@ -1535,7 +1535,7 @@ describe("tabular.routes", () => {
         it("still answers 404 to a caller with no verdict at all", async () => {
             // The split must keep the 404 for a non-member: 403 would confirm
             // the review exists to somebody who cannot see it.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "other",
@@ -1559,7 +1559,7 @@ describe("tabular.routes", () => {
             // START, and a viewer never was. Leaving it open would have made
             // the POST gate cosmetic: the same generation channel, one URL
             // away.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "other",
@@ -1581,11 +1581,11 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(403);
             expect(res.body.detail).toBe(REVIEW_EDIT_FORBIDDEN);
-            expect(supabaseState.rpcCalls).toEqual([]);
+            expect(dbState.rpcCalls).toEqual([]);
         });
 
         it("blocks a run when the review has no selected model", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1603,11 +1603,11 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(409);
             expect(res.body.code).toBe("model_required");
-            expect(supabaseState.rpcCalls).toHaveLength(0);
+            expect(dbState.rpcCalls).toHaveLength(0);
         });
 
         it("returns 400 when no columns are configured", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1626,7 +1626,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 422 missing_api_key before streaming when the key is absent", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1635,7 +1635,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_cells = { data: [], error: null };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
                 tabular_model: "claude-sonnet-5",
@@ -1652,7 +1652,7 @@ describe("tabular.routes", () => {
         });
 
         it("requires the version currently loaded by the client", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1662,7 +1662,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_cells = { data: [], error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/generate")
@@ -1676,7 +1676,7 @@ describe("tabular.routes", () => {
         });
 
         it("claims the lease before loading rows and cells", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1686,15 +1686,15 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.tabular_cells = {
+            dbState.tables.tabular_cells = {
                 data: null,
                 error: { message: "cell snapshot failed" },
             };
-            supabaseState.rpc = { data: "started", error: null };
+            dbState.rpc = { data: "started", error: null };
 
             const res = await request(app)
                 .post("/tabular-review/r1/generate")
@@ -1707,19 +1707,19 @@ describe("tabular.routes", () => {
             expect(res.body.detail).toBe(
                 "Something went wrong. Please try again.",
             );
-            const beginIndex = supabaseState.operations.indexOf(
+            const beginIndex = dbState.operations.indexOf(
                 "rpc:begin_tabular_review_generation",
             );
-            const rowsIndex = supabaseState.operations.indexOf(
+            const rowsIndex = dbState.operations.indexOf(
                 "from:tabular_review_rows",
             );
-            const cellsIndex = supabaseState.operations.indexOf(
+            const cellsIndex = dbState.operations.indexOf(
                 "from:tabular_cells",
             );
             expect(beginIndex).toBeGreaterThanOrEqual(0);
             expect(rowsIndex).toBeGreaterThan(beginIndex);
             expect(cellsIndex).toBeGreaterThan(rowsIndex);
-            expect(supabaseState.rpcCalls.at(-1)?.fn).toBe(
+            expect(dbState.rpcCalls.at(-1)?.fn).toBe(
                 "finish_tabular_review_generation",
             );
         });
@@ -1738,7 +1738,7 @@ describe("tabular.routes", () => {
         ])(
             "returns a distinct conflict when the atomic start result is %s",
             async (startResult, code, detail) => {
-                supabaseState.tables.tabular_reviews = {
+                dbState.tables.tabular_reviews = {
                     data: {
                         id: "r1",
                         user_id: "u1",
@@ -1750,11 +1750,11 @@ describe("tabular.routes", () => {
                     },
                     error: null,
                 };
-                supabaseState.tables.tabular_cells = {
+                dbState.tables.tabular_cells = {
                     data: [],
                     error: null,
                 };
-                supabaseState.rpc = { data: startResult, error: null };
+                dbState.rpc = { data: startResult, error: null };
 
                 const res = await request(app)
                     .post("/tabular-review/r1/generate")
@@ -1765,7 +1765,7 @@ describe("tabular.routes", () => {
 
                 expect(res.status).toBe(409);
                 expect(res.body).toEqual({ code, detail });
-                expect(supabaseState.rpcCalls[0]).toMatchObject({
+                expect(dbState.rpcCalls[0]).toMatchObject({
                     fn: "begin_tabular_review_generation",
                     args: {
                         target_review_id: "r1",
@@ -1788,7 +1788,7 @@ describe("tabular.routes", () => {
 
         /** A review with one row and one column, ready to generate. */
         function seedRunnableReview() {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -1798,7 +1798,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_review_rows = {
                 data: [
                     {
                         id: "row-1",
@@ -1813,8 +1813,8 @@ describe("tabular.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
-            supabaseState.rpc = { data: "started", error: null };
+            dbState.tables.tabular_cells = { data: [], error: null };
+            dbState.rpc = { data: "started", error: null };
         }
 
         const startGeneration = () =>
@@ -1876,7 +1876,7 @@ describe("tabular.routes", () => {
             return held;
         }
 
-        const rpcNames = () => supabaseState.rpcCalls.map((call) => call.fn);
+        const rpcNames = () => dbState.rpcCalls.map((call) => call.fn);
 
         beforeEach(() => {
             resetStreamRunsForTests();
@@ -1984,7 +1984,7 @@ describe("tabular.routes", () => {
             // The stopped cell is persisted back to pending, not left
             // "generating" for the next reader to puzzle over.
             expect(
-                supabaseState.updates.filter(
+                dbState.updates.filter(
                     (update) =>
                         update.table === "tabular_cells" &&
                         (update.payload as { status?: string }).status ===
@@ -2094,7 +2094,7 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -2113,7 +2113,7 @@ describe("tabular.routes", () => {
             // Review chat writes: it persists messages and can reshape the
             // review. A viewer used to be told "Review not found" for a
             // review sitting open on their screen.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: "p1" },
                 error: null,
             };
@@ -2131,11 +2131,11 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(403);
             expect(res.body.detail).toBe(REVIEW_EDIT_FORBIDDEN);
-            expect(supabaseState.inserts).toEqual([]);
+            expect(dbState.inserts).toEqual([]);
         });
 
         it("returns 422 missing_api_key before streaming when the key is absent", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -2144,7 +2144,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_cells = { data: [], error: null };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
                 tabular_model: "claude-sonnet-5",
@@ -2165,7 +2165,7 @@ describe("tabular.routes", () => {
         });
 
         it("schedules app memory but not project memory for a direct review grant", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "other",
@@ -2175,12 +2175,12 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_review_rows = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: {
                     id: "review-chat-1",
                     title: "Existing title",
@@ -2191,7 +2191,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chat_messages = {
+            dbState.tables.tabular_review_chat_messages = {
                 data: null,
                 error: null,
             };
@@ -2224,7 +2224,7 @@ describe("tabular.routes", () => {
                     memorySharedAudience: true,
                 }),
             );
-            const userInsert = supabaseState.inserts.find(
+            const userInsert = dbState.inserts.find(
                 ({ table, payload }) =>
                     table === "tabular_review_chat_messages" &&
                     (payload as { role?: unknown }).role === "user",
@@ -2232,7 +2232,7 @@ describe("tabular.routes", () => {
             const inputMessageId = (
                 userInsert?.payload as { id?: string } | undefined
             )?.id;
-            const assistantInsert = supabaseState.inserts.find(
+            const assistantInsert = dbState.inserts.find(
                 ({ table, payload }) =>
                     table === "tabular_review_chat_messages" &&
                     (payload as { role?: unknown }).role === "assistant",
@@ -2270,7 +2270,7 @@ describe("tabular.routes", () => {
         });
 
         it("releases the memory lease when tabular chat streaming fails", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -2280,12 +2280,12 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_review_rows = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: {
                     id: "review-chat-1",
                     title: "Existing title",
@@ -2296,7 +2296,7 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chat_messages = {
+            dbState.tables.tabular_review_chat_messages = {
                 data: null,
                 error: null,
             };
@@ -2354,7 +2354,7 @@ describe("tabular.routes", () => {
         };
 
         function seedChattableReview() {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: {
                     id: "r1",
                     user_id: "u1",
@@ -2364,16 +2364,16 @@ describe("tabular.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.tabular_cells = { data: [], error: null };
-            supabaseState.tables.tabular_review_rows = {
+            dbState.tables.tabular_cells = { data: [], error: null };
+            dbState.tables.tabular_review_rows = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: CHAT_ROW,
                 error: null,
             };
-            supabaseState.tables.tabular_review_chat_messages = {
+            dbState.tables.tabular_review_chat_messages = {
                 data: null,
                 error: null,
             };
@@ -2427,14 +2427,14 @@ describe("tabular.routes", () => {
          * the stop test asserts on directly.
          */
         async function activeTurnId(): Promise<string> {
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: [CHAT_ROW],
                 error: null,
             };
             const listed = await request(app)
                 .get("/tabular-review/r1/chats")
                 .set(...AUTH);
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: CHAT_ROW,
                 error: null,
             };
@@ -2442,7 +2442,7 @@ describe("tabular.routes", () => {
         }
 
         const assistantInsert = () =>
-            supabaseState.inserts.find(
+            dbState.inserts.find(
                 ({ table, payload }) =>
                     table === "tabular_review_chat_messages" &&
                     (payload as { role?: unknown }).role === "assistant",
@@ -2473,7 +2473,7 @@ describe("tabular.routes", () => {
             expect(params.signal?.aborted).toBe(false);
 
             // What a reloaded panel sees: the chat list carries the live turn.
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: [CHAT_ROW],
                 error: null,
             };
@@ -2490,7 +2490,7 @@ describe("tabular.routes", () => {
             expect(activeTurn.assistant_message_id).toBe(activeTurn.id);
             // chat_id (1) and the first delta (2) are already out.
             expect(activeTurn.seq).toBeGreaterThanOrEqual(2);
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: CHAT_ROW,
                 error: null,
             };
@@ -2526,7 +2526,7 @@ describe("tabular.routes", () => {
                 content: [{ type: "content", text: "First second" }],
             });
 
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: [CHAT_ROW],
                 error: null,
             };
@@ -2684,7 +2684,7 @@ describe("tabular.routes", () => {
                 orgRole: null,
                 projectRole: "editor",
             });
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: { ...CHAT_ROW, user_id: "someone-else" },
                 error: null,
             };
@@ -2702,7 +2702,7 @@ describe("tabular.routes", () => {
 
     describe("PATCH /tabular-review/:reviewId/chats/:chatId", () => {
         it("persists the chat model and reasoning independently", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "u1", project_id: null },
                 error: null,
             };
@@ -2712,7 +2712,7 @@ describe("tabular.routes", () => {
                 orgRole: null,
                 projectRole: "owner",
             });
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: {
                     id: "chat-1",
                     title: "Chat",
@@ -2738,7 +2738,7 @@ describe("tabular.routes", () => {
                 .send({ model: "gpt-5.6-sol", reasoningLevel: "low" });
 
             expect(res.status).toBe(200);
-            expect(supabaseState.updates).toContainEqual({
+            expect(dbState.updates).toContainEqual({
                 table: "tabular_review_chats",
                 payload: expect.objectContaining({
                     model: "gpt-5.6-sol",
@@ -2751,7 +2751,7 @@ describe("tabular.routes", () => {
     // ── GET /tabular-review/:reviewId/chats ───────────────────────────────
     describe("GET /tabular-review/:reviewId/chats", () => {
         it("returns 404 when review access is denied", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
@@ -2766,11 +2766,11 @@ describe("tabular.routes", () => {
         });
 
         it("returns the chat list when access is granted", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "u1", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: [{ id: "chat-1", title: "T", user_id: "u1" }],
                 error: null,
             };
@@ -2799,8 +2799,8 @@ describe("tabular.routes", () => {
         };
 
         it("returns 404 when the review does not exist", async () => {
-            supabaseState.tables.tabular_reviews = { data: null, error: null };
-            supabaseState.tables.tabular_review_chats = CHAT_IN_R1;
+            dbState.tables.tabular_reviews = { data: null, error: null };
+            dbState.tables.tabular_review_chats = CHAT_IN_R1;
 
             const del = await request(app)
                 .delete("/tabular-review/r-missing/chats/chat-1")
@@ -2817,11 +2817,11 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when the caller has no access to the review", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = CHAT_IN_R1;
+            dbState.tables.tabular_review_chats = CHAT_IN_R1;
             ensureReviewAccess.mockResolvedValue({ ok: false });
 
             const del = await request(app)
@@ -2839,11 +2839,11 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when the chat belongs to a different review", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "u1", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: { id: "chat-1", review_id: "r2" },
                 error: null,
             };
@@ -2863,11 +2863,11 @@ describe("tabular.routes", () => {
         });
 
         it("returns 404 when the chat does not exist", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "u1", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: null,
                 error: null,
             };
@@ -2885,11 +2885,11 @@ describe("tabular.routes", () => {
             // chat belongs to someone else. Before the owner check lived in
             // the gate, this returned a success-shaped 204 while the
             // user_id-scoped write silently matched zero rows.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: { id: "chat-1", review_id: "r1", user_id: "other" },
                 error: null,
             };
@@ -2925,11 +2925,11 @@ describe("tabular.routes", () => {
         };
 
         it("lets an admin modify a chat whose creator's account was deleted", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: null, project_id: "p1" },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = ORPHANED_CHAT;
+            dbState.tables.tabular_review_chats = ORPHANED_CHAT;
             ensureReviewAccess.mockResolvedValue({
                 ok: true,
                 isCreator: false,
@@ -2953,11 +2953,11 @@ describe("tabular.routes", () => {
             // Inheriting an authorship-scoped operation is an ADMIN power —
             // the tier that could already delete the whole container. A
             // member gains nothing from the creator's departure.
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: null, project_id: "p1" },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = ORPHANED_CHAT;
+            dbState.tables.tabular_review_chats = ORPHANED_CHAT;
             ensureReviewAccess.mockResolvedValue({
                 ok: true,
                 isCreator: false,
@@ -2985,11 +2985,11 @@ describe("tabular.routes", () => {
             // exists, an admin still may not rename their thread — which is
             // what stops `creatorScopedAllowed` from quietly becoming
             // "admins can do anything".
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "other", project_id: "p1" },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = {
+            dbState.tables.tabular_review_chats = {
                 data: { id: "chat-1", review_id: "r1", user_id: "other" },
                 error: null,
             };
@@ -3008,11 +3008,11 @@ describe("tabular.routes", () => {
         });
 
         it("returns 204 for the owner once the review and chat line up", async () => {
-            supabaseState.tables.tabular_reviews = {
+            dbState.tables.tabular_reviews = {
                 data: { id: "r1", user_id: "u1", project_id: null },
                 error: null,
             };
-            supabaseState.tables.tabular_review_chats = CHAT_IN_R1;
+            dbState.tables.tabular_review_chats = CHAT_IN_R1;
 
             const rename = await request(app)
                 .patch("/tabular-review/r1/chats/chat-1")

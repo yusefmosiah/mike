@@ -25,7 +25,7 @@ type OverviewRow = {
 
 const db = stackDb()!;
 
-maybeDescribe("Supabase projects-overview pagination", () => {
+maybeDescribe("projects-overview pagination", () => {
     let ownerId = "";
     let ownerEmail = "";
     let otherUserId = "";

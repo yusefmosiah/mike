@@ -33,7 +33,6 @@ const SENSITIVE_HEADERS = new Set([
     "cookie",
     "set-cookie",
     "x-api-key",
-    "x-supabase-auth",
 ]);
 const SENSITIVE_KEY_PATTERN =
     /(token|secret|password|passwd|authorization|cookie|api[-_]?key|credential|private[-_]?key)/i;

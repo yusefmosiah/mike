@@ -68,7 +68,7 @@ function makeQuery(table: string) {
     return q;
 }
 
-function mockSupabase() {
+function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
     rpc: vi.fn((name: string) =>
@@ -113,8 +113,8 @@ afterEach(() => {
     expect(unexpectedFetch).not.toHaveBeenCalled();
 });
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => mockDb()),
 }));
 
 vi.mock("../../lib/memory/schedule", () => ({
@@ -187,7 +187,7 @@ vi.mock("../../lib/access", () => ({
 import { app } from "../../app";
 import { resetAssistantTurnRunsForTests } from "../../lib/assistantTurnRuns";
 import { spotlight } from "../../modules/chat/engine/index";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 
 const VALID_BODY = {
     messages: [{ role: "user", content: "hello" }],
@@ -496,7 +496,7 @@ describe("POST /projects/:projectId/chat", () => {
 
             expect(res.status).toBe(400);
             expect(res.body.detail).toBe(detail);
-            expect(createServerSupabase).not.toHaveBeenCalled();
+            expect(createDb).not.toHaveBeenCalled();
             expect(checkProjectAccess).not.toHaveBeenCalled();
             expect(buildProjectDocContext).not.toHaveBeenCalled();
             expect(runLLMStream).not.toHaveBeenCalled();
@@ -573,7 +573,7 @@ describe("POST /projects/:projectId/chat", () => {
             projectRole: "viewer",
         });
         const updatedTables: string[] = [];
-        const db = mockSupabase();
+        const db = mockDb();
         (db.from as ReturnType<typeof vi.fn>).mockImplementation(
             (table: string) => {
                 const q = makeQuery(table);
@@ -598,7 +598,7 @@ describe("POST /projects/:projectId/chat", () => {
                 return q;
             },
         );
-        vi.mocked(createServerSupabase).mockReturnValueOnce(db as never);
+        vi.mocked(createDb).mockReturnValueOnce(db as never);
 
         const res = await request(app)
             .post("/projects/p1/chat")

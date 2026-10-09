@@ -19,7 +19,7 @@ import {
     type MemoryScope,
 } from "../../lib/memory/files";
 import { can, type Capability } from "../../lib/permissions";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 
 // The error classes are part of this module's contract: the route maps each
 // onto a status code, and the tests assert those mappings by class.

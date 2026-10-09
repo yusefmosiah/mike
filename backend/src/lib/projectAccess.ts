@@ -18,7 +18,7 @@
 // The retired `projects.shared_with` array is migrated once into this table;
 // all reads and writes use grants directly from then on.
 
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 import { normalizeEmail } from "./access";
 import { isProjectRole, type ProjectRole } from "./permissions";
 import { listOrgAccessPeople } from "./orgAccessOverrides";

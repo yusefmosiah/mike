@@ -115,7 +115,7 @@ function makeQuery(table: string) {
   return query;
 }
 
-function mockSupabase() {
+function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
     auth: {
@@ -125,8 +125,8 @@ function mockSupabase() {
   };
 }
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+  createDb: vi.fn(() => mockDb()),
 }));
 
 vi.mock("../../lib/memory/schedule", () => ({

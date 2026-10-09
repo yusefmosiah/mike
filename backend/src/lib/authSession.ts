@@ -54,9 +54,8 @@ export function clearRequestAuthCookies(req: Request, res: Response): void {
   res.setHeader("Cache-Control", NO_STORE);
 }
 
-// The cookie format is the one @supabase/ssr wrote, so sessions issued before
-// Mike talked to GoTrue directly stay valid: each stored item is `base64-` +
-// base64url(value), split into `<key>.0`, `<key>.1`, ... past 3180 characters.
+// Each stored item is `base64-` + base64url(value), split into `<key>.0`,
+// `<key>.1`, ... past 3180 characters so no single cookie nears the 4KB limit.
 const BASE64_PREFIX = "base64-";
 const MAX_CHUNK_SIZE = 3180;
 const COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;

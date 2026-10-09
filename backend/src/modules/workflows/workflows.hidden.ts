@@ -1,5 +1,5 @@
 // workflows hidden — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { ServiceFailure } from "./workflows.types";
 
 export async function listHiddenWorkflows(

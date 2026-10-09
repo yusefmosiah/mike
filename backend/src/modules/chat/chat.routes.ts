@@ -17,7 +17,7 @@ import { Router, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { enqueueChatTurnAudit } from "../../lib/audit";
 import { drainReceiptsSince } from "../../lib/llm/attestation";
 import {
@@ -89,7 +89,7 @@ export const chatRouter = Router();
 chatRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
-    const db = createServerSupabase();
+    const db = createDb();
     const requestedLimit = Number.parseInt(String(req.query.limit ?? ""), 10);
     const requestedOffset = Number.parseInt(String(req.query.offset ?? ""), 10);
     const limit = Number.isFinite(requestedLimit)
@@ -141,7 +141,7 @@ chatRouter.post("/create", requireAuth, asyncRoute(async (req, res) => {
         return void res.status(400).json({ detail: parsedProjectId.detail });
     }
     const projectId = parsedProjectId.value.projectId;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const result = await createChat(db, { userId, userEmail, projectId });
     if (!result.ok) {
@@ -157,7 +157,7 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     // Reading a chat only needs visibility (project.view) — org viewers
     // are allowed here even though they cannot write to the chat.
@@ -194,7 +194,7 @@ chatRouter.get("/:chatId/turn/:turnId/stream", requireAuth, asyncRoute(async (re
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId, turnId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -218,7 +218,7 @@ chatRouter.post("/:chatId/turn/:turnId/stop", requireAuth, asyncRoute(async (req
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId, turnId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -250,7 +250,7 @@ chatRouter.get("/:chatId/people", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
@@ -266,7 +266,7 @@ chatRouter.get("/:chatId/access", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -297,7 +297,7 @@ chatRouter.post("/:chatId/access", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -341,7 +341,7 @@ chatRouter.delete("/:chatId/access/:email", requireAuth, asyncRoute(async (req, 
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -411,7 +411,7 @@ chatRouter.patch("/:chatId", requireAuth, asyncRoute(async (req, res) => {
             detail: "title, model or reasoningLevel is required",
         });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -459,7 +459,7 @@ chatRouter.delete("/:chatId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { chatId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     // container.delete keeps chat deletion at the top of the ladder: the
     // chat's creator, or an admin of the project it lives in (who could
     // already delete the whole project). Members and viewers get 403.
@@ -487,7 +487,7 @@ chatRouter.post("/:chatId/generate-title", requireAuth, asyncRoute(async (req, r
         typeof req.body?.model === "string" ? req.body.model.trim() : null;
     if (!message)
         return void res.status(400).json({ detail: "message is required" });
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -599,7 +599,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     });
 
     const userEmail = res.locals.userEmail as string | undefined;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const prep = await prepareChatStream(db, {
         userId,
@@ -714,7 +714,7 @@ chatRouter.post("/:chatId/branches", requireAuth, asyncRoute(async (req, res) =>
     }
     const override = parsedOverride.value[0];
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -759,7 +759,7 @@ chatRouter.post("/:chatId/leaf", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: "leaf_message_id must be a message id" });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -795,7 +795,7 @@ chatRouter.post("/:chatId/fork", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: "message_id must be a message id" });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -834,7 +834,7 @@ chatRouter.get("/:chatId/path", requireAuth, asyncRoute(async (req, res) => {
             .status(400)
             .json({ detail: "leaf must be a message id" });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });
@@ -862,7 +862,7 @@ chatRouter.get("/:chatId/branches/:messageId/siblings", requireAuth, asyncRoute(
     if (!isMessageId(messageId))
         return void res.status(400).json({ detail: "Invalid message id" });
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await getAccessibleChat(db, { chatId, userId, userEmail });
     if (!access.ok)
         return void res.status(404).json({ detail: "Chat not found" });

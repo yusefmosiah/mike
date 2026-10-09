@@ -6,7 +6,7 @@
 // projects.service.ts re-exports the whole surface so route/test importers see
 // a single module.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 export type { Db };
 import { deleteCollectionDocuments } from "../documents/documents.service";
 

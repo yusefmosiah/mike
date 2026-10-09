@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { updateChatTitle } from "../chat.service";
 
 type Call = {

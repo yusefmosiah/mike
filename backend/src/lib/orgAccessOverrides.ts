@@ -1,4 +1,4 @@
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 import type { ProjectRole } from "./permissions";
 
 export type OrgResourceKind =

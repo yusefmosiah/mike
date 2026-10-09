@@ -3,7 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { scriptedDb } from "../../../../../__tests__/helpers/scriptedDb";
-import type { Db } from "../../../../../lib/supabase";
+import type { Db } from "../../../../../lib/db";
 
 const mocks = vi.hoisted(() => ({
   active: vi.fn(),

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 import {
-    supabaseState,
-    resetSupabaseState,
-    mockSupabase,
-} from "../helpers/supabaseMock";
+    dbState,
+    resetDbState,
+    mockDb,
+} from "../helpers/dbMock";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock fns we want to reconfigure per-test.
@@ -19,9 +19,9 @@ const { checkProjectAccess, checkWorkflowAccess, deleteUserProjects, getOrgRole 
 );
 
 // ---------------------------------------------------------------------------
-// Supabase + auth stubs, shared with the other route suites via ../helpers/.
+// Database + auth stubs, shared with the other route suites via ../helpers/.
 // Every suite here mounts `app`, which loads every router, so they all need the
-// same fakes; see helpers/supabaseMock.ts for how `supabaseState` (seeded in
+// same fakes; see helpers/dbMock.ts for how `dbState` (seeded in
 // beforeEach below) drives the responses.
 //
 // `vi.mock` factories are hoisted above the imports, so they cannot close over
@@ -31,9 +31,9 @@ const { checkProjectAccess, checkWorkflowAccess, deleteUserProjects, getOrgRole 
 // both specifiers resolve to the same module instance as the static import
 // above, so the state object the tests mutate is the one the stub reads.
 // ---------------------------------------------------------------------------
-vi.mock("../../lib/supabase", async () => {
-    const { mockSupabase } = await import("../helpers/supabaseMock.js");
-    return { createServerSupabase: vi.fn(() => mockSupabase()) };
+vi.mock("../../lib/db", async () => {
+    const { mockDb } = await import("../helpers/dbMock.js");
+    return { createDb: vi.fn(() => mockDb()) };
 });
 
 vi.mock("../../middleware/auth", async () => {
@@ -67,7 +67,7 @@ vi.mock("../../lib/documentVersions", () => ({
 
 import { app } from "../../app";
 import { ensureDocAccess } from "../../lib/access";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { resetEnsuredDefaultUsersForTests } from "../../lib/workflowCatalog";
 
 const AUTH = ["Authorization", "Bearer test"] as const;
@@ -77,8 +77,8 @@ function captureRpcArgs(): { args: unknown; name: string | undefined } {
         args: undefined,
         name: undefined,
     };
-    vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-        const db = mockSupabase();
+    vi.mocked(createDb).mockImplementationOnce(() => {
+        const db = mockDb();
         const originalRpc = db.rpc;
         db.rpc = vi.fn((name: string, args: unknown) => {
             captured.name = name;
@@ -93,13 +93,13 @@ function captureRpcArgs(): { args: unknown; name: string | undefined } {
 describe("workflows.routes", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        resetSupabaseState();
+        resetDbState();
         resetEnsuredDefaultUsersForTests();
         // Default: the caller belongs to no organization.
         getOrgRole.mockResolvedValue(null);
         checkWorkflowAccess.mockImplementation(
             async (_workflowId: string, userId: string) => {
-                const workflow = supabaseState.tables.workflows?.data as
+                const workflow = dbState.tables.workflows?.data as
                     | { id: string; user_id: string | null; org_id?: string | null }
                     | null
                     | undefined;
@@ -130,7 +130,7 @@ describe("workflows.routes", () => {
     // ── GET /workflows (overview) ─────────────────────────────────────────
     describe("GET /workflows", () => {
         it("returns the user's installed workflows when no pagination params are present", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [
                     {
                         id: "w1",
@@ -161,19 +161,19 @@ describe("workflows.routes", () => {
         });
 
         it("backfills organization access when the overview RPC is stale", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [{ id: "w1", title: "Firm workflow", is_owner: true }],
                 error: null,
             };
-            supabaseState.tables.workflows = {
+            dbState.tables.workflows = {
                 data: [{ id: "w1", org_id: "org-1" }],
                 error: null,
             };
-            supabaseState.tables.workflow_shares = {
+            dbState.tables.workflow_shares = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.organizations = {
+            dbState.tables.organizations = {
                 data: [{ id: "org-1", name: "Elite Law LLP" }],
                 error: null,
             };
@@ -200,7 +200,7 @@ describe("workflows.routes", () => {
         // list with no error.
         it("calls the legacy 3-arg RPC shape when no pagination params are present", async () => {
             const captured = captureRpcArgs();
-            supabaseState.rpc = { data: [], error: null };
+            dbState.rpc = { data: [], error: null };
 
       await request(app)
         .get("/workflows?type=tabular")
@@ -216,7 +216,7 @@ describe("workflows.routes", () => {
 
         it("calls the paginated RPC shape with every filter parsed once any pagination param is present, and omits system workflows", async () => {
             const captured = captureRpcArgs();
-            supabaseState.rpc = { data: [], error: null };
+            dbState.rpc = { data: [], error: null };
 
             const res = await request(app)
                 .get(
@@ -245,7 +245,7 @@ describe("workflows.routes", () => {
         });
 
         it("returns 500 with detail when the RPC errors", async () => {
-            supabaseState.rpc = { data: null, error: { message: "boom" } };
+            dbState.rpc = { data: null, error: { message: "boom" } };
 
       const res = await request(app)
         .get("/workflows?type=assistant")
@@ -259,7 +259,7 @@ describe("workflows.routes", () => {
     // ── GET /workflows/system ──────────────────────────────────────────────
     describe("GET /workflows/system", () => {
         it("returns catalog workflows in the legacy system response shape", async () => {
-            supabaseState.tables.mike_workflows = {
+            dbState.tables.mike_workflows = {
                 data: [
                     {
                         id: "catalog-1",
@@ -303,7 +303,7 @@ describe("workflows.routes", () => {
                     }),
                 }),
             ]);
-            expect(createServerSupabase).toHaveBeenCalled();
+            expect(createDb).toHaveBeenCalled();
         });
     });
 
@@ -318,8 +318,8 @@ describe("workflows.routes", () => {
                     error: null,
                 })
                 .mockResolvedValueOnce({ data: [], error: null });
-            vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-                const db = mockSupabase();
+            vi.mocked(createDb).mockImplementationOnce(() => {
+                const db = mockDb();
                 db.rpc = rpcMock;
                 return db as unknown as Db;
             });
@@ -338,7 +338,7 @@ describe("workflows.routes", () => {
         });
 
         it("returns 500 with detail when the RPC errors", async () => {
-            supabaseState.rpc = { data: null, error: { message: "boom" } };
+            dbState.rpc = { data: null, error: { message: "boom" } };
 
       const res = await request(app)
         .get("/workflows/ids")
@@ -352,7 +352,7 @@ describe("workflows.routes", () => {
   describe("GET /workflows/filter-options", () => {
     it("passes type and scope to the facet RPC", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: [
           {
             practices: ["Disputes"],
@@ -392,11 +392,11 @@ describe("workflows.routes", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.detail).toContain("between 1 and 50");
-      expect(createServerSupabase).not.toHaveBeenCalled();
+      expect(createDb).not.toHaveBeenCalled();
     });
 
     it("does not allow assets on a tabular workflow", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: {
           id: "workflow-1",
           user_id: "u1",
@@ -436,7 +436,7 @@ describe("workflows.routes", () => {
 
     it("files a workflow under an organization the caller belongs to", async () => {
       getOrgRole.mockResolvedValue("member");
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-org", user_id: "u1", org_id: "org-1" },
         error: null,
       };
@@ -450,7 +450,7 @@ describe("workflows.routes", () => {
         organization_name: null,
       });
       expect(
-        supabaseState.inserts.find((i) => i.table === "workflows")?.payload,
+        dbState.inserts.find((i) => i.table === "workflows")?.payload,
       ).toMatchObject({ org_id: "org-1", user_id: "u1" });
     });
 
@@ -463,11 +463,11 @@ describe("workflows.routes", () => {
       expect(res.body.detail).toBe(
         "You are not a member of that organization.",
       );
-      expect(supabaseState.inserts).toEqual([]);
+      expect(dbState.inserts).toEqual([]);
     });
 
     it("keeps a workflow personal when no org is named", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w1", user_id: "u1", org_id: null },
         error: null,
       };
@@ -481,7 +481,7 @@ describe("workflows.routes", () => {
         organization_name: null,
       });
       expect(
-        supabaseState.inserts.find((i) => i.table === "workflows")?.payload,
+        dbState.inserts.find((i) => i.table === "workflows")?.payload,
       ).toMatchObject({ org_id: null });
     });
 
@@ -489,7 +489,7 @@ describe("workflows.routes", () => {
       // The workflow belongs to the organization, not to whoever drafted it.
       // Both org roles sit at member or above on the ladder, where editing
       // content is a member capability.
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: {
           id: "w-org",
           user_id: "someone-else",
@@ -498,7 +498,7 @@ describe("workflows.routes", () => {
         },
         error: null,
       };
-      supabaseState.tables.workflow_shares = { data: null, error: null };
+      dbState.tables.workflow_shares = { data: null, error: null };
       getOrgRole.mockResolvedValue("member");
 
       const res = await request(app)
@@ -513,11 +513,11 @@ describe("workflows.routes", () => {
     });
 
     it("still refuses an org workflow to somebody outside the org", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-org", user_id: "someone-else", org_id: "org-1" },
         error: null,
       };
-      supabaseState.tables.workflow_shares = { data: null, error: null };
+      dbState.tables.workflow_shares = { data: null, error: null };
       getOrgRole.mockResolvedValue(null);
 
       const res = await request(app)
@@ -531,11 +531,11 @@ describe("workflows.routes", () => {
 
   describe("workflow direct grants", () => {
     it("rejects a personal grant for an email that has not registered", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-personal", user_id: "u1", org_id: null },
         error: null,
       };
-      supabaseState.tables.user_profiles = { data: [], error: null };
+      dbState.tables.user_profiles = { data: [], error: null };
 
       const res = await request(app)
         .post("/workflows/w-personal/share")
@@ -549,15 +549,15 @@ describe("workflows.routes", () => {
     });
 
     it("stores a personal grant for an existing user", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-personal", user_id: "u1", org_id: null },
         error: null,
       };
-      supabaseState.tables.user_profiles = {
+      dbState.tables.user_profiles = {
         data: [{ email: "colleague@firm.test" }],
         error: null,
       };
-      supabaseState.tables.workflow_shares = { data: null, error: null };
+      dbState.tables.workflow_shares = { data: null, error: null };
 
       const res = await request(app)
         .post("/workflows/w-personal/share")
@@ -572,14 +572,14 @@ describe("workflows.routes", () => {
     // dropped the row from the list while the person kept access.
     describe("DELETE /workflows/:workflowId/shares/:shareId", () => {
       beforeEach(() => {
-        supabaseState.tables.workflows = {
+        dbState.tables.workflows = {
           data: { id: "w-personal", user_id: "u1", org_id: null },
           error: null,
         };
       });
 
       it("returns 204 when a row was actually removed", async () => {
-        supabaseState.tables.workflow_shares = {
+        dbState.tables.workflow_shares = {
           data: [{ id: "s1" }],
           error: null,
         };
@@ -592,7 +592,7 @@ describe("workflows.routes", () => {
       });
 
       it("returns 404 when the share id matched nothing", async () => {
-        supabaseState.tables.workflow_shares = { data: [], error: null };
+        dbState.tables.workflow_shares = { data: [], error: null };
 
         const res = await request(app)
           .delete("/workflows/w-personal/shares/s-unknown")
@@ -603,7 +603,7 @@ describe("workflows.routes", () => {
       });
 
       it("reports a failed delete instead of a false 204", async () => {
-        supabaseState.tables.workflow_shares = {
+        dbState.tables.workflow_shares = {
           data: null,
           error: { message: "boom" },
         };
@@ -682,12 +682,12 @@ describe("workflows.routes", () => {
           getUser: () =>
             Promise.resolve({ data: { user: { id: "u1" } }, error: null }),
         },
-      } as unknown as ReturnType<typeof createServerSupabase>;
+      } as unknown as ReturnType<typeof createDb>;
       return { db, upserts };
     }
 
     function shareOrgWorkflow(emails: string[]) {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-org", user_id: "u1", org_id: "org-1" },
         error: null,
       };
@@ -699,7 +699,7 @@ describe("workflows.routes", () => {
 
     it("writes no org override when a later email in the batch is invalid", async () => {
       const { db, upserts } = orgShareDb();
-      vi.mocked(createServerSupabase).mockImplementationOnce(() => db);
+      vi.mocked(createDb).mockImplementationOnce(() => db);
 
       const res = await shareOrgWorkflow([
         "first@firm.test",
@@ -719,7 +719,7 @@ describe("workflows.routes", () => {
       // One statement, so a trigger refusal on any row rolls back the rest.
       // Three separate upserts would be three separate transactions.
       const { db, upserts } = orgShareDb();
-      vi.mocked(createServerSupabase).mockImplementationOnce(() => db);
+      vi.mocked(createDb).mockImplementationOnce(() => db);
 
       const res = await shareOrgWorkflow([
         "first@firm.test",
@@ -758,7 +758,7 @@ describe("workflows.routes", () => {
       const { db, upserts } = orgShareDb({
         upsertError: "org_members_protect_last_admin",
       });
-      vi.mocked(createServerSupabase).mockImplementationOnce(() => db);
+      vi.mocked(createDb).mockImplementationOnce(() => db);
 
       const res = await shareOrgWorkflow([
         "first@firm.test",
@@ -785,22 +785,22 @@ describe("workflows.routes", () => {
 
     function captureWorkflowQueries() {
       const queries: { table: string; q: Record<string, unknown> }[] = [];
-      vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-        const db = mockSupabase();
+      vi.mocked(createDb).mockImplementationOnce(() => {
+        const db = mockDb();
         const originalFrom = db.from;
         db.from = vi.fn((table: string) => {
           const q = originalFrom(table);
           queries.push({ table, q: q as Record<string, unknown> });
           return q;
         });
-        return db as unknown as ReturnType<typeof createServerSupabase>;
+        return db as unknown as ReturnType<typeof createDb>;
       });
       return queries;
     }
 
     it("lets an org admin delete a workflow whose creator's account is gone", async () => {
-      supabaseState.tables.workflows = { data: detached, error: null };
-      supabaseState.tables.workflow_reference_documents = {
+      dbState.tables.workflows = { data: detached, error: null };
+      dbState.tables.workflow_reference_documents = {
         data: [],
         error: null,
       };
@@ -824,7 +824,7 @@ describe("workflows.routes", () => {
     });
 
     it("does not extend Owner operations to org Members", async () => {
-      supabaseState.tables.workflows = { data: detached, error: null };
+      dbState.tables.workflows = { data: detached, error: null };
       getOrgRole.mockResolvedValue("member");
 
       const res = await request(app)
@@ -835,7 +835,7 @@ describe("workflows.routes", () => {
     });
 
     it("lets an org Admin manage a workflow with a living creator", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { ...detached, user_id: "someone-else" },
         error: null,
       };
@@ -849,8 +849,8 @@ describe("workflows.routes", () => {
     });
 
     it("applies the same Owner rule to the sharing surface", async () => {
-      supabaseState.tables.workflows = { data: detached, error: null };
-      supabaseState.tables.workflow_shares = { data: [], error: null };
+      dbState.tables.workflows = { data: detached, error: null };
+      dbState.tables.workflow_shares = { data: [], error: null };
       getOrgRole.mockResolvedValue("admin");
 
       const res = await request(app)
@@ -862,7 +862,7 @@ describe("workflows.routes", () => {
     });
 
     it("keeps the sharing surface closed to org members", async () => {
-      supabaseState.tables.workflows = { data: detached, error: null };
+      dbState.tables.workflows = { data: detached, error: null };
       getOrgRole.mockResolvedValue("member");
 
       const res = await request(app)
@@ -939,12 +939,12 @@ describe("workflows.routes", () => {
           getUser: () =>
             Promise.resolve({ data: { user: { id: "u1" } }, error: null }),
         },
-      } as unknown as ReturnType<typeof createServerSupabase>;
+      } as unknown as ReturnType<typeof createDb>;
       return { db, selects };
     }
 
     it("selects org_id, so an org-library file attaches", async () => {
-      supabaseState.tables.workflows = {
+      dbState.tables.workflows = {
         data: { id: "w-org", user_id: "u1", org_id: "org-1", type: "assistant" },
         error: null,
       };
@@ -968,7 +968,7 @@ describe("workflows.routes", () => {
         org_id: "org-1",
         current_version_id: null,
       });
-      vi.mocked(createServerSupabase).mockImplementationOnce(() => db);
+      vi.mocked(createDb).mockImplementationOnce(() => db);
 
       const res = await request(app)
         .post("/workflows/w-org/assets/from-documents")

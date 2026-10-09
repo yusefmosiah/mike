@@ -4,7 +4,7 @@
 // title.
 
 import { completeText } from "../../lib/llm";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { getUserModelSettings } from "../user/user.service";
 import { failure } from "../../lib/serviceResult";
 import { statusFailure, type TabularResult } from "./tabular.shared";
@@ -98,7 +98,7 @@ export async function draftColumnPrompt(
     try {
         const { tabular_model: promptModel, api_keys } =
             // Pass the request's client through: omitting it built a second
-            // Supabase client (and a second connection) per draft.
+            // Database client (and a second connection) per draft.
             await getUserModelSettings(userId, db);
         if (!promptModel) {
             return statusFailure(409, {

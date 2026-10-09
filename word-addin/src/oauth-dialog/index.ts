@@ -47,11 +47,6 @@ function sendError(requestId: string, message: string): void {
 }
 
 function clearTemporaryAuthStorage(): void {
-  // Sweep up PKCE/session keys left by older browser-Supabase builds.
-  for (const storage of [window.sessionStorage, window.localStorage]) {
-    storage.removeItem("mike-word-google-oauth");
-    storage.removeItem("mike-word-google-oauth-code-verifier");
-  }
   window.sessionStorage.removeItem(REQUEST_STORAGE_KEY);
 }
 

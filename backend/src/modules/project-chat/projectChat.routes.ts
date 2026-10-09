@@ -9,7 +9,7 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import {
     isMessageId,
     parseChatMessages,
@@ -110,7 +110,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     const assistantMessageId = askInputsResponse ? null : randomUUID();
     const inputMessageId = askInputsResponse ? null : randomUUID();
 
-    const db = createServerSupabase();
+    const db = createDb();
 
     devLog("[project-chat/stream] incoming request", {
         userId,

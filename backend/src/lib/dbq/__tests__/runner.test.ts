@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("../../supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../db", () => ({ createDb: vi.fn() }));
 vi.mock("../../storage", () => ({ deleteFile: vi.fn() }));
 
 import {

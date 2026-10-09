@@ -4,7 +4,7 @@ import { chatTurnAuditEvents, recordChatTurn } from "../audit";
 type Insert = Record<string, unknown>;
 
 /**
- * Minimal Supabase mock that captures every audit_events insert so tests can
+ * Minimal database mock that captures every audit_events insert so tests can
  * assert on the exact rows recordChatTurn mines from a turn's events.
  */
 function makeDb() {

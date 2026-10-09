@@ -165,8 +165,7 @@ sign-in. The backend rejects missing or weak handoff configuration at startup.
 For Google sign-in, add
 `https://word.example.com/oauth-dialog.html` to GoTrue's redirect allow list
 (`GOTRUE_URI_ALLOW_LIST`). Google's own authorized redirect URI remains
-GoTrue's callback, `AUTH_PUBLIC_URL` + `/callback` (on a hosted Supabase
-project, `https://<project-ref>.supabase.co/auth/v1/callback`).
+GoTrue's callback, `AUTH_PUBLIC_URL` + `/callback`.
 
 ## Chat and storage behavior
 

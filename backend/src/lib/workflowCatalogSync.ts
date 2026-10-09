@@ -8,7 +8,7 @@ import {
   type WorkflowCatalogSourceOptions,
   type WorkflowCatalogSourceWorkflow,
 } from "./workflowCatalogSource";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 export type WorkflowCatalogSyncResult = {
   workflows: number;

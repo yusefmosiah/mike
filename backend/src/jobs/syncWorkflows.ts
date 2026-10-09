@@ -1,10 +1,10 @@
 import "../instrument";
-import { createServerSupabase } from "../lib/supabase";
+import { createDb } from "../lib/db";
 import { flushSentry, reportError } from "../lib/observability/sentry";
 import { syncWorkflowCatalog } from "../lib/workflowCatalogSync";
 
 async function main() {
-  const result = await syncWorkflowCatalog(createServerSupabase());
+  const result = await syncWorkflowCatalog(createDb());
   console.log(
     `Synced ${result.workflows} Mike workflows and ${result.assets} assets from ${result.sourceCommit}`,
   );

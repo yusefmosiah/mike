@@ -60,7 +60,7 @@ export {
   type ShareWorkflowResult,
   shareWorkflow,
 } from "./workflows.sharing";
-export { type Db } from "../../lib/supabase";
+export { type Db } from "../../lib/db";
 export {
   listWorkflowAddons,
   loadWorkflowAddonAssetDisplay,

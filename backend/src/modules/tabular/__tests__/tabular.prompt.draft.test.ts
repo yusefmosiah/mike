@@ -20,7 +20,7 @@ vi.mock("../../user/user.settings", () => ({ getUserModelSettings }));
 
 import { draftColumnPrompt } from "../tabular.prompt";
 
-// The service takes the request's Supabase client; these tests stub
+// The service takes the request's database client; these tests stub
 // getUserModelSettings, so the handle is only passed through.
 const DB = {} as never;
 

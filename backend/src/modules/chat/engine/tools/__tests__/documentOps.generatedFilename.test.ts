@@ -33,8 +33,8 @@ vi.mock("../../../../../lib/queue/conversionQueue", () => ({
   enqueueConversion: vi.fn(async () => ({})),
 }));
 
-vi.mock("../../../../../lib/supabase", () => ({
-  createServerSupabase: vi.fn(),
+vi.mock("../../../../../lib/db", () => ({
+  createDb: vi.fn(),
 }));
 
 import { buildContentDisposition } from "../../../../../lib/storage";
@@ -54,7 +54,7 @@ afterAll(() => {
 
 type Insert = { table: string; payload: Record<string, unknown> };
 
-// Chainable Supabase double: records inserts, returns fixed ids.
+// Chainable database double: records inserts, returns fixed ids.
 function makeDb() {
   const inserts: Insert[] = [];
   function from(table: string) {

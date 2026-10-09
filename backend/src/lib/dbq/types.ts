@@ -1,4 +1,4 @@
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 export type { Db };
 
 /** One row of public.db_jobs (see the 20260829_01_db_jobs migration). */

@@ -10,15 +10,7 @@ vi.mock("@supabase/auth-js", () => ({ GoTrueClient }));
 
 import { authAdmin, browserAuthUrl } from "../gotrue";
 
-const AUTH_KEYS = [
-  "AUTH_URL",
-  "AUTH_PUBLIC_URL",
-  "AUTH_API_KEY",
-  "AUTH_SERVICE_KEY",
-  "SUPABASE_URL",
-  "SUPABASE_PUBLISHABLE_KEY",
-  "SUPABASE_SECRET_KEY",
-];
+const AUTH_KEYS = ["AUTH_URL", "AUTH_PUBLIC_URL", "AUTH_SERVICE_KEY"];
 
 beforeEach(() => {
   GoTrueClient.mockClear();
@@ -37,10 +29,7 @@ describe("authAdmin", () => {
     expect(GoTrueClient).toHaveBeenCalledTimes(1);
     expect(GoTrueClient).toHaveBeenCalledWith({
       url: process.env.AUTH_URL,
-      headers: {
-        apikey: process.env.AUTH_SERVICE_KEY,
-        Authorization: `Bearer ${process.env.AUTH_SERVICE_KEY}`,
-      },
+      headers: { Authorization: `Bearer ${process.env.AUTH_SERVICE_KEY}` },
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
@@ -52,20 +41,6 @@ describe("authAdmin", () => {
     process.env.AUTH_SERVICE_KEY = crypto.randomUUID();
     expect(authAdmin()).not.toBe(first);
     expect(GoTrueClient).toHaveBeenCalledTimes(2);
-  });
-
-  it("reaches the same GoTrue behind Supabase's gateway for a deployment still on SUPABASE_*", () => {
-    delete process.env.AUTH_URL;
-    delete process.env.AUTH_SERVICE_KEY;
-    process.env.SUPABASE_URL = "https://project.supabase.test/";
-    process.env.SUPABASE_SECRET_KEY = "secret";
-    authAdmin();
-    expect(GoTrueClient).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: "https://project.supabase.test/auth/v1",
-        headers: { apikey: "secret", Authorization: "Bearer secret" },
-      }),
-    );
   });
 
   it("rejects missing server configuration", () => {

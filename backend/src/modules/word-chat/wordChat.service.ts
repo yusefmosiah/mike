@@ -1,7 +1,7 @@
 // Business logic + data-access for the word-chat module.
 //
 // Service layer behind wordChat.routes.ts. Every function takes an explicit
-// Supabase client (`db`) plus request-derived primitives, performs the DB work,
+// Database client (`db`) plus request-derived primitives, performs the DB work,
 // and RETURNS typed results. Nothing here imports express or touches req/res —
 // the thin route handlers map these results onto status codes and JSON.
 //
@@ -12,7 +12,7 @@
 // chat-activity write (`recordWordChatActivity`) live here.
 
 import { randomUUID } from "node:crypto";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import {
   beginMemoryConversationTurn,
@@ -749,7 +749,7 @@ export async function prepareWordChatStream(
     const activeDocumentText = args.documentContext;
     if (activeDocumentText !== undefined) {
       docStore.set(ACTIVE_WORD_DOCUMENT_ID, {
-        // This is an in-memory identity, never a Supabase storage path.
+        // This is an in-memory identity, never a storage path.
         storage_path: `inline:word-document:${clientDocumentId}`,
         file_type: "text/markdown",
         filename: activeDocumentName,

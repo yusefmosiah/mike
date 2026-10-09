@@ -121,8 +121,8 @@ helpers in `frontend/src/app/lib/userFacingError.ts` for unexpected failures.
   status codes and JSON; it never queries the database. `<name>.service.ts`
   is the module's facade (named re-exports only, exactly one per module) and,
   for small modules, the implementation. Service code takes an explicit
-  `db: Db` (from `backend/src/lib/supabase.ts`; Mike's supabase-js–shaped
-  query builder over a direct Postgres connection, `backend/src/lib/db/`)
+  `db: Db` (from `backend/src/lib/db/`; Mike's chainable query builder over
+  a direct Postgres connection)
   plus request-derived
   primitives, returns typed results (`ServiceResult<T>` from
   `backend/src/lib/serviceResult.ts` for new code), and never touches

@@ -6,7 +6,7 @@
 // helpers depend on it, and lib/ may never import from modules/ — so the
 // functions stay in lib and the module re-exports them by name.
 //
-// Everything below takes an explicit Supabase client (`db`) plus
+// Everything below takes an explicit database client (`db`) plus
 // request-derived primitives, enforces the admin/member role model, and
 // RETURNS a typed discriminated result. Nothing here touches req/res; the
 // thin handlers in orgs.routes.ts map those results onto status codes, and

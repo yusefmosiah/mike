@@ -27,7 +27,7 @@ import {
 } from "../../lib/assistantTurnRuns";
 import { openAssistantSse } from "../../lib/assistantSse";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { recordAudit } from "../../lib/audit";
 import { sendInternalError } from "../../lib/httpError";
 import { sendServiceFailure } from "../../lib/serviceResult";
@@ -144,7 +144,7 @@ function projectIdFilterOf(query: Record<string, unknown>): string | null {
 // GET /tabular-review
 tabularRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
     const query = req.query as Record<string, unknown>;
-    const result = await listTabularReviews(createServerSupabase(), {
+    const result = await listTabularReviews(createDb(), {
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
         projectIdFilter: projectIdFilterOf(query),
@@ -163,7 +163,7 @@ tabularRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
 // have to page through full review payloads just to collect checkboxes.
 tabularRouter.get("/ids", requireAuth, asyncRoute(async (req, res) => {
     const query = req.query as Record<string, unknown>;
-    const result = await listTabularReviewIds(createServerSupabase(), {
+    const result = await listTabularReviewIds(createDb(), {
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
         projectIdFilter: projectIdFilterOf(query),
@@ -196,7 +196,7 @@ tabularRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         model?: string;
     };
 
-    const result = await createTabularReview(createServerSupabase(), {
+    const result = await createTabularReview(createDb(), {
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
         title,
@@ -214,7 +214,7 @@ tabularRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
 
 // POST /tabular-review/prompt (must come before /:reviewId routes)
 tabularRouter.post("/prompt", requireAuth, asyncRoute(async (req, res) => {
-    const result = await draftColumnPrompt(createServerSupabase(), {
+    const result = await draftColumnPrompt(createDb(), {
         userId: res.locals.userId as string,
         title: typeof req.body.title === "string" ? req.body.title.trim() : "",
         format: typeof req.body.format === "string" ? req.body.format : "text",
@@ -233,7 +233,7 @@ tabularRouter.post("/prompt", requireAuth, asyncRoute(async (req, res) => {
 // GET /tabular-review/:reviewId
 tabularRouter.get("/:reviewId", requireAuth, asyncRoute(async (req, res) => {
     const { reviewId } = req.params;
-    const result = await getTabularReviewDetail(createServerSupabase(), {
+    const result = await getTabularReviewDetail(createDb(), {
         reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -256,7 +256,7 @@ tabularRouter.get("/:reviewId", requireAuth, asyncRoute(async (req, res) => {
 // /projects/:id/people. Used by the standalone TR detail page's People
 // modal so the roster can show display_names alongside emails.
 tabularRouter.get("/:reviewId/people", requireAuth, asyncRoute(async (req, res) => {
-    const result = await getTabularReviewPeople(createServerSupabase(), {
+    const result = await getTabularReviewPeople(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -267,7 +267,7 @@ tabularRouter.get("/:reviewId/people", requireAuth, asyncRoute(async (req, res) 
 
 // GET /tabular-review/:reviewId/access — role-aware direct grants, admin-only.
 tabularRouter.get("/:reviewId/access", requireAuth, asyncRoute(async (req, res) => {
-    const result = await getTabularReviewAccess(createServerSupabase(), {
+    const result = await getTabularReviewAccess(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -278,7 +278,7 @@ tabularRouter.get("/:reviewId/access", requireAuth, asyncRoute(async (req, res) 
 
 // POST /tabular-review/:reviewId/access — grant or re-role one recipient.
 tabularRouter.post("/:reviewId/access", requireAuth, asyncRoute(async (req, res) => {
-    const result = await grantTabularReviewAccess(createServerSupabase(), {
+    const result = await grantTabularReviewAccess(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -294,7 +294,7 @@ tabularRouter.delete(
     "/:reviewId/access/:email",
     requireAuth,
     asyncRoute(async (req, res) => {
-        const result = await revokeTabularReviewAccess(createServerSupabase(), {
+        const result = await revokeTabularReviewAccess(createDb(), {
             reviewId: req.params.reviewId,
             userId: res.locals.userId as string,
             userEmail: res.locals.userEmail as string | undefined,
@@ -307,7 +307,7 @@ tabularRouter.delete(
 
 // PATCH /tabular-review/:reviewId
 tabularRouter.patch("/:reviewId", requireAuth, asyncRoute(async (req, res) => {
-    const result = await updateTabularReview(createServerSupabase(), {
+    const result = await updateTabularReview(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -319,7 +319,7 @@ tabularRouter.patch("/:reviewId", requireAuth, asyncRoute(async (req, res) => {
 
 // DELETE /tabular-review/:reviewId
 tabularRouter.delete("/:reviewId", requireAuth, asyncRoute(async (req, res) => {
-    const result = await deleteTabularReview(createServerSupabase(), {
+    const result = await deleteTabularReview(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -336,7 +336,7 @@ tabularRouter.post("/:reviewId/clear-cells", requireAuth, asyncRoute(async (req,
     if (!Array.isArray(row_ids) || row_ids.length === 0)
         return void res.status(400).json({ detail: "row_ids is required" });
 
-    const result = await clearTabularReviewCells(createServerSupabase(), {
+    const result = await clearTabularReviewCells(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -361,7 +361,7 @@ tabularRouter.post(
                 .status(400)
                 .json({ detail: "row_id and column_index are required" });
 
-        const result = await regenerateTabularCell(createServerSupabase(), {
+        const result = await regenerateTabularCell(createDb(), {
             reviewId: req.params.reviewId,
             userId: res.locals.userId as string,
             userEmail: res.locals.userEmail as string | undefined,
@@ -379,7 +379,7 @@ tabularRouter.post("/:reviewId/generate", requireAuth, asyncRoute(async (req, re
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
     const { reviewId } = req.params;
-    const db = createServerSupabase();
+    const db = createDb();
     // Phase 1 (the pre-lease guards) is still tied to the request: nothing has
     // been claimed yet, so a caller that walks away costs nothing to drop.
     // Once the lease is claimed the SYNCHRONOUS path hands ownership to a
@@ -672,7 +672,7 @@ tabularRouter.post(
         // Edit standing only — not a usable model or keys for the caller, who
         // may not be the collaborator who started the run.
         const gate = await ensureReviewGenerateStopAccess(
-            createServerSupabase(),
+            createDb(),
             {
                 reviewId,
                 userId: res.locals.userId as string,
@@ -707,7 +707,7 @@ tabularRouter.get(
     requireAuth,
     asyncRoute(async (req, res) => {
         const { reviewId } = req.params;
-        const db = createServerSupabase();
+        const db = createDb();
         const view = await prepareTabularRunView(db, {
             reviewId,
             userId: res.locals.userId as string,
@@ -742,7 +742,7 @@ tabularRouter.get(
 
 // GET /tabular-review/:reviewId/chats — list chats (metadata only, no messages)
 tabularRouter.get("/:reviewId/chats", requireAuth, asyncRoute(async (req, res) => {
-    const result = await listTabularReviewChats(createServerSupabase(), {
+    const result = await listTabularReviewChats(createDb(), {
         reviewId: req.params.reviewId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
@@ -773,7 +773,7 @@ tabularRouter.get(
     asyncRoute(async (req, res) => {
         const { reviewId, chatId, turnId } = req.params;
         const gate = await ensureReviewChatReadAccess(
-            createServerSupabase(),
+            createDb(),
             reviewId,
             chatId,
             res.locals.userId as string,
@@ -805,7 +805,7 @@ tabularRouter.post(
     asyncRoute(async (req, res) => {
         const { reviewId, chatId, turnId } = req.params;
         const gate = await ensureReviewChatWriteAccess(
-            createServerSupabase(),
+            createDb(),
             reviewId,
             chatId,
             res.locals.userId as string,
@@ -831,7 +831,7 @@ tabularRouter.delete(
     "/:reviewId/chats/:chatId",
     requireAuth,
     asyncRoute(async (req, res) => {
-        const result = await deleteTabularReviewChat(createServerSupabase(), {
+        const result = await deleteTabularReviewChat(createDb(), {
             reviewId: req.params.reviewId,
             chatId: req.params.chatId,
             userId: res.locals.userId as string,
@@ -847,7 +847,7 @@ tabularRouter.patch(
     "/:reviewId/chats/:chatId",
     requireAuth,
     asyncRoute(async (req, res) => {
-        const result = await updateTabularReviewChat(createServerSupabase(), {
+        const result = await updateTabularReviewChat(createDb(), {
             reviewId: req.params.reviewId,
             chatId: req.params.chatId,
             userId: res.locals.userId as string,
@@ -870,7 +870,7 @@ tabularRouter.get(
     requireAuth,
     asyncRoute(async (req, res) => {
         const result = await listTabularReviewChatMessages(
-            createServerSupabase(),
+            createDb(),
             {
                 reviewId: req.params.reviewId,
                 chatId: req.params.chatId,
@@ -926,7 +926,7 @@ tabularRouter.post("/:reviewId/chat", requireAuth, asyncRoute(async (req, res) =
             .json({ detail: "messages must include a user message" });
     }
 
-    const db = createServerSupabase();
+    const db = createDb();
     // Everything before the first SSE byte: the review and its grid, the chat
     // record, the model policy, the persisted user turn, the prompt.
     const preparation = await prepareTabularChat(db, {

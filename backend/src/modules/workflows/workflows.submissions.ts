@@ -1,5 +1,5 @@
 // workflows submissions — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { OpenSourceSubmissionRow, OpenSourceSubmissionSummary, WorkflowRecord, WorkflowContributor, DEFAULT_WORKFLOW_CONTRIBUTOR } from "./workflows.types";
 
 import { metadataFromWorkflowRecord, normalizeContributors, contributorFromName } from "./workflows.serialization";

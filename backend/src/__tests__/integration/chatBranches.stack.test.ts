@@ -3,7 +3,7 @@ import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 import { createBranch, forkChat, setLeafAndPath } from "../../modules/chat/chat.branches";
 import { getChatMessages } from "../../modules/chat/chat.messages";
 import { linkedPrompt } from "../../modules/chat/chat.tree";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 
 // Gated: runs only against a real Postgres + GoTrue (npm run test:stack,
 // which starts both and sets DATABASE_TEST_URL, AUTH_TEST_URL and

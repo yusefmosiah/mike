@@ -12,8 +12,8 @@ const { from, eq, downloadFile, uploadFile, deleteFile, docxToPdf } =
     docxToPdf: vi.fn(),
   }));
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: () => ({ from, rpc: async (name: string, args: { p_document_id: string; p_version: Record<string, unknown> }) => {
+vi.mock("../../lib/db", () => ({
+  createDb: () => ({ from, rpc: async (name: string, args: { p_document_id: string; p_version: Record<string, unknown> }) => {
     expect(name).toBe("create_document_version");
     return from("document_versions").insert({ ...args.p_version, document_id: args.p_document_id });
   } }),

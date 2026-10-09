@@ -12,7 +12,7 @@ import { defineConfig, devices } from "@playwright/test";
  * (see e2e/support/office-mock.ts), so nothing here needs the real Office host.
  *
  * Tests are fully hermetic — every backend call is intercepted with page.route
- * inside the shared fixture; no live API/Supabase is ever contacted.
+ * inside the shared fixture; no live API or auth server is ever contacted.
  */
 const PORT = 3100;
 const BASE_URL = `http://localhost:${PORT}`;

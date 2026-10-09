@@ -13,7 +13,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendOrgFailure } from "../../lib/orgFailure";
 import {
     listMyOrgs,
@@ -36,7 +36,7 @@ export const orgsRouter = Router();
 // GET /orgs — orgs the caller belongs to (with their role + member count).
 orgsRouter.get("/", requireAuth, asyncRoute(async (_req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listMyOrgs(db, userId);
     if (!result.ok) return sendOrgFailure(res, result);
     res.json(result.orgs);
@@ -45,7 +45,7 @@ orgsRouter.get("/", requireAuth, asyncRoute(async (_req, res) => {
 // POST /orgs — create an org; the caller becomes its first admin.
 orgsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await createOrg(db, { userId, name: req.body?.name });
     if (!result.ok) return sendOrgFailure(res, result);
     res.status(201).json(result.org);
@@ -54,7 +54,7 @@ orgsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
 // GET /orgs/:orgId — org detail (any member).
 orgsRouter.get("/:orgId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await getOrg(db, { userId, orgId: req.params.orgId });
     if (!result.ok) return sendOrgFailure(res, result);
     res.json(result.org);
@@ -63,7 +63,7 @@ orgsRouter.get("/:orgId", requireAuth, asyncRoute(async (req, res) => {
 // PATCH /orgs/:orgId — rename the org (admin only).
 orgsRouter.patch("/:orgId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await updateOrg(db, {
         userId,
         orgId: req.params.orgId,
@@ -77,7 +77,7 @@ orgsRouter.patch("/:orgId", requireAuth, asyncRoute(async (req, res) => {
 // resources never become personal data as a side effect of deletion.
 orgsRouter.delete("/:orgId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await deleteOrg(db, {
         userId,
         userEmail: res.locals.userEmail as string | undefined,
@@ -92,7 +92,7 @@ orgsRouter.delete("/:orgId", requireAuth, asyncRoute(async (req, res) => {
 // are browsed inside those projects rather than as independent org resources.
 orgsRouter.get("/:orgId/resources", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listOrgResources(db, {
         userId,
         orgId: req.params.orgId,
@@ -107,7 +107,7 @@ orgsRouter.get("/:orgId/resources", requireAuth, asyncRoute(async (req, res) => 
 // GET /orgs/:orgId/members — the accepted roster (any member).
 orgsRouter.get("/:orgId/members", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listMembers(db, { userId, orgId: req.params.orgId });
     if (!result.ok) return sendOrgFailure(res, result);
     res.json(result.members);
@@ -116,7 +116,7 @@ orgsRouter.get("/:orgId/members", requireAuth, asyncRoute(async (req, res) => {
 // PATCH /orgs/:orgId/members/:userId — change a member's role (admin only).
 orgsRouter.patch("/:orgId/members/:userId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await updateMember(db, {
         actorId: userId,
         actorEmail: res.locals.userEmail as string | undefined,
@@ -131,7 +131,7 @@ orgsRouter.patch("/:orgId/members/:userId", requireAuth, asyncRoute(async (req, 
 // DELETE /orgs/:orgId/members/:userId — remove a member (admin, or self).
 orgsRouter.delete("/:orgId/members/:userId", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await removeMember(db, {
         actorId: userId,
         actorEmail: res.locals.userEmail as string | undefined,
@@ -150,7 +150,7 @@ orgsRouter.delete("/:orgId/members/:userId", requireAuth, asyncRoute(async (req,
 orgsRouter.post("/:orgId/invitations", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await createInvitation(db, {
         actorId: userId,
         actorEmail: userEmail,
@@ -165,7 +165,7 @@ orgsRouter.post("/:orgId/invitations", requireAuth, asyncRoute(async (req, res) 
 // GET /orgs/:orgId/invitations — pending/recent invitations (admin only).
 orgsRouter.get("/:orgId/invitations", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await listInvitations(db, {
         userId,
         orgId: req.params.orgId,
@@ -181,7 +181,7 @@ orgsRouter.delete(
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await cancelInvitation(db, {
             actorId: userId,
             actorEmail: userEmail,
@@ -205,7 +205,7 @@ orgsRouter.post(
     asyncRoute(async (req, res) => {
         const userId = res.locals.userId as string;
         const userEmail = res.locals.userEmail as string | undefined;
-        const db = createServerSupabase();
+        const db = createDb();
         const result = await resendInvitation(db, {
             actorId: userId,
             actorEmail: userEmail,

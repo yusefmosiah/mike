@@ -10,7 +10,7 @@ import { createDocumentVersion } from "../documents/documents.service";
 // workflows.service.ts, the module facade.
 
 import crypto from "crypto";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { downloadFile, storageKey, uploadFile } from "../../lib/storage";
 import { enqueueStorageCleanup } from "../../lib/dbq/enqueue";
 import {

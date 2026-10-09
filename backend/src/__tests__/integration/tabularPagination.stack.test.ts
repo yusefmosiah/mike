@@ -20,7 +20,7 @@ type OverviewRow = {
 
 const db = stackDb()!;
 
-maybeDescribe("Supabase tabular-review pagination", () => {
+maybeDescribe("tabular-review pagination", () => {
     let ownerId = "";
     let ownerEmail = "";
     const projectId = crypto.randomUUID();
@@ -323,7 +323,7 @@ maybeDescribe("Supabase tabular-review pagination", () => {
     });
 });
 
-maybeDescribe("Supabase tabular-review org visibility", () => {
+maybeDescribe("tabular-review org visibility", () => {
     // Org membership is the third visibility branch (alongside row ownership
     // and direct grants). These tests act as a plain member — neither the
     // row owner nor a direct grantee — so only the org branch can

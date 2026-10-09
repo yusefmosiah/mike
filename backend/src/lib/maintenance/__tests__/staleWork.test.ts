@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../../supabase", () => ({
-    createServerSupabase: vi.fn(),
+vi.mock("../../db", () => ({
+    createDb: vi.fn(),
 }));
 
 const conversionGetJob = vi.fn();
@@ -38,7 +38,7 @@ type Call = {
 
 type Responder = unknown[] | ((call: Call) => unknown[]);
 
-// Chainable Supabase double: select responses come from `responses[table]`
+// Chainable database double: select responses come from `responses[table]`
 // (an array, or a function of the recorded call for tables that are read more
 // than once); updates resolve empty and are recorded. `rpc` calls are recorded
 // too — the reaper releases a dead generation's lease through one.

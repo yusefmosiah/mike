@@ -1,14 +1,13 @@
 -- Runs once, when the Postgres volume is first initialized, as the superuser.
 --
--- supabase_auth_admin is GoTrue's conventional role: it owns the auth schema,
--- where GoTrue builds auth.users and its other tables on start. anon,
--- authenticated and service_role never log in and Mike never uses them; they
--- exist so schema.sql's grants and row-level security (which deny them, for a
--- deployment that keeps its database on a hosted Supabase) apply unchanged.
+-- gotrue is the auth server's role: it owns the auth schema, where GoTrue
+-- builds auth.users and its other tables on start. anon, authenticated and
+-- service_role never log in and Mike never uses them; schema.sql grants to them
+-- and fences them off with row-level security, so they must exist.
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'supabase_auth_admin') then
-    create role supabase_auth_admin with login noinherit createrole password 'postgres';
+  if not exists (select from pg_roles where rolname = 'gotrue') then
+    create role gotrue with login noinherit createrole password 'postgres';
   end if;
   if not exists (select from pg_roles where rolname = 'anon') then
     create role anon nologin noinherit;
@@ -21,6 +20,6 @@ begin
   end if;
 end $$;
 
-create schema if not exists auth authorization supabase_auth_admin;
-grant create on database postgres to supabase_auth_admin;
-alter role supabase_auth_admin set search_path = auth;
+create schema if not exists auth authorization gotrue;
+grant create on database postgres to gotrue;
+alter role gotrue set search_path = auth;

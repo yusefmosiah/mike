@@ -1,6 +1,6 @@
-import { createServerSupabase } from "./supabase";
+import { createDb } from "./db";
 import { UserFacingError } from "./userFacingError";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 import { resolveModel } from "./llm/models";
 
 export type RouterSlug = "openrouter" | "vercel" | "opencode-go";
@@ -65,7 +65,7 @@ export async function resolveRequestedModel(
     requested: string | null | undefined,
     fallback: string,
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
     onOutsideSelection: "throw" | "fallback" = "fallback",
 ): Promise<string> {
     const resolved = resolveModel(requested, fallback);
@@ -116,7 +116,7 @@ let warnedMissingTable = false;
 /** Every router's saved selection for a user, in one round of queries. */
 export async function getAllUserRouterModels(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<RouterModelSelections> {
     const selections = await Promise.all(
         ROUTER_SLUGS.map((slug) => getUserRouterModels(userId, slug, db)),
@@ -129,7 +129,7 @@ export async function getAllUserRouterModels(
 export async function getUserRouterModels(
     userId: string,
     router: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<string[]> {
     const { data, error } = await db
         .from("user_router_models")
@@ -164,7 +164,7 @@ export async function replaceUserRouterModels(
     userId: string,
     router: string,
     modelIds: string[],
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const { error } = await db.rpc("replace_user_router_models", {
         target_user_id: userId,

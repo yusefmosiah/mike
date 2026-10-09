@@ -25,7 +25,7 @@ const {
     buildUserAccountExport,
     buildUserChatsExport,
     buildUserTabularReviewsExport,
-    supabaseRpc,
+    dbRpc,
     adminSignOut,
     adminDeleteUser,
     dbJobsEnabled,
@@ -44,16 +44,16 @@ const {
     buildUserAccountExport: vi.fn(),
     buildUserChatsExport: vi.fn(),
     buildUserTabularReviewsExport: vi.fn(),
-    supabaseRpc: vi.fn(),
+    dbRpc: vi.fn(),
     adminSignOut: vi.fn(),
     adminDeleteUser: vi.fn(),
     dbJobsEnabled: vi.fn(() => true),
 }));
 
 // ---------------------------------------------------------------------------
-// Configurable Supabase stub. The only route in this suite that reaches the
+// Configurable database stub. The only route in this suite that reaches the
 // DB directly is GET /user/profile (via loadProfile → selectProfile). Tests
-// seed `supabaseState.tables.user_profiles`; terminal query ops resolve to the
+// seed `dbState.tables.user_profiles`; terminal query ops resolve to the
 // per-table result and auth.admin methods are stubbed where routes call them.
 // ---------------------------------------------------------------------------
 type QueryResult = { data: unknown; error: unknown };
@@ -61,7 +61,7 @@ type QueryResult = { data: unknown; error: unknown };
 // A table entry may be a queue of results: each query consumes the next one,
 // and the last repeats. Lets tests drive the selectProfile fallback cascade
 // (first select fails with 42703, the retry succeeds).
-let supabaseState: {
+let dbState: {
     tables: Record<string, QueryResult | QueryResult[]>;
     updates: Record<string, unknown[]>;
     inserts: Record<string, unknown[]>;
@@ -76,8 +76,8 @@ let supabaseState: {
     adminDeleteUser: { error: unknown };
 };
 
-function resetSupabaseState() {
-    supabaseState = {
+function resetDbState() {
+    dbState = {
         tables: {},
         updates: {},
         inserts: {},
@@ -90,10 +90,10 @@ function resetSupabaseState() {
         adminDeleteUser: { error: null },
     };
 }
-resetSupabaseState();
+resetDbState();
 
 function resultForTable(table: string): QueryResult {
-    const entry = supabaseState.tables[table];
+    const entry = dbState.tables[table];
     if (Array.isArray(entry)) {
         return entry.length > 1
             ? (entry.shift() as QueryResult)
@@ -130,9 +130,9 @@ function makeQuery(table: string) {
     let missing: string | null = null;
     q.select = vi.fn((columns?: unknown) => {
         if (typeof columns === "string") {
-            (supabaseState.selects[table] ??= []).push(columns);
+            (dbState.selects[table] ??= []).push(columns);
             missing =
-                supabaseState.missingColumns.find((column) =>
+                dbState.missingColumns.find((column) =>
                     columns.split(/,\s*/).includes(column),
                 ) ?? null;
         }
@@ -151,11 +151,11 @@ function makeQuery(table: string) {
     // Record update payloads so tests can assert what a route WROTE (the
     // per-table result stub only models what queries return).
     q.update = vi.fn((payload: unknown) => {
-        (supabaseState.updates[table] ??= []).push(payload);
+        (dbState.updates[table] ??= []).push(payload);
         return q;
     });
     q.insert = vi.fn((payload: unknown) => {
-        (supabaseState.inserts[table] ??= []).push(payload);
+        (dbState.inserts[table] ??= []).push(payload);
         return q;
     });
     q.single = vi.fn(() =>
@@ -175,16 +175,16 @@ function makeQuery(table: string) {
     return q;
 }
 
-function mockSupabase() {
+function mockDb() {
     return {
         from: vi.fn((table: string) => makeQuery(table)),
-        rpc: (...args: unknown[]) => supabaseRpc(...args),
+        rpc: (...args: unknown[]) => dbRpc(...args),
         auth: {
             getUser: () =>
                 Promise.resolve({ data: { user: { id: "u1" } }, error: null }),
             admin: {
                 getUserById: vi.fn(() =>
-                    Promise.resolve(supabaseState.adminGetUserById),
+                    Promise.resolve(dbState.adminGetUserById),
                 ),
                 deleteUser: (...a: unknown[]) => adminDeleteUser(...a),
                 signOut: (...a: unknown[]) => adminSignOut(...a),
@@ -193,11 +193,11 @@ function mockSupabase() {
     };
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => mockDb()),
 }));
 vi.mock("../../lib/gotrue", () => ({
-    authAdmin: vi.fn(() => mockSupabase().auth),
+    authAdmin: vi.fn(() => mockDb().auth),
 }));
 
 // The DB-queue runner's enabled flag is what the account-delete and export
@@ -309,13 +309,13 @@ function rejectMfa(_req: unknown, res: any) {
 describe("user.routes", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        resetSupabaseState();
+        resetDbState();
         // Default: MFA satisfied (guard passes through).
         requireMfaIfEnrolled.mockImplementation(
             (_req: unknown, _res: unknown, next: () => void) => next(),
         );
         adminDeleteUser.mockImplementation(() =>
-            Promise.resolve(supabaseState.adminDeleteUser),
+            Promise.resolve(dbState.adminDeleteUser),
         );
         adminSignOut.mockResolvedValue({ data: null, error: null });
         dbJobsEnabled.mockReturnValue(true);
@@ -336,17 +336,17 @@ describe("user.routes", () => {
         buildUserAccountExport.mockResolvedValue({ account: "data" });
         buildUserChatsExport.mockResolvedValue({ chats: "data" });
         buildUserTabularReviewsExport.mockResolvedValue({ reviews: "data" });
-        supabaseRpc.mockResolvedValue({ data: null, error: null });
+        dbRpc.mockResolvedValue({ data: null, error: null });
     });
 
     // ── GET /user/profile (MFA bootstrap path) ────────────────────────────
     describe("GET /user/profile", () => {
         it("returns the serialized profile plus apiKeyStatus", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
-            supabaseState.tables.user_router_models = {
+            dbState.tables.user_router_models = {
                 data: [
                     { model_id: "anthropic/claude-sonnet-4.5" },
                     { model_id: "openai/gpt-5.4" },
@@ -388,7 +388,7 @@ describe("user.routes", () => {
             // Even if the MFA factor were unsatisfied, profile must remain
             // reachable so the client can render the verification gate.
             requireMfaIfEnrolled.mockImplementation(rejectMfa);
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
@@ -407,7 +407,7 @@ describe("user.routes", () => {
             });
             delete (preMigrationRow as Record<string, unknown>)
                 .memory_curator_model;
-            supabaseState.tables.user_profiles = [
+            dbState.tables.user_profiles = [
                 {
                     data: null,
                     error: {
@@ -441,11 +441,11 @@ describe("user.routes", () => {
                 .memory_curator_model;
             delete (preMigrationRow as Record<string, unknown>)
                 .project_memory_default;
-            supabaseState.missingColumns = [
+            dbState.missingColumns = [
                 "memory_curator_model",
                 "project_memory_default",
             ];
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: preMigrationRow,
                 error: null,
             };
@@ -455,7 +455,7 @@ describe("user.routes", () => {
                 .set(...AUTH);
 
             expect(res.status).toBe(200);
-            const selects = supabaseState.selects.user_profiles ?? [];
+            const selects = dbState.selects.user_profiles ?? [];
             // Exactly one retry: the full select, then the tier that drops
             // both columns of that migration and nothing else.
             expect(selects).toHaveLength(2);
@@ -487,7 +487,7 @@ describe("user.routes", () => {
                 legal_research_us: false,
                 quick_actions_visible: false,
             };
-            supabaseState.tables.user_profiles = [
+            dbState.tables.user_profiles = [
                 {
                     data: null,
                     error: {
@@ -522,7 +522,7 @@ describe("user.routes", () => {
             // skip onboarding entirely.
             const migration01Row = profileRow({ onboarding_version: null });
             delete (migration01Row as Record<string, unknown>).password_set_at;
-            supabaseState.tables.user_profiles = [
+            dbState.tables.user_profiles = [
                 {
                     data: null,
                     error: {
@@ -549,7 +549,7 @@ describe("user.routes", () => {
         });
 
         it("returns 500 with detail when the profile load errors", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: null,
                 error: { message: "db down" },
             };
@@ -566,7 +566,7 @@ describe("user.routes", () => {
     // ── PATCH /user/profile (appearance preference) ───────────────────────
     describe("PATCH /user/profile appearance", () => {
         it("persists and returns the dark mode preference", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ dark_mode: true }),
                 error: null,
             };
@@ -591,7 +591,7 @@ describe("user.routes", () => {
         });
 
         it("persists and returns the project memory default", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ project_memory_default: false }),
                 error: null,
             };
@@ -603,7 +603,7 @@ describe("user.routes", () => {
 
             expect(res.status).toBe(200);
             expect(res.body.projectMemoryDefault).toBe(false);
-            expect(supabaseState.updates.user_profiles).toContainEqual(
+            expect(dbState.updates.user_profiles).toContainEqual(
                 expect.objectContaining({ project_memory_default: false }),
             );
         });
@@ -757,7 +757,7 @@ describe("user.routes", () => {
 
     describe("PATCH /user/profile", () => {
         it("persists the last-selected model from the initial chat view", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({
                     last_selected_chat_model: "gpt-5.6-sol",
                 }),
@@ -770,7 +770,7 @@ describe("user.routes", () => {
                 .send({ lastSelectedChatModel: "gpt-5.6-sol" });
 
             expect(res.status).toBe(200);
-            expect(supabaseState.updates.user_profiles).toContainEqual(
+            expect(dbState.updates.user_profiles).toContainEqual(
                 expect.objectContaining({
                     last_selected_chat_model: "gpt-5.6-sol",
                 }),
@@ -779,7 +779,7 @@ describe("user.routes", () => {
         });
 
         it("persists and returns the memory curator model", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ memory_curator_model: "gpt-5.4-mini" }),
                 error: null,
             };
@@ -791,7 +791,7 @@ describe("user.routes", () => {
 
             expect(res.status).toBe(200);
             expect(res.body.memoryCuratorModel).toBe("gpt-5.4-mini");
-            expect(supabaseState.updates.user_profiles).toContainEqual(
+            expect(dbState.updates.user_profiles).toContainEqual(
                 expect.objectContaining({
                     memory_curator_model: "gpt-5.4-mini",
                 }),
@@ -809,7 +809,7 @@ describe("user.routes", () => {
         });
 
         it("persists OpenRouter selections through the router-neutral table function", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
@@ -825,7 +825,7 @@ describe("user.routes", () => {
                 });
 
             expect(res.status).toBe(200);
-            expect(supabaseRpc).toHaveBeenCalledWith(
+            expect(dbRpc).toHaveBeenCalledWith(
                 "replace_user_router_models",
                 {
                     target_user_id: "u1",
@@ -839,7 +839,7 @@ describe("user.routes", () => {
         });
 
         it("persists Vercel selections through the router-neutral table function", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
@@ -850,7 +850,7 @@ describe("user.routes", () => {
                 .send({ vercelModels: ["openai/gpt-5.4"] });
 
             expect(res.status).toBe(200);
-            expect(supabaseRpc).toHaveBeenCalledWith(
+            expect(dbRpc).toHaveBeenCalledWith(
                 "replace_user_router_models",
                 {
                     target_user_id: "u1",
@@ -873,7 +873,7 @@ describe("user.routes", () => {
         });
 
         it("allows personalisation fields to be cleared", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
@@ -902,7 +902,7 @@ describe("user.routes", () => {
         ] as const)(
             "truncates %s to 200 characters",
             async (field, column) => {
-                supabaseState.tables.user_profiles = {
+                dbState.tables.user_profiles = {
                     data: profileRow(),
                     error: null,
                 };
@@ -913,7 +913,7 @@ describe("user.routes", () => {
                     .send({ [field]: "x".repeat(250) });
 
                 expect(res.status).toBe(200);
-                const written = supabaseState.updates.user_profiles?.at(-1) as
+                const written = dbState.updates.user_profiles?.at(-1) as
                     | Record<string, unknown>
                     | undefined;
                 expect(written?.[column]).toBe("x".repeat(200));
@@ -923,7 +923,7 @@ describe("user.routes", () => {
 
     describe("POST /user/onboarding", () => {
         it("accepts a jurisdiction and normalized practice areas", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ onboarding_version: null }),
                 error: null,
             };
@@ -951,7 +951,7 @@ describe("user.routes", () => {
         });
 
         it("treats onboarding version 0 as legacy-exempt", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ onboarding_version: 0 }),
                 error: null,
             };
@@ -968,7 +968,7 @@ describe("user.routes", () => {
         });
 
         it("allows users to skip all personalisation fields", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ onboarding_version: null }),
                 error: null,
             };
@@ -1008,7 +1008,7 @@ describe("user.routes", () => {
         });
 
         it("allows onboarding completion without a display name", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ display_name: null }),
                 error: null,
             };
@@ -1028,13 +1028,13 @@ describe("user.routes", () => {
 
     describe("POST /user/security/password-set", () => {
         it("records and returns verified password capability", async () => {
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({
                     password_set_at: "2026-08-21T12:00:00.000Z",
                 }),
                 error: null,
             };
-            supabaseRpc.mockResolvedValue({
+            dbRpc.mockResolvedValue({
                 data: "2026-08-21T12:00:00.000Z",
                 error: null,
             });
@@ -1046,18 +1046,18 @@ describe("user.routes", () => {
 
             expect(res.status).toBe(200);
             expect(res.body.passwordSet).toBe(true);
-            expect(supabaseRpc).toHaveBeenCalledWith(
+            expect(dbRpc).toHaveBeenCalledWith(
                 "sync_user_password_set",
                 { p_user_id: "u1" },
             );
         });
 
-        it("rejects the marker when Supabase has no password", async () => {
-            supabaseState.tables.user_profiles = {
+        it("rejects the marker when GoTrue has no password", async () => {
+            dbState.tables.user_profiles = {
                 data: profileRow(),
                 error: null,
             };
-            supabaseRpc.mockResolvedValue({ data: null, error: null });
+            dbRpc.mockResolvedValue({ data: null, error: null });
 
             const res = await request(app)
                 .post("/user/security/password-set")
@@ -1195,7 +1195,7 @@ describe("user.routes", () => {
         // files live. It must therefore happen LAST — inside the job, after the
         // cascade — never in this request.
         it("DELETE /user/account schedules the cascade and does NOT delete the auth user yet", async () => {
-            supabaseState.tables.db_jobs = {
+            dbState.tables.db_jobs = {
                 data: { id: "job-1" },
                 error: null,
             };
@@ -1206,7 +1206,7 @@ describe("user.routes", () => {
 
             expect(res.status).toBe(204);
             // Durable job queued...
-            const jobInserts = (supabaseState.inserts.db_jobs ?? []) as Record<
+            const jobInserts = (dbState.inserts.db_jobs ?? []) as Record<
                 string,
                 unknown
             >[];
@@ -1246,7 +1246,7 @@ describe("user.routes", () => {
             // destroyed — the user is still signed in and can appoint an
             // admin. The old behaviour answered 204, revoked the session and
             // then failed the job forever.
-            expect(supabaseState.inserts.db_jobs ?? []).toHaveLength(0);
+            expect(dbState.inserts.db_jobs ?? []).toHaveLength(0);
             expect(adminSignOut).not.toHaveBeenCalled();
             expect(deleteUserAccountData).not.toHaveBeenCalled();
         });
@@ -1282,12 +1282,12 @@ describe("user.routes", () => {
                 "u1",
                 "u1@test.local",
             );
-            expect(supabaseState.inserts.db_jobs ?? []).toHaveLength(0);
+            expect(dbState.inserts.db_jobs ?? []).toHaveLength(0);
         });
 
         it("DELETE /user/account returns 500 when the inline auth-user delete errors", async () => {
             dbJobsEnabled.mockReturnValue(false);
-            supabaseState.adminDeleteUser = { error: { message: "auth boom" } };
+            dbState.adminDeleteUser = { error: { message: "auth boom" } };
 
             const res = await request(app)
                 .delete("/user/account")
@@ -1300,7 +1300,7 @@ describe("user.routes", () => {
         it("DELETE /user/account returns 500 when the cascade cannot be scheduled", async () => {
             // Nothing has been destroyed yet, so the request is cleanly
             // retriable — it must not answer 204.
-            supabaseState.tables.db_jobs = {
+            dbState.tables.db_jobs = {
                 data: null,
                 error: { code: "08006", message: "connection lost" },
             };
@@ -1353,7 +1353,7 @@ describe("user.routes", () => {
     // ── PATCH /user/security/mfa-login (factor-gated, MFA-guarded) ────────
     describe("PATCH /user/security/mfa-login", () => {
         it("returns 400 when enabling without a verified TOTP factor", async () => {
-            supabaseState.adminGetUserById = {
+            dbState.adminGetUserById = {
                 data: { user: { id: "u1", factors: [] } },
                 error: null,
             };
@@ -1368,7 +1368,7 @@ describe("user.routes", () => {
         });
 
         it("enables MFA-on-login when a verified TOTP factor exists", async () => {
-            supabaseState.adminGetUserById = {
+            dbState.adminGetUserById = {
                 data: {
                     user: {
                         id: "u1",
@@ -1377,7 +1377,7 @@ describe("user.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: profileRow({ mfa_on_login: true }),
                 error: null,
             };

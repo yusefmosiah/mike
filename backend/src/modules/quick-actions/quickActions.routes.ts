@@ -10,7 +10,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import {
   createQuickAction,
@@ -25,7 +25,7 @@ quickActionsRouter.get(
   "/",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const result = await listQuickActions(createServerSupabase(), {
+    const result = await listQuickActions(createDb(), {
       userId: res.locals.userId as string,
       userEmail: res.locals.userEmail as string | undefined,
       surface: req.query.surface,
@@ -39,7 +39,7 @@ quickActionsRouter.post(
   "/",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const result = await createQuickAction(createServerSupabase(), {
+    const result = await createQuickAction(createDb(), {
       userId: res.locals.userId as string,
       userEmail: res.locals.userEmail as string | undefined,
       body: req.body,
@@ -63,7 +63,7 @@ quickActionsRouter.patch(
   asyncRoute(async (req, res) => {
     if (!isUuid(req.params.quickActionId))
       return void res.status(404).json({ detail: "Quick action not found" });
-    const result = await updateQuickAction(createServerSupabase(), {
+    const result = await updateQuickAction(createDb(), {
       userId: res.locals.userId as string,
       userEmail: res.locals.userEmail as string | undefined,
       quickActionId: req.params.quickActionId,
@@ -80,7 +80,7 @@ quickActionsRouter.delete(
   asyncRoute(async (req, res) => {
     if (!isUuid(req.params.quickActionId))
       return void res.status(404).json({ detail: "Quick action not found" });
-    const result = await deleteQuickAction(createServerSupabase(), {
+    const result = await deleteQuickAction(createDb(), {
       userId: res.locals.userId as string,
       quickActionId: req.params.quickActionId,
     });

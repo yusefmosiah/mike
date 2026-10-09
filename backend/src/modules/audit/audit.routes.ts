@@ -9,7 +9,7 @@
 import { Router } from "express";
 import { requireAuth, requireMfaIfEnrolled } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import { exportAuditCsv, listAuditEvents } from "./audit.service";
 
@@ -17,7 +17,7 @@ export const auditRouter = Router();
 auditRouter.use(requireAuth);
 
 auditRouter.get("/", asyncRoute(async (req, res) => {
-  const result = await listAuditEvents(createServerSupabase(), {
+  const result = await listAuditEvents(createDb(), {
     userId: res.locals.userId as string,
     email: res.locals.userEmail as string | undefined,
     query: req.query as Record<string, unknown>,
@@ -30,7 +30,7 @@ auditRouter.get("/", asyncRoute(async (req, res) => {
 // frontend goes through the durable "audit-csv" export job instead. Both
 // emit the same bytes because both render through buildAuditCsv.
 auditRouter.get("/export", requireMfaIfEnrolled, asyncRoute(async (req, res) => {
-  const result = await exportAuditCsv(createServerSupabase(), {
+  const result = await exportAuditCsv(createDb(), {
     userId: res.locals.userId as string,
     email: res.locals.userEmail as string | undefined,
     query: req.query as Record<string, unknown>,

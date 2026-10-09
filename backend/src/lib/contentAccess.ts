@@ -3,7 +3,7 @@
 // Both resources use the same access ladder as projects. Their creator has
 // implicit Owner standing; these rows represent only additional recipients.
 
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 import { isProjectRole, type ProjectRole } from "./permissions";
 import { findProfileUserByEmail } from "./userLookup";
 

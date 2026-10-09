@@ -6,6 +6,15 @@ import { DbClient, type Executor } from "./client";
 
 export { DbClient, type DbError, type DbResult, type Executor } from "./client";
 
+/**
+ * The server-side database handle every service function takes as its first
+ * argument. Services and job handlers accept a `Db`; route handlers obtain the
+ * shared one from `createDb()` and pass it down, which lets tests substitute a
+ * fake with a single cast. Queries bypass row-level security: use it only
+ * after authorizing the caller.
+ */
+export type Db = DbClient;
+
 let pool: Pool | undefined;
 let client: DbClient | undefined;
 
@@ -29,7 +38,7 @@ export function databasePool(): Pool {
 const execute: Executor = async (sql, params) => (await databasePool().query(sql, params)).rows;
 
 /** The shared database handle. */
-export function createDb(): DbClient {
+export function createDb(): Db {
   client ??= new DbClient(execute);
   return client;
 }

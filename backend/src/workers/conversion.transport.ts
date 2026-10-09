@@ -3,7 +3,7 @@ import { Worker, type Job } from "bullmq";
 import { getRedisConnection } from "../lib/queue/connection";
 import { reportError } from "../lib/observability/sentry";
 import { CONVERSION_QUEUE, type ConversionJobData } from "../lib/queue/conversionQueue";
-import { createServerSupabase } from "../lib/supabase";
+import { createDb } from "../lib/db";
 import { runConversionJob, setDocumentTerminalStatus } from "../modules/documents/documents.service";
 
 /** True once a job has exhausted its retries (BullMQ 'failed', no attempts left). */
@@ -80,7 +80,7 @@ export function createConversionWorker(): Worker<ConversionJobData> {
         );
         try {
             await setDocumentTerminalStatus(
-                createServerSupabase(),
+                createDb(),
                 job.data.documentId,
                 "error",
             );

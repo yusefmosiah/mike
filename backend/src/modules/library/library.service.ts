@@ -2,13 +2,13 @@
 //
 // The library organises a user's standalone (project_id === null) documents
 // into two collections — "files" and "templates" — each with an optional
-// folder tree (library_folders). These functions take an explicit Supabase
+// folder tree (library_folders). These functions take an explicit database
 // client (`db`) plus request-derived primitives and RETURN typed results;
 // the thin route handlers in library.routes.ts map them onto HTTP responses.
 
 import { parseFolderPath, validateFolderMove, collectFolderSubtree } from "../../lib/folderTree";
 import { renameDocument, deleteCollectionDocuments } from "../documents/documents.service";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
   attachActiveVersionPaths,
   attachLatestVersionNumbers,

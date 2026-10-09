@@ -38,7 +38,7 @@ function geminiRejectsKey(): Response {
     );
 }
 
-// Supabase stand-in: thenable chain; nothing in this turn needs rows.
+// Database stand-in: thenable chain; nothing in this turn needs rows.
 function emptyDb() {
     const chain: Record<string, unknown> = {};
     for (const method of ["from", "select", "eq", "order", "in", "is", "limit"]) {

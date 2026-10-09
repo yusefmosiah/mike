@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 const settings = vi.hoisted(() => vi.fn());
 vi.mock("../user.settings", () => ({ getUserModelSettings: settings }));
 import { resolveUserChatSelection } from "../user.chatSelection";

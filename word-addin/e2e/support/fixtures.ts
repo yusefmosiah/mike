@@ -205,7 +205,7 @@ export const test = base.extend<{ addin: Addin }>({
     );
 
     // Fail closed: API requests not explicitly mocked by the fixture or a spec
-    // must never escape to a developer's backend or Supabase project. Static
+    // must never escape to a developer's backend or auth server. Static
     // task-pane assets are the only network traffic allowed through.
     await page.route("**/*", (route, request) => {
       const url = new URL(request.url());

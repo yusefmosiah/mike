@@ -1,11 +1,11 @@
 // Business logic + data-access for the downloads module.
 //
-// Service layer behind downloads.routes.ts. Takes an explicit Supabase client
+// Service layer behind downloads.routes.ts. Takes an explicit database client
 // (`db`) plus request-derived primitives, resolves a signed download token to
 // the bytes it grants access to, and RETURNS a typed result. It never touches
 // req/res — the route maps the result onto status codes, headers, and body.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { downloadFile } from "../../lib/storage";
 import { verifyDownload } from "../../lib/downloadTokens";
 import { ensureDocAccess } from "../../lib/access";

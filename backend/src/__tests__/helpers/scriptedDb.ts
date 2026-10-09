@@ -1,5 +1,5 @@
 import { expect } from "vitest";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 
 export type Query = {
   table: string;

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { scriptedDb } from "../helpers/scriptedDb";
 const state = vi.hoisted(() => ({
   db: undefined as Db | undefined,
   access: vi.fn(),
 }));
-vi.mock("../../lib/supabase", () => ({ createServerSupabase: () => state.db }));
+vi.mock("../../lib/db", () => ({ createDb: () => state.db }));
 vi.mock("../../middleware/auth", async () => {
   const { authMock } = await import("../helpers/authMock.js");
   return authMock();

@@ -26,7 +26,7 @@ import { toProviderStreamError } from "../../../../lib/llm/providerErrors";
 
 import { AssistantStreamError, runLLMStream } from "../streaming";
 
-// Supabase mock that only has to serve getUserRouterModels' query chain.
+// Database mock that only has to serve getUserRouterModels' query chain.
 function routerModelsDb(
     rows: { model_id: string }[],
     error: unknown = null,

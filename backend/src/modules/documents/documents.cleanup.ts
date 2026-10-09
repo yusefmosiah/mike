@@ -1,5 +1,5 @@
 import { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "./documents.cleanupJobs";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
   ok,
   internalFailure,

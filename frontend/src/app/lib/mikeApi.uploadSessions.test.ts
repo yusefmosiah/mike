@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSessionMock } = vi.hoisted(() => ({ getSessionMock: vi.fn() }));
-vi.mock("@/app/lib/supabase", () => ({
-    supabase: { auth: { getSession: getSessionMock } },
-}));
-
 import {
     UploadBatchError,
     failedUploadMessage,
@@ -296,9 +291,6 @@ function fileOfSize(name: string, size: number): File {
 describe("direct upload sessions", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        getSessionMock.mockResolvedValue({
-            data: { session: { access_token: "token-123" } },
-        });
         vi.stubGlobal("fetch", fetchMock);
     });
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 type Supa = Db;
 

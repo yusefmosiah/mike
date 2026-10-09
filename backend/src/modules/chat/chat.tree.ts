@@ -7,11 +7,11 @@
 // existing content.
 //
 // These functions are the service layer behind the branching endpoints and
-// the transcript read path. They take an explicit Supabase client (`db`) plus
+// the transcript read path. They take an explicit database client (`db`) plus
 // request-derived primitives and return plain values. Read helpers fail open
 // (log + empty/fallback result) so a transient DB error degrades a transcript
 // rather than 500ing it; `setLeaf` is the one write and surfaces its error.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 
 // The columns every tree consumer needs. `select *` would also ship citations
 // and memory bookkeeping that no caller here reads.

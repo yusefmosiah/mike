@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { createServerSupabase } from "../../lib/supabase";
-import type { Db } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
+import type { Db } from "../../lib/db";
 import { logError } from "../../lib/log";
 import type { UserApiKeys } from "../../lib/llm";
 
@@ -136,7 +136,7 @@ export function normalizeApiKeyProvider(value: string): ApiKeyProvider | null {
 
 export async function getUserApiKeyStatus(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<ApiKeyStatus> {
     const status: ApiKeyStatus = {
         claude: false,
@@ -183,7 +183,7 @@ export async function getUserApiKeyStatus(
 
 export async function getUserApiKeys(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<UserApiKeys> {
     const apiKeys: UserApiKeys = {
         claude: envApiKey("claude"),
@@ -215,7 +215,7 @@ export async function saveUserApiKey(
     userId: string,
     provider: ApiKeyProvider,
     value: string | null,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const normalized = value?.trim() || null;
     if (!normalized) {

@@ -56,7 +56,7 @@ describe("targetPendingCells", () => {
 // awaitCellTerminal — the "view" half of an async regenerate-cell.
 // ---------------------------------------------------------------------------
 
-// Read-only Supabase double: it records every call so the tests can assert the
+// Read-only database double: it records every call so the tests can assert the
 // wait loop never writes (the worker owns the cell and its generation lease).
 function makeCellDb(rows: Record<string, unknown>[]) {
     const calls: { op: string; filters: Record<string, unknown> }[] = [];

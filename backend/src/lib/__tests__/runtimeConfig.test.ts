@@ -101,18 +101,6 @@ describe("runtime authentication configuration", () => {
       }),
     ).toThrow(/AUTH_HANDOFF_ENCRYPTION_SECRET is required/);
   });
-
-  it("accepts a deployment still configured with SUPABASE_URL and its secret key", () => {
-    expect(() =>
-      validateRuntimeConfiguration({
-        ...validProduction,
-        AUTH_URL: undefined,
-        AUTH_SERVICE_KEY: undefined,
-        SUPABASE_URL: "https://project.supabase.co",
-        SUPABASE_SECRET_KEY: "service-role-key",
-      }),
-    ).not.toThrow();
-  });
 });
 
 describe("upload-session rate-limit configuration", () => {

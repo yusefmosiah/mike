@@ -11,7 +11,6 @@ import React, {
     ReactNode,
 } from "react";
 import {
-    clearLegacyBrowserAuthStorage,
     getAuthSession,
     logout,
     updateAuthEmail,
@@ -95,8 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        clearLegacyBrowserAuthStorage();
-
         const channel =
             typeof BroadcastChannel === "undefined"
                 ? null

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Db } from "../../supabase";
+import type { Db } from "../../db";
 import type { AuditEventInput } from "../../audit";
 
 // GoTrue is reached through authAdmin(); it answers with the current fake db's `auth`.

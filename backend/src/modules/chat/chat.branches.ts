@@ -2,7 +2,7 @@
 // Business logic + data-access for the chat module.
 //
 // These functions are the service layer behind chat.routes.ts. They take an
-// explicit Supabase client (`db`) plus request-derived primitives, perform the
+// explicit database client (`db`) plus request-derived primitives, perform the
 // chat orchestration / DB work, and RETURN values or typed error results. They
 // never touch req/res — the thin route handlers map the results onto HTTP
 // status codes, headers, and response bodies.
@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { forkChatLineage } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { createChat } from "./chat.crud";
 import type { ChatMessage } from "./engine/types";
 import {

@@ -18,7 +18,7 @@
 #      WORD_ADDIN_SIDELOAD=0.
 #
 # Prerequisite: the Mike API must be running (`npm run dev` in backend/),
-# and its Supabase server configuration must be filled in (see the repo README).
+# and its database and GoTrue settings must be filled in (see the repo README).
 #
 # Pass --setup-only to do everything except the port check + final `npm start`.
 #
@@ -80,7 +80,7 @@ ok "dependencies installed and verified"
 
 # ── 5. Mike backend health ───────────────────────────────────────────────────
 # The backend owns sign-in, session refresh, chat, actions, workflows, project
-# browsing, and uploads. The add-in never contacts Supabase directly.
+# browsing, and uploads. The add-in never contacts GoTrue directly.
 step "Checking the Mike backend is running"
 BACKEND_OK=1
 
@@ -171,7 +171,7 @@ if [ "$BACKEND_OK" != 1 ]; then
     step "Mike backend is not running"
     echo "    The add-in needs Mike running before it does anything useful. Start it:"
     echo "      (backend/)    npm run dev        # the Mike API on :3001"
-    echo "    and make sure backend/.env contains the Supabase server configuration."
+    echo "    and make sure backend/.env contains the database and GoTrue settings."
     echo "    Then re-run this script. To launch anyway, set FORCE=1 (sign-in will fail until Mike is up)."
     [ "${FORCE:-0}" = 1 ] || exit 1
     warn "FORCE=1 set — launching despite the backend being down."

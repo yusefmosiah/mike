@@ -13,7 +13,7 @@ import {
     loadUserMessageSentTimes,
 } from "../../modules/chat/engine/contextBuilders";
 import { buildTabularMessages } from "../../modules/tabular/tabular.chats";
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 
 // 13:05 UTC is 14:05 in London (BST) and 09:05 in New York (EDT).
 const NOW = new Date("2026-10-01T13:05:00Z");

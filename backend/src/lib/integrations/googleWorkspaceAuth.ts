@@ -3,7 +3,7 @@ import type {
   GoogleWorkspaceStatus,
 } from "@mike/contracts";
 import crypto from "node:crypto";
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 import {
   base64Url,
   encryptString,

@@ -6,7 +6,7 @@
 import { Router, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { sendDocumentDisplay } from "../../lib/documentDisplay";
 import { sendInternalError } from "../../lib/httpError";
 import { sendServiceFailure } from "../../lib/serviceResult";
@@ -36,7 +36,7 @@ workflowAddonsRouter.get(
   "/",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const db = createServerSupabase();
+    const db = createDb();
     const type = typeof req.query.type === "string" ? req.query.type : null;
     const result = await listWorkflowAddons(db, { type });
     if (!result.ok) return void sendServiceFailure(res, result);
@@ -61,7 +61,7 @@ workflowAddonsRouter.get(
   "/:addonId/assets/:assetId/display",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await loadWorkflowAddonAssetDisplay(db, {
       addonId: req.params.addonId,
       assetId: req.params.assetId,
@@ -83,7 +83,7 @@ workflowAddonsRouter.get(
   "/:addonId",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await getWorkflowAddon(db, { addonId: req.params.addonId });
     if (!result.ok) return void sendServiceFailure(res, result);
     res.json(result.data);
@@ -96,7 +96,7 @@ workflowAddonsRouter.post(
   requireAuth,
   asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await importWorkflowAddon(db, {
       addonId: req.params.addonId,
       userId,

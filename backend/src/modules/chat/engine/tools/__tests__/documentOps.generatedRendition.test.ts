@@ -44,15 +44,15 @@ vi.mock("../../../../../lib/downloadTokens", () => ({
   buildDownloadUrl: (key: string) => `https://dl.test/${key}`,
 }));
 
-vi.mock("../../../../../lib/supabase", () => ({
-  createServerSupabase: vi.fn(),
+vi.mock("../../../../../lib/db", () => ({
+  createDb: vi.fn(),
 }));
 
 import { generatePpt } from "../documentOps";
 
 type Insert = { table: string; payload: Record<string, unknown> };
 
-// Chainable Supabase double: records inserts, returns fixed ids.
+// Chainable database double: records inserts, returns fixed ids.
 function makeDb() {
   const inserts: Insert[] = [];
   function from(table: string) {

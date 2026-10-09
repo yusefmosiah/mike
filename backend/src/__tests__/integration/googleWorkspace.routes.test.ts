@@ -19,7 +19,7 @@ vi.mock("../../lib/integrations/googleDrive", async (original) => ({
   updateGoogleDriveSettings: mocks.driveSettings,
   getGoogleDriveStatus: mocks.driveStatus,
 }));
-vi.mock("../../lib/supabase", () => ({ createServerSupabase: () => ({}) }));
+vi.mock("../../lib/db", () => ({ createDb: () => ({}) }));
 vi.mock("../../middleware/auth", () => ({
   requireAuth: (_r: unknown, res: Response, next: () => void) => {
     if (!mocks.auth) return void res.status(401).end();

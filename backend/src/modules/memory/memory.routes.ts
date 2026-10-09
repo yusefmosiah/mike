@@ -13,7 +13,7 @@ import {
 import type { ParamsFlatDictionary } from "express-serve-static-core";
 import { sendInternalError } from "../../lib/httpError";
 import type { Capability } from "../../lib/permissions";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import {
@@ -51,14 +51,14 @@ async function userContext(
   res: Response,
 ): Promise<MemoryContext | null> {
   return resolveUserMemoryContext(
-    createServerSupabase(),
+    createDb(),
     res.locals.userId as string,
   );
 }
 
 function projectContext(required: Capability): ContextResolver {
   return async (req, res) => {
-    const result = await resolveProjectMemoryContext(createServerSupabase(), {
+    const result = await resolveProjectMemoryContext(createDb(), {
       projectId: req.params.projectId,
       userId: res.locals.userId as string,
       userEmail: res.locals.userEmail as string | undefined,
@@ -86,7 +86,7 @@ async function sendMemoryError(
   if (error instanceof MemoryRevisionConflictError && ctx) {
     let current;
     try {
-      current = await currentMemory(createServerSupabase(), ctx);
+      current = await currentMemory(createDb(), ctx);
     } catch {
       current = undefined;
     }
@@ -124,7 +124,7 @@ function installMemoryRoutes(
     try {
       const ctx = await readContext(req, res);
       if (!ctx) return;
-      res.json(await currentMemory(createServerSupabase(), ctx));
+      res.json(await currentMemory(createDb(), ctx));
     } catch (error) {
       await sendMemoryError(res, error);
     }
@@ -142,7 +142,7 @@ function installMemoryRoutes(
       }
       ctx = await writeContext(req, res);
       if (!ctx) return;
-      const current = await saveMemory(createServerSupabase(), {
+      const current = await saveMemory(createDb(), {
         ctx,
         content: req.body.content,
         expectedRevision: parsedVersion,
@@ -163,7 +163,7 @@ function installMemoryRoutes(
       }
       const ctx = await settingsContext(req, res);
       if (!ctx) return;
-      const current = await setMemoryEnabled(createServerSupabase(), {
+      const current = await setMemoryEnabled(createDb(), {
         ctx,
         enabled: req.body.enabled,
         updatedBy: res.locals.userId as string,
@@ -180,7 +180,7 @@ function installMemoryRoutes(
         const ctx = await wipeContext(req, res);
         if (!ctx) return;
         res.json(
-          await wipeMemory(createServerSupabase(), {
+          await wipeMemory(createDb(), {
             ctx,
             updatedBy: res.locals.userId as string,
           }),

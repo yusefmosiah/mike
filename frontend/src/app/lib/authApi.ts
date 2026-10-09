@@ -176,15 +176,3 @@ export function unenrollMfa(factorId: string) {
         },
     );
 }
-
-export function clearLegacyBrowserAuthStorage() {
-    if (typeof window === "undefined") return;
-    for (const storage of [window.localStorage, window.sessionStorage]) {
-        for (let index = storage.length - 1; index >= 0; index -= 1) {
-            const key = storage.key(index);
-            if (key && /(?:^|-)auth-token(?:$|-)|supabase.*auth/i.test(key)) {
-                storage.removeItem(key);
-            }
-        }
-    }
-}

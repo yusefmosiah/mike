@@ -1,6 +1,6 @@
 import { downloadFile, listFiles } from "./storage";
 import { devLog } from "./log";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 
 const COURTLISTENER_BASE = "https://www.courtlistener.com/api/rest/v4";
 const COURTLISTENER_WEB_BASE = "https://www.courtlistener.com";
@@ -8,7 +8,6 @@ const COURTLISTENER_STORAGE_BASE = "https://storage.courtlistener.com";
 const COURTLISTENER_R2_OPINIONS_PREFIX = "courtlistener/opinions/by-cluster";
 
 type JsonRecord = Record<string, unknown>;
-type ServerSupabase = Db;
 
 function courtlistenerBulkDataEnabled() {
     return process.env.COURTLISTENER_BULK_DATA_ENABLED === "true";
@@ -546,7 +545,7 @@ function courtlistenerApiTokenAvailable(apiToken?: string | null) {
 }
 
 async function getBulkCitationLookup(args: {
-    db?: ServerSupabase;
+    db?: Db;
     citations: string[];
     allowPartial?: boolean;
 }): Promise<CitationLookupPayload | null> {
@@ -789,7 +788,7 @@ async function fetchCourtlistenerCitationLookup(args: {
 }
 
 async function getBulkCourtlistenerCaseOpinions(args: {
-    db?: ServerSupabase;
+    db?: Db;
     clusterId: number;
     maxChars: number;
 }) {
@@ -959,7 +958,7 @@ async function getBulkCourtlistenerCaseOpinions(args: {
 
 export async function verifyCourtlistenerCitations(args: {
     citations?: string[];
-    db?: ServerSupabase;
+    db?: Db;
     apiToken?: string | null;
 }) {
     const citations = Array.isArray(args.citations)
@@ -1130,7 +1129,7 @@ export async function getCourtlistenerCaseOpinions(args: {
     clusterId?: number;
     includeFullText?: boolean;
     maxChars?: number;
-    db?: ServerSupabase;
+    db?: Db;
     apiToken?: string | null;
 }) {
     if (!args.clusterId || !Number.isFinite(args.clusterId)) {
@@ -1157,7 +1156,7 @@ export async function getCourtlistenerCases(args: {
     clusterIds?: number[];
     includeFullText?: boolean;
     maxChars?: number;
-    db?: ServerSupabase;
+    db?: Db;
     apiToken?: string | null;
 }) {
     const clusterIds = Array.from(

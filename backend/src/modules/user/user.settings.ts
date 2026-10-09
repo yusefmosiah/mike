@@ -1,4 +1,4 @@
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { type UserApiKeys } from "../../lib/llm";
 import { type ReasoningLevel } from "../../lib/llm";
 import { getUserApiKeys as getStoredUserApiKeys } from "./user.apiKeyStore";
@@ -37,7 +37,7 @@ export async function getUserModelSettings(
     userId: string,
     db?: Db,
 ): Promise<UserModelSettings> {
-    const client = db ?? createServerSupabase();
+    const client = db ?? createDb();
     const [profileResult, api_keys, routerModels] = await Promise.all([
         client
             .from("user_profiles")
@@ -208,6 +208,6 @@ export async function getUserApiKeys(
     userId: string,
     db?: Db,
 ): Promise<UserApiKeys> {
-    const client = db ?? createServerSupabase();
+    const client = db ?? createDb();
     return getStoredUserApiKeys(userId, client);
 }

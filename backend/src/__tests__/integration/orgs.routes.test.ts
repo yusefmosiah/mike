@@ -9,7 +9,7 @@ import request from "supertest";
 // failure kind becomes which status code, who is allowed through each
 // endpoint, and the response shapes the web UI is written against.
 //
-// The Supabase stub here is STATEFUL, so an invitation created through POST
+// The database stub here is STATEFUL, so an invitation created through POST
 // really is the row a later accept/cancel finds.
 // ---------------------------------------------------------------------------
 
@@ -235,8 +235,8 @@ function query(table: string) {
     return builder;
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => ({
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => ({
         from: (t: string) => query(t),
         rpc: vi.fn(() => Promise.resolve({ data: [], error: null })),
         auth: {

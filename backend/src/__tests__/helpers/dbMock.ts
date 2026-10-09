@@ -1,15 +1,15 @@
 /**
- * Configurable Supabase stub shared by the route integration suites.
+ * Configurable database stub shared by the route integration suites.
  *
  * Every suite that imports `../../app` loads *every* router, so each one needs
- * the same fake `createServerSupabase()`. The stub used to be copy-pasted
+ * the same fake `createDb()`. The stub used to be copy-pasted
  * byte-for-byte into projects.routes.test.ts, tabular.routes.test.ts and
  * workflows.routes.test.ts; a fix to one copy (say, a newly-used PostgREST
  * filter method) silently left the other two behind.
  *
- * How it works: `supabaseState` is seeded per-test in `beforeEach`; terminal
+ * How it works: `dbState` is seeded per-test in `beforeEach`; terminal
  * query operations (.single() / .maybeSingle() / awaiting the thenable builder)
- * resolve to the per-table result, and rpc() resolves to `supabaseState.rpc`.
+ * resolve to the per-table result, and rpc() resolves to `dbState.rpc`.
  * Insert payloads are recorded so tests can assert on what got persisted
  * (normalisation, lowercasing, dedupe), and `operations` / `rpcCalls` record
  * the order a route touched tables and RPCs in — the tabular suites assert on
@@ -20,11 +20,11 @@
  * factory must pull the helper in dynamically rather than closing over a
  * top-level import binding:
  *
- *     import { supabaseState, resetSupabaseState, mockSupabase } from "../helpers/supabaseMock";
+ *     import { dbState, resetDbState, mockDb } from "../helpers/dbMock";
  *
- *     vi.mock("../../lib/supabase", async () => {
- *         const { mockSupabase } = await import("../helpers/supabaseMock");
- *         return { createServerSupabase: vi.fn(() => mockSupabase()) };
+ *     vi.mock("../../lib/db", async () => {
+ *         const { mockDb } = await import("../helpers/dbMock");
+ *         return { createDb: vi.fn(() => mockDb()) };
  *     });
  *
  * The dynamic import inside the factory and the static import at the top of the
@@ -36,7 +36,7 @@ import { vi } from "vitest";
 
 export type QueryResult = { data: unknown; error: unknown };
 
-export type SupabaseState = {
+export type DbState = {
     rpc: QueryResult;
     /** `from:<table>` / `rpc:<fn>` in call order. */
     operations: string[];
@@ -47,9 +47,9 @@ export type SupabaseState = {
 
 /**
  * Reset in place rather than reassigned, so suites can hold a stable reference
- * to this object across `resetSupabaseState()` calls in `beforeEach`.
+ * to this object across `resetDbState()` calls in `beforeEach`.
  */
-export const supabaseState: SupabaseState = {
+export const dbState: DbState = {
     rpc: { data: [], error: null },
     operations: [],
     rpcCalls: [],
@@ -57,16 +57,16 @@ export const supabaseState: SupabaseState = {
     inserts: [],
 };
 
-export function resetSupabaseState() {
-    supabaseState.rpc = { data: [], error: null };
-    supabaseState.operations = [];
-    supabaseState.rpcCalls = [];
-    supabaseState.tables = {};
-    supabaseState.inserts = [];
+export function resetDbState() {
+    dbState.rpc = { data: [], error: null };
+    dbState.operations = [];
+    dbState.rpcCalls = [];
+    dbState.tables = {};
+    dbState.inserts = [];
 }
 
 function resultForTable(table: string): QueryResult {
-    return supabaseState.tables[table] ?? { data: null, error: null };
+    return dbState.tables[table] ?? { data: null, error: null };
 }
 
 /**
@@ -99,7 +99,7 @@ export function makeQuery(table: string) {
     ];
     for (const m of chain) q[m] = vi.fn(() => q);
     q.insert = vi.fn((payload: unknown) => {
-        supabaseState.inserts.push({ table, payload });
+        dbState.inserts.push({ table, payload });
         return q;
     });
     q.single = vi.fn(() => Promise.resolve(resultForTable(table)));
@@ -116,7 +116,7 @@ export function makeQuery(table: string) {
  * not zero-arity — because suites wrap it to capture the arguments a route
  * actually sent (see `captureRpcArgs` in projects/workflows routes tests).
  */
-export type SupabaseStub = {
+export type DbStub = {
     from: (table: string) => Record<string, unknown>;
     rpc: (name: string, args?: unknown) => Promise<QueryResult>;
     auth: {
@@ -127,16 +127,16 @@ export type SupabaseStub = {
     };
 };
 
-export function mockSupabase(): SupabaseStub {
+export function mockDb(): DbStub {
     return {
         from: vi.fn((table: string) => {
-            supabaseState.operations.push(`from:${table}`);
+            dbState.operations.push(`from:${table}`);
             return makeQuery(table);
         }),
         rpc: vi.fn((name: string, args?: unknown) => {
-            supabaseState.operations.push(`rpc:${name}`);
-            supabaseState.rpcCalls.push({ fn: name, args });
-            return Promise.resolve(supabaseState.rpc);
+            dbState.operations.push(`rpc:${name}`);
+            dbState.rpcCalls.push({ fn: name, args });
+            return Promise.resolve(dbState.rpc);
         }),
         auth: {
             getUser: () =>

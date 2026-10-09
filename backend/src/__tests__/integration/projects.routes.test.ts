@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import request from "supertest";
 import {
-    supabaseState,
-    resetSupabaseState,
-    mockSupabase,
+    dbState,
+    resetDbState,
+    mockDb,
     makeQuery,
-} from "../helpers/supabaseMock";
+} from "../helpers/dbMock";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock fns we want to reconfigure per-test.
@@ -16,9 +16,9 @@ const { checkProjectAccess, deleteProjectsByIds } = vi.hoisted(() => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Supabase + auth stubs, shared with the other route suites via ../helpers/.
+// Database + auth stubs, shared with the other route suites via ../helpers/.
 // Every suite here mounts `app`, which loads every router, so they all need the
-// same fakes; see helpers/supabaseMock.ts for how `supabaseState` (seeded in
+// same fakes; see helpers/dbMock.ts for how `dbState` (seeded in
 // beforeEach below) drives the responses.
 //
 // `vi.mock` factories are hoisted above the imports, so they cannot close over
@@ -28,9 +28,9 @@ const { checkProjectAccess, deleteProjectsByIds } = vi.hoisted(() => ({
 // both specifiers resolve to the same module instance as the static import
 // above, so the state object the tests mutate is the one the stub reads.
 // ---------------------------------------------------------------------------
-vi.mock("../../lib/supabase", async () => {
-    const { mockSupabase } = await import("../helpers/supabaseMock.js");
-    return { createServerSupabase: vi.fn(() => mockSupabase()) };
+vi.mock("../../lib/db", async () => {
+    const { mockDb } = await import("../helpers/dbMock.js");
+    return { createDb: vi.fn(() => mockDb()) };
 });
 
 vi.mock("../../middleware/auth", async () => {
@@ -71,14 +71,14 @@ vi.mock("../../lib/documentVersions", () => ({
 import { app } from "../../app";
 import crypto from "crypto";
 import { manifestPublicKey } from "../../lib/manifestSigning";
-import { createServerSupabase, type Db } from "../../lib/supabase";
+import { createDb, type Db } from "../../lib/db";
 import { attachActiveVersionPaths } from "../../lib/documentVersions";
 
 const SIGNING_KEY = "3b".repeat(32);
 
 const AUTH = ["Authorization", "Bearer test"] as const;
 
-// Wraps mockSupabase()'s rpc so the next request's exact RPC call args can be
+// Wraps mockDb()'s rpc so the next request's exact RPC call args can be
 // asserted on — the shared mock otherwise only lets tests control the
 // *response*, not inspect what was sent.
 function captureRpcArgs(): { args: unknown; name: string | undefined } {
@@ -86,8 +86,8 @@ function captureRpcArgs(): { args: unknown; name: string | undefined } {
     args: undefined,
     name: undefined,
   };
-    vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-        const db = mockSupabase();
+    vi.mocked(createDb).mockImplementationOnce(() => {
+        const db = mockDb();
         const originalRpc = db.rpc;
         db.rpc = vi.fn((name: string, args: unknown) => {
       captured.name = name;
@@ -102,7 +102,7 @@ function captureRpcArgs(): { args: unknown; name: string | undefined } {
 describe("projects.routes", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        resetSupabaseState();
+        resetDbState();
         checkProjectAccess.mockResolvedValue({
             ok: true,
             isCreator: true,
@@ -128,7 +128,7 @@ describe("projects.routes", () => {
                     page_count: 2,
                     source: "upload",
                 };
-                supabaseState.tables.documents = {
+                dbState.tables.documents = {
                     data: {
                         id: "doc-1",
                         project_id: "p1",
@@ -136,12 +136,12 @@ describe("projects.routes", () => {
                     },
                     error: null,
                 };
-                supabaseState.tables.document_versions = {
+                dbState.tables.document_versions = {
                     data: version,
                     error: null,
                 };
-                vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-                    const db = mockSupabase();
+                vi.mocked(createDb).mockImplementationOnce(() => {
+                    const db = mockDb();
                     db.from = vi.fn((table: string) => {
                         const query = makeQuery(table);
                         if (table === "document_versions") {
@@ -158,7 +158,7 @@ describe("projects.routes", () => {
                         }
                         return query;
                     });
-                    return db as unknown as ReturnType<typeof createServerSupabase>;
+                    return db as unknown as ReturnType<typeof createDb>;
                 });
                 const actual = await vi.importActual<
                     typeof import("../../lib/documentVersions")
@@ -188,11 +188,11 @@ describe("projects.routes", () => {
         );
 
         it("does not report a successful rename when the version update fails", async () => {
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: { id: "doc-1", project_id: "p1", current_version_id: "v1" },
                 error: null,
             };
-            supabaseState.tables.document_versions = {
+            dbState.tables.document_versions = {
                 data: { filename: "Original.pdf" },
                 error: { message: "private database failure" },
             };
@@ -211,7 +211,7 @@ describe("projects.routes", () => {
     // ── GET /projects (overview) ──────────────────────────────────────────
     describe("GET /projects", () => {
         it("returns the overview rows from the RPC", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [
                     {
                         id: "p1",
@@ -242,19 +242,19 @@ describe("projects.routes", () => {
         });
 
         it("backfills organization access when the overview RPC is stale", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [{ id: "p1", name: "Firm matter", is_owner: true }],
                 error: null,
             };
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: [{ id: "p1", org_id: "org-1" }],
                 error: null,
             };
-            supabaseState.tables.project_access_grants = {
+            dbState.tables.project_access_grants = {
                 data: [],
                 error: null,
             };
-            supabaseState.tables.organizations = {
+            dbState.tables.organizations = {
                 data: [{ id: "org-1", name: "Elite Law LLP" }],
                 error: null,
             };
@@ -276,11 +276,11 @@ describe("projects.routes", () => {
         });
 
         it("includes documents and subfolders in the batched directory response", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: [{ id: "p1", name: "Alpha" }],
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [
                     {
                         id: "d1",
@@ -291,7 +291,7 @@ describe("projects.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.project_subfolders = {
+            dbState.tables.project_subfolders = {
                 data: [
                     {
                         id: "f1",
@@ -316,7 +316,7 @@ describe("projects.routes", () => {
         });
 
         it("returns 500 with detail when the RPC errors", async () => {
-            supabaseState.rpc = { data: null, error: { message: "boom" } };
+            dbState.rpc = { data: null, error: { message: "boom" } };
 
       const res = await request(app)
         .get("/projects")
@@ -330,7 +330,7 @@ describe("projects.routes", () => {
     // query params and need the full, unpaginated list back.
         it("calls the legacy 2-arg RPC shape when no pagination params are present", async () => {
             const captured = captureRpcArgs();
-            supabaseState.rpc = { data: [], error: null };
+            dbState.rpc = { data: [], error: null };
 
       await request(app)
         .get("/projects")
@@ -344,7 +344,7 @@ describe("projects.routes", () => {
 
         it("calls the paginated RPC shape with every filter parsed once any pagination param is present", async () => {
             const captured = captureRpcArgs();
-            supabaseState.rpc = { data: [], error: null };
+            dbState.rpc = { data: [], error: null };
 
             await request(app)
                 .get(
@@ -369,7 +369,7 @@ describe("projects.routes", () => {
 
     it("uses the lightweight summary RPC for view=summary", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: [{ id: "p1", name: "Recently updated" }],
         error: null,
       };
@@ -496,13 +496,13 @@ describe("projects.routes", () => {
     };
 
     it("hides an org project the caller is denied on", async () => {
-      vi.mocked(createServerSupabase).mockImplementationOnce(
+      vi.mocked(createDb).mockImplementationOnce(
         () =>
           directorySearchDb({
             memberships: [{ org_id: "o1", role: "member" }],
             orgProjects: [WALLED],
             denies: ["p-walled"],
-          }) as unknown as ReturnType<typeof createServerSupabase>,
+          }) as unknown as ReturnType<typeof createDb>,
       );
 
       const res = await request(app)
@@ -514,12 +514,12 @@ describe("projects.routes", () => {
     });
 
     it("still returns the org project when no deny override exists", async () => {
-      vi.mocked(createServerSupabase).mockImplementationOnce(
+      vi.mocked(createDb).mockImplementationOnce(
         () =>
           directorySearchDb({
             memberships: [{ org_id: "o1", role: "member" }],
             orgProjects: [WALLED],
-          }) as unknown as ReturnType<typeof createServerSupabase>,
+          }) as unknown as ReturnType<typeof createDb>,
       );
 
       const res = await request(app)
@@ -533,13 +533,13 @@ describe("projects.routes", () => {
     });
 
     it("keeps an org admin's view of a project carrying a stale deny row", async () => {
-      vi.mocked(createServerSupabase).mockImplementationOnce(
+      vi.mocked(createDb).mockImplementationOnce(
         () =>
           directorySearchDb({
             memberships: [{ org_id: "o1", role: "admin" }],
             orgProjects: [WALLED],
             denies: ["p-walled"],
-          }) as unknown as ReturnType<typeof createServerSupabase>,
+          }) as unknown as ReturnType<typeof createDb>,
       );
 
       const res = await request(app)
@@ -563,8 +563,8 @@ describe("projects.routes", () => {
                     error: null,
                 })
                 .mockResolvedValueOnce({ data: [], error: null });
-            vi.mocked(createServerSupabase).mockImplementationOnce(() => {
-                const db = mockSupabase();
+            vi.mocked(createDb).mockImplementationOnce(() => {
+                const db = mockDb();
                 db.rpc = rpcMock;
                 return db as unknown as Db;
             });
@@ -580,7 +580,7 @@ describe("projects.routes", () => {
         });
 
         it("returns 500 with detail when the RPC errors", async () => {
-            supabaseState.rpc = { data: null, error: { message: "boom" } };
+            dbState.rpc = { data: null, error: { message: "boom" } };
 
       const res = await request(app)
         .get("/projects/ids")
@@ -594,7 +594,7 @@ describe("projects.routes", () => {
   describe("GET /projects/filter-options", () => {
     it("returns lightweight practice and owner facets", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: [
           {
             practices: ["Litigation"],
@@ -622,7 +622,7 @@ describe("projects.routes", () => {
 
   describe("Library query endpoints", () => {
     it("returns the ancestor path for a Library folder", async () => {
-      supabaseState.tables.library_folders = {
+      dbState.tables.library_folders = {
         data: [
           {
             id: "nested",
@@ -655,7 +655,7 @@ describe("projects.routes", () => {
     });
 
     it("returns 404 for a Library folder outside the requested collection", async () => {
-      supabaseState.tables.library_folders = { data: [], error: null };
+      dbState.tables.library_folders = { data: [], error: null };
 
       const res = await request(app)
         .get("/library/files/folders/missing")
@@ -667,7 +667,7 @@ describe("projects.routes", () => {
 
     it("returns a flat paginated search result", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: [
           { id: "d1", filename: "Agreement.docx" },
           { id: "d2", filename: "Agreement schedule.docx" },
@@ -716,7 +716,7 @@ describe("projects.routes", () => {
 
     it("returns only the file-type facet payload", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: [{ file_types: ["docx", "pdf"] }],
         error: null,
       };
@@ -738,7 +738,7 @@ describe("projects.routes", () => {
   describe("folder upload path resolution", () => {
     it("resolves a project path through the atomic RPC", async () => {
       const captured = captureRpcArgs();
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: {
           conflict: false,
           folder_id: "folder-2",
@@ -813,7 +813,7 @@ describe("projects.routes", () => {
         projectRole: "editor",
         project: { id: "p1", user_id: "u2", org_id: null },
       });
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: {
           conflict: true,
           folder_name: "NDAs",
@@ -839,7 +839,7 @@ describe("projects.routes", () => {
     });
 
     it("returns library folder conflicts without replacement permissions", async () => {
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: {
           conflict: true,
           folder_name: "NDAs",
@@ -870,7 +870,7 @@ describe("projects.routes", () => {
     ])("does not expose raw %s folder RPC errors", async (_scope, path) => {
       const rawError =
         "Could not find resolve_project_folder_path in the schema cache";
-      supabaseState.rpc = {
+      dbState.rpc = {
         data: null,
         error: { message: rawError },
       };
@@ -933,7 +933,7 @@ describe("projects.routes", () => {
         });
 
         it("creates the project with normalized project details", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: {
                     id: "p9",
                     name: "Gamma",
@@ -958,8 +958,8 @@ describe("projects.routes", () => {
                 organization_name: null,
             });
 
-            const db = vi.mocked(createServerSupabase).mock.results.at(-1)
-                ?.value as ReturnType<typeof mockSupabase>;
+            const db = vi.mocked(createDb).mock.results.at(-1)
+                ?.value as ReturnType<typeof mockDb>;
             expect(db.rpc).toHaveBeenCalledWith("create_project_with_memory", {
                 p_user_id: "u1",
                 p_name: "Gamma",
@@ -971,11 +971,11 @@ describe("projects.routes", () => {
         });
 
         it("applies the creator's saved project-memory default", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: { id: "p11", name: "Quiet", user_id: "u1" },
                 error: null,
             };
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: { project_memory_default: false },
                 error: null,
             };
@@ -987,8 +987,8 @@ describe("projects.routes", () => {
 
             expect(res.status).toBe(201);
             expect(res.body.memory_enabled).toBe(false);
-            const db = vi.mocked(createServerSupabase).mock.results.at(-1)
-                ?.value as ReturnType<typeof mockSupabase>;
+            const db = vi.mocked(createDb).mock.results.at(-1)
+                ?.value as ReturnType<typeof mockDb>;
             expect(db.rpc).toHaveBeenCalledWith(
                 "create_project_with_memory",
                 expect.objectContaining({ p_memory_enabled: false }),
@@ -996,12 +996,12 @@ describe("projects.routes", () => {
         });
 
         it("defaults new projects to memory on when the preference is unreadable", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: { id: "p12", name: "Legacy", user_id: "u1" },
                 error: null,
             };
             // A database that has not applied the preference migration.
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: null,
                 error: { code: "42703", message: "project_memory_default" },
             };
@@ -1016,7 +1016,7 @@ describe("projects.routes", () => {
         });
 
         it("commits an explicit memory opt-out in the same project transaction", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: { id: "p10", name: "Private", user_id: "u1" },
                 error: null,
             };
@@ -1026,17 +1026,17 @@ describe("projects.routes", () => {
                 .send({ name: "Private", memory_enabled: false });
             expect(res.status).toBe(201);
             expect(res.body.memory_enabled).toBe(false);
-            const db = vi.mocked(createServerSupabase).mock.results.at(-1)
-                ?.value as ReturnType<typeof mockSupabase>;
+            const db = vi.mocked(createDb).mock.results.at(-1)
+                ?.value as ReturnType<typeof mockDb>;
             expect(db.rpc).toHaveBeenCalledWith(
                 "create_project_with_memory",
                 expect.objectContaining({ p_memory_enabled: false }),
             );
-            expect(supabaseState.inserts).toEqual([]);
+            expect(dbState.inserts).toEqual([]);
         });
 
         it("returns 500 when the insert errors", async () => {
-            supabaseState.rpc = {
+            dbState.rpc = {
                 data: null,
                 error: { message: "insert failed" },
             };
@@ -1054,7 +1054,7 @@ describe("projects.routes", () => {
     // ── GET /projects/:projectId (detail, shared access helper) ───────────
     describe("GET /projects/:projectId", () => {
         it("returns 404 when the project does not exist", async () => {
-            supabaseState.tables.projects = { data: null, error: null };
+            dbState.tables.projects = { data: null, error: null };
 
       const res = await request(app)
         .get("/projects/p1")
@@ -1066,7 +1066,7 @@ describe("projects.routes", () => {
 
         it("returns 404 when the caller is neither owner nor shared", async () => {
             checkProjectAccess.mockResolvedValue({ ok: false });
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: {
                     id: "p1",
                     user_id: "someone-else",
@@ -1099,15 +1099,15 @@ describe("projects.routes", () => {
                     user_id: "someone-else",
                 },
             });
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: {
                     id: "p1",
                     user_id: "someone-else",
                 },
                 error: null,
             };
-            supabaseState.tables.documents = { data: [], error: null };
-            supabaseState.tables.project_subfolders = { data: [], error: null };
+            dbState.tables.documents = { data: [], error: null };
+            dbState.tables.project_subfolders = { data: [], error: null };
 
       const res = await request(app)
         .get("/projects/p1")
@@ -1123,15 +1123,15 @@ describe("projects.routes", () => {
         });
 
         it("returns 200 with documents/folders/is_owner when owned", async () => {
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: { id: "p1", user_id: "u1" },
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [{ id: "d1", user_id: "u1" }],
                 error: null,
             };
-            supabaseState.tables.project_subfolders = {
+            dbState.tables.project_subfolders = {
                 data: [{ id: "f1" }],
                 error: null,
             };
@@ -1165,7 +1165,7 @@ describe("projects.routes", () => {
                 projectRole,
                 project: { id: "p1", user_id: "creator", org_id: null },
             });
-            supabaseState.tables.user_profiles = {
+            dbState.tables.user_profiles = {
                 data: [
                     {
                         user_id: "creator",
@@ -1180,7 +1180,7 @@ describe("projects.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.project_access_grants = {
+            dbState.tables.project_access_grants = {
                 data: [
                     {
                         id: "g1",
@@ -1258,11 +1258,11 @@ describe("projects.routes", () => {
         });
 
         beforeEach(() => {
-            supabaseState.tables.project_subfolders = {
+            dbState.tables.project_subfolders = {
                 data: [{ id: "f1", parent_folder_id: null }],
                 error: null,
             };
-            supabaseState.tables.documents = { data: [], error: null };
+            dbState.tables.documents = { data: [], error: null };
         });
 
         it("allows a project owner (204)", async () => {
@@ -1323,7 +1323,7 @@ describe("projects.routes", () => {
             expect(res.body.detail).toBe(
                 "You do not have permission to organize documents in this project.",
             );
-            expect(supabaseState.inserts).toEqual([]);
+            expect(dbState.inserts).toEqual([]);
         });
 
         it("keeps 404 for a project the caller cannot see at all", async () => {
@@ -1345,7 +1345,7 @@ describe("projects.routes", () => {
     // wrong in both directions.
     describe("GET /projects/:projectId/chats", () => {
         const seedChats = () => {
-            supabaseState.tables.chats = {
+            dbState.tables.chats = {
                 data: [
                     { id: "c-mine", user_id: "u1" },
                     { id: "c-theirs", user_id: "u2" },
@@ -1353,11 +1353,11 @@ describe("projects.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.chat_access_grants = {
+            dbState.tables.chat_access_grants = {
                 data: [{ chat_id: "c-shared", role: "editor" }],
                 error: null,
             };
-            supabaseState.tables.user_profiles = { data: [], error: null };
+            dbState.tables.user_profiles = { data: [], error: null };
         };
 
         it("labels each chat with the caller's role for it", async () => {
@@ -1450,7 +1450,7 @@ describe("projects.routes", () => {
         });
 
         it("returns 200 with documents when access is granted", async () => {
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [{ id: "d1" }, { id: "d2" }],
                 error: null,
             };
@@ -1480,7 +1480,7 @@ describe("projects.routes", () => {
         });
 
         it("returns 404 when the update matches no owned project", async () => {
-            supabaseState.tables.projects = { data: null, error: null };
+            dbState.tables.projects = { data: null, error: null };
 
             const res = await request(app)
                 .patch("/projects/p1")
@@ -1581,7 +1581,7 @@ describe("projects.routes", () => {
     // ── GET /projects/:projectId/export (tamper-evident manifest) ─────────
     describe("GET /projects/:projectId/export", () => {
         function seedProjectWithOneVersion() {
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: {
                     id: "p1",
                     name: "Alpha",
@@ -1590,7 +1590,7 @@ describe("projects.routes", () => {
                 },
                 error: null,
             };
-            supabaseState.tables.documents = {
+            dbState.tables.documents = {
                 data: [
                     {
                         id: "d1",
@@ -1602,7 +1602,7 @@ describe("projects.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.document_versions = {
+            dbState.tables.document_versions = {
                 data: [
                     {
                         id: "v1",
@@ -1619,7 +1619,7 @@ describe("projects.routes", () => {
                 ],
                 error: null,
             };
-            supabaseState.tables.document_edits = {
+            dbState.tables.document_edits = {
                 data: [
                     {
                         id: "e1",
@@ -1716,7 +1716,7 @@ describe("projects.routes", () => {
         });
 
         it("does not leak the underlying error when the manifest build fails", async () => {
-            supabaseState.tables.projects = {
+            dbState.tables.projects = {
                 data: null,
         error: { message: 'relation "projects" does not exist' },
             };

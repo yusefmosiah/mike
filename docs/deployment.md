@@ -3,9 +3,7 @@
 Use this path when connecting Mike to your own Postgres, GoTrue auth server,
 and S3-compatible storage instead of the infrastructure bundled with Docker
 Compose. Mike needs only those three: Postgres for its data, GoTrue (the auth
-server Supabase maintains) for accounts and sessions, and a bucket for files.
-A hosted Supabase project is one way to get the first two together; Mike uses
-nothing else from it.
+server) for accounts and sessions, and a bucket for files.
 
 ## Prerequisites
 
@@ -13,7 +11,7 @@ nothing else from it.
 - npm and Git
 - A Postgres 17 database Mike can reach directly
 - A GoTrue auth server (v2.189.0 is the pinned, tested version) using the same
-  database, or a hosted Supabase project, which provides both
+  database
 - A Cloudflare R2, MinIO, or other S3-compatible bucket
 - At least one supported model-provider API key, or an accessible Ollama server
 - Optional: a CourtListener API token for case-law tools
@@ -24,14 +22,12 @@ nothing else from it.
 GoTrue creates its own `auth` schema, including `auth.users`, the first time it
 starts; Mike's schema references it. On a database of your own, first run
 `docker/db-init/roles.sql` as a superuser: it creates GoTrue's
-`supabase_auth_admin` role and `auth` schema, plus the `anon`, `authenticated`
+`gotrue` role and `auth` schema, plus the `anon`, `authenticated`
 and `service_role` roles that `schema.sql` grants to (Mike never uses them;
 they exist so its grants and row-level security apply unchanged). Point GoTrue
-at the database as `supabase_auth_admin` and start it once. A hosted Supabase
-project already has all of this.
+at the database as `gotrue` and start it once.
 
-Then, for a fresh database, run `backend/schema.sql` once, with `psql` or the
-Supabase SQL editor. The schema file contains the complete current database
+Then, for a fresh database, run `backend/schema.sql` once, with `psql`. The schema file contains the complete current database
 shape.
 
 For an existing deployment, do not run the complete schema over production
@@ -45,36 +41,6 @@ expected starting schema, and a successful fresh install from `schema.sql` is
 not evidence that an older database has completed every upgrade step. The
 repository's schema-drift CI separately checks that its pinned historical
 baseline converges with the fresh schema after all later migrations run.
-
-### Moving a Docker Compose install off the Supabase Postgres image
-
-Compose installs used to run `supabase/postgres` on the `db_data` volume, with
-PostgREST and a gateway in front. The stack now runs stock Postgres on a new
-`postgres_data` volume and reaches GoTrue directly. An upgraded install whose
-data is still in `db_data` refuses to start (the `legacy-data-check` service
-says so) rather than coming up empty. Move the data once:
-
-```bash
-docker compose down
-scripts/migrate-supabase-db.sh
-docker compose up -d
-```
-
-The script starts the old image read-only on `db_data`, dumps the `auth`
-(accounts), `public` (application data) and `pi_durable` (chat transcripts)
-schemas, restores them into `postgres_data`, and hands the `auth` schema back to
-GoTrue's role. Supabase's own schemas held nothing of Mike's and stay behind,
-as do grants to roles only the Supabase image had. It refuses to write into a
-database that already holds Mike data, and never deletes `db_data`; remove that
-volume yourself once the new stack checks out. Text sorts by the database's
-libc collation now rather than ICU, so the order of some names in sorted lists
-can change slightly.
-
-Also update anything that pointed at the old gateway on port 54321: GoTrue now
-answers there directly, without the `/auth/v1` prefix. In particular, register
-`http://localhost:54321/callback` (or `AUTH_PUBLIC_URL` + `/callback`) as the
-Google OAuth redirect URI, and rename `SUPABASE_PUBLIC_URL` to
-`AUTH_PUBLIC_URL` in the root `.env` (the old name still works).
 
 ### After the organization-access upgrade: `tabular_review_legacy_shares`
 
@@ -145,26 +111,17 @@ Use:
 - `NODE_ENV=production` so startup enforces HTTPS and secure-cookie invariants
   (the backend Docker image sets this by default; see
   [Running the backend image](#running-the-backend-image));
-- GoTrue's base URL, as the backend reaches it, for backend `AUTH_URL`
-  (for a hosted Supabase project, `https://<project-ref>.supabase.co/auth/v1`);
+- GoTrue's base URL, as the backend reaches it, for backend `AUTH_URL`;
 - a `service_role` JWT signed with GoTrue's JWT secret for backend
-  `AUTH_SERVICE_KEY` (a hosted Supabase project's service-role key);
+  `AUTH_SERVICE_KEY`;
 - GoTrue's browser-reachable base URL for backend `AUTH_PUBLIC_URL`, when it
   differs from `AUTH_URL` (OAuth sign-in sends the browser there);
-- for a hosted Supabase project, its publishable/anon key for backend
-  `AUTH_API_KEY` (its gateway requires an `apikey` header; a GoTrue reached
-  directly does not);
 - a direct Postgres connection string for backend `DATABASE_URL` (see below);
   and
 - the internal Mike backend origin for frontend `API_BASE_URL`.
 
-A deployment configured before Mike talked to GoTrue directly can keep
-`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`: without
-`AUTH_URL`, the backend reaches GoTrue at `SUPABASE_URL/auth/v1` with those
-keys. Move to the `AUTH_*` names at your convenience.
-
 Mike queries Postgres over `DATABASE_URL` and nothing else; it does not use
-PostgREST or a Supabase data API. Chat runs on Pi Durable, which keeps every
+PostgREST or any other data API. Chat runs on Pi Durable, which keeps every
 conversation's model transcript, and any turn in flight, in its own schema of the same database (`pi_durable`, or
 `PI_DURABLE_SCHEMA`). The backend creates the schema on first use. It needs a
 direct, session-mode connection, not a transaction pooler, because it holds an
@@ -295,14 +252,12 @@ what is scrubbed, and how to verify are in [observability.md](observability.md).
 ## Authentication email
 
 GoTrue sends signup, email-change, and password-recovery messages. Configure
-production SMTP through its `GOTRUE_SMTP_*` variables (on a hosted Supabase
-project, in its dashboard); Mike does not require a Resend API key for these
+production SMTP through its `GOTRUE_SMTP_*` variables; Mike does not require a Resend API key for these
 messages.
 
 Set GoTrue's Site URL (`GOTRUE_SITE_URL`) to the deployed frontend origin and
 add that origin's `/auth/callback` URL to its redirect allow list
-(`GOTRUE_URI_ALLOW_LIST`; on hosted Supabase, **Authentication > URL
-Configuration**). For example:
+(`GOTRUE_URI_ALLOW_LIST`). For example:
 
 ```text
 https://your-mike.example/auth/callback
@@ -331,12 +286,7 @@ authorized redirect URI is GoTrue's callback, not Mike's frontend callback:
 https://auth.example.com/callback
 ```
 
-(for hosted Supabase, `https://<project-ref>.supabase.co/auth/v1/callback`).
-Compose installs that registered `http://localhost:54321/auth/v1/callback`
-before the Compose gateway was removed must register the new URL.
-
-Enable Google in GoTrue (`GOTRUE_EXTERNAL_GOOGLE_*`; on hosted Supabase,
-**Authentication > Providers**) with the client ID and secret, and allow both
+Enable Google in GoTrue (`GOTRUE_EXTERNAL_GOOGLE_*`) with the client ID and secret, and allow both
 deployed Mike clients as redirect targets:
 
 ```text
@@ -387,8 +337,7 @@ repository. Restart the Auth service after configuring SAML.
 In GoTrue, set `GOTRUE_SITE_URL` to the deployed frontend origin and restrict
 `GOTRUE_URI_ALLOW_LIST` to the frontend's `/auth/callback` URL (plus existing
 required callbacks). Replace the permissive local Compose allowlist for a
-public deployment. For hosted Supabase, use its SAML provider setup and URL
-configuration instead of configuring GoTrue container variables.
+public deployment.
 
 ### Register an identity provider
 

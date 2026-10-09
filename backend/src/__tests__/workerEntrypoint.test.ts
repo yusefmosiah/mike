@@ -12,7 +12,7 @@ import path from "node:path";
 // runner, logs "running", and exits immediately. In Redis mode BullMQ's open
 // sockets hide this; in Postgres mode (the default transport) nothing does.
 //
-// This spawns the real entrypoint against a Supabase URL that does not answer
+// This spawns the real entrypoint against an auth URL that does not answer
 // — the runner logs claim failures and keeps polling, which is exactly the
 // behaviour under test — and asserts it is still alive a second later.
 const backendRoot = path.resolve(__dirname, "../..");

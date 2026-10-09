@@ -23,8 +23,8 @@ vi.mock("../../middleware/auth", () => ({
   },
 }));
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: () => ({ marker: "db" }),
+vi.mock("../../lib/db", () => ({
+  createDb: () => ({ marker: "db" }),
 }));
 
 vi.mock("../../lib/access", () => ({

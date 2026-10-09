@@ -112,8 +112,8 @@ function makeQuery(table: string) {
 const rpcCalls: { name: string; args: unknown }[] = [];
 let rpcResult: { data: unknown; error: unknown } = { data: null, error: null };
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => ({
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => ({
         from: vi.fn((table: string) => makeQuery(table)),
         rpc: vi.fn(async (name: string, args: unknown) => {
             rpcCalls.push({ name, args });

@@ -1,9 +1,9 @@
 // MIKE-BACKEND-A: "Failure in http / GET / /:id / 500" whose only stack was
-// rooted inside the Sentry reporter. A supabase-js query returns its error
+// rooted inside the Sentry reporter. A query returns its error
 // as a PLAIN object ({ code, message, details, hint }); a service hands that
 // to internalFailure(), and nothing on the way to Sentry had a stack for it,
 // so the reporter's fallback `new Error(...)` became the "culprit" and the
-// SQLSTATE/PostgREST code that would have named the fault was lost.
+// SQLSTATE code that would have named the fault was lost.
 //
 // These tests drive the real routers and assert what reaches reportError.
 import express from "express";
@@ -21,8 +21,8 @@ vi.mock("../../lib/observability/sentry", async (importOriginal) => ({
   reportError,
 }));
 
-vi.mock("../../lib/supabase", () => ({
-  createServerSupabase: () => ({ from, rpc }),
+vi.mock("../../lib/db", () => ({
+  createDb: () => ({ from, rpc }),
 }));
 
 vi.mock("../../middleware/auth", () => ({

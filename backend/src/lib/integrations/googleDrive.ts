@@ -20,7 +20,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { createReadStream } from "node:fs";
 import { googleDriveLimits } from "./googleDriveLimits";
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 import {
     base64Url,
     decryptString,
@@ -28,7 +28,7 @@ import {
     stateHash,
 } from "../mcp/client";
 import { ConnectorSetupError } from "../mcp/errors";
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 import type { ConnectorCallPlan, McpToolEvent } from "../mcp/types";
 import {
     connectorSettingsPatch,
@@ -141,7 +141,7 @@ export function googleDriveSetupInstructions(redirectUri: string): string {
 export async function startGoogleDriveOAuth(
     userId: string,
     redirectUri: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ authorizationUrl: string }> {
     const env = googleDriveOAuthEnv();
     if (!env.clientId || !env.clientSecret) {
@@ -198,7 +198,7 @@ export async function completeGoogleDriveOAuth(
     completingUserId: string,
     state: string,
     code: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ userId: string }> {
     const { data, error } = await db
         .from(OAUTH_STATES_TABLE)
@@ -400,7 +400,7 @@ function isMissingTableError(error: unknown): boolean {
 
 export async function getGoogleDriveStatus(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<GoogleDriveStatus> {
     const env = googleDriveOAuthEnv();
     const configured = !!(env.clientId && env.clientSecret);
@@ -449,7 +449,7 @@ export async function getGoogleDriveStatus(
 export async function updateGoogleDriveSettings(
     userId: string,
     settings: NativeConnectorSettings,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const patch = connectorSettingsPatch(settings);
     if (!Object.keys(patch).length) return;
@@ -467,7 +467,7 @@ export async function setGoogleDriveToolEnabled(
     userId: string,
     toolName: string,
     enabled: boolean,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     if (!ALL_GOOGLE_DRIVE_TOOLS.some((tool) => tool.function.name === toolName))
         throw new GoogleDriveUserError("Unknown Google Drive tool.");
@@ -492,7 +492,7 @@ export async function setGoogleDriveToolEnabled(
 
 export async function disconnectGoogleDrive(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     // Google revocation is project-wide: it would also invalidate Gmail,
     // Calendar, and other clients sharing this project's grant. Remove this
@@ -507,7 +507,7 @@ export async function disconnectGoogleDrive(
 export async function cancelGoogleDriveOAuth(
     userId: string,
     state: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<void> {
     const { error } = await db
         .from(OAUTH_STATES_TABLE)
@@ -1068,7 +1068,7 @@ export async function executeApprovedGoogleDriveCall(
 /** Drive writes require the full grant; old read-only connections still read. */
 export async function buildGoogleDriveTools(
     userId: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<unknown[]> {
     try {
         const row = await loadTokenRow(userId, db);
@@ -1111,7 +1111,7 @@ export async function executeGoogleDriveToolCall(
     userId: string,
     toolName: string,
     args: Record<string, unknown>,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ content: string; event: McpToolEvent }> {
     try {
         if (driveWriteTool(toolName)) {

@@ -17,7 +17,7 @@ import { Router, type Response } from "express";
 import { sendInternalError } from "../../lib/httpError";
 import { uploadSessionRateLimitConfiguration } from "../../lib/runtimeConfig";
 import { storageEnabled } from "../../lib/storage";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 // Sibling topic files are imported directly, as in every module; outside the
@@ -122,7 +122,7 @@ uploadSessionsRouter.post(
       throw error;
     }
 
-    const db = createServerSupabase();
+    const db = createDb();
     const access = await validateDestinationAccess(
       manifest,
       userId,
@@ -149,7 +149,7 @@ uploadSessionsRouter.get(
   uploadSessionPollingLimiter,
   asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await getUploadSession(db, req.params.sessionId, userId);
     if (!result.ok) return void sendUploadFailure(res, result);
     res.json(result.data);
@@ -166,7 +166,7 @@ uploadSessionsRouter.post(
       return void res.status(503).json({ detail: "Storage is not configured" });
     }
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await refreshUploadUrls(db, req.params.sessionId, userId);
     if (!result.ok) return void sendUploadFailure(res, result);
     res.json(result.data);
@@ -189,7 +189,7 @@ uploadSessionsRouter.post(
         .json({ detail: "Invalid completion request" });
     }
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await completeUploadSessionFile(db, {
       sessionId: req.params.sessionId,
       fileId: req.params.fileId,
@@ -208,7 +208,7 @@ uploadSessionsRouter.delete(
   uploadSessionMutationLimiter,
   asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await cancelUploadSession(db, req.params.sessionId, userId);
     if (!result.ok) return void sendUploadFailure(res, result);
     res.status(204).end();

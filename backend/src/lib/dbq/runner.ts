@@ -13,7 +13,7 @@
 // query, and FOR UPDATE SKIP LOCKED in the claim RPC makes any number of
 // backend replicas partition the work safely.
 
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 import { jobErrorMessage } from "./jobError";
 import { deleteFile } from "../storage";
 import { enqueueAppJobDelivery } from "../queue/appJobsQueue";
@@ -447,7 +447,7 @@ export function startDbJobRunner(handlers: DbJobHandlers, failureHooks: Readonly
         return;
     }
     if (pollTimer) return;
-    const db = createServerSupabase();
+    const db = createDb();
 
     const tick = () => {
         // While claims keep failing, skip ticks until the backed-off retry

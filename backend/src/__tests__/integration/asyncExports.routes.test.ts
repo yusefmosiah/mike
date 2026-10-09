@@ -56,8 +56,8 @@ function makeQuery(table: string) {
     return q;
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => ({
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => ({
         from: vi.fn((table: string) => makeQuery(table)),
         rpc: vi.fn(async () => ({ data: null, error: null })),
         auth: {

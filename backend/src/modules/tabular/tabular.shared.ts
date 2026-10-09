@@ -19,10 +19,10 @@ import { getUserModelSettings } from "../user/user.service";
 import { resolveRequestedModel } from "../../lib/routerModels";
 import { TABULAR_MODEL_REQUIRED_DETAIL } from "../../lib/modelSelection";
 import { UserFacingError } from "../../lib/userFacingError";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import type { ServiceFailure } from "../../lib/serviceResult";
 
-// One `Db` for the whole backend — declared in lib/supabase.ts. Re-exported
+// One `Db` for the whole backend — declared in lib/db. Re-exported
 // here so the module's files keep importing it from their own shared file.
 export type { Db };
 

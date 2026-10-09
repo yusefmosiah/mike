@@ -37,7 +37,7 @@
 // PDF/read path; both hooks land with the chat wiring. Until then, indexing
 // is an explicit caller step.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 
 /** Target chunk size in characters. */
 export const CHUNK_SIZE = 1000;

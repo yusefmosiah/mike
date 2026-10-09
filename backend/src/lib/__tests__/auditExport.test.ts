@@ -6,7 +6,7 @@ import {
     queryEvents,
 } from "../auditExport";
 
-// Chainable Supabase double: no accessible projects, and one fixed page of
+// Chainable database double: no accessible projects, and one fixed page of
 // audit rows for the export query. Enough to exercise CSV assembly.
 function makeDb(events: Record<string, unknown>[], error?: { message: string }) {
     const ranges: [number, number][] = [];

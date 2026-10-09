@@ -6,7 +6,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import { buildContentDisposition } from "../../lib/storage";
 import { resolveTokenDownload } from "./downloads.service";
 
@@ -16,7 +16,7 @@ export const downloadsRouter = Router();
 downloadsRouter.get("/:token", requireAuth, asyncRoute(async (req, res) => {
     const userId = res.locals.userId as string;
     const userEmail = res.locals.userEmail as string | undefined;
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await resolveTokenDownload(db, {
         token: req.params.token,
         userId,

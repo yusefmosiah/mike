@@ -1,7 +1,7 @@
 // Business logic + data-access for the audit module.
 //
 // Service layer behind audit.routes.ts. Both functions take an explicit
-// Supabase client (`db`) plus request-derived primitives, parse the caller's
+// Database client (`db`) plus request-derived primitives, parse the caller's
 // filter, run the visibility-scoped query, and RETURN a `ServiceResult`.
 // They never touch req/res.
 //
@@ -9,7 +9,7 @@
 // async "audit-csv" export job reuses them; they are re-exported by name here
 // so the module's facade is the one door into the audit surface.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import {
   AUDIT_CSV_FILENAME,
   AUDIT_EXPORT_LIMIT,

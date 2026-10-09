@@ -120,7 +120,7 @@ describe("parseQuery", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Chainable Supabase mock.
+ * Chainable database mock.
  *
  * `owned` answers the personal `projects` lookup, `shared` answers the
  * `project_access_grants` lookup (where direct sharing lives), and `org`

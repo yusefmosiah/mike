@@ -8,7 +8,7 @@ import type {
     OAuthClientMetadata,
     OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { createServerSupabase } from "../supabase";
+import { createDb } from "../db";
 import {
     authConfigPatch,
     base64Url,
@@ -772,7 +772,7 @@ export async function startUserMcpConnectorOAuth(
     userId: string,
     connectorId: string,
     redirectUri: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ authorizationUrl: string | null; alreadyAuthorized: boolean }> {
     const connector = await loadConnector(userId, connectorId, db);
     const provider = new DbMcpOAuthProvider(
@@ -849,7 +849,7 @@ export async function startUserMcpConnectorOAuth(
 export async function completeMcpConnectorOAuthAuthorization(
     state: string,
     code: string,
-    db: Db = createServerSupabase(),
+    db: Db = createDb(),
 ): Promise<{ userId: string; connectorId: string }> {
     const { data, error } = await db
         .from("user_mcp_oauth_states")

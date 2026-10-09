@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { scriptedDb } from "../../../__tests__/helpers/scriptedDb";
 import {
   createDocumentVersion,

@@ -1,7 +1,7 @@
 // Business logic + data-access for the user module.
 //
 // These functions are the service layer behind user.routes.ts. They take an
-// explicit Supabase client (`db`) plus request-derived primitives, perform the
+// explicit database client (`db`) plus request-derived primitives, perform the
 // profile / MFA / API-key / MCP / export / deletion orchestration, and RETURN
 // values or typed error results. They never touch req/res — the thin route
 // handlers map the results onto HTTP status codes, headers, and response

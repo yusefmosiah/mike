@@ -4,14 +4,14 @@
 // timeouts on long tool calls), so it gets a dedicated harness. It is
 // ON-DEMAND tooling — run it by hand or via .github/workflows/loadtest.yml
 // pointed at any non-production deployment of the backend API you own
-// (it must serve POST /chat behind Supabase bearer auth, with real LLM
+// (it must serve POST /chat behind GoTrue bearer auth, with real LLM
 // provider keys configured). Never point it at production:
 // every iteration creates a real chat row and burns real LLM tokens on the
 // target stack.
 //
 // Endpoint shape (from backend/src/modules/chat/chat.routes.ts):
 //   POST {BASE_URL}/chat
-//   Authorization: Bearer <supabase access token>
+//   Authorization: Bearer <GoTrue access token>
 //   Body: { "messages": [{ "role": "user", "content": "..." }] }
 //   Response: text/event-stream. First event is
 //   `data: {"type":"chat_id",...}`, then streamed events, terminated by
@@ -24,7 +24,7 @@
 //
 // Required env:
 //   BASE_URL    e.g. http://localhost:3001 or the staging backend URL
-//   AUTH_TOKEN  a valid Supabase access token for a test user
+//   AUTH_TOKEN  a valid GoTrue access token for a test user
 // Optional env:
 //   VUS            peak concurrent streams (default 5)
 //   RAMP_DURATION  ramp-up time (default 30s)
@@ -94,7 +94,7 @@ export const options = {
 export function setup() {
     if (!AUTH_TOKEN) {
         throw new Error(
-            "AUTH_TOKEN is required (a Supabase access token for a test user). " +
+            "AUTH_TOKEN is required (a GoTrue access token for a test user). " +
                 "See docs/test-depth.md for how to mint one against the local stack.",
         );
     }

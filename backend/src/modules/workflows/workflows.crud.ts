@@ -1,6 +1,6 @@
 import { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "../documents/documents.service";
 // workflows crud — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { getOrgRole } from "../../lib/access";
 // devLog comes from lib/chat/types (a leaf file — importing the whole chat
 // barrel here just for a logger would be a heavy dependency edge).

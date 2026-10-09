@@ -7,8 +7,8 @@ const mocks = vi.hoisted(() => ({
   assurance: vi.fn(),
 }));
 vi.mock("../lib/log", () => ({ devLog: mocks.devLog, isDev: true }));
-vi.mock("../lib/supabase", () => ({
-  createServerSupabase: () => ({}),
+vi.mock("../lib/db", () => ({
+  createDb: () => ({}),
 }));
 vi.mock("../lib/gotrue", () => ({
   authAdmin: () => ({

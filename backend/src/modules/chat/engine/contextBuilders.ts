@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { ensureDocAccess } from "../../../lib/access";
 import { attachActiveVersionPaths } from "../../../lib/documentVersions";
 import {

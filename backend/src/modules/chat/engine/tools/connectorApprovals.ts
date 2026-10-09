@@ -14,7 +14,7 @@ import type {
   ConnectorApprovalItem,
   McpToolEvent,
 } from "@mike/contracts";
-import type { Db } from "../../../../lib/supabase";
+import type { Db } from "../../../../lib/db";
 import type { ConnectorCallPlan } from "../../../../lib/mcp/types";
 import {
   planGoogleDriveCall,

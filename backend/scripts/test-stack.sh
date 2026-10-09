@@ -51,7 +51,7 @@ fi
 export DATABASE_TEST_URL="postgres://postgres:postgres@127.0.0.1:$DB_PORT/postgres"
 export AUTH_TEST_URL="http://127.0.0.1:$AUTH_PORT"
 # The compose file's local demo service-role key, signed with its GoTrue secret.
-export AUTH_TEST_SERVICE_KEY="${AUTH_TEST_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}"
+export AUTH_TEST_SERVICE_KEY="${AUTH_TEST_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y}"
 
 echo "Running stack integration tests against $AUTH_TEST_URL and $DATABASE_TEST_URL"
 cd "$BACKEND_DIR"

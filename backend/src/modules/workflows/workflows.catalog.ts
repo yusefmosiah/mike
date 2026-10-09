@@ -1,5 +1,5 @@
 // workflows catalog — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { catalogWorkflowToLegacy, ensureDefaultWorkflows, findCatalogWorkflow, listActiveCatalogWorkflows, type LegacyCatalogWorkflow } from "../../lib/workflowCatalog";
 import { WorkflowType, ServiceFailure } from "./workflows.types";
 import { withSystemWorkflowAccess } from "./workflows.serialization";

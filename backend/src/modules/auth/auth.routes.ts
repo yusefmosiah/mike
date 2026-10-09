@@ -1,7 +1,7 @@
 // HTTP layer for the auth module.
 //
 // Everything that genuinely needs req/res lives here: creating the
-// cookie-bearing Supabase client, clearing auth cookies, reading the request
+// cookie-bearing auth client, clearing auth cookies, reading the request
 // origin, and rendering GoTrue's errors as safe responses. The payload
 // schemas, the redirect-URL construction, and the GoTrue calls themselves are
 // in auth.service.ts.

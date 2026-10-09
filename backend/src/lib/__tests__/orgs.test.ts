@@ -18,7 +18,7 @@ import {
 
 type Row = Record<string, unknown>;
 
-// Stateful in-memory Supabase fake: unlike the read-only makeDb in
+// Stateful in-memory database fake: unlike the read-only makeDb in
 // access.test.ts, this one actually mutates the seeded tables so
 // insert/update/delete round-trips (membership changes, last-admin counts) can
 // be asserted. Supports the subset of the query builder the service uses.

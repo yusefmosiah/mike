@@ -4,13 +4,11 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import { AUTH_SESSION_INVALIDATED_EVENT } from "@/app/lib/authEvents";
 
 const {
-    clearLegacyBrowserAuthStorage,
     getAuthSession,
     logout,
     updateAuthEmail,
     updateAuthPassword,
 } = vi.hoisted(() => ({
-    clearLegacyBrowserAuthStorage: vi.fn(),
     getAuthSession: vi.fn(),
     logout: vi.fn(),
     updateAuthEmail: vi.fn(),
@@ -18,7 +16,6 @@ const {
 }));
 
 vi.mock("@/app/lib/authApi", () => ({
-    clearLegacyBrowserAuthStorage,
     getAuthSession,
     logout,
     updateAuthEmail,
@@ -53,7 +50,6 @@ describe("AuthProvider", () => {
     beforeEach(() => {
         getAuthSession.mockReset();
         logout.mockReset();
-        clearLegacyBrowserAuthStorage.mockReset();
         updateAuthEmail.mockReset();
         updateAuthPassword.mockReset();
         window.localStorage.clear();

@@ -24,7 +24,7 @@ vi.mock("../../lib/queue/appJobsQueue", async (importOriginal) => {
             enqueueAppJobDelivery(dbJobId, opts),
     };
 });
-vi.mock("../../lib/supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../lib/db", () => ({ createDb: vi.fn() }));
 const reportError = vi.fn();
 vi.mock("../../lib/observability/sentry", async (importOriginal) => {
     const actual =

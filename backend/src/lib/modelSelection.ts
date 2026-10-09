@@ -19,7 +19,7 @@ import {
     type RouterModelSelections,
 } from "./routerModels";
 import { resolveRequestedModel } from "./routerModels";
-import type { Db } from "./supabase";
+import type { Db } from "./db";
 import { UserFacingError } from "./userFacingError";
 
 export const MODEL_REQUIRED_DETAIL =

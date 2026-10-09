@@ -6,7 +6,7 @@
 // lives here, and user.service.ts re-exports the whole public surface so
 // route/test importers see a single module.
 
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 export type { Db };
 
 // Every caller sends this straight to the browser as `{ ok: false, detail }`.

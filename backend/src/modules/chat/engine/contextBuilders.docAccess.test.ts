@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ways: being mentioned in a chat the caller can read is not itself access.
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../lib/supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../../lib/db", () => ({ createDb: vi.fn() }));
 vi.mock("../../../lib/storage", () => ({ downloadFile: vi.fn() }));
 
 const ensureDocAccess = vi.fn(async (..._args: unknown[]) => ({ ok: true }));

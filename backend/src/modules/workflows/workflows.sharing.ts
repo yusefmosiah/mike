@@ -1,5 +1,5 @@
 // workflows sharing — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { findMissingUserEmails, loadProfileUsersByEmail } from "../../lib/userLookup";
 import { type ProjectRole } from "../../lib/permissions";
 import { deleteOrgAccessOverride, findAssignableOrgMember, isOrgAssignableRole, listOrgAccessPeople, setOrgAccessOverrides } from "../../lib/orgAccessOverrides";

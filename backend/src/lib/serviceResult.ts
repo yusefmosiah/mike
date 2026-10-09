@@ -55,7 +55,7 @@ export function failure(
   return code ? { ok: false, kind, detail, code } : { ok: false, kind, detail };
 }
 
-// A service's `{ data, error }` from supabase-js carries a PLAIN object
+// A service's `{ data, error }` from a query carries a PLAIN object
 // (`{ code, message, details, hint }`), not an Error: it has no stack. Left
 // alone, the first stack anyone takes is inside the Sentry reporter, so the
 // issue points at the reporting code instead of the query that failed

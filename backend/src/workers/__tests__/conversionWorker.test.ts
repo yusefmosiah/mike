@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Never construct a real Supabase client during the unit test.
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(),
+// Never construct a real database client during the unit test.
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(),
 }));
 
 const enqueueDbJob = vi.fn();
@@ -37,7 +37,7 @@ type Call = {
     filters: Record<string, unknown>;
 };
 
-// Chainable Supabase double. `errors` lets a test make one table's update
+// Chainable database double. `errors` lets a test make one table's update
 // fail the way PostgREST does — by RESOLVING with an `error` field, not by
 // throwing — which is precisely the failure mode the worker used to ignore.
 function makeDb(

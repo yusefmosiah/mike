@@ -1,4 +1,4 @@
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import { getUserModelSettings } from "./user.settings";
 import {
   resolveEffectiveChatModel,

@@ -4,7 +4,7 @@ import type {
   NativeConnectorTool,
 } from "@mike/contracts";
 import { z } from "zod";
-import type { Db } from "../supabase";
+import type { Db } from "../db";
 import type { ConnectorCallPlan, McpToolEvent } from "../mcp/types";
 import { safeError } from "../safeError";
 import {

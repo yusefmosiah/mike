@@ -17,8 +17,8 @@ vi.mock("../../../middleware/auth", () => ({
     },
 }));
 
-vi.mock("../../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => ({ from: vi.fn() })),
+vi.mock("../../../lib/db", () => ({
+    createDb: vi.fn(() => ({ from: vi.fn() })),
 }));
 
 vi.mock("../../user/user.apiKeyStore", () => ({

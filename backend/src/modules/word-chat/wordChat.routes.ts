@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 import {
   AssistantStreamError,
   assistantStreamErrorPayload,
@@ -274,7 +274,7 @@ wordChatRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
   const offset = Number.isFinite(requestedOffset)
     ? Math.max(requestedOffset, 0)
     : 0;
-  const db = createServerSupabase();
+  const db = createDb();
   const result = await listWordChats(db, {
     userId,
     clientDocumentId: parsedDocumentId.value,
@@ -297,7 +297,7 @@ wordChatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
   if (!isUuid(req.params.chatId)) {
     return void res.status(404).json({ detail: "Chat not found" });
   }
-  const db = createServerSupabase();
+  const db = createDb();
   const result = await getWordChatWithMessages(db, {
     userId,
     clientDocumentId: parsedDocumentId.value,
@@ -389,7 +389,7 @@ wordChatRouter.patch("/:chatId/model", requireAuth, asyncRoute(async (req, res) 
     });
   }
 
-  const db = createServerSupabase();
+  const db = createDb();
   const result = await updateWordChatModel(db, {
     userId,
     clientDocumentId: parsedDocumentId.value,
@@ -430,7 +430,7 @@ wordChatRouter.patch("/:chatId/reasoning", requireAuth, asyncRoute(async (req, r
         : parsedReasoning.detail,
     });
   }
-  const db = createServerSupabase();
+  const db = createDb();
   const result = await updateWordChatReasoning(db, {
     userId,
     clientDocumentId: parsedDocumentId.value,
@@ -473,7 +473,7 @@ wordChatRouter.put(
     if (!parsedEdit.ok) {
       return void res.status(400).json({ detail: parsedEdit.detail });
     }
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await saveProposedWordEdit(db, {
       userId,
       clientDocumentId: parsedDocumentId.value,
@@ -569,7 +569,7 @@ wordChatRouter.patch(
     if (Object.keys(patch).length === 1) {
       return void res.status(400).json({ detail: "No edit fields supplied" });
     }
-    const db = createServerSupabase();
+    const db = createDb();
     const result = await updateWordEditOutcome(db, {
       userId,
       clientDocumentId: parsedDocumentId.value,
@@ -679,7 +679,7 @@ wordChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
   const activeDocumentName = parsedDocumentName.value;
   const persistChat = parsedStorage.value === "cloud";
   const editApplyMode = parsedEditApplyMode.value;
-  const db = createServerSupabase();
+  const db = createDb();
 
   const prep = await prepareWordChatStream(db, {
     userId,

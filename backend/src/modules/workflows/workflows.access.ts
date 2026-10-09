@@ -1,5 +1,5 @@
 // workflows access — implementation behind the module facade.
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { checkWorkflowAccess } from "../../lib/access";
 import { can } from "../../lib/permissions";
 import { WorkflowAccess, WorkflowRecord } from "./workflows.types";

@@ -31,7 +31,7 @@ const listFilesMock = vi.mocked(listFiles);
 type Row = Record<string, unknown>;
 
 /**
- * Stateful Supabase mock: deletes and updates mutate `tables`, so tests can
+ * Stateful database mock: deletes and updates mutate `tables`, so tests can
  * assert on exactly which rows survived a cleanup call. Supports the chains
  * userDataCleanup uses (select/delete/update + eq/in/not/order/filter-cs) and can
  * inject a delete error per table to exercise error propagation.
@@ -261,7 +261,7 @@ function makeDb(
                                 (row) => !predicate(row),
                             );
                             cascadeDelete(table, removed);
-                            // Supabase returns the deleted rows when the call
+                            // The database returns the deleted rows when the call
                             // chains .select(); the grant cleanup uses that to
                             // learn which projects need their mirror rebuilt.
                             result = { data: removed, error: null };

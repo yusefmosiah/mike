@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import type { ParamsFlatDictionary } from "express-serve-static-core";
 import type { User } from "@supabase/auth-js";
-import { createServerSupabase, type Db } from "../lib/supabase";
+import { createDb, type Db } from "../lib/db";
 import { authAdmin, type AuthAdmin } from "../lib/gotrue";
 import { syncProfileEmail } from "../lib/userLookup";
 import { sendInternalError } from "../lib/httpError";
@@ -103,7 +103,7 @@ async function enforceLoginMfaIfEnabled(
 
 function getAdminClient(res: Response) {
   try {
-    return createServerSupabase();
+    return createDb();
   } catch {
     res.status(500).json({ detail: "Server auth is not configured" });
     return null;

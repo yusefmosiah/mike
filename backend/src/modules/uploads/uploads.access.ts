@@ -16,7 +16,7 @@ import {
   creatorScopedAllowed,
   ensureDocAccess,
 } from "../../lib/access";
-import type { Db } from "../../lib/supabase";
+import type { Db } from "../../lib/db";
 import type { ParsedUploadSessionRequest } from "./uploads.manifest";
 import {
   failure,

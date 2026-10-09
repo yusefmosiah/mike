@@ -13,7 +13,7 @@ import request from "supertest";
 // test, not just its answer.
 // ---------------------------------------------------------------------------
 
-function mockSupabase() {
+function mockDb() {
     return {
         from: vi.fn(() => {
             const q: Record<string, unknown> = {};
@@ -49,8 +49,8 @@ function mockSupabase() {
     };
 }
 
-vi.mock("../../lib/supabase", () => ({
-    createServerSupabase: vi.fn(() => mockSupabase()),
+vi.mock("../../lib/db", () => ({
+    createDb: vi.fn(() => mockDb()),
 }));
 
 vi.mock("../../middleware/auth", () => ({
@@ -97,7 +97,7 @@ vi.mock("../../lib/documentVersions", () => ({
 }));
 
 import { app } from "../../app";
-import { createServerSupabase } from "../../lib/supabase";
+import { createDb } from "../../lib/db";
 
 const AUTH = ["Authorization", "Bearer test"] as const;
 
@@ -189,8 +189,8 @@ function directorySearchDb(options: {
 }
 
 function useDb(handle: { db: unknown }) {
-    vi.mocked(createServerSupabase).mockImplementationOnce(
-        () => handle.db as ReturnType<typeof createServerSupabase>,
+    vi.mocked(createDb).mockImplementationOnce(
+        () => handle.db as ReturnType<typeof createDb>,
     );
 }
 

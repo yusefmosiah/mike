@@ -1,4 +1,4 @@
-import type { Db } from "../../../lib/supabase";
+import type { Db } from "../../../lib/db";
 import { setLeaf } from "../chat.tree";
 
 type AssistantMessageTable = "chat_messages" | "word_chat_messages";

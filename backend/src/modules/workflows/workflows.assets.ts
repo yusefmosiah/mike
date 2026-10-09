@@ -3,13 +3,13 @@ import { captureInlineDocumentCleanup, completeInlineDocumentCleanup, createDocu
 // workflows assets — implementation behind the module facade.
 // Business logic + data access for the workflows module.
 //
-// These functions take an explicit Supabase client (`db`) plus
+// These functions take an explicit database client (`db`) plus
 // request-derived primitives, perform the workflow / share / hidden-list /
 // asset orchestration, and RETURN typed results. They never touch
 // req/res — the thin route handlers in workflows.routes.ts map the results
 // onto HTTP status codes and response bodies.
 import { randomUUID } from "node:crypto";
-import { type Db } from "../../lib/supabase";
+import { type Db } from "../../lib/db";
 import { ensureDocAccess } from "../../lib/access";
 import { convertedPdfKey } from "../../lib/convert";
 import { copyFile, storageKey } from "../../lib/storage";

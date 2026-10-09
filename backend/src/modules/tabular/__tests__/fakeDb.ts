@@ -1,4 +1,4 @@
-// A minimal stand-in for the Supabase client, shared by the tabular service
+// A minimal stand-in for the database client, shared by the tabular service
 // unit tests.
 //
 // Service functions take an explicit `Db`, so a test can hand them this object

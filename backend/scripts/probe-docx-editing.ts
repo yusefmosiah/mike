@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const LOCAL_SERVICE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y";
 process.env.AUTH_URL ??= "http://localhost:54321";
 process.env.AUTH_SERVICE_KEY ??= LOCAL_SERVICE_KEY;
 process.env.DATABASE_URL ??= "postgres://postgres:postgres@localhost:54322/postgres";
@@ -43,7 +43,7 @@ function check(label: string, ok: boolean) {
 }
 
 async function main() {
-  const { createServerSupabase } = await import("../src/lib/supabase");
+  const { createDb } = await import("../src/lib/db");
   const { uploadFile, downloadFile } = await import("../src/lib/storage");
   const { createDocumentVersion, resolveEdit, docxViewForVersion } = await import("../src/modules/documents/documents.service");
   const { runToolCalls } = await import("../src/modules/chat/engine/tools/toolDispatcher");
@@ -51,7 +51,7 @@ async function main() {
   const { renderInlines } = await import("../src/lib/docx/render");
   const { loadActiveVersion } = await import("../src/lib/documentVersions");
 
-  const db = createServerSupabase();
+  const db = createDb();
   const email = `probe-${Date.now()}@mike.local`;
   const { data: created, error: userErr } = await db.auth.admin.createUser({ email, password: randomUUID(), email_confirm: true });
   if (userErr || !created.user) throw new Error(`createUser: ${userErr?.message}`);

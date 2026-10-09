@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 
 // verifyCitations only reuses the pure normalizeWithMap matcher from
-// documentOps, but importing documentOps pulls in its storage/supabase graph.
+// documentOps, but importing documentOps pulls in its storage/database graph.
 // Keep those module side-effects offline — this test injects source text
 // directly and never touches storage, proving verification adds no egress
 // (air-gap safe).
-vi.mock("../../../lib/supabase", () => ({ createServerSupabase: vi.fn() }));
+vi.mock("../../../lib/db", () => ({ createDb: vi.fn() }));
 vi.mock("../../../lib/storage", () => ({ downloadFile: vi.fn() }));
 
 import {
