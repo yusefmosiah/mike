@@ -22,7 +22,7 @@ import {
     audioFailure,
     type AudioFailure,
 } from "./audio.shared";
-import { synthesizeSpeech, transcribeAudio } from "./audio.service";
+import { synthesizeSpeech, transcribeAudio, voiceOptions } from "./audio.service";
 
 export const audioRouter = Router();
 
@@ -87,8 +87,9 @@ function recordingFilename(mimetype: string, provided: unknown): string {
 
 // POST /audio/transcriptions
 //
-// { audio_base64, mimetype, filename?, language? } in, { text } out. The
-// parsing rationale is in the module comment above.
+// { audio_base64, mimetype, filename?, language?, provider?, model? } in,
+// { text, provider, model, cost_usd } out. The parsing rationale is in the
+// module comment above.
 audioRouter.post(
     "/transcriptions",
     requireAuth,
@@ -114,15 +115,23 @@ audioRouter.post(
             filename: recordingFilename(mimetype, body.filename),
             mimetype,
             language,
+            provider: body.provider,
+            model: typeof body.model === "string" ? body.model : undefined,
         });
         if (!result.ok) return void sendAudioFailure(res, result);
-        res.json({ text: result.text });
+        res.json({
+            text: result.text,
+            provider: result.provider,
+            model: result.model,
+            cost_usd: result.costUsd,
+        });
     }),
 );
 
 // POST /audio/speech
 //
-// { text, voice?, speed?, format? } in, the synthesized bytes out.
+// { text, voice?, speed?, format?, provider?, model? } in, the synthesized
+// bytes out.
 audioRouter.post(
     "/speech",
     requireAuth,
@@ -130,7 +139,25 @@ audioRouter.post(
         const result = await synthesizeSpeech(req.body);
         if (!result.ok) return void sendAudioFailure(res, result);
         res.setHeader("Content-Type", result.contentType);
+        // For the voice test bench: which model spoke, and what it cost
+        // when the price is known.
+        res.setHeader("X-Mike-Audio-Provider", result.provider);
+        res.setHeader("X-Mike-Audio-Model", result.model);
+        if (result.costUsd !== null) res.setHeader("X-Mike-Audio-Cost", result.costUsd.toFixed(6));
         res.send(result.audio);
+    }),
+);
+
+// GET /audio/options
+//
+// What this deployment offers: the operator's configured models, and
+// OpenRouter's speech and transcription catalog with prices when that lane
+// is available (never in strict private mode).
+audioRouter.get(
+    "/options",
+    requireAuth,
+    asyncRoute(async (_req, res) => {
+        res.json(await voiceOptions());
     }),
 );
 

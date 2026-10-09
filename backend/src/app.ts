@@ -238,7 +238,7 @@ app.use(
     // access log, and the Sentry event. Browsers hide response headers from
     // cross-origin scripts unless they are listed here, so a dev build or a
     // self-hoster serving the API from another origin could not read it.
-    exposedHeaders: ["X-Request-ID"],
+    exposedHeaders: ["X-Request-ID", "X-Mike-Audio-Provider", "X-Mike-Audio-Model", "X-Mike-Audio-Cost"],
   }),
 );
 

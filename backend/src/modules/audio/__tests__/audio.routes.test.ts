@@ -117,7 +117,13 @@ describe("transcribeAudio", () => {
             language: "  en  ",
         });
 
-        expect(result).toEqual({ ok: true, text: "Hello there" });
+        expect(result).toEqual({
+            ok: true,
+            text: "Hello there",
+            provider: "operator",
+            model: "whisper-large-v3-turbo",
+            costUsd: null,
+        });
 
         const { url, init } = firstCall(fetchMock);
         expect(url).toBe(`${STT_BASE}/audio/transcriptions`);
@@ -255,6 +261,9 @@ describe("synthesizeSpeech", () => {
             ok: true,
             audio: Buffer.from([1, 2, 3]),
             contentType: "audio/mpeg",
+            provider: "operator",
+            model: "tts-1",
+            costUsd: null,
         });
 
         const { url, init } = firstCall(fetchMock);
@@ -410,7 +419,12 @@ describe("POST /audio/transcriptions", () => {
             });
 
         expect(response.status).toBe(200);
-        expect(response.body).toEqual({ text: "Hello" });
+        expect(response.body).toEqual({
+            text: "Hello",
+            provider: "operator",
+            model: "whisper-large-v3-turbo",
+            cost_usd: null,
+        });
 
         const form = firstCall(fetchMock).init.body as FormData;
         expect((form.get("file") as File).name).toBe("recording.webm");

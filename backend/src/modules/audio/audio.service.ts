@@ -25,6 +25,29 @@ import {
     type SpeechFormat,
 } from "./audio.shared";
 import { assertEgressAllowed } from "../../lib/egress";
+import {
+    openRouterAudioStatus,
+    openRouterSpeech,
+    openRouterTranscribe,
+    voiceCatalog,
+    type OpenRouterStatus,
+    type VoiceCatalog,
+} from "./audio.openrouter";
+
+export { normalizeVoicePrice, resetVoiceCatalogCache } from "./audio.openrouter";
+export type { VoiceCatalog, VoiceModel, VoicePrice } from "./audio.openrouter";
+
+/**
+ * Where a request goes: the deployment's own operator (the default, and the
+ * only choice in strict private mode) or OpenRouter, the comparison lane.
+ */
+export type AudioProvider = "operator" | "openrouter";
+
+function providerOf(value: unknown): AudioProvider | null {
+    if (value === undefined || value === null || value === "" || value === "operator") return "operator";
+    if (value === "openrouter") return "openrouter";
+    return null;
+}
 
 export type TranscribeInput = {
     // The buffer parameter is pinned to ArrayBuffer rather than the default
@@ -34,12 +57,24 @@ export type TranscribeInput = {
     filename: string;
     mimetype: string;
     language?: string;
+    provider?: unknown;
+    /** OpenRouter model id; the operator always uses its configured model. */
+    model?: string;
 };
 
-export type TranscribeResult = { ok: true; text: string } | AudioFailure;
+export type TranscribeResult =
+    | { ok: true; text: string; provider: AudioProvider; model: string; costUsd: number | null }
+    | AudioFailure;
 
 export type SpeechResult =
-    | { ok: true; audio: Buffer; contentType: string }
+    | {
+          ok: true;
+          audio: Buffer;
+          contentType: string;
+          provider: AudioProvider;
+          model: string;
+          costUsd: number | null;
+      }
     | AudioFailure;
 
 /**
@@ -66,6 +101,15 @@ export async function transcribeAudio(
             "bad_audio",
             "Send the recording as an audio/* or video/* file.",
         );
+    }
+
+    const provider = providerOf(input.provider);
+    if (!provider) return audioFailure("bad_audio", "provider must be operator or openrouter.");
+    if (provider === "openrouter") {
+        const model = input.model?.trim();
+        if (!model) return audioFailure("bad_audio", "model is required for OpenRouter.");
+        const result = await openRouterTranscribe({ audio: input.file, mimetype, model, language });
+        return result.ok ? { ...result, provider } : result;
     }
 
     const configuration = sttConfiguration();
@@ -126,7 +170,7 @@ export async function transcribeAudio(
         );
     }
 
-    return { ok: true, text: payload.text };
+    return { ok: true, text: payload.text, provider, model: configuration.model, costUsd: null };
 }
 
 /**
@@ -188,6 +232,17 @@ export async function synthesizeSpeech(input: unknown): Promise<SpeechResult> {
         format = fields.format;
     }
 
+    const provider = providerOf(fields.provider);
+    if (!provider) return audioFailure("bad_audio", "provider must be operator or openrouter.");
+    if (provider === "openrouter") {
+        const model = typeof fields.model === "string" ? fields.model.trim() : "";
+        if (!model) return audioFailure("bad_audio", "model is required for OpenRouter.");
+        const result = await openRouterSpeech({ text, model, voice, speed });
+        return result.ok
+            ? { ok: true, audio: result.audio, contentType: result.contentType, provider, model: result.model, costUsd: result.costUsd }
+            : result;
+    }
+
     const configuration = ttsConfiguration();
     if (!configuration) {
         return audioFailure(
@@ -237,5 +292,37 @@ export async function synthesizeSpeech(input: unknown): Promise<SpeechResult> {
         );
     }
 
-    return { ok: true, audio, contentType: SPEECH_CONTENT_TYPES[format] };
+    return {
+        ok: true,
+        audio,
+        contentType: SPEECH_CONTENT_TYPES[format],
+        provider,
+        model: configuration.model,
+        costUsd: null,
+    };
+}
+
+export type VoiceOptions = {
+    strict_private: boolean;
+    operator: {
+        transcription: { model: string } | null;
+        speech: { model: string; voice: string } | null;
+    };
+    openrouter: OpenRouterStatus & { catalog: VoiceCatalog | null };
+};
+
+/** What this deployment can do for voice, for Settings -> Voice. */
+export async function voiceOptions(env: NodeJS.ProcessEnv = process.env): Promise<VoiceOptions> {
+    const stt = sttConfiguration(env);
+    const tts = ttsConfiguration(env);
+    const status = openRouterAudioStatus(env);
+    const catalog = status.available ? await voiceCatalog({ env }).catch(() => null) : null;
+    return {
+        strict_private: !status.available && status.reason === "strict_private",
+        operator: {
+            transcription: stt ? { model: stt.model } : null,
+            speech: tts ? { model: tts.model, voice: tts.voice } : null,
+        },
+        openrouter: { ...status, catalog },
+    };
 }
