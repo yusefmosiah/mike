@@ -26,6 +26,15 @@ const readDocument: OpenAIToolSchema = {
   },
 };
 
+const editDocument: OpenAIToolSchema = {
+  type: "function",
+  function: {
+    name: "edit_document",
+    description: "Edit a document",
+    parameters: { type: "object", properties: { doc_id: { type: "string" } }, required: ["doc_id"] },
+  },
+};
+
 type Seen = { users: string[]; toolResults: string[]; text: string };
 let requests: Seen[];
 
@@ -56,6 +65,9 @@ function setup(options: { tokensPerSecond?: number } = {}) {
     const firstUser = text(ctx.messages.find((m) => m.role === "user")?.content);
     if (firstUser.includes("keep reading") && !(last?.role === "toolResult" && text(last.content).startsWith("Not run"))) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: `nda-${requests.length}` })], { stopReason: "toolUse" });
+    }
+    if (last?.role === "user" && text(last.content).includes("edit NDA")) {
+      return fauxAssistantMessage([fauxToolCall("edit_document", { doc_id: "nda" })], { stopReason: "toolUse" });
     }
     if (last?.role === "user" && text(last.content).includes("read NDA")) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" });
@@ -338,6 +350,43 @@ describe("Pi runtime: turns, branches and memory", () => {
     expect(resumed.fullText).toMatch(/^attempt 2: /);
     expect(shown).toBe(resumed.fullText);
   }, 15_000);
+
+  it("a write cut off by a restart is not run again: the model is told it was interrupted", async () => {
+    const durableTurn = { context: { surface: "chat" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    let writes = 0;
+    void turn([{ role: "user", content: "Please edit NDA" }], identity, {
+      durableTurn,
+      tools: [readDocument, editDocument],
+      runTools: () => (writes++, new Promise(() => undefined)),
+    }).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(writes).toBe(1);
+    await resetPiRuntime(current);
+
+    const resumed = await turn([{ role: "user", content: "Please edit NDA" }], identity, {
+      durableTurn: { ...durableTurn, resume: true },
+      tools: [readDocument, editDocument],
+      runTools: async (calls) => calls.map((call) => (writes++, { tool_use_id: call.id, content: "edited" })),
+    });
+    expect(writes).toBe(1);
+    expect(resumed.fullText).toMatch(/^answer/);
+    expect(requests.at(-1)!.toolResults.join("")).not.toContain("edited");
+    expect(requests.at(-1)!.toolResults.join("")).toMatch(/interrupt/i);
+  });
+
+  it("a turn nobody can resume is stopped after a restart, not run on for no one", async () => {
+    // A Word or tabular turn: bound to a chat, but not recorded as durable.
+    void turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {
+      runTools: () => new Promise(() => undefined),
+    }).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const sent = requests.length;
+    await resetPiRuntime(current);
+    const { harness } = await piRuntime();
+    await vi.waitFor(async () => expect((await harness.inspect(context)).tasks).toHaveLength(0), { timeout: 2000 });
+    expect(requests).toHaveLength(sent);
+  });
 
   it("an interrupted turn can be given up, which stops its run", async () => {
     void turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {

@@ -284,7 +284,20 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       }, background)
       .catch((error: unknown) => console.error("[pi] failed to persist tool schemas", error));
   };
+  // Work no recorded turn will drive again (a Word or tabular turn, whose
+  // listener died with the process) would otherwise run on for no one.
+  const orphans = new Set(
+    (await harness.inspect(background)).tasks
+      .map((task) => task.record.conversationId as number)
+      .filter((conversation) => !bindings.resumable.has(conversation)),
+  );
   harness.resume();
+  for (const id of orphans) {
+    void harness
+      .conversation(id as ConversationId, background)
+      .then((conversation) => conversation?.abort(background))
+      .catch((error: unknown) => console.error("[pi] failed to stop an orphaned run", error));
+  }
   return { harness, installTools, resolve: catalog.resolve, bindings };
 }
 

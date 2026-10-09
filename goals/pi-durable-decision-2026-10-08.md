@@ -113,11 +113,33 @@ live session, and a finished turn grafted onto another branch after navigation.
 Not browser-checked: the project chat page (same hook and server routes; fork
 navigation differs), phone width, and the D1 failure path (unit-tested).
 
+## Turns survive a restart (stage 2, checked with `docker kill`)
+
+A global or project chat turn records its durable context (user, chat,
+project, model, options, displayed and attached documents, prompt id) in a Pi
+session document before its input is sent. On startup each module re-prepares
+its recorded turns from storage, so access is checked again and documents are
+reloaded. It then drives each one into a server-owned run that a reloading
+client attaches to. Tool schemas are persisted, so the Harness can re-install
+them before resuming. Reads (tier 1) replay as safe. Writes are unsafe: Pi
+gives the model an interrupted result instead of running them twice
+(unit-tested). The record is cleared only once the module has stored the
+outcome. A crash after the model finished but before the store therefore
+returns the same answer again, with no new model request. A turn that cannot
+be driven gets an error answer.
+
+Killing the backend mid-answer on both surfaces resumed the turn after
+restart and stored one clean answer. This live check found that Pi's aborted
+partial was being replayed in front of the resent answer; the replay now
+skips aborted messages. Word and tabular turns are not recorded: Word needs
+its client tools to wait on durable documents (stage 4). After a restart
+their runs are stopped, so they no longer run on for no one.
+
 ## Remaining limits
 
-- Tools still run through the request binding, so after a restart every
-  in-flight Mike tool behaves as unsafe (interrupted). Durable server tools are
-  Stage 2.
+- Word add-in and tabular-review turns end with a restart (their runs are
+  stopped, nothing is resumed). `ask_inputs` pauses and connector approvals
+  are still in-memory.
 - Not live-verified for lack of local keys: direct Anthropic, Google and OpenAI
   keys (the same pi-ai catalogs that OpenRouter exercised), Ollama, and
   configured endpoints (covered by tests against a local OpenAI-compatible
