@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord";
 import type { ImageContent, Message, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
-import { tierForTool } from "../../guardrails/policy.js";
+import { isParallelSafeTool, tierForTool } from "../../guardrails/policy.js";
 import { databaseUrl } from "../../runtimeConfig.js";
 import { getConfiguredModel, tolerateTextToolCalls } from "../registry.js";
 import { createMikeModels, providerError, tolerantMessage, useRequestKeys, type MikeModels } from "./providers.mjs";
@@ -306,8 +306,10 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       models: catalog.models,
       registry,
       settings: {
-        // Mike's dispatcher keeps per-turn edit and read state; run a round in call order.
-        toolExecution: "sequential",
+        // Lookups in one round run at once; a tool that changes something
+        // declares `executionMode: "sequential"` (see mikeTool), which runs
+        // its whole round in call order.
+        toolExecution: "parallel",
         progress: { partialIntervalMs: 100, outputIntervalMs: 250 },
       },
     },
@@ -406,6 +408,9 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
     // A read can run again after a crash; anything with effects is answered
     // as interrupted instead, so a write never happens twice unseen.
     replay: tierForTool(name) === 1 ? "safe" : "unsafe",
+    // Writes, connector calls and client tools act on shared state whose
+    // order the model chose; one of them in a round makes the round sequential.
+    executionMode: isParallelSafeTool(name) ? "parallel" : "sequential",
     execute: async (args, api, context) => {
       const binding = await bindings.wait(api.conversationId, context.abortSignal);
       if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");

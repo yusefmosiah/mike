@@ -9,6 +9,7 @@ import {
     classifyToolCall,
     inScopeForContainer,
     tierForTool,
+    isParallelSafeTool,
 } from "../index";
 import type { ClassifierCompleteFn, ClassifyToolCallInput } from "../index";
 
@@ -516,4 +517,27 @@ describe("guardrails index", () => {
         expect(DOCUMENT_WRITE_TOOLS.has("edit_document")).toBe(true);
         expect(DEFAULT_CLASSIFIER_MODEL).toBe("opencode-go/glm-5.3-flash");
     });
+});
+
+describe("isParallelSafeTool", () => {
+  it.each(["read_document", "find_in_document", "list_documents", "courtlistener_read_case", "web_search", "fetch_web_page"])(
+    "lets %s run beside other lookups",
+    (name) => {
+      expect(isParallelSafeTool(name)).toBe(true);
+    },
+  );
+
+  it.each([
+    "edit_document",
+    "generate_docx",
+    "replicate_document",
+    "ask_inputs",
+    "apply_word_edits",
+    "read_active_document",
+    "mcp_gmail__send",
+    "",
+    undefined,
+  ])("keeps %s in call order", (name) => {
+    expect(isParallelSafeTool(name)).toBe(false);
+  });
 });

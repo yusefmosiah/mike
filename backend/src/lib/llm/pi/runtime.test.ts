@@ -66,6 +66,18 @@ function setup(options: { tokensPerSecond?: number } = {}) {
     if (firstUser.includes("keep reading") && !(last?.role === "toolResult" && text(last.content).startsWith("Not run"))) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: `nda-${requests.length}` })], { stopReason: "toolUse" });
     }
+    if (last?.role === "user" && text(last.content).includes("read three")) {
+      return fauxAssistantMessage(
+        ["a", "b", "c"].map((doc) => fauxToolCall("read_document", { doc_id: doc })),
+        { stopReason: "toolUse" },
+      );
+    }
+    if (last?.role === "user" && text(last.content).includes("read then edit")) {
+      return fauxAssistantMessage(
+        [fauxToolCall("read_document", { doc_id: "a" }), fauxToolCall("edit_document", { doc_id: "a" }), fauxToolCall("read_document", { doc_id: "b" })],
+        { stopReason: "toolUse" },
+      );
+    }
     if (last?.role === "user" && text(last.content).includes("edit NDA")) {
       return fauxAssistantMessage([fauxToolCall("edit_document", { doc_id: "nda" })], { stopReason: "toolUse" });
     }
@@ -277,6 +289,46 @@ describe("Pi runtime: turns, branches and memory", () => {
     const text = await completeTextOnPi({ model: MODEL, systemPrompt: "Title this.", user: "An NDA question" });
     expect(text).toMatch(/^answer/);
     expect(requests.at(-1)!.users).toEqual(["An NDA question"]);
+  });
+
+  it("runs the lookups of one round at once, and answers each in call order", async () => {
+    const order: string[] = [];
+    let running = 0;
+    let peak = 0;
+    const result = await turn([{ role: "user", content: "Please read three" }], { user: "u1", parent: null, assistant: "a1" }, {
+      runTools: async (calls) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        order.push(`start ${String(calls[0].input.doc_id)}`);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        order.push(`end ${String(calls[0].input.doc_id)}`);
+        running -= 1;
+        return calls.map((call) => ({ tool_use_id: call.id, content: `doc ${String(call.input.doc_id)}` }));
+      },
+    });
+    expect(result.fullText).toMatch(/^answer/);
+    expect(peak).toBe(3);
+    expect(order.slice(0, 3)).toEqual(["start a", "start b", "start c"]);
+    expect(requests.at(-1)!.toolResults).toEqual(["doc a", "doc b", "doc c"]);
+  });
+
+  it("runs a round that writes in call order, one call at a time", async () => {
+    const order: string[] = [];
+    let running = 0;
+    let peak = 0;
+    await turn([{ role: "user", content: "Please read then edit" }], { user: "u1", parent: null, assistant: "a1" }, {
+      tools: [readDocument, editDocument],
+      runTools: async (calls) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        order.push(`${calls[0].name} ${String(calls[0].input.doc_id)}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        running -= 1;
+        return calls.map((call) => ({ tool_use_id: call.id, content: "ok" }));
+      },
+    });
+    expect(peak).toBe(1);
+    expect(order).toEqual(["read_document a", "edit_document a", "read_document b"]);
   });
 
   it("a turn cut off by a restart is driven again: the read reruns, the input is not sent twice", async () => {

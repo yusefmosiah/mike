@@ -62,6 +62,23 @@ export const DOCUMENT_WRITE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Tools that only look things up, so several may run at once in one round:
+ * Mike's own reads plus web search and page fetches (external egress, so
+ * Tier 3 for Auto Mode, but they change nothing). Every other tool — document
+ * writes, connector calls, the Word add-in's client tools, ask_inputs and
+ * unknown names — runs its whole round in call order.
+ */
+export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
+  ...TIER_1_READ_TOOLS,
+  "web_search",
+  "fetch_web_page",
+]);
+
+export function isParallelSafeTool(name: string | null | undefined): boolean {
+  return !!name && PARALLEL_SAFE_TOOLS.has(name);
+}
+
+/**
  * Tier for a tool name. Unknown, empty and missing names are Tier 3: the
  * classifier judges them or they are denied — never silently allowed.
  */

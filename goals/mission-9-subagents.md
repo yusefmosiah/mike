@@ -99,12 +99,12 @@ citation verification (Mission 6) builds on this later.
 
 Differences from the design, for review:
 
-- **Children run one after another.** Mike's harness runs a round's tool
-  calls in order (`toolExecution: "sequential"`) because the dispatcher keeps
-  per-turn edit and read state. The 4-at-once limit is enforced (slots are
-  taken before the first await) but is not reachable until delegate calls can
-  run in parallel. Running them in parallel needs either a per-tool execution
-  mode in Pi or a batch delegate call.
+- **Parallel since 2026-10-09 (later the same day).** The harness now runs a
+  round's lookups at once (`toolExecution: "parallel"`); any tool outside
+  `PARALLEL_SAFE_TOOLS` (writes, connector calls, Word client tools,
+  ask_inputs) declares `executionMode: "sequential"`, which runs its whole
+  round in call order. Several `delegate` calls in one response run their
+  children together, up to 4 at once; the rest are told to wait.
 - **Costs for flat-rate models are list-price equivalents.** Pi prices
   opencode-go tokens at catalog rates, so the cost line shows dollars for a
   subscription the user does not pay per token. Owner decision: show, relabel,

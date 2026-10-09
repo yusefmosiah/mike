@@ -10,6 +10,8 @@ export {
   TIER_1_READ_TOOLS,
   inScopeForContainer,
   tierForTool,
+  isParallelSafeTool,
+  PARALLEL_SAFE_TOOLS,
 } from "./policy";
 export type { GuardrailTier } from "./policy";
 

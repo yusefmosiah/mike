@@ -6,6 +6,7 @@ import { createMikeModels } from "./providers.mjs";
 import {
   finishTurnOnPi,
   interruptedTurnsOnPi,
+  MAX_CONCURRENT_SUBAGENTS,
   MAX_SUBAGENTS_PER_TURN,
   resetPiRuntime,
   streamChatWithToolsOnPi,
@@ -66,6 +67,16 @@ function setup() {
     }
     parentRequests.push(ctx);
     const delegations = ctx.messages.filter((m) => m.role === "toolResult").length;
+    const together = Number(/in parallel (\d+)/.exec(firstUser)?.[1] ?? "0");
+    if (together && delegations === 0) {
+      // One response asking for several children at once.
+      return fauxAssistantMessage(
+        Array.from({ length: together }, (_, i) =>
+          fauxToolCall("delegate", { type: "document_review", task: `${CHILD_TASK} (${i + 1})` }),
+        ),
+        { stopReason: "toolUse" },
+      );
+    }
     const wanted = Number(/delegate (\d+)/.exec(firstUser)?.[1] ?? "1");
     if (delegations < wanted) {
       const task = firstUser.includes("nested") ? `${CHILD_TASK} (nested)` : `${CHILD_TASK} (${delegations + 1})`;
@@ -263,6 +274,52 @@ describe("delegate", () => {
     expect(transcript!.entries.filter((entry) => entry.kind === "task")).toHaveLength(1);
     expect(transcript!.envelopes.map((envelope) => envelope.kind)).toEqual(["task", "report"]);
     await finishTurnOnPi("a1");
+  });
+
+  it("runs the children one response asks for at the same time", async () => {
+    let running = 0;
+    let peak = 0;
+    const runTools = async (calls: { id: string }[]) => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      running -= 1;
+      return calls.map((call) => ({ tool_use_id: call.id, content: "Clause 12: governed by Delaware law." }));
+    };
+    const delegation = host({ prepare: vi.fn(async (input) => spec({ task: String(input.task), runTools })) });
+    const { result } = await parentTurn("Review three contracts in parallel 3", { subagents: delegation });
+    expect(peak).toBe(3);
+    expect(delegation.finished).toHaveBeenCalledTimes(3);
+    expect(result.fullText).toContain("Parent answer.");
+    // Each child kept its own number.
+    expect(delegation.started.mock.calls.map(([child]) => child.address).sort()).toEqual([
+      "turn/a1/document_review-1",
+      "turn/a1/document_review-2",
+      "turn/a1/document_review-3",
+    ]);
+  });
+
+  it(`runs at most ${MAX_CONCURRENT_SUBAGENTS} children at once, and tells the model to wait for the rest`, async () => {
+    const delegation = host({
+      prepare: vi.fn(async (input) =>
+        spec({
+          task: String(input.task),
+          runTools: async (calls) => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return calls.map((call) => ({ tool_use_id: call.id, content: "Clause 12: governed by Delaware law." }));
+          },
+        }),
+      ),
+    });
+    const { result } = await parentTurn(`Review them in parallel ${MAX_CONCURRENT_SUBAGENTS + 2}`, { subagents: delegation });
+    expect(delegation.started).toHaveBeenCalledTimes(MAX_CONCURRENT_SUBAGENTS);
+    const lastParent = parentRequests.at(-1)!;
+    const refusals = lastParent.messages
+      .filter((m) => m.role === "toolResult")
+      .map((m) => text(m.content))
+      .filter((t) => t.includes("already running"));
+    expect(refusals).toHaveLength(2);
+    expect(result.fullText).toContain("Parent answer.");
   });
 
   it("knows no subagent by a malformed or unknown id", async () => {
