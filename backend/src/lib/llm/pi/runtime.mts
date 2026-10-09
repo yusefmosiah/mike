@@ -16,12 +16,15 @@
 // `runTools`; a call that outlives its request is answered as interrupted.
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord";
 import type { ImageContent, Message, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
+import { tierForTool } from "../../guardrails/policy.js";
 import { getConfiguredModel, tolerateTextToolCalls } from "../registry.js";
 import { createMikeModels, tolerantMessage, useRequestKeys, type MikeModels } from "./providers.mjs";
 import {
   configure,
   createRegistry,
+  defineDoc,
   defineDocFamily,
   defineExtension,
   defineTool,
@@ -77,6 +80,45 @@ const ChatLineage = defineDocFamily<LineageState, null>({
   }),
 });
 
+/**
+ * Every Mike tool schema the runtime has offered, by name. The tool registry
+ * lives in memory, so after a restart it is rebuilt from here before Pi resumes
+ * the tool calls a crash interrupted.
+ */
+/** A tool schema as stored: the same JSON, typed for the document store. */
+type StoredToolSchema = JsonValue & { type: "function"; function: { name: string } };
+
+const ToolSchemas = defineDoc<Record<string, StoredToolSchema>>({
+  kind: "mike.tools",
+  version: 1,
+  scope: "session",
+  initial: () => ({}),
+});
+
+/**
+ * A chat turn in flight, by its reserved answer id: where it runs, the first
+ * entry it can write, and the caller's opaque context for driving it again. A
+ * turn that ends in this process removes its record; one that outlives the
+ * process (a crash, a deploy) is still here when the next process starts.
+ */
+export type DurableTurnRecord = {
+  conversation: number;
+  chatKey: string;
+  firstEntry: number;
+  context: JsonValue;
+  startedAt: number;
+};
+
+const DurableTurns = defineDoc<Record<string, DurableTurnRecord>>({
+  kind: "mike.turns",
+  version: 1,
+  scope: "session",
+  initial: () => ({}),
+});
+
+/** How long a resumed tool call waits for its turn to be driven again before it gives up. */
+const RESUME_BINDING_WAIT_MS = 120_000;
+
 type TurnBinding = {
   runTools: NonNullable<StreamChatParams["runTools"]>;
   readMemory?: () => Promise<string>;
@@ -87,8 +129,51 @@ type TurnBinding = {
   firstEntry: EntryId;
 };
 
-/** Live requests by conversation. A tool task finds its request's runTools here. */
-type Bindings = Map<number, TurnBinding>;
+/**
+ * Live requests by conversation. A tool task finds its request's runTools here;
+ * after a restart a resumed call waits for the turn's new request to bind.
+ */
+class Bindings {
+  private readonly live = new Map<number, TurnBinding>();
+  private readonly waiting = new Map<number, Array<(binding: TurnBinding) => void>>();
+  /** Conversations with a turn from a previous process that may still be driven again. */
+  readonly resumable = new Set<number>();
+
+  get(conversation: number): TurnBinding | undefined {
+    return this.live.get(conversation);
+  }
+
+  set(conversation: number, binding: TurnBinding): void {
+    this.live.set(conversation, binding);
+    const waiters = this.waiting.get(conversation) ?? [];
+    this.waiting.delete(conversation);
+    for (const resolve of waiters) resolve(binding);
+  }
+
+  delete(conversation: number): void {
+    this.live.delete(conversation);
+    this.resumable.delete(conversation);
+  }
+
+  /** The live binding, or, for a turn awaiting resumption, the one it gets within the wait. */
+  async wait(conversation: number, signal: AbortSignal | undefined): Promise<TurnBinding | undefined> {
+    const live = this.live.get(conversation);
+    if (live || !this.resumable.has(conversation)) return live;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => done(undefined), RESUME_BINDING_WAIT_MS);
+      const done = (binding: TurnBinding | undefined) => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(binding);
+      };
+      const onAbort = () => done(undefined);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const list = this.waiting.get(conversation) ?? [];
+      list.push(done);
+      this.waiting.set(conversation, list);
+    });
+  }
+}
 
 type Runtime = {
   harness: Harness;
@@ -148,7 +233,8 @@ function openModels(): MikeModels {
 async function openRuntime(storage?: Storage): Promise<Runtime> {
   storage ??= await openStorage();
   const catalog = openModels();
-  const bindings: Bindings = new Map();
+  const bindings = new Bindings();
+  let persistTools: (schemas: OpenAIToolSchema[]) => void = () => undefined;
 
   const registry = createRegistry();
   const tools = new Map<string, ToolRegistration>();
@@ -161,7 +247,10 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       tools.set(name, mikeTool(schema, bindings));
       changed = true;
     }
-    if (changed) registry.install(defineExtension({ name: "mike-tools", tools: [...tools.values()] }));
+    if (changed) {
+      registry.install(defineExtension({ name: "mike-tools", tools: [...tools.values()] }));
+      persistTools([...schemas]);
+    }
   };
   registry.install(defineExtension({ name: "mike-tools", tools: [] }));
   registry.install(defineExtension({ name: "mike-memory", tools: [readMemoryTool(bindings)] }));
@@ -179,6 +268,22 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
     },
     background,
   );
+  // Rebuild what the previous process offered before resuming its work: the
+  // tools a resumed call needs, and the turns that may be driven again.
+  installTools(
+    Object.values((await harness.snapshot(ToolSchemas, background)) ?? {}) as unknown as OpenAIToolSchema[],
+  );
+  for (const record of Object.values((await harness.snapshot(DurableTurns, background)) ?? {})) {
+    bindings.resumable.add(record.conversation);
+  }
+  persistTools = (schemas) => {
+    void harness
+      .commit(async (tx) => {
+        const known = await tx.doc(ToolSchemas);
+        for (const schema of schemas) known[schema.function.name] = schema as unknown as StoredToolSchema;
+      }, background)
+      .catch((error: unknown) => console.error("[pi] failed to persist tool schemas", error));
+  };
   harness.resume();
   return { harness, installTools, resolve: catalog.resolve, bindings };
 }
@@ -191,7 +296,7 @@ const readMemoryTool = (bindings: Bindings) => defineTool({
   parameters: { type: "object", properties: {} } as never,
   replay: "safe",
   execute: async (_args, api) => {
-    const binding = bindings.get(api.conversationId);
+    const binding = await bindings.wait(api.conversationId, undefined);
     if (!binding?.readMemory) throw new Error("Memory is not available in this conversation.");
     return { content: [{ type: "text", text: await binding.readMemory() }] };
   },
@@ -232,9 +337,11 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
     name,
     description: schema.function.description,
     parameters: schema.function.parameters as never,
-    replay: "unsafe",
+    // A read can run again after a crash; anything with effects is answered
+    // as interrupted instead, so a write never happens twice unseen.
+    replay: tierForTool(name) === 1 ? "safe" : "unsafe",
     execute: async (args, api, context) => {
-      const binding = bindings.get(api.conversationId);
+      const binding = await bindings.wait(api.conversationId, context.abortSignal);
       if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");
       if ((await roundsSince(api, binding.firstEntry)) > binding.maxRounds) {
         return {
@@ -529,15 +636,30 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   const tools = params.tools ?? [];
   installTools(tools);
   const chatKey = params.conversationId ?? `ephemeral:${randomUUID()}`;
+  // A durable turn is keyed by its reserved answer; resuming one attaches to
+  // the conversation it was already running in.
+  const turnKey = params.durableTurn && params.turn && params.conversationId ? params.turn.assistantMessageId : undefined;
+  const resumed = turnKey && params.durableTurn?.resume
+    ? (await harness.snapshot(DurableTurns, background))?.[turnKey]
+    : undefined;
+  if (params.durableTurn?.resume && !resumed) throw new Error("This answer is no longer in progress.");
+  const resumedConversation = resumed
+    ? await harness.conversation(resumed.conversation as ConversationId, background)
+    : undefined;
+  if (resumed && !resumedConversation) throw new Error("This answer is no longer in progress.");
   const conversation =
+    resumedConversation ??
     (params.turn && params.conversationId
       ? await conversationForTurn(harness, chatKey, params.turn, ref)
-      : undefined) ?? (await conversationFor(harness, chatKey, history, ref, vision));
+      : undefined) ??
+    (await conversationFor(harness, chatKey, history, ref, vision));
 
-  // One commit fixes this turn's agent: model, effort, Mike's system prompt, and the offered tools.
+  // One commit fixes this turn's agent: model, effort, Mike's system prompt, and
+  // the offered tools. A resumed turn keeps the agent it started with.
   let providerSession = "";
   await conversation.commit(async (tx) => {
     providerSession = (await tx.doc(ProviderDoc, conversation.id)).sessionId;
+    if (resumed) return;
     await configure(tx, conversation.id, {
       model: ref,
       thinkingLevel: thinkingLevel(params.reasoning),
@@ -550,13 +672,27 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   }, background);
 
   const callbacks = params.callbacks ?? {};
+  const firstEntry = resumed ? (resumed.firstEntry as EntryId) : await nextEntryId(conversation);
+  if (turnKey && !resumed) {
+    // Written before the input is sent, so a crash at any later point leaves a
+    // turn the next process can drive again.
+    await conversation.commit(async (tx) => {
+      (await tx.doc(DurableTurns))[turnKey] = {
+        conversation: conversation.id,
+        chatKey,
+        firstEntry,
+        context: params.durableTurn!.context as JsonValue,
+        startedAt: Date.now(),
+      };
+    }, background);
+  }
   if (params.runTools) {
     bindings.set(conversation.id, {
       runTools: params.runTools,
       readMemory: params.readMemory,
       onToolCallStart: callbacks.onToolCallStart,
       maxRounds: params.maxIterations ?? DEFAULT_MAX_ROUNDS,
-      firstEntry: await nextEntryId(conversation),
+      firstEntry,
     });
   }
   let fullText = "";
@@ -567,6 +703,8 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   let blocks: Block[] = [];
   let sent: number[] = [];
   let thinkingOpen = false;
+  // Entries a resumed turn already replayed; their message_end is not emitted twice.
+  let replayedThrough = 0;
   const emit = () => {
     blocks.forEach((block, index) => {
       const value = block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : undefined;
@@ -620,6 +758,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         }
         emit();
       } else if (event.type === "message_end") {
+        if (event.entry.id <= replayedThrough) continue;
         if (adopt(event.entry.model?.[0])) emit();
         blocks = [];
         sent = [];
@@ -631,11 +770,34 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   params.abortSignal?.addEventListener("abort", onAbort, { once: true });
   const releaseKeys = useRequestKeys(providerSession, params.apiKeys);
   try {
-    const freshThread = history.length === 0 && (await userEntries(conversation)).length === 0;
+    if (resumed) {
+      // What the turn committed before the restart reaches the caller first,
+      // as if it had streamed: answers so far, and the tools they started.
+      const earlier = await conversation.entries({ minEntryId: firstEntry, order: "ascending" }, 500, undefined, background);
+      for (const entry of earlier.items) {
+        const message = entry.kind === "pi.assistant" ? entry.model?.[0] : undefined;
+        replayedThrough = Math.max(replayedThrough, entry.id);
+        if (message?.role !== "assistant") continue;
+        adopt(message);
+        sent = [];
+        emit();
+        for (const block of message.content) {
+          if (block.type === "toolCall") {
+            callbacks.onToolCallStart?.({ id: block.id, name: block.name, input: block.arguments as Record<string, unknown> });
+          }
+        }
+        blocks = [];
+        sent = [];
+      }
+    }
+    const freshThread = !resumed && history.length === 0 && (await userEntries(conversation)).length === 0;
     const content = piUserContent(input.content, vision);
+    // The same request id returns the submission already admitted, so driving
+    // a resumed turn again never sends its input twice.
     const submission = await conversation.submit(
       {
         type: "input",
+        ...(turnKey ? { requestId: `turn:${turnKey}` } : {}),
         content: freshThread && memory ? withThreadMemory(content, userText(memory.content)) : content,
         whenBusy: "reject",
       },
@@ -661,7 +823,40 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     releaseKeys();
     bindings.delete(conversation.id);
     await stream.stop();
+    // The turn ended in this process (answered, failed or stopped): nothing to resume.
+    if (turnKey) await forgetTurn(harness, turnKey).catch(() => undefined);
   }
+}
+
+async function forgetTurn(harness: Harness, turnKey: string): Promise<void> {
+  await harness.commit(async (tx) => {
+    const turns = await tx.doc(DurableTurns);
+    delete turns[turnKey];
+  }, background);
+}
+
+/**
+ * Turns a previous process left in flight, oldest first. The caller drives
+ * each again with `durableTurn.resume`, or gives it up with `abandonTurnOnPi`.
+ */
+export async function interruptedTurnsOnPi(): Promise<Array<DurableTurnRecord & { assistantMessageId: string }>> {
+  const { harness } = await piRuntime();
+  const turns = (await harness.snapshot(DurableTurns, background)) ?? {};
+  return Object.entries(turns)
+    .map(([assistantMessageId, record]) => ({ ...record, assistantMessageId }))
+    .sort((a, b) => a.startedAt - b.startedAt);
+}
+
+/** Stop an interrupted turn's run and forget it. */
+export async function abandonTurnOnPi(assistantMessageId: string): Promise<void> {
+  const { harness, bindings } = await piRuntime();
+  const record = (await harness.snapshot(DurableTurns, background))?.[assistantMessageId];
+  if (record) {
+    bindings.resumable.delete(record.conversation);
+    const conversation = await harness.conversation(record.conversation as ConversationId, background);
+    await conversation?.abort(background).catch(() => undefined);
+  }
+  await forgetTurn(harness, assistantMessageId);
 }
 
 /**

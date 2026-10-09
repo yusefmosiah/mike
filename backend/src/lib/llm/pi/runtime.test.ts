@@ -4,7 +4,15 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createMikeModels } from "./providers.mjs";
-import { completeTextOnPi, forkChatLineageOnPi, piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "./runtime.mjs";
+import {
+  abandonTurnOnPi,
+  completeTextOnPi,
+  forkChatLineageOnPi,
+  interruptedTurnsOnPi,
+  piRuntime,
+  resetPiRuntime,
+  streamChatWithToolsOnPi,
+} from "./runtime.mjs";
 import type { LlmMessage, OpenAIToolSchema, StreamChatParams } from "../types";
 
 const MODEL = "opencode-go/test-model";
@@ -50,7 +58,17 @@ function setup() {
     return fauxAssistantMessage([fauxText(`answer ${requests.length}`)]);
   };
   faux.setResponses(Array.from({ length: 50 }, () => respond));
-  return { models: createMikeModels(models), storage: new MemoryStorage() };
+  // A restart is a new Harness over the same data: the storage outlives the
+  // Harness that closes it, as a database outlives its process.
+  const storage = new MemoryStorage();
+  const surviving = new Proxy(storage, {
+    get(target, key) {
+      if (key === "close") return async () => undefined;
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { models: createMikeModels(models), storage: surviving };
 }
 
 async function turn(
@@ -83,8 +101,10 @@ async function lineage(chat = "chat-1") {
   return (await harness.snapshot(token, chat, context))!;
 }
 
+let current: ReturnType<typeof setup>;
 beforeEach(async () => {
-  await resetPiRuntime(setup());
+  current = setup();
+  await resetPiRuntime(current);
 });
 afterEach(async () => {
   await resetPiRuntime();
@@ -237,6 +257,52 @@ describe("Pi runtime: turns, branches and memory", () => {
     const text = await completeTextOnPi({ model: MODEL, systemPrompt: "Title this.", user: "An NDA question" });
     expect(text).toMatch(/^answer/);
     expect(requests.at(-1)!.users).toEqual(["An NDA question"]);
+  });
+
+  it("a turn cut off by a restart is driven again: the read reruns, the input is not sent twice", async () => {
+    const durableTurn = { context: { surface: "chat", note: "how to drive me again" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    // The process dies while the tool runs: the request never settles.
+    void turn([{ role: "user", content: "Please read NDA" }], identity, {
+      durableTurn,
+      runTools: () => new Promise(() => undefined),
+    }).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await resetPiRuntime(current); // same storage, new process
+
+    const interrupted = await interruptedTurnsOnPi();
+    expect(interrupted).toEqual([expect.objectContaining({ assistantMessageId: "a1", context: durableTurn.context })]);
+
+    const shown: string[] = [];
+    const resumed = await turn([{ role: "user", content: "Please read NDA" }], identity, {
+      durableTurn: { ...durableTurn, resume: true },
+      callbacks: { onToolCallStart: (call) => shown.push(`tool:${call.name}`), onContentDelta: (d) => shown.push(d) },
+    });
+    expect(resumed.fullText).toMatch(/^answer/);
+    // The read ran again through the new request, and its result reached the model.
+    expect(requests.at(-1)!.toolResults.join("")).toContain("Delaware");
+    expect(requests.at(-1)!.users.filter((u) => u.includes("Please read NDA"))).toHaveLength(1);
+    // The caller saw the tool the turn had already started, then the answer.
+    expect(shown[0]).toBe("tool:read_document");
+    expect(shown.join("")).toContain("answer");
+    expect(await interruptedTurnsOnPi()).toEqual([]);
+    expect((await lineage()).messages.a1).toBeDefined();
+  });
+
+  it("an interrupted turn can be given up, which stops its run", async () => {
+    void turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {
+      durableTurn: { context: {} },
+      runTools: () => new Promise(() => undefined),
+    }).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await resetPiRuntime(current);
+    await abandonTurnOnPi("a1");
+    expect(await interruptedTurnsOnPi()).toEqual([]);
+    await expect(
+      turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" }, {
+        durableTurn: { context: {}, resume: true },
+      }),
+    ).rejects.toThrow("no longer in progress");
   });
 
   it("stopping a turn stops a tool that is still running and leaves no tool task behind", async () => {

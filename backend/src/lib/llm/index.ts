@@ -34,6 +34,33 @@ export async function forkChatLineage(params: {
     await forkChatLineageOnPi(params);
 }
 
+/** A turn a previous process left in flight, with the context its caller stored. */
+export type InterruptedTurn = {
+    assistantMessageId: string;
+    chatKey: string;
+    context: unknown;
+    startedAt: number;
+};
+
+/** Turns a previous process left in flight. Empty on the AI SDK path, which keeps none. */
+export async function interruptedTurns(): Promise<InterruptedTurn[]> {
+    if (!piRuntimeEnabled()) return [];
+    const { interruptedTurnsOnPi } = await import("./pi/runtime.mjs");
+    return (await interruptedTurnsOnPi()).map((turn) => ({
+        assistantMessageId: turn.assistantMessageId,
+        chatKey: turn.chatKey,
+        context: turn.context,
+        startedAt: turn.startedAt,
+    }));
+}
+
+/** Give up an interrupted turn: stop its run and forget it. */
+export async function abandonTurn(assistantMessageId: string): Promise<void> {
+    if (!piRuntimeEnabled()) return;
+    const { abandonTurnOnPi } = await import("./pi/runtime.mjs");
+    await abandonTurnOnPi(assistantMessageId);
+}
+
 export function piRuntimeEnabled(): boolean {
     return process.env.MIKE_LLM_RUNTIME === "pi";
 }

@@ -428,6 +428,8 @@ export async function runLLMStream(params: {
   conversationId?: string | null;
   /** The stored identity of this turn (see StreamChatParams.turn). */
   turn?: import("../../../lib/llm").TurnIdentity;
+  /** Make the turn survive a restart, or drive one that did (see StreamChatParams.durableTurn). */
+  durableTurn?: import("../../../lib/llm").StreamChatParams["durableTurn"];
 }): Promise<{
   fullText: string;
   events: AssistantEvent[];
@@ -728,6 +730,7 @@ export async function runLLMStream(params: {
       abortSignal: signal,
       conversationId,
       turn: params.turn,
+      durableTurn: params.durableTurn,
       memoryMessage: memory.message ?? undefined,
       readMemory: includeMemory
         ? async () =>

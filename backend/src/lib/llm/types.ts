@@ -132,6 +132,13 @@ export type StreamChatParams = {
     turn?: TurnIdentity;
     /** Reads the memory this conversation may see, as of now (the memory tool). */
     readMemory?: () => Promise<string>;
+    /**
+     * Make this turn survive the process. `context` is the caller's own record
+     * of how to drive the turn again (opaque here, JSON only); after a restart
+     * the caller re-drives it with `resume: true`, which attaches to the run
+     * already in flight instead of sending the input again. Needs `turn`.
+     */
+    durableTurn?: { context: Record<string, unknown>; resume?: boolean };
 };
 
 export type StreamChatResult = {

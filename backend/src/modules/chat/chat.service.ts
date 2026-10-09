@@ -24,6 +24,11 @@ export { updateChatSettings } from "./chat.settings";
 export { updateChatTitle, generateChatTitle } from "./chat.titles";
 export { type PreparedChatStream, prepareChatStream } from "./chat.prepare";
 export {
+  driveChatTurn,
+  resumeInterruptedChatTurns,
+  type ChatTurnResumeContext,
+} from "./chat.turn";
+export {
   devLog,
   appendAssistantEventsToMessage,
   AssistantStreamError,

@@ -9,6 +9,8 @@ import { manifestPublicKey } from "./lib/manifestSigning";
 import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
 import { reportError } from "./lib/observability/sentry";
+import { createServerSupabase } from "./lib/supabase";
+import { resumeInterruptedChatTurns } from "./modules/chat/chat.service";
 import {
   closeHttpServer,
   createShutdown,
@@ -129,6 +131,10 @@ async function main(): Promise<void> {
     }
     // WORKERS_MODE === "none": a standalone worker process owns background
     // work (node dist/worker.js).
+
+    // Chat turns the previous process left in flight (a deploy, a crash)
+    // continue now, into runs a reloading client attaches to.
+    void resumeInterruptedChatTurns(createServerSupabase());
   });
 }
 
