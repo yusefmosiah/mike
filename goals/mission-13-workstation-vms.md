@@ -165,6 +165,19 @@ First run found a bug, fixed before the receipt above: the empty home disk
 is mounted over `/home` after NixOS creates home directories, so
 `/home/agent` did not exist; a tmpfiles rule now creates it after the mount.
 
+**Phase 2 acceptance, 2026-10-09 (dev lane, not accepted).** A chat turn on
+the isolated local backend (port 3201, a generated localhost account mapped to
+the dev VM by `WORKSTATION_USER_IDS`, model `opencode-go/deepseek-v4.1-flash`).
+The VM held `~/data/sales.csv` (500 seeded rows); computed in the VM beforehand
+with pandas: `{'East': 25763.24, 'North': 29530.68, 'South': 26797.59,
+'West': 26619.27}`, top product `Gizmo`. Prompt: "My workstation has a sales
+file at ~/data/sales.csv ... Use Python there to compute total revenue ... per
+region and tell me which region is highest and which product earns the most
+overall. Give exact figures." The turn (41 s) started `run_command` four
+times and answered "Highest region: North, at $29,530.68" and "Top-earning
+product overall: Gizmo, at $28,048.73", with the other three regions'
+figures matching to the cent.
+
 **Phases 3 and 4 (boundary part), 2026-10-09, on node-a** (x86_64, KVM,
 btrfs on md RAID1; ZFS is not available there, so snapshots are btrfs).
 `infra/node-a/workstations.nix` runs `ws-owner` under Cloud Hypervisor
