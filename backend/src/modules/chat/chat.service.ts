@@ -25,7 +25,7 @@ export { updateChatTitle, generateChatTitle } from "./chat.titles";
 export { type PreparedChatStream, prepareChatStream } from "./chat.prepare";
 export {
   driveChatTurn,
-  resumeInterruptedChatTurns,
+  resumeInterruptedChatTurn,
   transcriptFromRows,
   type ChatTurnResumeContext,
 } from "./chat.turn";

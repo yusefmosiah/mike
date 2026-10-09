@@ -12,7 +12,7 @@ import {
     type AssistantTurnRun,
 } from "../../lib/assistantTurnRuns";
 import { enqueueChatTurnAudit } from "../../lib/audit";
-import { abandonTurn, finishTurn, interruptedTurns } from "../../lib/llm";
+import { abandonTurn, finishTurn } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
 import { drainReceiptsSince } from "../../lib/llm/attestation";
 import {
@@ -627,43 +627,32 @@ async function failInterruptedTurn(db: Db, chatId: string, assistantMessageId: s
 }
 
 /**
- * Drive again every chat turn a previous process left in flight. Each is
- * prepared from storage as its request would be (the caller's access is
- * checked again, the documents reloaded), then driven into a server-owned run
- * a reloading client attaches to. A turn that can no longer be driven (access
- * gone, prompt changed, chat deleted) is stopped and its row says so.
+ * Drive again a chat turn a previous process left in flight. It is prepared
+ * from storage as its request would be (the caller's access is checked again,
+ * the documents reloaded), then driven into a server-owned run a reloading
+ * client attaches to. A turn that can no longer be driven (access gone,
+ * prompt changed, chat deleted) is stopped and its row says so.
  */
-export async function resumeInterruptedChatTurns(db: Db): Promise<void> {
-    let pending;
-    try {
-        pending = await interruptedTurns();
-    } catch (error) {
-        console.error("[chat/resume] could not read interrupted turns", safeError(error));
+export async function resumeInterruptedChatTurn(
+    db: Db,
+    turn: { assistantMessageId: string; context: unknown },
+): Promise<void> {
+    const context = turn.context;
+    if (!isResumeContext(context)) {
+        await abandonTurn(turn.assistantMessageId).catch(() => undefined);
         return;
     }
-    // Project chat turns are the project-chat module's to resume.
-    const own = pending.filter(
-        (turn) => (turn.context as { surface?: unknown } | null)?.surface !== "project-chat",
-    );
-    // Concurrently: each drive lasts as long as its turn's generation.
-    await Promise.all(own.map(async (turn) => {
-        const context = turn.context;
-        if (!isResumeContext(context)) {
-            await abandonTurn(turn.assistantMessageId).catch(() => undefined);
-            return;
-        }
-        try {
-            const resumed = await resumeChatTurn(db, turn.assistantMessageId, context);
-            if (!resumed) {
-                await abandonTurn(turn.assistantMessageId).catch(() => undefined);
-                await failInterruptedTurn(db, context.chatId, turn.assistantMessageId);
-            }
-        } catch (error) {
-            console.error("[chat/resume] failed to resume a turn", safeError(error));
+    try {
+        const resumed = await resumeChatTurn(db, turn.assistantMessageId, context);
+        if (!resumed) {
             await abandonTurn(turn.assistantMessageId).catch(() => undefined);
             await failInterruptedTurn(db, context.chatId, turn.assistantMessageId);
         }
-    }));
+    } catch (error) {
+        console.error("[chat/resume] failed to resume a turn", safeError(error));
+        await abandonTurn(turn.assistantMessageId).catch(() => undefined);
+        await failInterruptedTurn(db, context.chatId, turn.assistantMessageId);
+    }
 }
 
 async function resumeChatTurn(

@@ -6,10 +6,10 @@
 //
 // The generation itself (runLLMStream, abort handling, assistant-message
 // persistence) is projectChat.turn.ts, driven by the route for a request and
-// by resumeInterruptedProjectChatTurns after a restart.
+// by resumeInterruptedProjectChatTurn after a restart.
 
 import { randomUUID } from "node:crypto";
-import { abandonTurn, interruptedTurns } from "../../lib/llm";
+import { abandonTurn } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
 import type { Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
@@ -625,41 +625,32 @@ function isProjectResumeContext(value: unknown): value is ProjectChatTurnResumeC
 }
 
 /**
- * Drive again every project chat turn a previous process left in flight. Each
- * is prepared from storage as its request would be (project access checked
+ * Drive again a project chat turn a previous process left in flight. It is
+ * prepared from storage as its request would be (project access checked
  * again, documents reloaded), then driven into a server-owned run a reloading
  * client attaches to. A turn that can no longer be driven is stopped and an
  * answer row saying so is stored under its prompt.
  */
-export async function resumeInterruptedProjectChatTurns(db: Db): Promise<void> {
-    let pending;
-    try {
-        pending = await interruptedTurns();
-    } catch (error) {
-        console.error("[project-chat/resume] could not read interrupted turns", safeError(error));
+export async function resumeInterruptedProjectChatTurn(
+    db: Db,
+    turn: { assistantMessageId: string; context: unknown },
+): Promise<void> {
+    const context = turn.context;
+    if (!isProjectResumeContext(context)) {
+        await abandonTurn(turn.assistantMessageId).catch(() => undefined);
         return;
     }
-    const own = pending.filter(
-        (turn) => (turn.context as { surface?: unknown } | null)?.surface === "project-chat",
-    );
-    await Promise.all(own.map(async (turn) => {
-        const context = turn.context;
-        if (!isProjectResumeContext(context)) {
-            await abandonTurn(turn.assistantMessageId).catch(() => undefined);
-            return;
-        }
-        try {
-            const resumed = await resumeProjectChatTurn(db, turn.assistantMessageId, context);
-            if (!resumed) {
-                await abandonTurn(turn.assistantMessageId).catch(() => undefined);
-                await failInterruptedProjectTurn(db, turn.assistantMessageId, context);
-            }
-        } catch (error) {
-            console.error("[project-chat/resume] failed to resume a turn", safeError(error));
+    try {
+        const resumed = await resumeProjectChatTurn(db, turn.assistantMessageId, context);
+        if (!resumed) {
             await abandonTurn(turn.assistantMessageId).catch(() => undefined);
             await failInterruptedProjectTurn(db, turn.assistantMessageId, context);
         }
-    }));
+    } catch (error) {
+        console.error("[project-chat/resume] failed to resume a turn", safeError(error));
+        await abandonTurn(turn.assistantMessageId).catch(() => undefined);
+        await failInterruptedProjectTurn(db, turn.assistantMessageId, context);
+    }
 }
 
 async function resumeProjectChatTurn(

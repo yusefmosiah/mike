@@ -1,62 +1,36 @@
-import { sendInternalError } from "../../lib/httpError";
-import {
-  attachAssistantTurnSse,
-  getActiveAssistantTurn,
-  getAssistantTurnRun,
-  startAssistantTurnRun,
-} from "../../lib/assistantTurnRuns";
-import { stopOutcomeFrame } from "../../lib/streamRuns";
 // HTTP layer for the word-chat module — the Word task pane's chat surface.
 //
 // Route handlers parse params/query/body, call the wordChat.service functions,
-// and map their typed results onto status codes and JSON. The SSE streaming
-// loop for POST /word-chat (header flush, runLLMStream, the client-tool
-// adapter, abort handling, assistant-message persistence) stays here — its
-// ordering is delicate; the pre-stream preparation and the post-stream
-// chat-activity write live in wordChat.service.ts.
+// and map their typed results onto status codes and JSON. POST /word-chat
+// prepares the turn and hands the rest to driveWordChatTurn, attaching the run
+// to this response.
 
 import { randomUUID } from "node:crypto";
 import { Router, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import { createDb } from "../../lib/db";
+import { sendInternalError } from "../../lib/httpError";
 import {
-  AssistantStreamError,
-  assistantStreamErrorPayload,
-  ASSISTANT_ERROR_MESSAGE,
-  buildCancelledAssistantMessage,
-  extractCitations,
-  isAbortError,
+  attachAssistantTurnSse,
+  getActiveAssistantTurn,
+  getAssistantTurnRun,
+} from "../../lib/assistantTurnRuns";
+import {
   parseChatMessages,
   parseOptionalChatId,
   parseOptionalDocumentContext,
   parseOptionalModel,
   parseOptionalReasoning,
-  createReservedAssistantMessageUpdater,
-  createWordClientToolsAdapter,
-  isClientToolCallPending,
-
-  reserveAssistantMessage,
-  runLLMStream,
-  stripTransientAssistantEvents,
   submitClientToolResult,
-} from "../chat/chat.service";
-import { enqueueChatTurnAudit } from "../../lib/audit";
-import { drainReceiptsSince } from "../../lib/llm/attestation";
-import {
-  persistWordDocumentEdits,
   WORD_EDIT_FORMATS,
   type WordEditApplyMode,
 } from "../chat/chat.service";
 import {
-  releaseMemoryConversationTurn,
-  scheduleMemoryConsolidation,
-} from "../../lib/memory/schedule";
-import {
+  driveWordChatTurn,
   getWordChatWithMessages,
   listWordChats,
   prepareWordChatStream,
-  recordWordChatActivity,
   saveProposedWordEdit,
   updateWordChatModel,
   updateWordChatReasoning,
@@ -221,34 +195,6 @@ function wordTurnRunFor(
   if (run.userId !== caller.userId) return undefined;
   if (run.meta.clientDocumentId !== caller.clientDocumentId) return undefined;
   return run;
-}
-
-/**
- * The bridge id of a `client_tool_call` SSE record, or null for anything
- * else (ordinary frames, and the `: tool-wait` keep-alive comments the
- * adapter writes between them).
- *
- * The route recognises the frame by parsing it back rather than having the
- * adapter announce it, because the adapter's contract is a plain
- * `write(line)` — one that knows nothing about runs, replay predicates or
- * which surface is streaming it.
- */
-function clientToolCallIdOf(line: string): string | null {
-  if (!line.startsWith("data: ")) return null;
-  const payload = line.slice(6).trim();
-  if (!payload.includes('"client_tool_call"')) return null;
-  try {
-    const frame = JSON.parse(payload) as {
-      type?: unknown;
-      tool_call_id?: unknown;
-    };
-    return frame.type === "client_tool_call" &&
-      typeof frame.tool_call_id === "string"
-      ? frame.tool_call_id
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /** One answer for unknown, finished-and-forgotten, and not-yours. */
@@ -704,318 +650,40 @@ wordChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     });
   }
 
-  const {
-    chatId,
-    lastUserContent,
-    inputMessageId,
-    memoryTurn,
-    docIndex,
-    docStore,
-    apiMessages,
-    workflowStore,
-    apiKeys,
-    selectedModel,
-    selectedReasoningLevel,
-    nonce,
-  } = prep.prepared;
-  let chatTitle = prep.prepared.chatTitle;
-  let memoryTurnScheduled = false;
-  try {
-  const assistantMessageId = randomUUID();
-
-  // The answer is a server-owned run from here on: it survives the pane's
-  // socket (the task pane closing, Word reloading it, a dropped connection)
-  // and only POST /word-chat/:chatId/turn/:turnId/stop aborts it. `chatId`
-  // always exists by now — a cloud row's id, or the UUID local storage was
-  // given — so every Word turn is keyed and resumable, local ones included.
-  const run = startAssistantTurnRun({
-    id: assistantMessageId,
-    chatId,
+  const prepared = prep.prepared;
+  const outcome = await driveWordChatTurn(db, {
+    prepared,
     userId,
-    assistantMessageId,
-    surface: "word",
-    // What the resume endpoints authorise against; a local chat has no row.
+    userEmail,
     clientDocumentId: parsedDocumentId.value,
+    activeDocumentName,
     persistChat,
-  });
-  if (!run) {
-    return void res.status(409).json({
-      code: "turn_in_progress",
-      detail: "A response is already being generated for this chat.",
-    });
-  }
-
-  if (persistChat) {
-    const error = await reserveAssistantMessage({
-      db,
-      table: "word_chat_messages",
-      id: assistantMessageId,
-      chatId,
-        inputMessageId: inputMessageId as string,
-        authorUserId: userId,
-    });
-    if (error) {
-      console.error("[word-chat] failed to reserve assistant message", error);
-      run.finish();
-      return void res
-        .status(500)
-        .json({ detail: "Failed to start Word assistant response" });
-    }
-  }
-
-  const stream = attachAssistantTurnSse(res, run);
-  const write = stream.write;
-  /**
-   * The adapter's writer, with one extra rule: a `client_tool_call` frame is
-   * replayed to a pane that attaches LATER only while the call is still
-   * pending. A pane closed mid-call reopens, is handed the call again, and
-   * answers the tool loop that has been waiting for it; a call that has been
-   * answered, timed out or cancelled is settled, and replaying it would apply
-   * the same edit twice. (Keep-alive comment lines are neither buffered nor
-   * numbered — see `streamRuns.write`.)
-   */
-  const writeClientToolFrame = (line: string): boolean => {
-    const callId = clientToolCallIdOf(line);
-    if (!callId) return write(line);
-    return run.write(line, { replay: () => isClientToolCallPending(callId) });
-  };
-  const updateAssistantMessage = createReservedAssistantMessageUpdater({
-    db,
-    table: "word_chat_messages",
-    id: assistantMessageId,
-    chatId,
-    enabled: persistChat,
-  });
-  const normalizeAssistantEvents = async (
-    events: unknown[],
-  ): Promise<unknown[]> => {
-    if (!persistChat) return events;
-    const normalized = await persistWordDocumentEdits({
-      db,
-      messageId: assistantMessageId,
-      events,
-      applyMode: editApplyMode,
-    });
-    return normalized.events;
-  };
-  const updateChatActivity = async (): Promise<void> => {
-    // Mirror the title the service just persisted back into the local
-    // variable so the audit enqueue below names the chat, the way chat.ts
-    // does. Without this the first turn of every Word chat would audit under
-    // a null title.
-    const nextTitle = await recordWordChatActivity(db, {
-      persistChat,
-      chatId,
-      userId,
-      chatTitle,
-      lastUserContent,
-    });
-    if (nextTitle) chatTitle = nextTitle;
-  };
-
-  try {
-    write(
-      `data: ${JSON.stringify({
-        type: "chat_id",
-        chatId,
-        turnId: run.id,
-        assistantMessageId,
-      })}\n\n`,
-    );
-    const { events, citations } = await runLLMStream({
-      apiMessages,
-      docStore,
-      docIndex,
-      userId,
-      db,
-      write,
-      workflowStore,
-      // CourtListener is intentionally unavailable in document-scoped Word
-      // chats. Legal research remains a web-assistant capability.
-      includeResearchTools: false,
-      includeAskInputs: false,
-      ...(clientToolsEnabled
+    clientToolsEnabled,
+    editApplyMode,
+    assistantMessageId: randomUUID(),
+    // Only a cloud chat's rows can rebuild the turn after a restart.
+    durableContext:
+      persistChat && prepared.inputMessageId
         ? {
-            clientTools: createWordClientToolsAdapter({
-              userId,
-              write: writeClientToolFrame,
-              signal: stream.signal,
-              nonce,
-            }),
-            // The edit flow is built around retry round-trips (propose →
-            // fail → read_active_document → retry), each costing one
-            // iteration; the default budget of 10 can end the loop before
-            // the model gets to write its summary.
-            maxIterations: 16,
+            surface: "word",
+            userId,
+            userEmail: userEmail ?? null,
+            chatId: prepared.chatId,
+            clientDocumentId: parsedDocumentId.value,
+            activeDocumentName,
+            documentContext: parsedDocumentContext.documentContext ?? null,
+            clientToolsEnabled,
+            editApplyMode,
+            model: parsedModel.value ?? null,
+            reasoning: parsedReasoning.value ?? null,
+            timeZone:
+              typeof req.body?.time_zone === "string" ? req.body.time_zone : null,
+            turnUserMessageId: prepared.inputMessageId,
           }
-        : {}),
-      model: selectedModel,
-      reasoning: selectedReasoningLevel,
-      apiKeys,
-      signal: stream.signal,
-      conversationId: persistChat ? chatId : null,
-        includeMemory: true,
-        memoryProjectId: null,
-      nonce,
-      emitDone: false,
-    });
-    const persistedEvents = await normalizeAssistantEvents(
-      stripTransientAssistantEvents(events),
-    );
-    const saveError = await updateAssistantMessage(
-      persistedEvents.length ? persistedEvents : null,
-      citations.length ? citations : null,
-    );
-    await updateChatActivity();
-    if (saveError) {
-      console.error("[word-chat] failed to save assistant response", saveError);
-      write(
-        `data: ${JSON.stringify({
-          type: "error",
-          message:
-            "The response was generated but could not be saved. Keep this document open and review its tracked changes in Word.",
-        })}\n\n`,
-      );
-      write("data: [DONE]\n\n");
-      return;
-    }
-      // Local Word chats deliberately have no durable transcript. Only a cloud
-      // turn can be curated later, once its reserved assistant row is complete.
-      if (
-        persistChat &&
-        !persistedEvents.some((event) =>
-          typeof event === "object" && event !== null && "type" in event
-            ? event.type === "error" || event.type === "ask_inputs"
-            : false,
-        )
-      ) {
-        const scheduled = await scheduleMemoryConsolidation({
-          db,
-          surface: "word",
-          conversationId: chatId,
-          actorUserId: userId,
-          projectId: null,
-          turnId: assistantMessageId,
-          turn: memoryTurn,
-        });
-        memoryTurnScheduled = scheduled != null;
-      }
-    // Word turns used to be audited nowhere, unlike the chat and project-chat
-    // modules. chatId/projectId stay null because a Word chat lives in
-    // word_chats — neither chats.id nor projects.id is a legal value for those
-    // columns — so `surface: "word"` is what makes these rows identifiable in
-    // the history feed. Placement mirrors chat.routes.ts: after the response is
-    // durable, immediately before [DONE].
-    void enqueueChatTurnAudit(
-      db,
-      {
-        userId,
-        userEmail,
-        chatId: null,
-        projectId: null,
-        surface: "word",
-        // Never the raw prompt: storage:"local" is the user asking that this
-        // conversation NOT be kept server-side, so the audit row records that
-        // a Word turn happened and which document it touched, not what was
-        // said. In cloud mode chatTitle is the prompt-derived title the
-        // server already stores, so nothing is lost there.
-        title: chatTitle ?? activeDocumentName ?? null,
-        model: selectedModel,
-      },
-      // Word edits are applied client-side in the document, not persisted as
-      // doc_created/doc_edited artifacts, so there is nothing here for the
-      // artifact fan-out to map — only the chat.message row.
-      [],
-      drainReceiptsSince(),
-    );
-    write("data: [DONE]\n\n");
-  } catch (error) {
-    if (isAbortError(error)) {
-      void enqueueChatTurnAudit(
-        db,
-        {
-          userId,
-          userEmail,
-          chatId: null,
-          projectId: null,
-          surface: "word",
-          title: chatTitle ?? activeDocumentName ?? null,
-          model: selectedModel,
-          status: "cancelled",
-        },
-        null,
-        drainReceiptsSince(),
-      );
-      if (error instanceof AssistantStreamError) {
-        const partial = buildCancelledAssistantMessage({
-          fullText: error.fullText,
-          events: error.events,
-          buildCitations: (fullText) =>
-            extractCitations(fullText, docIndex, docStore),
-        });
-        const partialEvents = await normalizeAssistantEvents(partial.events);
-        const saveError = await updateAssistantMessage(
-          partialEvents.length ? partialEvents : null,
-          partial.citations.length ? partial.citations : null,
-        );
-        if (saveError) {
-          console.error("[word-chat] failed to save aborted stream", saveError);
-        }
-      }
-      await updateChatActivity();
-      // Readers still attached (Stop came from another pane, or this one is
-      // only watching) learn the outcome the way a reopen would.
-      write(stopOutcomeFrame(run));
-      write("data: [DONE]\n\n");
-      return;
-    }
-    console.error("[word-chat] stream error", error);
-    const errorPayload = assistantStreamErrorPayload(error);
-    const message = errorPayload.message;
-    const errorEvents =
-      error instanceof AssistantStreamError
-        ? stripTransientAssistantEvents(error.events)
-        : [{ type: "error" as const, message }];
-    const errorFullText =
-      error instanceof AssistantStreamError ? error.fullText : "";
-    try {
-      const citations = extractCitations(errorFullText, docIndex, docStore);
-      const normalizedErrorEvents = await normalizeAssistantEvents(errorEvents);
-      const saveError = await updateAssistantMessage(
-        normalizedErrorEvents.length ? normalizedErrorEvents : null,
-        citations.length ? citations : null,
-      );
-      if (saveError) {
-        console.error("[word-chat] failed to save stream error", saveError);
-      }
-    } catch (saveError) {
-      console.error("[word-chat] failed to persist stream error", saveError);
-    }
-    try {
-      write(
-        `data: ${JSON.stringify({ type: "error", ...errorPayload })}\n\n`,
-      );
-      write("data: [DONE]\n\n");
-    } catch {
-      // The client disconnected while the error was being handled.
-    }
-  } finally {
-    stream.finish();
-  }
-  } finally {
-    if (memoryTurn && !memoryTurnScheduled) {
-      try {
-        await releaseMemoryConversationTurn({
-          db,
-          surface: "word",
-          conversationId: chatId,
-          turn: memoryTurn,
-        });
-      } catch {
-        console.warn("[memory] Word activity release failed", { chatId });
-      }
-    }
-  }
+        : null,
+    open: (run) => attachAssistantTurnSse(res, run),
+  });
+  if (!outcome.ok) res.status(outcome.status).json(outcome.body);
 }));
 
 wordChatRouter.use(routerErrorHandler("[word-chat]"));

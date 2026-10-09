@@ -127,7 +127,8 @@ conversation's model transcript, and any turn in flight, in its own schema of th
 direct, session-mode connection, not a transaction pooler, because it holds an
 advisory lock on the schema for as long as it runs. Run one backend process per
 database. A second one cannot take the lock, and its chat turns fail. A turn
-interrupted by a restart or deploy resumes when the backend starts again.
+interrupted by a restart or deploy resumes when the backend starts again (except
+in a Word chat stored only on the device, which is stopped).
 
 Set backend `API_PUBLIC_URL` to the browser-reachable frontend gateway, including
 its `/api` prefix (for example, `https://app.example.com/api`). OAuth providers,

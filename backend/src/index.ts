@@ -10,8 +10,7 @@ import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
 import { reportError } from "./lib/observability/sentry";
 import { createDb } from "./lib/db";
-import { resumeInterruptedChatTurns } from "./modules/chat/chat.service";
-import { resumeInterruptedProjectChatTurns } from "./modules/project-chat/projectChat.service";
+import { resumeInterruptedTurns } from "./turnResumers";
 import {
   closeHttpServer,
   createShutdown,
@@ -135,8 +134,7 @@ async function main(): Promise<void> {
 
     // Chat turns the previous process left in flight (a deploy, a crash)
     // continue now, into runs a reloading client attaches to.
-    void resumeInterruptedChatTurns(createDb());
-    void resumeInterruptedProjectChatTurns(createDb());
+    void resumeInterruptedTurns(createDb());
   });
 }
 

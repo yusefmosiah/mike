@@ -491,6 +491,9 @@ export type PreparedTabularChat = {
     /** The id of the user turn just persisted — the assistant row links back
      *  to it through `memory_input_message_id`. */
     inputMessageId: string;
+    /** The row before the user turn (the previous answer), or null for a
+     *  chat's first message: the turn's tree parent for the model runtime. */
+    turnParentMessageId: string | null;
     /** The project whose memory may be READ into this turn's prompt. */
     readableMemoryProjectId: string | null;
     /** The project whose memory this turn may CURATE, if any. */
@@ -526,6 +529,11 @@ export async function prepareTabularChat(
         requestedReasoning: string | undefined;
         /** The browser's IANA time zone; unvalidated request input. */
         requestedTimeZone?: unknown;
+        /**
+         * Driving again a turn a restart cut off: its prompt is this stored
+         * row of `chatId`, so nothing is inserted and no chat is created.
+         */
+        resumeUserMessageId?: string;
     },
 ): Promise<TabularResult<PreparedTabularChat>> {
     const {
@@ -679,6 +687,8 @@ export async function prepareTabularChat(
         if (updateError) return internalFailure(updateError);
     }
 
+    if (!chatId && args.resumeUserMessageId)
+        return failure("not_found", "Chat not found");
     if (!chatId) {
         const { data: newChat, error: newChatError } = await db
             .from("tabular_review_chats")
@@ -697,10 +707,21 @@ export async function prepareTabularChat(
     }
 
     let memoryTurn: MemoryConversationTurn | null = null;
-    const inputMessageId = randomUUID();
+    const resuming = !!args.resumeUserMessageId;
+    const inputMessageId = args.resumeUserMessageId ?? randomUUID();
+    let turnParentMessageId: string | null = null;
+    if (chatId) {
+        const previous = await previousTabularChatMessageId(
+            db,
+            chatId,
+            resuming ? inputMessageId : null,
+        );
+        if (!previous.ok) return internalFailure(previous.error);
+        turnParentMessageId = previous.id;
+    }
 
     // Persist user message
-    if (chatId) {
+    if (chatId && !resuming) {
         const { error: userMessageError } = await db
             .from("tabular_review_chat_messages")
             .insert({
@@ -756,12 +777,47 @@ export async function prepareTabularChat(
             apiKeys: modelSettings.api_keys,
             apiMessages,
             inputMessageId,
+            turnParentMessageId,
             readableMemoryProjectId,
             writableMemoryProjectId,
             memorySharedAudience,
             memoryTurn,
         },
     };
+}
+
+/**
+ * The newest message stored in a review chat, or the newest before `beforeId`
+ * when that row is given: the answer a new prompt follows.
+ */
+async function previousTabularChatMessageId(
+    db: Db,
+    chatId: string,
+    beforeId: string | null,
+): Promise<{ ok: true; id: string | null } | { ok: false; error: unknown }> {
+    let before: string | null = null;
+    if (beforeId) {
+        const { data, error } = await db
+            .from("tabular_review_chat_messages")
+            .select("created_at")
+            .eq("id", beforeId)
+            .eq("chat_id", chatId)
+            .maybeSingle();
+        if (error) return { ok: false, error };
+        if (!data) return { ok: false, error: new Error("The turn's prompt is gone") };
+        before = data.created_at as string;
+    }
+    let query = db
+        .from("tabular_review_chat_messages")
+        .select("id")
+        .eq("chat_id", chatId);
+    if (before) query = query.lt("created_at", before);
+    const { data, error } = await query
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error) return { ok: false, error };
+    return { ok: true, id: (data?.id as string | undefined) ?? null };
 }
 
 /**

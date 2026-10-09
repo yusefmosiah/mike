@@ -87,6 +87,7 @@ export function makeFakeDb(spec: FakeDbSpec = {}): FakeDb {
             },
             eq: filter,
             neq: filter,
+            lt: filter,
             in: filter,
             is: filter,
             not: filter,

@@ -85,6 +85,11 @@ export {
     type TabularParsedCitation,
 } from "./tabular.chats";
 export {
+    driveTabularChatTurn,
+    resumeInterruptedTabularChatTurn,
+    type TabularChatTurnResumeContext,
+} from "./tabular.turn";
+export {
     finishGeneration,
     finishGenerationIfIdle,
     isReviewGenerationRunning,

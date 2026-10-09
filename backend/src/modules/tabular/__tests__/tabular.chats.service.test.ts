@@ -492,12 +492,83 @@ describe("prepareTabularChat", () => {
         expect(JSON.stringify(result.data.apiMessages)).toContain(
             "Lease review",
         );
-        expect(callTo(fake.calls, "tabular_review_chat_messages")).toMatchObject(
-            {
-                op: "insert",
-                payload: { chat_id: "chat-new", role: "user", content: "hi" },
+        // A new chat's first prompt has no answer before it.
+        expect(result.data.turnParentMessageId).toBeNull();
+        expect(
+            callTo(fake.calls, "tabular_review_chat_messages", 1),
+        ).toMatchObject({
+            op: "insert",
+            payload: { chat_id: "chat-new", role: "user", content: "hi" },
+        });
+    });
+
+    it("resumes from a stored prompt without storing it again", async () => {
+        const fake = makeFakeDb({
+            tables: {
+                tabular_reviews: { data: REVIEW, error: null },
+                tabular_review_chats: {
+                    data: {
+                        id: "chat-1",
+                        title: "Earlier",
+                        model: "claude-sonnet-5",
+                        reasoning_level: null,
+                        review_id: "rev-1",
+                        user_id: WHO.userId,
+                    },
+                    error: null,
+                },
+                tabular_review_chat_messages: [
+                    // The prompt's position…
+                    { data: { created_at: "2026-10-09T00:00:02Z" }, error: null },
+                    // …and the answer before it.
+                    { data: { id: "answer-0" }, error: null },
+                ],
             },
+        });
+        const result = await prepareTabularChat(fake.db, {
+            ...base,
+            messages: [
+                { role: "user" as const, content: "first" },
+                { role: "assistant" as const, content: "ok" },
+                { role: "user" as const, content: "hi" },
+            ],
+            chatId: "chat-1",
+            resumeUserMessageId: "prompt-1",
+        });
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.data.chatId).toBe("chat-1");
+        expect(result.data.inputMessageId).toBe("prompt-1");
+        expect(result.data.turnParentMessageId).toBe("answer-0");
+        const messageCalls = fake.calls.filter(
+            (call) => call.table === "tabular_review_chat_messages",
         );
+        expect(messageCalls.some((call) => call.op === "insert")).toBe(false);
+        expect(messageCalls[1].filters).toMatchObject({
+            chat_id: "chat-1",
+            created_at: "2026-10-09T00:00:02Z",
+        });
+    });
+
+    it("never creates a chat for a resumed turn whose chat is gone", async () => {
+        const fake = makeFakeDb({
+            tables: {
+                tabular_reviews: { data: REVIEW, error: null },
+                tabular_review_chats: { data: null, error: null },
+            },
+        });
+        const result = await prepareTabularChat(fake.db, {
+            ...base,
+            chatId: "chat-gone",
+            resumeUserMessageId: "prompt-1",
+        });
+        expect(result).toMatchObject({ ok: false, kind: "not_found" });
+        expect(
+            fake.calls.filter(
+                (call) =>
+                    call.table === "tabular_review_chats" && call.op === "insert",
+            ),
+        ).toEqual([]);
     });
 
     it("refuses to adopt a chat id belonging to another review", async () => {

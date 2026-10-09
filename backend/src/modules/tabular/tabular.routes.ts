@@ -2,11 +2,11 @@
 // request, call the module's service files, and map their typed results onto
 // status codes. No handler queries the database.
 //
-// Two endpoints keep more than that, because streaming is an HTTP concern a
-// return value cannot express: POST /:reviewId/generate keeps its SSE loop and
-// abort/heartbeat wiring, and POST /:reviewId/chat keeps its SSE loop.
-// Everything either of them does before the first frame and after the last one
-// is a service call. (The async generate stream's loop is the module's one
+// POST /:reviewId/generate keeps more than that, because streaming is an HTTP
+// concern a return value cannot express: its SSE loop and abort/heartbeat
+// wiring. Everything it does before the first frame and after the last one is
+// a service call. POST /:reviewId/chat prepares the turn and hands the rest to
+// driveTabularChatTurn (tabular.turn.ts), attaching the run to this response. (The async generate stream's loop is the module's one
 // documented layering exception and lives in tabular.generateStream.ts — see
 // the note in that file's header.)
 
@@ -23,7 +23,6 @@ import {
     attachAssistantTurnSse,
     getActiveAssistantTurn,
     getAssistantTurnRun,
-    startAssistantTurnRun,
 } from "../../lib/assistantTurnRuns";
 import { openAssistantSse } from "../../lib/assistantSse";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
@@ -32,14 +31,8 @@ import { recordAudit } from "../../lib/audit";
 import { sendInternalError } from "../../lib/httpError";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import {
-    AssistantStreamError,
     assistantStreamErrorPayload,
     ASSISTANT_ERROR_MESSAGE,
-    buildCancelledAssistantMessage,
-    isAbortError,
-    runLLMStream,
-    stripTransientAssistantEvents,
-    TABULAR_TOOLS,
     type ChatMessage,
     parseOptionalModel,
     parseOptionalReasoning,
@@ -85,23 +78,13 @@ import {
     deleteTabularReviewChat,
     ensureReviewChatReadAccess,
     ensureReviewChatWriteAccess,
-    extractTabularAnnotations,
     listTabularReviewChatMessages,
     listTabularReviewChats,
     prepareTabularChat,
-    saveTabularChatTurn,
-    titleTabularChat,
     updateTabularReviewChat,
 } from "./tabular.chats";
+import { driveTabularChatTurn } from "./tabular.turn";
 import { draftColumnPrompt } from "./tabular.prompt";
-// The memory fence spans the chat stream itself: it opens before the first
-// frame and has to be released (or handed to the curator) after the last one,
-// so it is wired here alongside the stream it guards rather than inside a
-// service that cannot see how the stream ended.
-import {
-    releaseMemoryConversationTurn,
-    scheduleMemoryConsolidation,
-} from "../../lib/memory/schedule";
 import { parsePaginationQuery } from "../../lib/pagination";
 import { normalizeSearchTerm } from "../../lib/search";
 import { parseTabularReviewSort } from "../../lib/sort";
@@ -941,253 +924,40 @@ tabularRouter.post("/:reviewId/chat", requireAuth, asyncRoute(async (req, res) =
         requestedTimeZone: req.body?.time_zone,
     });
     if (!preparation.ok) return void sendTabularFailure(res, preparation);
-    const {
-        apiMessages,
-        apiKeys: api_keys,
-        chatId,
-        chatTitle,
-        inputMessageId,
-        isFirstExchange,
-        memorySharedAudience,
-        memoryTurn,
-        model: selectedChatModel,
-        readableMemoryProjectId,
-        reasoningLevel: selectedReasoningLevel,
-        reviewTitle,
-        tabularStore,
-        titleModel,
-        writableMemoryProjectId,
-    } = preparation.data;
-    // The fence `prepareTabularChat` opened is released here unless this turn
-    // hands it to the curator (`scheduleMemoryConsolidation`).
-    let memoryTurnScheduled = false;
-    const assistantMessageId = randomUUID();
-    const releaseMemoryFence = async () => {
-        if (!memoryTurn) return;
-        try {
-            await releaseMemoryConversationTurn({
-                db,
-                surface: "tabular",
-                conversationId: chatId as string,
-                turn: memoryTurn,
-            });
-        } catch {
-            console.warn("[memory] tabular activity release failed", {
-                chatId,
-            });
-        }
-    };
-
-    // The answer is a server-owned run from here on: it survives the caller's
-    // socket (a refresh, a closed panel, a second tab taking over) and only
-    // POST .../turn/:turnId/stop aborts it. A chat may have one at a time.
-    const run = chatId
-        ? startAssistantTurnRun({
-              id: assistantMessageId,
-              chatId,
-              userId,
-              assistantMessageId,
-              surface: "tabular",
-          })
-        : null;
-    if (chatId && !run) {
-        // Refused before the first SSE byte, so the caller gets a status code
-        // rather than an error frame — but the user turn is already stored,
-        // so the fence this request opened has to be handed back here.
-        await releaseMemoryFence();
-        return void res.status(409).json({
-            code: "turn_in_progress",
-            detail: "A response is already being generated for this chat.",
-        });
-    }
-
-    // `prepareTabularChat` is allowed to return no chat id (chat creation was
-    // skipped); there is then no thread to key a run on and nothing that
-    // could ever attach to it, so THAT request alone keeps the old
-    // single-socket contract: closing the socket aborts it.
-    const stream = run
-        ? attachAssistantTurnSse(res, run)
-        : openAssistantSse(res);
-    const write = stream.write;
-
-    if (chatId && run) {
-        write(
-            `data: ${JSON.stringify({
-                type: "chat_id",
-                chatId,
-                turnId: run.id,
-            })}\n\n`,
-        );
-    }
-
-    try {
-        const { fullText, events } = await runLLMStream({
-            apiMessages,
-            docStore: new Map(),
-            docIndex: {},
-            userId,
-            db,
-            write,
-            extraTools: TABULAR_TOOLS,
-            includeResearchTools: false,
-            tabularStore,
-            buildCitations: (text) =>
-                extractTabularAnnotations(text, tabularStore),
-            model: selectedChatModel,
-            reasoning: selectedReasoningLevel,
-            apiKeys: api_keys,
-            signal: stream.signal,
-            conversationId: chatId,
-            includeMemory: true,
-            memoryProjectId: readableMemoryProjectId,
-            memorySharedAudience,
-            emitDone: false,
-        });
-
-        const persistedEvents = stripTransientAssistantEvents(events);
-        const annotations = extractTabularAnnotations(fullText, tabularStore);
-
-        let assistantSaved = false;
-        if (chatId) {
-            const saved = await saveTabularChatTurn(db, {
-                chatId,
-                messageId: assistantMessageId,
-                authorUserId: userId,
-                memoryInputMessageId: inputMessageId,
-                content: persistedEvents,
-                annotations,
-                touch: "when-saved",
-            });
-            if (saved.error)
-                console.error(
-                    "[tabular/chat] failed to save assistant response",
-                    saved.error,
-                );
-            assistantSaved = saved.saved;
-        }
-
-        // Generate title on first exchange
-        if (chatId && isFirstExchange && !chatTitle && lastUser.content) {
-            const title = await titleTabularChat(db, {
-                chatId,
-                titleModel,
-                userContent: lastUser.content,
-                reviewTitle: clientReviewTitle ?? reviewTitle ?? null,
-                projectName: clientProjectName ?? null,
-                apiKeys: api_keys,
-            });
-            if (title) {
-                write(
-                    `data: ${JSON.stringify({ type: "chat_title", chatId, title })}\n\n`,
-                );
-            }
-        }
-
-        // Only a durably saved, successful turn is worth consolidating: an
-        // `ask_inputs` continuation is not finished, and an `error` frame is
-        // not a turn at all.
-        if (
-            chatId &&
-            assistantSaved &&
-            !persistedEvents.some(
-                (event) =>
-                    event.type === "ask_inputs" || event.type === "error",
-            )
-        ) {
-            const scheduled = await scheduleMemoryConsolidation({
-                db,
-                surface: "tabular",
-                conversationId: chatId,
-                actorUserId: userId,
-                projectId: writableMemoryProjectId,
-                turnId: assistantMessageId,
-                turn: memoryTurn,
-            });
-            memoryTurnScheduled = scheduled != null;
-        }
-        write("data: [DONE]\n\n");
-    } catch (err) {
-        if (isAbortError(err)) {
-            console.log("[tabular/chat] turn stopped", { chatId });
-            if (chatId && err instanceof AssistantStreamError) {
-                const partial = buildCancelledAssistantMessage({
-                    fullText: err.fullText,
-                    events: err.events,
-                    buildCitations: (fullText) =>
-                        extractTabularAnnotations(fullText, tabularStore),
-                });
-                const { error: saveError } = await saveTabularChatTurn(db, {
-                    chatId,
-                    messageId: assistantMessageId,
-                    authorUserId: userId,
-                    memoryInputMessageId: inputMessageId,
-                    content: partial.events,
-                    annotations: partial.citations,
-                    touch: "always",
-                });
-                if (saveError)
-                    console.error(
-                        "[tabular/chat] failed to save aborted stream",
-                        saveError,
-                    );
-            }
-            // Readers still attached (Stop came from another tab, or this one
-            // is only watching) learn the outcome the same way a reload
-            // would: the stored row now ends "Cancelled by user."
-            write(stopOutcomeFrame(run));
-            write("data: [DONE]\n\n");
-            return;
-        }
-        console.error("[tabular/chat] error", err);
-        const errorPayload = assistantStreamErrorPayload(err);
-        const message = errorPayload.message;
-        const errorEvents =
-            err instanceof AssistantStreamError
-                ? stripTransientAssistantEvents(err.events)
-                : [{ type: "error" as const, message }];
-        const errorFullText =
-            err instanceof AssistantStreamError ? err.fullText : "";
-        if (chatId) {
-            try {
-                const { error: saveError } = await saveTabularChatTurn(db, {
-                    chatId,
-                    messageId: assistantMessageId,
-                    authorUserId: userId,
-                    memoryInputMessageId: inputMessageId,
-                    content: errorEvents,
-                    annotations: extractTabularAnnotations(
-                        errorFullText,
-                        tabularStore,
-                    ),
-                    touch: "never",
-                });
-                if (saveError)
-                    console.error(
-                        "[tabular/chat] failed to save error",
-                        saveError,
-                    );
-            } catch (saveErr) {
-                console.error("[tabular/chat] failed to save error", saveErr);
-            }
-        }
-        try {
-            write(
-                `data: ${JSON.stringify({ type: "error", ...errorPayload })}\n\n`,
-            );
-            write("data: [DONE]\n\n");
-        } catch {
-            /* ignore */
-        }
-    } finally {
-        // Ends every response attached to the run — this one, a reload, a
-        // second tab — and starts its retention window, so a client
-        // reconnecting a moment later still gets the last frames.
-        stream.finish();
-        // Whatever ended the stream, the fence must not outlive it: released
-        // here unless this turn already handed it to the curator, which owns
-        // it from that point on.
-        if (!memoryTurnScheduled) await releaseMemoryFence();
-    }
+    const prepared = preparation.data;
+    const outcome = await driveTabularChatTurn(db, {
+        prepared,
+        userId,
+        lastUserContent: lastUser.content,
+        clientReviewTitle: clientReviewTitle ?? null,
+        clientProjectName: clientProjectName ?? null,
+        assistantMessageId: randomUUID(),
+        durableContext: prepared.chatId
+            ? {
+                  surface: "tabular",
+                  userId,
+                  userEmail: userEmail ?? null,
+                  reviewId,
+                  chatId: prepared.chatId,
+                  model: parsedModel.value ?? null,
+                  reasoning: parsedReasoning.value ?? null,
+                  timeZone:
+                      typeof req.body?.time_zone === "string"
+                          ? req.body.time_zone
+                          : null,
+                  reviewTitle: clientReviewTitle ?? null,
+                  projectName: clientProjectName ?? null,
+                  turnUserMessageId: prepared.inputMessageId,
+              }
+            : null,
+        // `prepareTabularChat` is allowed to return no chat id; there is then
+        // no thread to key a run on and nothing that could ever attach to it,
+        // so THAT request alone keeps the old single-socket contract: closing
+        // the socket aborts it.
+        open: (run) =>
+            run ? attachAssistantTurnSse(res, run) : openAssistantSse(res),
+    });
+    if (!outcome.ok) res.status(outcome.status).json(outcome.body);
 }));
 
 tabularRouter.use(routerErrorHandler("[tabular]"));

@@ -146,7 +146,7 @@ away costs nothing.
 
 `POST /word-chat` registers a run under the `word` surface. `chatId` always
 exists by then — a cloud row's id, or the UUID `prepareWordChatStream` mints
-for `storage: "local"` — so every Word turn is keyed and resumable, local
+for `storage: "local"` — so every Word turn is keyed and attachable, local
 ones included.
 
 - `GET /word-chat/:chatId/turn/:turnId/stream?document_id=<uuid>&from=<seq>`
@@ -183,6 +183,27 @@ to shared storage. `lib/assistantSse.ts` (`openAssistantSse`) survives only
 for the one case that cannot be a run: a tabular review chat whose
 preparation produced no chat id, so there is no key to register under and
 nothing that could ever attach.
+
+#### Restarts
+
+A run dies with its process; the turn behind it need not. Each route hands
+`runLLMStream` a `durableTurn` context (the request minus its history, JSON
+only), which Pi stores with the turn until the outcome is saved
+(`finishTurn`). On boot `src/turnResumers.ts` reads `interruptedTurns()` and
+gives each turn to the resumer its context's `surface` names: chat,
+project-chat, word or tabular. The resumer rebuilds the turn from storage the
+way its request would (access checked again, documents and grid reloaded,
+nothing inserted), registers a fresh run under the same turn id, and drives
+it; a client finds that run through `active_turn` and attaches as usual. Pi
+replays read tools and answers interrupted writes as interrupted, so nothing
+is written twice. A turn that can no longer be driven (access gone, chat
+deleted, the conversation moved on) is abandoned and its answer row says why.
+
+Only turns whose transcript lives in Mike's database are durable: a
+`storage: "local"` Word chat keeps nothing server-side, so its interrupted run
+is simply stopped. Review chats store the answer row at the end rather than
+reserving it, so an abandoned review-chat turn gets an error answer inserted
+under its prompt.
 
 ### The service contract
 
