@@ -5,7 +5,12 @@
  * `layered-report.mts` can replay any threshold without calling a model again.
  *
  *   npx tsx --env-file=.env evals/auto-mode-gate/layered.mts \
- *     --models liquid/d1,jaredpalmer/kev-4b,cloudflare/clef-flash --repeats 1 --out layered.jsonl
+ *     --models liquid/d1,jaredpalmer/kev-4b,cloudflare/clef-flash --repeats 1 --out layered.jsonl \
+ *     [--questions harm|proof] [--history]
+ *
+ * --questions picks the Layer 3 wording (LAYER3_QUESTION_SETS); --history adds
+ * each thread's earlier user messages from corpus/history.json (a twin shares
+ * its source case's thread).
  *
  * Sets: corpus/allow.json (legitimate calls with their context), corpus/twins.json
  * (a harmful near-twin of each), and the hand-written cases in cases.mts with
@@ -14,7 +19,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { askDecisionQuestions } from "../../src/lib/guardrails/decisions.ts";
-import { LAYER3_QUESTIONS, planCall, type Layer3QuestionId } from "../../src/lib/guardrails/layered.ts";
+import { LAYER3_QUESTION_SETS, planCall, type Layer3QuestionId, type Layer3QuestionSet } from "../../src/lib/guardrails/layered.ts";
 import type { ContextEntry } from "../../src/lib/guardrails/facts.ts";
 import { CASES } from "./cases.mts";
 import { CONTEXTS } from "./contexts.mts";
@@ -29,18 +34,22 @@ export type EvalCase = {
   family: string;
   user_request: string;
   context: ContextEntry[];
+  /** The user's earlier messages in the thread (corpus/history.json), oldest first. */
+  earlier?: string[];
   tool: string;
   arguments: Record<string, unknown>;
 };
 
 const here = new URL(".", import.meta.url).pathname;
 
-export function loadCases(): EvalCase[] {
+export function loadCases(withHistory = false): EvalCase[] {
   const cases: EvalCase[] = [];
+  const history: Record<string, string[]> = withHistory ? JSON.parse(readFileSync(`${here}corpus/history.json`, "utf8")).history : {};
   const allow = JSON.parse(readFileSync(`${here}corpus/allow.json`, "utf8")).cases;
-  for (const c of allow) cases.push({ ...c, set: "allow", label: "allow" });
+  for (const c of allow) cases.push({ ...c, set: "allow", label: "allow", earlier: history[c.id] });
   const twins = JSON.parse(readFileSync(`${here}corpus/twins.json`, "utf8")).cases;
-  for (const c of twins) cases.push({ ...c, set: "twin", label: "stop" });
+  // A twin shares its source case's thread.
+  for (const c of twins) cases.push({ ...c, set: "twin", label: "stop", earlier: history[c.twin_of] });
   for (const c of CASES) {
     cases.push({
       id: `H:${c.id}`,
@@ -68,7 +77,9 @@ async function main() {
   const timeoutMs = Number(flag("timeout", "8000"));
   const out = flag("out", "layered.jsonl");
   const only = flag("cases", "");
-  const cases = loadCases().filter((c) => !only || only.split(",").includes(c.id));
+  const questionSet = flag("questions", "harm") as Layer3QuestionSet;
+  const withHistory = process.argv.includes("--history");
+  const cases = loadCases(withHistory).filter((c) => !only || only.split(",").includes(c.id));
 
   const done = new Set<string>();
   if (existsSync(out)) {
@@ -82,7 +93,7 @@ async function main() {
   const jobs: Job[] = [];
   let cost = 0;
   for (const c of cases) {
-    const plan = planCall({ userRequest: c.user_request, tool: c.tool, args: c.arguments, context: c.context });
+    const plan = planCall({ userRequest: c.user_request, tool: c.tool, args: c.arguments, context: c.context, earlierRequests: c.earlier });
     const base = { id: c.id, set: c.set, label: c.label, family: c.family, check: c.check ?? null };
     if (plan.decided) {
       if (!done.has(`${c.id}|null|0`)) {
@@ -94,7 +105,8 @@ async function main() {
       for (let repeat = 0; repeat < repeats; repeat++) {
         if (done.has(`${c.id}|${model}|${repeat}`)) continue;
         jobs.push(async () => {
-          const questions = Object.fromEntries(plan.questions.map((id) => [id, LAYER3_QUESTIONS[id]])) as Record<Layer3QuestionId, (typeof LAYER3_QUESTIONS)[Layer3QuestionId]>;
+          const set = LAYER3_QUESTION_SETS[questionSet];
+          const questions = Object.fromEntries(plan.questions.map((id) => [id, set[id]])) as Record<Layer3QuestionId, (typeof set)[Layer3QuestionId]>;
           const asked = await askDecisionQuestions({ model, state: plan.state as never, timeoutMs }, questions);
           cost += asked.usage?.cost ?? 0;
           appendFileSync(

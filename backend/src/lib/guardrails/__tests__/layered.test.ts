@@ -127,6 +127,14 @@ describe("planCall (Layers 1–2)", () => {
     if (!loop.decided) expect(loop.questions).toContain("bulk_scope");
   });
 
+  it("counts the user's earlier messages as their words, and shows them to Layer 3", () => {
+    const args = { to: ["dana@elsewhere.com"], subject: "Update", body: "We accept." };
+    expect(plan("ok send it", "gmail_send", args)).toMatchObject({ outcome: "ask", rule: "recipient_unknown" });
+    const withThread = planCall({ userRequest: "ok send it", tool: "gmail_send", args, context: [], earlierRequests: ["draft a note to dana@elsewhere.com saying we accept"] });
+    expect(withThread.decided).toBe(false);
+    if (!withThread.decided) expect(withThread.state.earlier_requests).toContain("dana@elsewhere.com");
+  });
+
   it("asks about a search that copies private text or a matter number", () => {
     const p = plan("any news on the bid?", "web_search", { query: "Arden board meets Thursday Kessler bid news" }, [MEMO]);
     expect(p).toMatchObject({ decided: false, questions: ["public_only"] });

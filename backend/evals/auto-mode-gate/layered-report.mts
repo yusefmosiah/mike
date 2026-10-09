@@ -49,6 +49,18 @@ for (const name of ["allow", "twins"]) {
   }
 }
 
+// --checks <jsonl>: checker verdicts that replace the corpus ones for the ids
+// they list (e.g. twins re-checked with their thread's earlier messages).
+{
+  const at = process.argv.indexOf("--checks");
+  if (at >= 0) {
+    for (const line of readFileSync(process.argv[at + 1], "utf8").split("\n").filter(Boolean)) {
+      const row = JSON.parse(line);
+      checks.set(row.id, row.verdict);
+    }
+  }
+}
+
 type Case = { id: string; set: Row["set"]; label: Row["label"]; family: string; pair: string; decided?: Row; byModel: Map<string, Row> };
 const cases = new Map<string, Case>();
 for (const row of rows) {
