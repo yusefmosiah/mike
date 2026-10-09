@@ -444,6 +444,8 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                         "The edited message could not be saved. Please try again.",
                     ),
                 });
+                // The editor stays open with the draft.
+                throw error;
             }
         },
         [editPrompt],
@@ -469,7 +471,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     const handleBranchIntoNewThread = useCallback(
         async (message: Message) => {
             try {
-                await branchIntoNewThread(message);
+                // A branched thread is a new chat in this project: open it.
+                const forkedId = await branchIntoNewThread(message);
+                if (forkedId) {
+                    router.push(
+                        `/projects/${projectId}/assistant/chat/${forkedId}`,
+                    );
+                }
             } catch (error) {
                 setChatActionError({
                     title: "Could not start a new thread",
@@ -480,7 +488,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 });
             }
         },
-        [branchIntoNewThread],
+        [branchIntoNewThread, projectId, router],
     );
 
     const handleNavigateSibling = useCallback(
@@ -2321,7 +2329,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                             onEditBranch={
                                                 branchActionsEnabled && msg.id
                                                     ? (content) =>
-                                                          void handleEditPrompt({
+                                                          handleEditPrompt({
                                                               message: msg,
                                                               content,
                                                           })

@@ -210,6 +210,12 @@ describe("withLiveTurn", () => {
       transcript[2],
     ]);
   });
+  it("keeps the branch position a reload knows when it replaces the stored row", () => {
+    const live = turnOn({ userMessage: user(), assistant: assistant("Streaming", "answer-1") });
+    const stored = { ...assistant("", "answer-1"), sibling: { index: 2, total: 2 } };
+    const [, replaced] = withLiveTurn([user("hello", "u1"), stored], live);
+    expect(replaced).toEqual({ ...live.assistant, sibling: { index: 2, total: 2 } });
+  });
   it("replaces the sender's own placeholder before the stream names the row", () => {
     const live = turnOn({ userMessage: user(), assistant: assistant("Streaming") });
     const transcript = [user("hello"), assistant("")];

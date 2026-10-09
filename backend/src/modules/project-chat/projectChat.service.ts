@@ -19,6 +19,7 @@ import {
     enrichWithPriorEvents,
     loadUserMessageSentTimes,
     appendAskInputsResponseToAssistantMessage,
+    linkedPrompt,
     resolveLeaf,
     runApprovedConnectorActions,
     setLeaf,
@@ -446,31 +447,14 @@ export async function prepareProjectChatStream(
         // put the turn on the wrong branch.
         const parentMessageId = await resolveLeaf(db, chatId as string, userId);
 
-        // Regenerate re-streams an existing prompt instead of sending a new
-        // one (mirrors chat.prepare.ts): when the caller names that prompt,
-        // the resolved leaf IS it, and its stored content still matches the
-        // payload, the turn reuses the existing row.
-        let reuseLeafRow = false;
-        if (
-            args.linkOnlyToMessageId &&
-            parentMessageId === args.linkOnlyToMessageId
-        ) {
-            const { data: leafRow } = await db
-                .from("chat_messages")
-                .select("role, content, parent_message_id")
-                .eq("chat_id", chatId)
-                .eq("id", parentMessageId)
-                .maybeSingle();
-            turnParentMessageId =
-                (leafRow?.parent_message_id as string | null | undefined) ?? null;
-            reuseLeafRow =
-                leafRow?.role === "user" &&
-                JSON.stringify(leafRow.content) ===
-                    JSON.stringify(lastUser.content ?? null);
-        }
+        // A re-answer names its stored prompt (mirrors chat.prepare.ts).
+        const linked = args.linkOnlyToMessageId
+            ? await linkedPrompt(db, chatId as string, args.linkOnlyToMessageId, lastUser.content)
+            : null;
 
-        if (reuseLeafRow) {
-            turnUserMessageId = parentMessageId;
+        if (linked) {
+            turnUserMessageId = linked.id;
+            turnParentMessageId = linked.parentMessageId;
         } else {
             const { error: userMessageError } = await db
                 .from("chat_messages")

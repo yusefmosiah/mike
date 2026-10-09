@@ -4,7 +4,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createMikeModels } from "./providers.mjs";
-import { completeTextOnPi, piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "./runtime.mjs";
+import { completeTextOnPi, forkChatLineageOnPi, piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "./runtime.mjs";
 import type { LlmMessage, OpenAIToolSchema, StreamChatParams } from "../types";
 
 const MODEL = "opencode-go/test-model";
@@ -59,18 +59,18 @@ async function turn(
   extra: Partial<StreamChatParams> = {},
 ) {
   return streamChatWithToolsOnPi({
+    conversationId: "chat-1",
     model: MODEL,
     systemPrompt: "You are Mike.",
     messages,
     tools: [readDocument],
-    conversationId: "chat-1",
     turn: { userMessageId: identity.user, parentMessageId: identity.parent, assistantMessageId: identity.assistant },
     runTools: async (calls) => calls.map((call) => ({ tool_use_id: call.id, content: "NDA says: governing law is Delaware." })),
     ...extra,
   });
 }
 
-async function lineage() {
+async function lineage(chat = "chat-1") {
   const { harness } = await piRuntime();
   const { defineDocFamily } = await import("@earendil-works/pi-durable");
   const token = defineDocFamily<{ conversations: number[]; messages: Record<string, { conversation: number; entry: number }> }, null>({
@@ -80,7 +80,7 @@ async function lineage() {
     family: true,
     initial: () => ({ conversations: [], messages: {} }),
   });
-  return (await harness.snapshot(token, "chat-1", context))!;
+  return (await harness.snapshot(token, chat, context))!;
 }
 
 beforeEach(async () => {
@@ -151,6 +151,42 @@ describe("Pi runtime: turns, branches and memory", () => {
     expect(second).toContain("MEMORY v1");
     expect(second).not.toContain("MEMORY v2");
     expect(second.match(/<thread-memory>/g)).toHaveLength(1);
+  });
+
+  it("branching into a new chat forks the transcript at the answer, leaving the source chat's own", async () => {
+    const { harness } = await piRuntime();
+    const a1 = await turn([{ role: "user", content: "first question" }], { user: "u1", parent: null, assistant: "a1" });
+    const h2 = [{ role: "user" as const, content: "first question" }, { role: "assistant" as const, content: a1.fullText }, { role: "user" as const, content: "second question" }];
+    await turn(h2, { user: "u2", parent: "a1", assistant: "a2" });
+    const source = await lineage();
+    const sourceConversation = source.messages.a2.conversation;
+    const sourceEntries = async () =>
+      (await (await harness.conversation(sourceConversation as never, context))!.entries({ order: "ascending" }, 500, undefined, context)).items.length;
+    const before = await sourceEntries();
+
+    // Fork at a2 into chat-2 (copies u1', a1', u2', a2').
+    await forkChatLineageOnPi({
+      fromChatId: "chat-1",
+      toChatId: "chat-2",
+      atMessageId: "a2",
+      messageIds: { u1: "u1c", a1: "a1c", u2: "u2c", a2: "a2c" },
+    });
+    const fork = await lineage("chat-2");
+    expect(fork.conversations).toHaveLength(1);
+    expect(fork.messages.a2c.conversation).toBe(fork.conversations[0]);
+
+    // The new chat's first turn continues the fork, with the whole copied history.
+    await turn([...h2, { role: "assistant", content: "x" }, { role: "user", content: "third, in the new chat" }], { user: "u3c", parent: "a2c", assistant: "a3c" }, { conversationId: "chat-2" });
+    expect(requests.at(-1)!.users.join("|")).toContain("second question");
+    expect((await lineage("chat-2")).messages.a3c.conversation).toBe(fork.conversations[0]);
+
+    // Editing the copied second prompt forks from the source's place, never appending to it.
+    await turn([...h2.slice(0, 2), { role: "user", content: "second, edited in the new chat" }], { user: "u2c2", parent: "a1c", assistant: "a2c2" }, { conversationId: "chat-2" });
+    const after = await lineage("chat-2");
+    expect(after.conversations).toHaveLength(2);
+    expect(after.messages.a2c2.conversation).not.toBe(sourceConversation);
+    expect(requests.at(-1)!.users.join("|")).not.toContain("second question");
+    expect(await sourceEntries()).toBe(before);
   });
 
   it("falls back to matching history the runtime never stored", async () => {

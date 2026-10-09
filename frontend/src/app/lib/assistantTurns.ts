@@ -206,7 +206,9 @@ export function withLiveTurn(
     );
     if (index >= 0) {
       const next = [...messages];
-      next[index] = assistant;
+      // A reload knows the answer's branch position; the stream does not.
+      const sibling = messages[index].sibling ?? assistant.sibling;
+      next[index] = sibling ? { ...assistant, sibling } : assistant;
       return next;
     }
   }

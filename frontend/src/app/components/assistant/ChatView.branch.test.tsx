@@ -14,6 +14,9 @@ const branchApi = vi.hoisted(() => ({
     setChatLeaf: vi.fn(),
     fetchSiblings: vi.fn(),
 }));
+// What each edit control's save returned: the real row awaits it to decide
+// whether to close the editor or keep the draft.
+const editSaves = vi.hoisted(() => [] as Array<void | Promise<void>>);
 
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => {
     const original = await importOriginal<Record<string, unknown>>();
@@ -75,7 +78,11 @@ vi.mock("./UserMessage", () => ({
             {onEditBranch && (
                 <button
                     type="button"
-                    onClick={() => void onEditBranch("edited content")}
+                    onClick={() => {
+                        const save = onEditBranch("edited content");
+                        editSaves.push(save);
+                        if (save) save.catch(() => {});
+                    }}
                 >
                     edit {messageId}
                 </button>
@@ -161,6 +168,7 @@ function renderView(
             message: Message;
             content: string;
         }) => void | Promise<void>;
+        onBranchIntoNewThread?: (message: Message) => Promise<void>;
         siblingById?: Record<string, MessageSibling>;
         isResponseLoading?: boolean;
     } = {},
@@ -178,6 +186,7 @@ function renderView(
                 onBranchChange={extra.onBranchChange}
                 onRegenerate={extra.onRegenerate}
                 onEditPrompt={extra.onEditPrompt}
+                onBranchIntoNewThread={extra.onBranchIntoNewThread}
                 siblingById={extra.siblingById}
             />
         </PageChromeContext.Provider>,
@@ -187,6 +196,7 @@ function renderView(
 describe("ChatView branch controls", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        editSaves.length = 0;
         vi.stubGlobal("ResizeObserver", ResizeObserverMock);
         Object.defineProperty(HTMLElement.prototype, "scrollTo", {
             configurable: true,
@@ -288,57 +298,86 @@ describe("ChatView branch controls", () => {
         expect(branchApi.fetchSiblings).not.toHaveBeenCalled();
     });
 
-    it("re-points the leaf at the prompt when regenerating", async () => {
+    it("hands a regenerate to the host, with the prompt that asked", async () => {
         const user = userEvent.setup();
-        const onBranchChange = vi.fn();
-        renderView(
-            [
-                { id: "user-1", role: "user", content: "Question" },
-                {
-                    id: "answer-1",
-                    role: "assistant",
-                    content: "Answer",
-                    sibling: { index: 1, total: 2, ids: ["answer-1", "answer-2"] },
-                },
-            ],
-            { onBranchChange },
-        );
+        const onRegenerate = vi.fn();
+        const prompt: Message = { id: "user-1", role: "user", content: "Question" };
+        const answer: Message = {
+            id: "answer-1",
+            role: "assistant",
+            content: "Answer",
+            sibling: { index: 1, total: 2, ids: ["answer-1", "answer-2"] },
+        };
+        renderView([prompt, answer], { onRegenerate });
 
         await user.click(
             screen.getByRole("button", { name: "regenerate answer-1" }),
         );
 
-        await waitFor(() => {
-            expect(branchApi.setChatLeaf).toHaveBeenCalledWith(
-                "chat-1",
-                "user-1",
-            );
-            expect(onBranchChange).toHaveBeenCalledTimes(1);
-        });
+        await waitFor(() =>
+            expect(onRegenerate).toHaveBeenCalledWith({
+                assistant: answer,
+                parentUser: prompt,
+            }),
+        );
+        // Regenerating never parks the leaf on the prompt.
+        expect(branchApi.setChatLeaf).not.toHaveBeenCalled();
     });
 
-    it("branches from a response into a new thread", async () => {
+    it("offers regenerate and new-thread only when the host can carry them out", () => {
+        renderView([
+            { id: "user-1", role: "user", content: "Question" },
+            { id: "answer-1", role: "assistant", content: "Answer" },
+        ]);
+        expect(
+            screen.queryByRole("button", { name: "regenerate answer-1" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "branch answer-1" }),
+        ).toBeNull();
+    });
+
+    it("hands branching into a new thread to the host", async () => {
         const user = userEvent.setup();
-        const onBranchChange = vi.fn();
+        const onBranchIntoNewThread = vi.fn().mockResolvedValue(undefined);
         renderView(
             [
                 { id: "user-1", role: "user", content: "Question" },
                 { id: "answer-1", role: "assistant", content: "Answer" },
             ],
-            { onBranchChange },
+            { onBranchIntoNewThread },
         );
 
         await user.click(
             screen.getByRole("button", { name: "branch answer-1" }),
         );
 
-        await waitFor(() => {
-            expect(branchApi.setChatLeaf).toHaveBeenCalledWith(
-                "chat-1",
-                "answer-1",
-            );
-            expect(onBranchChange).toHaveBeenCalledTimes(1);
-        });
+        await waitFor(() =>
+            expect(onBranchIntoNewThread).toHaveBeenCalledWith(
+                expect.objectContaining({ id: "answer-1" }),
+            ),
+        );
+        expect(branchApi.setChatLeaf).not.toHaveBeenCalled();
+    });
+
+    it("keeps the edit open when saving fails, and says why", async () => {
+        const user = userEvent.setup();
+        const onEditPrompt = vi.fn().mockRejectedValue(new Error("offline"));
+        renderView(
+            [{ id: "user-1", role: "user", content: "Original question" }],
+            { onEditPrompt },
+        );
+
+        await user.click(
+            screen.getByRole("button", { name: "edit user-1" }),
+        );
+
+        // The row's save rejects, which is what keeps its draft open.
+        expect(editSaves).toHaveLength(1);
+        await expect(editSaves[0]).rejects.toThrow("offline");
+        expect(
+            await screen.findByText("Could not save the edit"),
+        ).toBeInTheDocument();
     });
 
     it("asks the branch API for sibling order when the view has none", async () => {

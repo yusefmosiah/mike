@@ -211,12 +211,17 @@ export function useAssistantChat({
         { type: "ask_inputs_response" }
       >;
       /**
-       * Regenerate/re-answer: the id of the existing user prompt the new
-       * answer should hang from. Sent only after this caller's leaf points at
-       * that prompt; the server then reuses the row instead of inserting a
-       * sibling of the same text.
+       * Regenerate/re-answer: the id of the stored user prompt the new answer
+       * should hang from. The server reuses that row instead of inserting a
+       * copy, so the answer becomes a sibling of the previous one.
        */
       linkOnlyToMessageId?: string;
+      /**
+       * The transcript before `message`, when the caller knows it better than
+       * the rendered list: a re-answer on another branch sends that branch's
+       * history, not whatever this hook last rendered.
+       */
+      history?: Message[];
     },
   ): Promise<string | null> => {
     if (!message.content.trim() || hasAssistantTurn(chatId)) return null;
@@ -229,9 +234,11 @@ export function useAssistantChat({
       lastMessage.role === "user" &&
       lastMessage.content === message.content;
 
-    const apiMessagesForTurn: Message[] = isMessageAlreadyAdded
-      ? messages
-      : [...messages, message];
+    const apiMessagesForTurn: Message[] = opts?.history
+      ? [...opts.history, message]
+      : isMessageAlreadyAdded
+        ? messages
+        : [...messages, message];
     const askInputsResponseEvent = opts?.askInputsResponse ?? null;
     const optimisticResponseEvent = askInputsResponseEvent;
     const userInputThinkingEvent = optimisticResponseEvent

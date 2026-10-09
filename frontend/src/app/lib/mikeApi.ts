@@ -2363,6 +2363,25 @@ export async function setChatLeaf(
 }
 
 /**
+ * Branch into a new thread: a new chat (the caller's, in the same project)
+ * holding this chat's history up to and including one answer.
+ */
+export async function forkChat(
+    chatId: string,
+    messageId: string,
+): Promise<{ chatId: string; leaf: string }> {
+    const raw = await apiRequest<{ chat_id: string; leaf: string }>(
+        `/chat/${chatId}/fork`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message_id: messageId }),
+        },
+    );
+    return { chatId: raw.chat_id, leaf: raw.leaf };
+}
+
+/**
  * The ancestry the caller is reading: an explicit leaf, else their stored
  * leaf, else the chat's newest message.
  */

@@ -23,7 +23,7 @@ import { can } from "../../lib/permissions";
 import { resolveEffectiveReasoningLevel } from "../../lib/modelSelection";
 import { beginMemoryConversationTurn, releaseMemoryConversationTurn, type MemoryConversationTurn } from "../../lib/memory/schedule";
 import { getAccessibleChat, validateAccessibleProjectId } from "./chat.access";
-import { resolveLeaf, setLeaf } from "./chat.tree";
+import { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
 
 // ---------------------------------------------------------------------------
 // Pre-stream preparation for POST /chat (streaming)
@@ -379,35 +379,19 @@ export async function prepareChatStream(
         // empty chat — the tree's first message.
         const parentMessageId = await resolveLeaf(db, chatId, userId);
 
-        // Regenerate re-streams an existing prompt instead of sending a new
-        // one: when the caller names that prompt (`linkOnlyToMessageId`), the
-        // resolved leaf IS it, and its stored content still matches the
-        // payload, the turn must reuse the existing row. Inserting again
-        // would show the prompt twice and put the new answer on a child row
-        // rather than beside the old one.
-        let reuseLeafRow = false;
-        if (
-            args.linkOnlyToMessageId &&
-            parentMessageId === args.linkOnlyToMessageId
-        ) {
-            const { data: leafRow } = await db
-                .from("chat_messages")
-                .select("role, content, parent_message_id")
-                .eq("chat_id", chatId)
-                .eq("id", parentMessageId)
-                .maybeSingle();
-            turnParentMessageId =
-                (leafRow?.parent_message_id as string | null | undefined) ?? null;
-            reuseLeafRow =
-                leafRow?.role === "user" &&
-                JSON.stringify(leafRow.content) ===
-                    JSON.stringify(lastUser.content ?? null);
-        }
+        // Regenerate and edited versions re-stream a stored prompt rather
+        // than sending a new one: reuse the row the caller names, so the new
+        // answer becomes a sibling of the old one instead of a duplicate
+        // prompt with a child answer.
+        const linked = args.linkOnlyToMessageId
+            ? await linkedPrompt(db, chatId, args.linkOnlyToMessageId, lastUser.content)
+            : null;
 
-        if (reuseLeafRow) {
-            // Row and leaf already exist; the reservation (parented to this
-            // id) completes the turn. The leaf stays where it is.
-            turnUserMessageId = parentMessageId;
+        if (linked) {
+            // The row exists; the reservation (parented to it) completes the
+            // turn and moves the caller's leaf onto the new answer.
+            turnUserMessageId = linked.id;
+            turnParentMessageId = linked.parentMessageId;
         } else {
             const { error: userMessageError } = await db
                 .from("chat_messages")

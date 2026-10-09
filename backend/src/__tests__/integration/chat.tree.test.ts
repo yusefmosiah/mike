@@ -3,6 +3,7 @@ import {
     activePathIds,
     buildSiblingsIndex,
     latestMessageId,
+    newestLeafUnder,
     walkPathFromRows,
     type TreeRow,
 } from "../../modules/chat/chat.tree";
@@ -235,5 +236,30 @@ describe("chronological backfill semantics", () => {
             row("a1", "assistant", "u1", "2026-01-01T00:00:02Z"),
         ]);
         expect(linked[1].parent_message_id).toBe("u1");
+    });
+});
+
+describe("newestLeafUnder", () => {
+    // u1 → a1 → { u2 → a2 → u3 → a3, u2b → a2b }, with a2b written last.
+    const rows = [
+        row("u1", "user", null, "2026-01-01T00:00:01Z"),
+        row("a1", "assistant", "u1", "2026-01-01T00:00:02Z"),
+        row("u2", "user", "a1", "2026-01-01T00:00:03Z"),
+        row("a2", "assistant", "u2", "2026-01-01T00:00:04Z"),
+        row("u3", "user", "a2", "2026-01-01T00:00:05Z"),
+        row("a3", "assistant", "u3", "2026-01-01T00:00:06Z"),
+        row("u2b", "user", "a1", "2026-01-01T00:00:07Z"),
+        row("a2b", "assistant", "u2b", "2026-01-01T00:00:08Z"),
+    ];
+
+    it("descends a prompt version to where that branch was last continued", () => {
+        expect(newestLeafUnder(rows, "u2")).toBe("a3");
+        expect(newestLeafUnder(rows, "u2b")).toBe("a2b");
+        expect(newestLeafUnder(rows, "u1")).toBe("a2b");
+    });
+
+    it("keeps a message nothing answers, and an unknown id", () => {
+        expect(newestLeafUnder(rows, "a3")).toBe("a3");
+        expect(newestLeafUnder(rows, "missing")).toBe("missing");
     });
 });

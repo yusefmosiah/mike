@@ -456,3 +456,42 @@ describe("Stop reaches the server", () => {
         ]);
     });
 });
+
+describe("useAssistantChat re-answers on a branch", () => {
+    it("sends the branch's own history, and the finished turn does not cover it", async () => {
+        const first = controllableSseResponse();
+        fetchMock.mockResolvedValueOnce(first.response);
+        const { result } = renderHook(() => useAssistantChat({ chatId: "chat-a" }));
+        const { turn } = await startTurn(result.current.handleChat);
+        await first.send('data: {"type":"content_delta","text":"First answer"}\n\n');
+        await first.close();
+        await turn;
+
+        // Regenerate the answer just received: nothing comes before its prompt.
+        const second = controllableSseResponse();
+        fetchMock.mockResolvedValueOnce(second.response);
+        const prompt: Message = { id: "prompt-1", role: "user", content: "hello" };
+        let reanswer!: Promise<string | null>;
+        act(() => {
+            reanswer = result.current.handleChat(prompt, {
+                linkOnlyToMessageId: "prompt-1",
+                history: [],
+            });
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        const request = JSON.parse(
+            (fetchMock.mock.calls[1]?.[1] as { body: string }).body,
+        );
+        expect(request.messages).toEqual([{ role: "user", content: "hello" }]);
+        expect(request.link_only_to_message_id).toBe("prompt-1");
+        // The old answer is not laid back over the re-answer's transcript.
+        expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
+            ["user", "hello"],
+            ["assistant", ""],
+        ]);
+
+        await second.close();
+        await reanswer;
+    });
+});

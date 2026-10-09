@@ -71,6 +71,35 @@ export function walkPathFromRows(
   return path;
 }
 
+/**
+ * The leaf a reader lands on when they open `messageId`: the newest message in
+ * its subtree (itself when it has no replies). A child is always newer than its
+ * parent, so the newest descendant has no replies of its own, and it is where
+ * that branch was last continued. Opening a prompt version therefore shows its
+ * answers, not a prompt hanging without one.
+ */
+export function newestLeafUnder(rows: TreeRow[], messageId: string): string {
+  const children = new Map<string, TreeRow[]>();
+  for (const row of rows) {
+    if (!row.parent_message_id) continue;
+    const list = children.get(row.parent_message_id);
+    if (list) list.push(row);
+    else children.set(row.parent_message_id, [row]);
+  }
+  let newest = rows.find((row) => row.id === messageId);
+  if (!newest) return messageId;
+  const visited = new Set<string>([messageId]);
+  const stack = [...(children.get(messageId) ?? [])];
+  while (stack.length > 0 && visited.size < MAX_CHAT_ROWS) {
+    const row = stack.pop()!;
+    if (visited.has(row.id)) continue;
+    visited.add(row.id);
+    if (compareRows(newest, row) < 0) newest = row;
+    stack.push(...(children.get(row.id) ?? []));
+  }
+  return newest.id;
+}
+
 /** The ids on an already-walked path, for O(1) "is this message active" checks. */
 export function activePathIds(rows: TreeRow[]): Set<string> {
   return new Set(rows.map((row) => row.id));
@@ -177,16 +206,8 @@ export async function setLeaf(
   }
 }
 
-/**
- * The active transcript for a leaf: rows root-first, following parent links.
- * Rows on sibling branches are excluded by construction.
- */
-export async function walkActivePath(
-  db: Db,
-  chatId: string,
-  leafId: string | null,
-): Promise<TreeRow[]> {
-  if (!leafId) return [];
+/** Every row of a chat, oldest first, up to the scan ceiling. Fails open to []. */
+export async function chatRows(db: Db, chatId: string): Promise<TreeRow[]> {
   const { data, error } = await db
     .from("chat_messages")
     .select(TREE_COLUMNS)
@@ -197,7 +218,20 @@ export async function walkActivePath(
     console.error("[chat/tree] failed to load chat rows", chatId, error);
     return [];
   }
-  return walkPathFromRows((data ?? []) as TreeRow[], leafId);
+  return (data ?? []) as TreeRow[];
+}
+
+/**
+ * The active transcript for a leaf: rows root-first, following parent links.
+ * Rows on sibling branches are excluded by construction.
+ */
+export async function walkActivePath(
+  db: Db,
+  chatId: string,
+  leafId: string | null,
+): Promise<TreeRow[]> {
+  if (!leafId) return [];
+  return walkPathFromRows(await chatRows(db, chatId), leafId);
 }
 
 /**
@@ -250,4 +284,32 @@ export async function siblingsOf(
     chatId,
     (data.parent_message_id as string | null) ?? null,
   );
+}
+
+/**
+ * The stored prompt a re-answer names (`link_only_to_message_id`): a user
+ * message of this chat whose content is still what the client sent. A
+ * regenerate or an edited version re-streams it instead of inserting a copy,
+ * so the new answer lands beside the old one. Where the reader's leaf sits does
+ * not matter; the answer's reservation moves the leaf onto itself.
+ */
+export async function linkedPrompt(
+  db: Db,
+  chatId: string,
+  messageId: string,
+  content: unknown,
+): Promise<{ id: string; parentMessageId: string | null } | null> {
+  const { data, error } = await db
+    .from("chat_messages")
+    .select("role, content, parent_message_id")
+    .eq("chat_id", chatId)
+    .eq("id", messageId)
+    .maybeSingle();
+  if (error) {
+    console.error("[chat/tree] failed to load linked prompt", chatId, messageId, error);
+    return null;
+  }
+  if (data?.role !== "user") return null;
+  if (JSON.stringify(data.content) !== JSON.stringify(content ?? null)) return null;
+  return { id: messageId, parentMessageId: (data.parent_message_id as string | null) ?? null };
 }

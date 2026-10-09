@@ -17,6 +17,23 @@ export async function streamChatWithTools(
     return streamWithProvider(params);
 }
 
+/**
+ * A chat forked into a new one: the new chat's model transcript forks at the
+ * same answer, so its first turn continues from the cached prefix. A no-op on
+ * the AI SDK path, whose transcript is the stored messages themselves.
+ */
+export async function forkChatLineage(params: {
+    fromChatId: string;
+    toChatId: string;
+    atMessageId: string;
+    /** Source message id -> its copy in the new chat. */
+    messageIds: Record<string, string>;
+}): Promise<void> {
+    if (!piRuntimeEnabled()) return;
+    const { forkChatLineageOnPi } = await import("./pi/runtime.mjs");
+    await forkChatLineageOnPi(params);
+}
+
 export function piRuntimeEnabled(): boolean {
     return process.env.MIKE_LLM_RUNTIME === "pi";
 }

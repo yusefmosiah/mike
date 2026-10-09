@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
     createBranch: vi.fn(),
     setChatLeaf: vi.fn(),
     fetchSiblings: vi.fn(),
+    forkChat: vi.fn(),
     getChat: vi.fn(),
 }));
 
@@ -43,17 +44,19 @@ describe("useChatBranchActions", () => {
         vi.clearAllMocks();
     });
 
-    it("saves an edited prompt, reloads, and re-answers it linked", async () => {
-        const reloaded: Message[] = [
-            oldPrompt,
-            { id: "prompt-2", role: "user", content: "edited question" },
-        ];
+    it("saves an edited prompt, then answers it with its own branch's history", async () => {
+        const editedPrompt: Message = {
+            id: "prompt-2",
+            role: "user",
+            content: "edited question",
+            sibling: { index: 2, total: 2 },
+        };
         api.createBranch.mockResolvedValue({
             id: "prompt-2",
             leaf: "prompt-2",
-            messages: reloaded,
+            messages: [{ id: "prompt-2", role: "user", content: "edited question" }],
         });
-        api.getChat.mockResolvedValue({ messages: reloaded });
+        api.getChat.mockResolvedValue({ messages: [editedPrompt] });
         const view = setup([oldPrompt, oldAnswer]);
 
         await act(async () => {
@@ -69,32 +72,38 @@ describe("useChatBranchActions", () => {
             files: undefined,
             workflow: undefined,
         });
-        expect(view.setMessages).toHaveBeenCalledWith(reloaded);
-
-        // The re-answer waits for the reloaded path to land…
-        expect(view.handleChat).not.toHaveBeenCalled();
-        view.rerender({ messages: reloaded });
-
-        // …then streams the new prompt linked to its stored row.
-        await waitFor(() =>
-            expect(view.handleChat).toHaveBeenCalledWith(
-                {
-                    id: "prompt-2",
-                    role: "user",
-                    content: "edited question",
-                    files: undefined,
-                    workflow: undefined,
-                },
-                { linkOnlyToMessageId: "prompt-2" },
-            ),
-        );
+        // The new version is a root prompt: nothing comes before it, and the
+        // old answer on screen is not part of its history.
+        expect(view.handleChat).toHaveBeenCalledWith(editedPrompt, {
+            linkOnlyToMessageId: "prompt-2",
+            history: [],
+        });
+        // After the answer is stored, the transcript reloads for its position.
+        await waitFor(() => expect(view.setMessages).toHaveBeenCalledWith([editedPrompt]));
     });
 
-    it("re-points the leaf at the prompt and re-answers it in place", async () => {
-        const reloaded: Message[] = [oldPrompt];
-        api.setChatLeaf.mockResolvedValue({ leaf: "prompt-1", messages: reloaded });
-        api.getChat.mockResolvedValue({ messages: reloaded });
+    it("rejects a failed save without starting an answer", async () => {
+        api.createBranch.mockRejectedValue(new Error("offline"));
         const view = setup([oldPrompt, oldAnswer]);
+
+        await expect(
+            act(() =>
+                view.result.current.editPrompt({
+                    message: oldPrompt,
+                    content: "edited question",
+                }),
+            ),
+        ).rejects.toThrow("offline");
+        expect(view.handleChat).not.toHaveBeenCalled();
+    });
+
+    it("regenerates the answer just received without moving the leaf first", async () => {
+        const earlier: Message[] = [
+            { id: "p0", role: "user", content: "earlier" },
+            { id: "a0", role: "assistant", content: "earlier answer" },
+        ];
+        api.getChat.mockResolvedValue({ messages: [] });
+        const view = setup([...earlier, oldPrompt, oldAnswer]);
 
         await act(async () => {
             await view.result.current.regenerate({
@@ -103,16 +112,11 @@ describe("useChatBranchActions", () => {
             });
         });
 
-        expect(api.setChatLeaf).toHaveBeenCalledWith("chat-1", "prompt-1");
-        expect(view.handleChat).not.toHaveBeenCalled();
-
-        view.rerender({ messages: reloaded });
-
-        await waitFor(() =>
-            expect(view.handleChat).toHaveBeenCalledWith(oldPrompt, {
-                linkOnlyToMessageId: "prompt-1",
-            }),
-        );
+        expect(api.setChatLeaf).not.toHaveBeenCalled();
+        expect(view.handleChat).toHaveBeenCalledWith(oldPrompt, {
+            linkOnlyToMessageId: "prompt-1",
+            history: earlier,
+        });
     });
 
     it("steps to a sibling through the branch API order", async () => {
@@ -158,17 +162,18 @@ describe("useChatBranchActions", () => {
         expect(api.setChatLeaf).toHaveBeenCalledWith("chat-1", "b");
     });
 
-    it("moves the leaf onto a response for a new thread", async () => {
-        api.setChatLeaf.mockResolvedValue({ leaf: "answer-1", messages: [] });
-        api.getChat.mockResolvedValue({ messages: [] });
+    it("forks a new chat from a response and returns its id", async () => {
+        api.forkChat.mockResolvedValue({ chatId: "chat-2", leaf: "answer-copy" });
         const view = setup([oldPrompt, oldAnswer]);
 
+        let forked: string | null = null;
         await act(async () => {
-            await view.result.current.branchIntoNewThread(oldAnswer);
+            forked = await view.result.current.branchIntoNewThread(oldAnswer);
         });
 
-        expect(api.setChatLeaf).toHaveBeenCalledWith("chat-1", "answer-1");
-        expect(api.getChat).toHaveBeenCalledWith("chat-1");
+        expect(api.forkChat).toHaveBeenCalledWith("chat-1", "answer-1");
+        expect(forked).toBe("chat-2");
+        expect(api.setChatLeaf).not.toHaveBeenCalled();
         expect(view.handleChat).not.toHaveBeenCalled();
     });
 });

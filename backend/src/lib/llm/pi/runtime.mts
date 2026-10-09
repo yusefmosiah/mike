@@ -385,8 +385,13 @@ async function conversationForTurn(
   if (!place) return undefined;
   const base = await harness.conversation(place.conversation as ConversationId, background);
   if (!base) return undefined;
-  const later = await base.entries({ minEntryId: (place.entry + 1) as EntryId, order: "ascending" }, 200, undefined, background);
-  if (!later.items.some((entry) => entry.kind === "pi.user")) return base;
+  // Continue only this chat's own conversation, and only at its tail. A place
+  // inherited from a forked-from chat is always forked, so two chats never
+  // append to one conversation.
+  if (lineage!.conversations.includes(base.id)) {
+    const later = await base.entries({ minEntryId: (place.entry + 1) as EntryId, order: "ascending" }, 200, undefined, background);
+    if (!later.items.some((entry) => entry.kind === "pi.user")) return base;
+  }
   return base.fork(place.entry as EntryId, { ownership: { kind: "ownerless" }, init: remember }, background);
 }
 
@@ -657,6 +662,42 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     bindings.delete(conversation.id);
     await stream.stop();
   }
+}
+
+/**
+ * Fork a chat's model transcript into a new chat at one stored answer. The
+ * new chat's lineage starts with a fork of the answer's conversation (the
+ * copied answer maps there, so the first turn continues it), and every other
+ * copied message keeps its original place, which a later edit forks from.
+ */
+export async function forkChatLineageOnPi(params: {
+  fromChatId: string;
+  toChatId: string;
+  atMessageId: string;
+  messageIds: Record<string, string>;
+}): Promise<void> {
+  const { harness } = await piRuntime();
+  const source = await harness.snapshot(ChatLineage, params.fromChatId, background);
+  const at = source?.messages?.[params.atMessageId];
+  if (!source || !at) return;
+  const base = await harness.conversation(at.conversation as ConversationId, background);
+  if (!base) return;
+  await base.fork(
+    at.entry as EntryId,
+    {
+      ownership: { kind: "ownerless" },
+      init: async (tx: Tx, id: ConversationId) => {
+        const lineage = await tx.doc(ChatLineage, params.toChatId, null);
+        lineage.conversations.push(id);
+        for (const [from, to] of Object.entries(params.messageIds)) {
+          const place = source.messages[from];
+          if (place) lineage.messages[to] = place;
+        }
+        lineage.messages[params.messageIds[params.atMessageId]] = { conversation: id, entry: at.entry };
+      },
+    },
+    background,
+  );
 }
 
 /** Output tokens added for a model's reasoning when it cannot turn thinking off. */

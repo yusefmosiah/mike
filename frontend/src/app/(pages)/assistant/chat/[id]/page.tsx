@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAssistantChat } from "@/app/hooks/useAssistantChat";
 import { useChatRoute } from "@/app/hooks/useChatRoute";
@@ -9,7 +9,7 @@ import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { ChatView } from "@/app/components/assistant/ChatView";
 import { loadAssistantChat } from "@/app/lib/assistantTurns";
 import { can, roleFrom } from "@/app/lib/permissions";
-import type { Chat } from "@/app/components/shared/types";
+import type { Chat, Message } from "@/app/components/shared/types";
 
 // Serves `/assistant` (a new chat) as well as `/assistant/chat/:id`: the
 // first answer adopts its chat id in place, so it streams without a remount.
@@ -51,12 +51,23 @@ export default function AssistantChatPage() {
     // Branch navigation: leaf moves happen server-side and the ancestry they
     // select comes back as this page's transcript, so the reload and the
     // queued re-answer (edit prompt / regenerate) live here, not in the view.
-    const { reloadActivePath, editPrompt, regenerate } = useChatBranchActions({
-        chatId: id,
-        messages,
-        setMessages,
-        handleChat,
-    });
+    const { reloadActivePath, editPrompt, regenerate, branchIntoNewThread } =
+        useChatBranchActions({
+            chatId: id,
+            messages,
+            setMessages,
+            handleChat,
+        });
+    // A branched thread is a new chat: list it, then open it.
+    const openBranchedThread = useCallback(
+        async (message: Message) => {
+            const forkedId = await branchIntoNewThread(message);
+            if (!forkedId) return;
+            void loadChats();
+            router.push(`/assistant/chat/${forkedId}`);
+        },
+        [branchIntoNewThread, loadChats, router],
+    );
     // Whether the caller may write here, from the standing GET /chat/:id
     // serves. Grant-reachable chats appear in the global sidebar since the
     // parity change, so a project VIEWER can land on this page — dropping
@@ -214,6 +225,7 @@ export default function AssistantChatPage() {
             onBranchChange={reloadActivePath}
             onEditPrompt={editPrompt}
             onRegenerate={regenerate}
+            onBranchIntoNewThread={openBranchedThread}
         />
     );
 }

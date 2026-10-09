@@ -15,13 +15,19 @@
 // thread changes. The tree primitives themselves (leaf resolution, ancestry
 // walking, sibling groups) live in chat.tree.ts.
 import { randomUUID } from "node:crypto";
+import { forkChatLineage } from "../../lib/llm";
+import { safeError } from "../../lib/safeError";
 import { type Db } from "../../lib/supabase";
+import { createChat } from "./chat.crud";
 import type { ChatMessage } from "./engine/types";
 import {
+    chatRows,
+    newestLeafUnder,
     resolveLeaf,
     setLeaf,
     siblingsOf,
     walkActivePath,
+    walkPathFromRows,
     type TreeRow,
 } from "./chat.tree";
 
@@ -128,24 +134,28 @@ export async function createBranch(
 }
 
 // POST /chat/:chatId/leaf
-// Move the caller's leaf to a message of this chat and return the ancestry
-// that leaf selects. Read-standing is enough: the write touches only the
-// caller's own leaf row, and the shared transcript is unchanged.
+// Open a message of this chat: the caller's leaf moves to the newest message
+// under it (the message itself when nothing answers it), so stepping to a
+// prompt version shows that version's answers. Read-standing is enough: the
+// write touches only the caller's own leaf row, and the shared transcript is
+// unchanged.
 export async function setLeafAndPath(
     db: Db,
     args: { chatId: string; userId: string; leafId: string },
 ): Promise<{ ok: true; leaf: string; path: TreeRow[] } | BranchFailure> {
-    const path = await walkActivePath(db, args.chatId, args.leafId);
-    if (path.length === 0) {
+    const rows = await chatRows(db, args.chatId);
+    if (!rows.some((row) => row.id === args.leafId)) {
         return { ok: false, kind: "not_found", detail: "Message not found" };
     }
+    const leaf = newestLeafUnder(rows, args.leafId);
+    const path = walkPathFromRows(rows, leaf);
 
     try {
-        await setLeaf(db, args.chatId, args.userId, args.leafId);
+        await setLeaf(db, args.chatId, args.userId, leaf);
     } catch (error) {
         return { ok: false, kind: "error", error };
     }
-    return { ok: true, leaf: args.leafId, path };
+    return { ok: true, leaf, path };
 }
 
 // GET /chat/:chatId/branches/:messageId/siblings
@@ -202,4 +212,102 @@ export async function chatPath(
     const leaf = await resolveLeaf(db, args.chatId, args.userId);
     const path = await walkActivePath(db, args.chatId, leaf);
     return { ok: true, leaf: path.length > 0 ? leaf : null, path };
+}
+
+// POST /chat/:chatId/fork
+// Branch into a new thread: a new chat whose history is this chat's path up to
+// and including one answer, so the conversation continues there while this
+// chat stays as it was. The copies keep their authors and timestamps (they
+// record what was said, and when); the new chat belongs to the caller, in the
+// same project. With the Pi runtime the model transcript forks at the same
+// point, so the new chat reuses the cached prefix instead of replaying it.
+export async function forkChat(
+    db: Db,
+    args: {
+        chatId: string;
+        userId: string;
+        userEmail: string | undefined;
+        projectId: string | null;
+        title: string | null;
+        atMessageId: string;
+    },
+): Promise<
+    | { ok: true; chatId: string; leaf: string }
+    | BranchFailure
+    | { ok: false; kind: "access"; status: number; detail: string }
+> {
+    const rows = await chatRows(db, args.chatId);
+    const path = walkPathFromRows(rows, args.atMessageId);
+    const at = path.at(-1);
+    if (!at || at.id !== args.atMessageId) {
+        return { ok: false, kind: "not_found", detail: "Message not found" };
+    }
+    if (at.role !== "assistant") {
+        return {
+            ok: false,
+            kind: "validation",
+            detail: "message_id must reference an answer",
+        };
+    }
+
+    const { data: full, error: loadError } = await db
+        .from("chat_messages")
+        .select("id, role, content, files, workflow, citations, author_user_id, created_at")
+        .eq("chat_id", args.chatId)
+        .in("id", path.map((row) => row.id));
+    if (loadError) return { ok: false, kind: "error", error: loadError };
+    const byId = new Map(
+        ((full ?? []) as Array<Record<string, unknown> & { id: string }>).map((row) => [row.id, row]),
+    );
+
+    const created = await createChat(db, {
+        userId: args.userId,
+        userEmail: args.userEmail,
+        projectId: args.projectId,
+    });
+    if (!created.ok) return created;
+
+    const newIds = new Map(path.map((row) => [row.id, randomUUID()]));
+    const copies = path.map((row, index) => {
+        const source: Record<string, unknown> = byId.get(row.id) ?? {};
+        return {
+            id: newIds.get(row.id),
+            chat_id: created.id,
+            role: row.role,
+            content: source.content ?? row.content,
+            files: source.files ?? row.files,
+            workflow: source.workflow ?? row.workflow,
+            citations: source.citations ?? null,
+            author_user_id: source.author_user_id ?? null,
+            parent_message_id: index === 0 ? null : newIds.get(path[index - 1].id),
+            created_at: row.created_at,
+        };
+    });
+    const { error: insertError } = await db.from("chat_messages").insert(copies);
+    if (!insertError && args.title) {
+        await db.from("chats").update({ title: args.title }).eq("id", created.id);
+    }
+    if (insertError) {
+        // No half-copied chat left behind for the caller to find.
+        await db.from("chats").delete().eq("id", created.id);
+        return { ok: false, kind: "error", error: insertError };
+    }
+
+    const leaf = newIds.get(at.id) as string;
+    try {
+        await setLeaf(db, created.id, args.userId, leaf);
+    } catch (error) {
+        console.error("[chat/fork] failed to set leaf", safeError(error));
+    }
+    // Bookkeeping: without it the new chat's first turn rebuilds its model
+    // transcript from the copied history, which is correct, just uncached.
+    await forkChatLineage({
+        fromChatId: args.chatId,
+        toChatId: created.id,
+        atMessageId: at.id,
+        messageIds: Object.fromEntries(newIds),
+    }).catch((error: unknown) => {
+        console.error("[chat/fork] failed to fork the model transcript", safeError(error));
+    });
+    return { ok: true, chatId: created.id, leaf };
 }

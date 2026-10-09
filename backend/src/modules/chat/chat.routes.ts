@@ -54,6 +54,7 @@ import {
 import {
     chatPath,
     createBranch,
+    forkChat,
     isMessageId,
     setLeafAndPath,
     siblingNav,
@@ -1199,6 +1200,50 @@ chatRouter.post("/:chatId/leaf", requireAuth, asyncRoute(async (req, res) => {
         leaf: result.leaf,
         path: result.path,
     });
+}));
+
+// POST /chat/:chatId/fork — branch into a new thread.
+// Copies the path up to one answer into a new chat the caller owns (in the
+// same project) and returns its id. Same standing as branching: a viewer can
+// read this chat but must not spin its content off into new writable threads.
+chatRouter.post("/:chatId/fork", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    const body =
+        req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? (req.body as Record<string, unknown>)
+            : {};
+    if (!isMessageId(chatId))
+        return void res.status(400).json({ detail: "Invalid chat id" });
+    if (!isMessageId(body.message_id))
+        return void res
+            .status(400)
+            .json({ detail: "message_id must be a message id" });
+
+    const db = createServerSupabase();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+    if (!can(access.projectRole, "content.edit"))
+        return void res
+            .status(403)
+            .json({ detail: "You do not have permission to branch this chat" });
+
+    const result = await forkChat(db, {
+        chatId,
+        userId,
+        userEmail,
+        projectId: access.chat.project_id,
+        title: access.chat.title,
+        atMessageId: body.message_id,
+    });
+    if (!result.ok) {
+        if (result.kind === "access")
+            return void res.status(result.status).json({ detail: result.detail });
+        return void sendBranchFailure(res, result);
+    }
+    res.status(201).json({ chat_id: result.chatId, leaf: result.leaf });
 }));
 
 // GET /chat/:chatId/path?leaf= — the ancestry a leaf selects: the explicit

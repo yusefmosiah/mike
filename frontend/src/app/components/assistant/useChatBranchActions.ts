@@ -1,20 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import {
     createBranch,
     fetchSiblings,
+    forkChat,
     getChat,
     setChatLeaf,
 } from "@/app/lib/mikeApi";
 import type { Message } from "../shared/types";
 
-type HandleChatOptions = { linkOnlyToMessageId?: string };
+type HandleChatOptions = { linkOnlyToMessageId?: string; history?: Message[] };
 
 interface Args {
     /** The chat whose tree is being navigated. Null before a chat exists. */
     chatId?: string | null;
-    /** The rendered transcript; the re-answer queue watches its tail. */
+    /** The rendered transcript; a regenerate takes its history from here. */
     messages: Message[];
     /** Replaces the transcript after a leaf move. */
     setMessages: (messages: Message[]) => void;
@@ -26,12 +27,11 @@ interface Args {
 }
 
 /**
- * The branch actions shared by the chat surfaces, for pages that wire the
- * full experience. ChatView owns the controls and has its own fallbacks;
- * pages pass these in so a leaf move reloads the transcript, and an edited
- * prompt or regenerated answer streams through the normal chat handler with
- * the prompt linked (`link_only_to_message_id`) instead of sending a new
- * message.
+ * The branch actions shared by the chat surfaces. A leaf move reloads the
+ * transcript the server selects; an edited prompt or a regenerated answer
+ * streams through the page's chat handler with the stored prompt named
+ * (`link_only_to_message_id`) and that branch's history given explicitly, so
+ * the request never depends on which transcript happened to be rendered.
  */
 export function useChatBranchActions({
     chatId,
@@ -40,10 +40,6 @@ export function useChatBranchActions({
     handleChat,
 }: Args) {
     const busyRef = useRef(false);
-    const [resubmit, setResubmit] = useState<{
-        prompt: Message;
-        linkOnlyToMessageId: string;
-    } | null>(null);
 
     /** Reloads the ancestry the caller's (moved) leaf selects. */
     const reloadActivePath = useCallback(async () => {
@@ -52,22 +48,27 @@ export function useChatBranchActions({
         setMessages(detail.messages);
     }, [chatId, setMessages]);
 
-    // The re-answer can only be sent once the reloaded path is in the
-    // transcript: handleChat streams the messages state it sees, and sending
-    // before the swap would post the pre-branch path and insert a duplicate
-    // prompt row server side. The request waits here until the transcript's
-    // tail becomes the prompt it names.
-    useEffect(() => {
-        if (!resubmit) return;
-        const last = messages[messages.length - 1];
-        if (last?.role !== "user" || last.id !== resubmit.prompt.id) return;
-        setResubmit(null);
-        void handleChat(resubmit.prompt, {
-            linkOnlyToMessageId: resubmit.linkOnlyToMessageId,
-        });
-    }, [resubmit, messages, handleChat]);
+    /**
+     * Answers a stored prompt again on the branch `history` leads to. Once the
+     * answer is stored, the reload shows its position among the prompt's
+     * answers ("‹ 2/2 ›"), which the stream cannot know.
+     */
+    const reanswer = useCallback(
+        async (prompt: Message & { id: string }, history: Message[]) => {
+            await handleChat(prompt, {
+                linkOnlyToMessageId: prompt.id,
+                history,
+            });
+            await reloadActivePath().catch(() => {});
+        },
+        [handleChat, reloadActivePath],
+    );
 
-    /** Saves the edited prompt as a sibling branch and re-answers it. */
+    /**
+     * Saves the edited prompt as a sibling version and starts its answer.
+     * Resolves once the version is saved, so an editor can close then; a
+     * failed save rejects and the caller keeps the draft.
+     */
     const editPrompt = useCallback(
         async (args: { message: Message; content: string }) => {
             if (!chatId || !args.message.id || busyRef.current) return;
@@ -79,59 +80,68 @@ export function useChatBranchActions({
                     files: args.message.files,
                     workflow: args.message.workflow,
                 });
-                await reloadActivePath();
-                setResubmit({
-                    prompt: {
-                        id: created.id,
-                        role: "user",
-                        content: args.content,
-                        files: args.message.files,
-                        workflow: args.message.workflow,
-                    },
-                    linkOnlyToMessageId: created.id,
-                });
+                // The full read carries branch positions, so the new version
+                // shows "‹ 2/2 ›" while it is answered. The branch call's own
+                // path is the fallback: the version is saved either way.
+                const path = await getChat(chatId)
+                    .then((detail) => detail.messages)
+                    .catch(() => created.messages);
+                const index = path.findIndex((m) => m.id === created.id);
+                const prompt: Message & { id: string } =
+                    index >= 0
+                        ? { ...path[index], id: created.id }
+                        : {
+                              id: created.id,
+                              role: "user",
+                              content: args.content,
+                              files: args.message.files,
+                              workflow: args.message.workflow,
+                          };
+                const history =
+                    index >= 0 ? path.slice(0, index) : path.slice(0, -1);
+                void reanswer(prompt, history);
             } finally {
                 busyRef.current = false;
             }
         },
-        [chatId, reloadActivePath],
+        [chatId, reanswer],
     );
 
-    /** Re-points the leaf at the prompt and re-answers it in place. */
+    /** Answers the prompt again; the new answer becomes a sibling of the old. */
     const regenerate = useCallback(
         async (args: { assistant: Message; parentUser: Message | null }) => {
-            if (!chatId || !args.parentUser?.id || busyRef.current) return;
-            busyRef.current = true;
-            try {
-                await setChatLeaf(chatId, args.parentUser.id);
-                await reloadActivePath();
-                setResubmit({
-                    prompt: args.parentUser,
-                    linkOnlyToMessageId: args.parentUser.id,
-                });
-            } finally {
-                busyRef.current = false;
-            }
+            const prompt = args.parentUser;
+            if (!chatId || !prompt?.id || busyRef.current) return;
+            const index = messages.findIndex((m) => m.id === prompt.id);
+            if (index < 0) return;
+            void reanswer({ ...prompt, id: prompt.id }, messages.slice(0, index));
         },
-        [chatId, reloadActivePath],
+        [chatId, messages, reanswer],
     );
 
-    /** Moves the leaf onto a response so the next prompt continues from it. */
+    /**
+     * Branches into a new thread: a new chat holding this one's history up to
+     * the answer. Returns the new chat's id; the page navigates to it.
+     */
     const branchIntoNewThread = useCallback(
-        async (message: Message) => {
-            if (!chatId || !message.id || busyRef.current) return;
+        async (message: Message): Promise<string | null> => {
+            if (!chatId || !message.id || busyRef.current) return null;
             busyRef.current = true;
             try {
-                await setChatLeaf(chatId, message.id);
-                await reloadActivePath();
+                const forked = await forkChat(chatId, message.id);
+                return forked.chatId;
             } finally {
                 busyRef.current = false;
             }
         },
-        [chatId, reloadActivePath],
+        [chatId],
     );
 
-    /** Steps to the sibling branch on either side of a message. */
+    /**
+     * Steps to the sibling branch on either side of a message. The server
+     * opens the newest message under the sibling, so a prompt version comes
+     * with its answers.
+     */
     const navigateSibling = useCallback(
         async (
             message: Message,

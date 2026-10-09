@@ -6,7 +6,7 @@ export {
   getAccessibleChat,
 } from "./chat.access";
 export { getChatMessages } from "./chat.messages";
-export { resolveLeaf, setLeaf } from "./chat.tree";
+export { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
 export { isMessageId } from "./chat.branches";
 export {
   listChats,

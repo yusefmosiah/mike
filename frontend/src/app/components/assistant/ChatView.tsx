@@ -150,11 +150,9 @@ interface Props {
      */
     onBranchChange?: () => void;
     /**
-     * Regenerates an assistant answer. When provided, the host owns the whole
-     * flow and receives the assistant message to replace plus the user
-     * message that prompted it. Without it, the view falls back to
-     * re-pointing the chat's leaf at the parent user message and asking the
-     * host to reload through `onBranchChange`.
+     * Regenerates an assistant answer: the host streams a new answer to the
+     * user message that prompted it (it owns the stream). Without it, no
+     * regenerate control renders.
      */
     onRegenerate?: (args: {
         assistant: Message;
@@ -171,6 +169,11 @@ interface Props {
         message: Message;
         content: string;
     }) => void | Promise<void>;
+    /**
+     * Branches into a new thread from an answer: the host creates the new
+     * chat and opens it. Without it, no control renders.
+     */
+    onBranchIntoNewThread?: (message: Message) => Promise<void>;
 }
 
 const ASSISTANT_PANEL_TRANSITION_MS = 500;
@@ -207,6 +210,7 @@ export function ChatView({
     onBranchChange,
     onRegenerate,
     onEditPrompt,
+    onBranchIntoNewThread,
 }: Props) {
     const router = useRouter();
     // The model is what we asked for, so it identifies whose key was rejected.
@@ -542,6 +546,8 @@ export function ChatView({
                             "The edited message could not be saved. Please try again.",
                         ),
                     });
+                    // The editor stays open with the draft.
+                    throw error;
                 }
                 return;
             }
@@ -566,6 +572,7 @@ export function ChatView({
                         "The edited message could not be saved. Please try again.",
                     ),
                 });
+                throw error;
             } finally {
                 branchBusyRef.current = false;
             }
@@ -615,28 +622,9 @@ export function ChatView({
 
     const handleRegenerate = useCallback(
         async (assistant: Message, parentUser: Message | null) => {
-            if (onRegenerate) {
-                try {
-                    await onRegenerate({ assistant, parentUser });
-                } catch (error) {
-                    setActionError({
-                        title: "Could not regenerate",
-                        message: userFacingApiError(
-                            error,
-                            "A new answer could not be requested. Please try again.",
-                        ),
-                    });
-                }
-                return;
-            }
-            if (!chatId || !parentUser?.id || branchBusyRef.current) return;
-            branchBusyRef.current = true;
+            if (!onRegenerate) return;
             try {
-                // Regeneration starts by making the prompt the leaf again, so
-                // the next stored answer lands beside the old one. Starting
-                // that answer is the host's job — it owns the stream — hence
-                // the `onRegenerate` pass-through above.
-                await moveLeaf(parentUser.id);
+                await onRegenerate({ assistant, parentUser });
             } catch (error) {
                 setActionError({
                     title: "Could not regenerate",
@@ -645,22 +633,17 @@ export function ChatView({
                         "A new answer could not be requested. Please try again.",
                     ),
                 });
-            } finally {
-                branchBusyRef.current = false;
             }
         },
-        [chatId, moveLeaf, onRegenerate],
+        [onRegenerate],
     );
 
     const handleBranchIntoNewThread = useCallback(
         async (message: Message) => {
-            if (!chatId || !message.id || branchBusyRef.current) return;
+            if (!onBranchIntoNewThread || branchBusyRef.current) return;
             branchBusyRef.current = true;
             try {
-                // The leaf becomes this response, so the next prompt typed
-                // becomes its child; nothing re-streams, the view just shows
-                // where the thread now continues from.
-                await moveLeaf(message.id);
+                await onBranchIntoNewThread(message);
             } catch (error) {
                 setActionError({
                     title: "Could not start a new thread",
@@ -673,7 +656,7 @@ export function ChatView({
                 branchBusyRef.current = false;
             }
         },
-        [chatId, moveLeaf],
+        [onBranchIntoNewThread],
     );
 
     /**
@@ -1366,7 +1349,7 @@ export function ChatView({
                                                                 chatId &&
                                                                 msg.id
                                                                     ? (content) =>
-                                                                          void handleEditBranch(
+                                                                          handleEditBranch(
                                                                               msg,
                                                                               content,
                                                                           )
@@ -1415,9 +1398,8 @@ export function ChatView({
                                                             sibling={sibling}
                                                             onRegenerate={
                                                                 branchActionsEnabled &&
-                                                                (onRegenerate ||
-                                                                    (chatId &&
-                                                                        parentUser?.id))
+                                                                onRegenerate &&
+                                                                parentUser?.id
                                                                     ? () =>
                                                                           void handleRegenerate(
                                                                               msg,
@@ -1438,6 +1420,7 @@ export function ChatView({
                                                             }
                                                             onBranchIntoNewThread={
                                                                 branchActionsEnabled &&
+                                                                onBranchIntoNewThread &&
                                                                 msg.id
                                                                     ? () =>
                                                                           void handleBranchIntoNewThread(
