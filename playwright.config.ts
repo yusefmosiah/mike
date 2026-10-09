@@ -10,6 +10,15 @@ const SYNTHETIC_SPECS = [
     /tabular-chat-lifecycle\.spec\.ts/,
 ];
 
+/* Locally, the backend Playwright starts runs against the mike-e2e stack
+   (scripts/e2e-local-stack.sh); test users must be created in that stack's
+   GoTrue too (e2e/users.ts). CI sets these itself. */
+if (!process.env.CI) {
+    process.env.AUTH_URL ??= `http://localhost:${process.env.E2E_AUTH_PORT ?? "21421"}`;
+    process.env.AUTH_SERVICE_KEY ??=
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+}
+
 export default defineConfig({
     testDir: "./e2e",
     /* Every parallel worker signs in as its OWN user (worker 0 is the
@@ -88,7 +97,7 @@ export default defineConfig({
         : [
               {
                   command:
-                      "bash ../scripts/e2e-local-stack.sh --setup-only && npm run dev",
+                      "bash ../scripts/e2e-local-stack.sh --serve-backend",
                   cwd: "backend",
                   url: "http://localhost:3001/health",
                   reuseExistingServer: true,
@@ -97,6 +106,7 @@ export default defineConfig({
               {
                   command: "npm run dev",
                   cwd: "frontend",
+                  env: { API_BASE_URL: "http://localhost:3001" },
                   url: "http://localhost:3000",
                   reuseExistingServer: true,
                   timeout: 120_000,
