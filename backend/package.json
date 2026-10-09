@@ -42,6 +42,7 @@
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.1",
+    "quickjs-emscripten": "0.32.0",
     "resend": "^6.30.0",
     "tesseract.js": "^7.0.0",
     "undici": "^8.11.2",

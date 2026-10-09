@@ -38,6 +38,8 @@ import {
   TOOLS,
   WORKFLOW_TOOLS,
   WORKSTATION_TOOLS,
+  CODE_MODE_TOOLS,
+  toolName,
   isDocumentMutatingTool,
   withoutDocumentMutatingTools,
 } from "./tools/toolSchemas";
@@ -62,6 +64,12 @@ import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
 import { workstationFor } from "../../../lib/workstation";
+import {
+  codeModeEnabled,
+  RUN_SCRIPT_TOOL,
+  runScript,
+  scriptResultContent,
+} from "../../../lib/codemode";
 import { createSubagentHost } from "./subagents/subagentHost";
 import { getAutoModeDecisionModel } from "../../user/user.service";
 import {
@@ -519,7 +527,14 @@ export async function runLLMStream(params: {
       ? TOOLS
       : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
   const workstationTools = workstationFor(userId) ? WORKSTATION_TOOLS : [];
-  const baseTools = [...conversationTools, ...researchTools, ...WORKFLOW_TOOLS, ...workstationTools];
+  const codeMode = codeModeEnabled();
+  const baseTools = [
+    ...conversationTools,
+    ...researchTools,
+    ...WORKFLOW_TOOLS,
+    ...workstationTools,
+    ...(codeMode ? CODE_MODE_TOOLS : []),
+  ];
   const advertisedTools = [
     ...baseTools,
     ...mcpTools,
@@ -788,10 +803,74 @@ export async function runLLMStream(params: {
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
     ): Promise<{ tool_use_id: string; content: string }[]> => {
+      if (codeMode && calls.some((call) => call.name === RUN_SCRIPT_TOOL)) {
+        // Scripts run in the model's call order with the calls around them,
+        // and outside the write queue: their own writes queue there.
+        const results: { tool_use_id: string; content: string }[] = [];
+        let pending: NormalizedToolCall[] = [];
+        for (const call of calls) {
+          if (call.name !== RUN_SCRIPT_TOOL) {
+            pending.push(call);
+            continue;
+          }
+          if (pending.length) results.push(...(await runTurnTools(pending, scope)));
+          pending = [];
+          results.push({ tool_use_id: call.id, content: await runScriptCall(call, scope) });
+        }
+        if (pending.length) results.push(...(await runTurnTools(pending, scope)));
+        return results;
+      }
       if (scope === "child" && !calls.every((call) => isParallelSafeTool(call.name))) {
         return inWriteOrder(() => runTurnToolsNow(calls, scope));
       }
       return runTurnToolsNow(calls, scope);
+    };
+    /**
+     * Code mode: runs one `run_script` call in the QuickJS sandbox. Each
+     * `tools.x(...)` the script makes is an ordinary call in this turn: same
+     * guardrails, same mutation gate, same events, with writes taking turns.
+     * A script cannot start another script, ask the user a question, or reach
+     * the Word add-in's client tools.
+     */
+    const runScriptCall = async (
+      call: NormalizedToolCall,
+      scope: "parent" | "child",
+    ): Promise<string> => {
+      const code = typeof call.input.code === "string" ? call.input.code : "";
+      if (!code.trim()) return JSON.stringify({ error: "code is empty" });
+      const toolNames = activeTools
+        .map(toolName)
+        .filter(
+          (name): name is string =>
+            !!name &&
+            name !== RUN_SCRIPT_TOOL &&
+            name !== "ask_inputs" &&
+            !clientTools?.owns(name),
+        );
+      let seq = 0;
+      const timeoutSeconds = Number(call.input.timeout_seconds);
+      const result = await runScript({
+        code,
+        toolNames,
+        timeoutMs: Number.isFinite(timeoutSeconds) ? timeoutSeconds * 1000 : undefined,
+        signal,
+        callTool: async (name, args) => {
+          const inner: NormalizedToolCall = {
+            id: `${call.id}.${++seq}`,
+            name,
+            input: args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {},
+          };
+          const run = () => runTurnToolsNow([inner], scope);
+          const [answer] = isParallelSafeTool(name) ? await run() : await inWriteOrder(run);
+          return answer?.content ?? JSON.stringify({ error: `${name} returned nothing` });
+        },
+      });
+      console.info("[code-mode] script", {
+        ok: result.ok,
+        tool_calls: result.toolCalls,
+        duration_ms: result.durationMs,
+      });
+      return scriptResultContent(result);
     };
     const runTurnToolsNow = async (
       calls: NormalizedToolCall[],
