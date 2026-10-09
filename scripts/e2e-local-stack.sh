@@ -49,7 +49,7 @@ compose up createbucket >/dev/null
 DB_URL="postgres://postgres:postgres@127.0.0.1:$DB_PORT/postgres"
 AUTH_URL="http://localhost:$AUTH_PORT"
 # The compose file's local demo service-role key, signed with its GoTrue secret.
-SERVICE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"
+SERVICE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y"
 
 # schema.sql is not idempotent, so only load it into a virgin database; the
 # dated migrations ARE re-runnable and fill any gap schema.sql has (it lags —
@@ -79,6 +79,11 @@ for cap in GENERAL CHAT CHAT_CREATE UPLOAD EXPORT DATA_DELETE UPLOAD_SESSION_MUT
     *) export "RATE_LIMIT_${cap}_MAX=100000" ;;
     esac
 done
+
+# Production runs the catalog sync as a release job before the backend starts;
+# new accounts get their default workflows from it. Same pinned ref as CI.
+export MIKE_WORKFLOWS_REF="${MIKE_WORKFLOWS_REF:-ce62e6a2d3f47e1d3567a4f2edc61898cfe9e78a}"
+(cd "$BACKEND" && npx tsx src/jobs/syncWorkflows.ts)
 
 echo "Local stack ready: auth $AUTH_URL, db ${DB_URL%%\?*}"
 
