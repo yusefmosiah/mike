@@ -106,6 +106,11 @@ export function useReadAloud(text: string): UseReadAloud {
     // Mirrors `error`, so the prose-change reset can tell whether there is
     // anything to reset without depending on (and re-running for) the state.
     const errorRef = useRef<string | null>(null);
+    // playAt schedules the next sentence from the audio's `ended` handler;
+    // a callback cannot name itself, so the handler goes through this ref.
+    const playAtRef = useRef<(index: number, generation: number) => Promise<void>>(
+        async () => undefined,
+    );
 
     useEffect(() => {
         sentencesRef.current = sentences;
@@ -160,6 +165,9 @@ export function useReadAloud(text: string): UseReadAloud {
     useEffect(() => {
         blobCacheRef.current.clear();
         if (sessionRef.current.active || errorRef.current !== null) {
+            // Stopping pauses audio and revokes object URLs, which are effects;
+            // the state it resets goes with them.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             stopInternal();
         }
     }, [sentences, stopInternal]);
@@ -231,7 +239,7 @@ export function useReadAloud(text: string): UseReadAloud {
             setSentenceIndex(index);
             audio.onended = () => {
                 if (generation === generationRef.current) {
-                    void playAt(index + 1, generation);
+                    void playAtRef.current(index + 1, generation);
                 }
             };
             audio.onerror = () => {
@@ -259,6 +267,10 @@ export function useReadAloud(text: string): UseReadAloud {
         },
         [ensureAudio, fail, loadSentence, prefetch, releaseUrls, stopInternal],
     );
+
+    useEffect(() => {
+        playAtRef.current = playAt;
+    }, [playAt]);
 
     const playFrom = useCallback(
         (index: number) => {
