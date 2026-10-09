@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { transcribeAudio } from "@/app/lib/mikeApi";
 import { userFacingApiError } from "@/app/lib/userFacingError";
+import {
+    BrowserRecognitionError,
+    startOnDeviceRecognition,
+    type OnDeviceRecognitionSession,
+} from "@/app/lib/voice/browserSpeech";
+import { transcribeRecording } from "@/app/lib/voice/engines";
+import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
 /**
  * MediaRecorder container preference, best first. A browser supporting none
@@ -50,10 +56,12 @@ export interface UseDictationResult {
 }
 
 /**
- * Records a microphone clip and hands it to the operator's transcription
- * endpoint. The hook owns the capture lifecycle only: it never inserts text
- * into a composer and never submits anything — callers decide what to do
- * with `transcript`/`transcriptVersion`.
+ * Records a microphone clip and transcribes it with the engine chosen in
+ * Settings → Voice (the operator by default; see lib/voice). With the
+ * browser's own engine, the browser listens on device instead of a
+ * recording being made. The hook owns the capture lifecycle only: it never
+ * inserts text into a composer and never submits anything — callers decide
+ * what to do with `transcript`/`transcriptVersion`.
  */
 export function useDictation({
     disabled = false,
@@ -66,6 +74,7 @@ export function useDictation({
     const [transcriptVersion, setTranscriptVersion] = useState(0);
 
     const recorderRef = useRef<MediaRecorder | null>(null);
+    const browserSessionRef = useRef<OnDeviceRecognitionSession | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const startedAtRef = useRef(0);
@@ -109,7 +118,7 @@ export function useDictation({
             busyRef.current = true;
             setBusy(true);
             try {
-                const { text } = await transcribeAudio(recorded);
+                const text = await transcribeRecording(recorded);
                 const trimmed = text.trim();
                 if (trimmed) {
                     setTranscript(trimmed);
@@ -142,6 +151,28 @@ export function useDictation({
         startingRef.current = true;
         try {
             setError(null);
+            if (loadVoicePreferences().transcription.engine === "browser") {
+                try {
+                    browserSessionRef.current = startOnDeviceRecognition(
+                        loadVoicePreferences().transcription.language,
+                    );
+                } catch (browserError) {
+                    setError(
+                        browserError instanceof BrowserRecognitionError
+                            ? browserError.message
+                            : MICROPHONE_START_FAILURE_MESSAGE,
+                    );
+                    return;
+                }
+                startedAtRef.current = Date.now();
+                setElapsedMs(0);
+                recordingRef.current = true;
+                setRecording(true);
+                timerRef.current = window.setInterval(() => {
+                    setElapsedMs(Date.now() - startedAtRef.current);
+                }, 1000);
+                return;
+            }
             if (
                 typeof MediaRecorder === "undefined" ||
                 !navigator.mediaDevices?.getUserMedia
@@ -222,10 +253,40 @@ export function useDictation({
     }, [clearTimer, finishRecording, releaseStream]);
 
     const stop = useCallback(() => {
+        const session = browserSessionRef.current;
+        if (session) {
+            browserSessionRef.current = null;
+            clearTimer();
+            recordingRef.current = false;
+            setRecording(false);
+            busyRef.current = true;
+            setBusy(true);
+            session
+                .stop()
+                .then((text) => {
+                    const trimmed = text.trim();
+                    if (trimmed && activeRef.current) {
+                        setTranscript(trimmed);
+                        setTranscriptVersion((version) => version + 1);
+                    }
+                })
+                .catch((browserError: unknown) => {
+                    setError(
+                        browserError instanceof Error && browserError.message
+                            ? browserError.message
+                            : TRANSCRIBE_FAILURE_MESSAGE,
+                    );
+                })
+                .finally(() => {
+                    busyRef.current = false;
+                    setBusy(false);
+                });
+            return;
+        }
         const recorder = recorderRef.current;
         if (!recorder || recorder.state === "inactive") return;
         recorder.stop();
-    }, []);
+    }, [clearTimer]);
 
     const toggle = useCallback(() => {
         if (recordingRef.current) {
@@ -242,6 +303,8 @@ export function useDictation({
         return () => {
             activeRef.current = false;
             clearTimer();
+            browserSessionRef.current?.cancel();
+            browserSessionRef.current = null;
             const recorder = recorderRef.current;
             recorderRef.current = null;
             if (recorder && recorder.state !== "inactive") {

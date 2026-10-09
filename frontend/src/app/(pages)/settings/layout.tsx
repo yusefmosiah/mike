@@ -22,6 +22,7 @@ const TABS: TabDef[] = [
     { id: "memory", label: "Memory", href: "/settings/memory" },
     { id: "appearance", label: "Appearance", href: "/settings/appearance" },
     { id: "features", label: "Features", href: "/settings/features" },
+    { id: "voice", label: "Voice", href: "/settings/voice" },
     {
         id: "privacy-data",
         label: "Privacy & Data",

@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { synthesizeSpeech } from "@/app/lib/mikeApi";
+import { synthesizeSentence } from "@/app/lib/voice/engines";
+import { useVoicePreferences } from "@/app/lib/voice/preferences";
+import { useBrowserReadAloud } from "./useBrowserReadAloud";
+import {
+    splitIntoReadAloudSentences,
+    type UseReadAloud,
+} from "./readAloudShared";
 
-/**
- * Sentence boundary: a run of non-terminator characters followed by one or
- * more `.` / `!` / `?`. Text after the last terminator (terse answers, or a
- * stream that ended mid-sentence) is kept as its own sentence by the
- * splitter below, so no prose is silently dropped.
- */
-const SENTENCE_PATTERN = /[^.!?]+[.!?]+/g;
-
-/**
- * Hard cap on how much of one response will be spoken: a pathological reply
- * (say, a giant table dump) must not queue hundreds of synthesis calls.
- */
-export const MAX_READ_ALOUD_SENTENCES = 200;
-
-/** Playback rates offered by the read-aloud control; 1 is engine default. */
-export const READ_ALOUD_SPEEDS = [0.75, 1, 1.25, 1.5] as const;
+export {
+    MAX_READ_ALOUD_SENTENCES,
+    READ_ALOUD_SPEEDS,
+    splitIntoReadAloudSentences,
+} from "./readAloudShared";
+export type {
+    UseReadAloud,
+    UseReadAloudControls,
+    UseReadAloudState,
+} from "./readAloudShared";
 
 const DEFAULT_SPEED = 1;
 
@@ -28,55 +28,22 @@ function readAloudErrorMessage(cause: unknown): string {
     return "Could not read this response aloud.";
 }
 
-export function splitIntoReadAloudSentences(text: string): string[] {
-    const trimmed = text.trim();
-    if (!trimmed) return [];
-
-    const sentences: string[] = [];
-    SENTENCE_PATTERN.lastIndex = 0;
-    let consumed = 0;
-    let match: RegExpExecArray | null;
-    while ((match = SENTENCE_PATTERN.exec(trimmed)) !== null) {
-        const sentence = match[0].trim();
-        if (sentence) sentences.push(sentence);
-        consumed = match.index + match[0].length;
-    }
-    const tail = trimmed.slice(consumed).trim();
-    if (tail) sentences.push(tail);
-    if (sentences.length === 0) sentences.push(trimmed);
-    return sentences.slice(0, MAX_READ_ALOUD_SENTENCES);
+/**
+ * Reads a response aloud with the engine chosen in Settings → Voice: the
+ * browser's own voices, or audio from the operator, OpenRouter or a model
+ * in the browser. Both hooks are always called (hooks cannot be
+ * conditional); the one not in use stays idle.
+ */
+export function useReadAloud(text: string): UseReadAloud {
+    const [preferences] = useVoicePreferences();
+    const browser = preferences.speech.engine === "browser";
+    const audio = useAudioReadAloud(browser ? "" : text);
+    const spoken = useBrowserReadAloud(browser ? text : "", preferences.speech.voice);
+    return browser ? spoken : audio;
 }
-
-export interface UseReadAloudState {
-    /** A reading session is active: started, not stopped or finished. */
-    playing: boolean;
-    /** The active session is held at the current sentence. */
-    paused: boolean;
-    /** 0-based index of the sentence being spoken. */
-    sentenceIndex: number;
-    sentenceCount: number;
-    /** Playback rate, 0.75 | 1 | 1.25 | 1.5. Applied to live audio too. */
-    speed: number;
-    error: string | null;
-}
-
-export interface UseReadAloudControls {
-    /** Starts a fresh session from the first sentence. */
-    play: () => void;
-    /** Holds the current sentence; playback resumes where it stopped. */
-    pause: () => void;
-    resume: () => void;
-    /** Ends the session, revokes every object URL, resets progress. */
-    stop: () => void;
-    setSpeed: (speed: number) => void;
-    /** Starts a session at a specific sentence (0-based). */
-    playFrom: (index: number) => void;
-}
-
-export type UseReadAloud = UseReadAloudState & UseReadAloudControls;
 
 /**
- * Reads a response aloud sentence by sentence.
+ * Reads a response aloud sentence by sentence from synthesized audio.
  *
  * The caller hands over plain prose. Sentences are synthesized lazily — when
  * playback reaches sentence i, and one sentence ahead while it plays — and
@@ -84,7 +51,7 @@ export type UseReadAloud = UseReadAloudState & UseReadAloudControls;
  * A single HTMLAudioElement plays one object URL at a time; URLs are revoked
  * as playback advances and on stop, so nothing leaks.
  */
-export function useReadAloud(text: string): UseReadAloud {
+function useAudioReadAloud(text: string): UseReadAloud {
     const sentences = useMemo(() => splitIntoReadAloudSentences(text), [text]);
 
     const [playing, setPlaying] = useState(false);
@@ -188,7 +155,7 @@ export function useReadAloud(text: string): UseReadAloud {
         async (index: number, generation: number): Promise<Blob> => {
             const cached = blobCacheRef.current.get(index);
             if (cached) return cached;
-            const blob = await synthesizeSpeech(sentencesRef.current[index]);
+            const blob = await synthesizeSentence(sentencesRef.current[index]);
             if (generation === generationRef.current) {
                 blobCacheRef.current.set(index, blob);
             }
@@ -200,7 +167,7 @@ export function useReadAloud(text: string): UseReadAloud {
     const prefetch = useCallback((index: number, generation: number) => {
         if (index >= sentencesRef.current.length) return;
         if (blobCacheRef.current.has(index)) return;
-        synthesizeSpeech(sentencesRef.current[index])
+        synthesizeSentence(sentencesRef.current[index])
             .then((blob) => {
                 if (generation === generationRef.current) {
                     blobCacheRef.current.set(index, blob);

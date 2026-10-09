@@ -57,6 +57,7 @@ import type {
     TabularReview,
     TabularReviewDetailOut,
 } from "@/app/components/shared/types";
+import type { VoicePrice } from "@/app/lib/voice/pricing";
 
 export { UploadBatchError };
 export { failedUploadMessage };
@@ -3616,14 +3617,38 @@ function blobToBase64(blob: Blob): Promise<string> {
  * for the length of the upstream request and returns `{ text }`; nothing is
  * stored on either side.
  */
-export async function transcribeAudio(blob: Blob): Promise<{ text: string }> {
-    return apiRequest<{ text: string }>("/audio/transcriptions", {
+export interface TranscribeAudioOptions {
+    /** "operator" (the default) or "openrouter". */
+    provider?: "operator" | "openrouter";
+    /** OpenRouter model id; ignored by the operator. */
+    model?: string;
+    language?: string;
+}
+
+export interface TranscribeAudioResult {
+    text: string;
+    provider?: string;
+    model?: string;
+    /** What the call cost, when the provider reports it. */
+    cost_usd?: number | null;
+}
+
+export async function transcribeAudio(
+    blob: Blob,
+    options?: TranscribeAudioOptions,
+): Promise<TranscribeAudioResult> {
+    return apiRequest<TranscribeAudioResult>("/audio/transcriptions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             audio_base64: await blobToBase64(blob),
             mimetype: blob.type || "audio/webm",
             filename: dictationFilename(blob.type),
+            ...(options?.provider && options.provider !== "operator"
+                ? { provider: options.provider }
+                : {}),
+            ...(options?.model ? { model: options.model } : {}),
+            ...(options?.language ? { language: options.language } : {}),
         }),
     });
 }
@@ -3635,6 +3660,18 @@ export interface SynthesizeSpeechOptions {
     /** 0.5..2.0; the backend applies its default when omitted. */
     speed?: number;
     format?: SpeechFormat;
+    /** "operator" (the default) or "openrouter". */
+    provider?: "operator" | "openrouter";
+    /** OpenRouter model id; ignored by the operator. */
+    model?: string;
+}
+
+export interface SynthesizedSpeech {
+    blob: Blob;
+    provider: string | null;
+    model: string | null;
+    /** Estimated from the model's per-character price; null when unknown. */
+    costUsd: number | null;
 }
 
 /**
@@ -3646,6 +3683,14 @@ export async function synthesizeSpeech(
     text: string,
     options?: SynthesizeSpeechOptions,
 ): Promise<Blob> {
+    return (await synthesizeSpeechDetailed(text, options)).blob;
+}
+
+/** As `synthesizeSpeech`, with the model that spoke and what it cost. */
+export async function synthesizeSpeechDetailed(
+    text: string,
+    options?: SynthesizeSpeechOptions,
+): Promise<SynthesizedSpeech> {
     const response = await apiFetch(`${API_BASE}/audio/speech`, {
         method: "POST",
         cache: "no-store",
@@ -3658,6 +3703,10 @@ export async function synthesizeSpeech(
             ...(options?.voice !== undefined ? { voice: options.voice } : {}),
             ...(options?.speed !== undefined ? { speed: options.speed } : {}),
             ...(options?.format !== undefined ? { format: options.format } : {}),
+            ...(options?.provider && options.provider !== "operator"
+                ? { provider: options.provider }
+                : {}),
+            ...(options?.model ? { model: options.model } : {}),
         }),
     });
 
@@ -3665,5 +3714,43 @@ export async function synthesizeSpeech(
         throw await toApiError(response, "/audio/speech", "POST");
     }
 
-    return response.blob();
+    const cost = Number(response.headers.get("X-Mike-Audio-Cost"));
+    return {
+        blob: await response.blob(),
+        provider: response.headers.get("X-Mike-Audio-Provider"),
+        model: response.headers.get("X-Mike-Audio-Model"),
+        costUsd:
+            response.headers.get("X-Mike-Audio-Cost") !== null &&
+            Number.isFinite(cost)
+                ? cost
+                : null,
+    };
+}
+
+export interface VoiceCatalogModel {
+    id: string;
+    name: string;
+    price: VoicePrice;
+    voices: string[];
+}
+
+export interface VoiceOptions {
+    strict_private: boolean;
+    operator: {
+        transcription: { model: string } | null;
+        speech: { model: string; voice: string } | null;
+    };
+    openrouter: {
+        available: boolean;
+        reason?: "strict_private" | "no_key";
+        catalog: {
+            speech: VoiceCatalogModel[];
+            transcription: VoiceCatalogModel[];
+        } | null;
+    };
+}
+
+/** What this deployment offers for voice (Settings -> Voice). */
+export async function getVoiceOptions(): Promise<VoiceOptions> {
+    return apiRequest<VoiceOptions>("/audio/options");
 }
