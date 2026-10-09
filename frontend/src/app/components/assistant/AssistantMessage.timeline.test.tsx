@@ -171,4 +171,37 @@ describe("AssistantMessage timeline", () => {
             screen.getByText("The response was interrupted."),
         ).toBeInTheDocument();
     });
+    it("shows a delegated answer's subagent and what both cost, without a usage line in the timeline", () => {
+        const load = vi.fn(async () => {
+            throw new Error("not opened in this test");
+        });
+        render(
+            <AssistantMessage
+                events={[
+                    {
+                        type: "subagent",
+                        call_id: "call-1",
+                        child_id: "7",
+                        address: "turn/a1/document_review-1",
+                        agent_type: "document_review",
+                        model: "opencode-go/glm-5",
+                        task: "Find the governing law",
+                        status: "done",
+                        usage: { input: 1200, output: 300, cost: 0.004 },
+                    },
+                    { type: "content", text: "Delaware law governs." },
+                    { type: "turn_usage", input: 5000, output: 700, cost: 0.0123 },
+                ]}
+                onLoadSubagentTranscript={load}
+            />,
+        );
+        // Like other work before the answer, it folds away once the answer is written.
+        fireEvent.click(screen.getByRole("button", { name: /Completed in 1 step/ }));
+        expect(screen.getByRole("button", { name: /Delegated to document review/ })).toBeInTheDocument();
+        expect(
+            screen.getByText("This answer: 5,700 tokens · $0.01. 1 subagent: 1,500 tokens · under $0.01."),
+        ).toBeInTheDocument();
+        expect(screen.queryByText(/turn_usage/)).not.toBeInTheDocument();
+        expect(load).not.toHaveBeenCalled();
+    });
 });

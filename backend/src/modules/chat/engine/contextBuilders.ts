@@ -615,6 +615,9 @@ const COMPLETES_TEXTLESS_TURN = {
   case_opinions: false,
   content: false,
   word_edit_block: false,
+  // Intermediate work: what matters is the answer written from its report.
+  subagent: false,
+  turn_usage: false,
   error: true,
 } satisfies Record<AssistantEvent["type"], boolean>;
 

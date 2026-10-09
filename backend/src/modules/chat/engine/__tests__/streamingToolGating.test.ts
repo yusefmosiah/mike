@@ -221,3 +221,24 @@ describe("runLLMStream document-mutation gating", () => {
     expect(dispatched).toEqual(["edit_document"]);
   });
 });
+
+describe("runLLMStream turn usage", () => {
+  const usage = { input: 1000, output: 200, cost: 0.003 };
+
+  it("records and streams the turn's own spend once the answer is done", async () => {
+    streamChatWithTools.mockResolvedValueOnce({ fullText: "ok", usage } as never);
+    const params = baseParams();
+    const result = await runLLMStream(params as never);
+    expect(result.events).toContainEqual({ type: "turn_usage", ...usage });
+    const frames = params.write.mock.calls.map(([chunk]) => String(chunk));
+    const usageFrame = frames.findIndex((chunk) => chunk.includes('"turn_usage"'));
+    expect(frames[usageFrame]).toBe(`data: ${JSON.stringify({ type: "turn_usage", ...usage })}\n\n`);
+    // Before the final citations, so a client has it when the turn closes.
+    expect(usageFrame).toBeLessThan(frames.findIndex((chunk) => chunk.includes('"status":"final"')));
+  });
+
+  it("records nothing when the runtime could not measure it", async () => {
+    const result = await runLLMStream(baseParams() as never);
+    expect(result.events.some((event) => event.type === "turn_usage")).toBe(false);
+  });
+});

@@ -2502,6 +2502,18 @@ export async function getChatPeople(chatId: string): Promise<ProjectPeople> {
     return apiRequest<ProjectPeople>(`/chat/${chatId}/people`);
 }
 
+export type SubagentTranscript = import("@mike/contracts").SubagentTranscript;
+
+/** The work of a subagent one of this chat's turns delegated to. */
+export async function getChatSubagentTranscript(
+    chatId: string,
+    childId: string,
+): Promise<SubagentTranscript> {
+    return apiRequest<SubagentTranscript>(
+        `/chat/${chatId}/subagents/${encodeURIComponent(childId)}`,
+    );
+}
+
 export async function getChatAccess(chatId: string): Promise<ContentAccess> {
     return apiRequest<ContentAccess>(`/chat/${chatId}/access`);
 }

@@ -73,6 +73,7 @@ import {
     createBranch,
     deleteDocument,
     fetchSiblings,
+    getChatSubagentTranscript,
     getDocument,
     renameLibraryDocument,
     renameProjectDocument,
@@ -522,6 +523,15 @@ export function ChatView({
     // edited copy as a sibling, moving the chat's leaf, and re-pointing the
     // leaf at a prompt so a new answer becomes a sibling of the old one.
     const branchBusyRef = useRef(false);
+
+    /** Reads the work of a subagent one of this chat's answers delegated to. */
+    const loadSubagentTranscript = useCallback(
+        (childId: string) => {
+            if (!chatId) return Promise.reject(new Error("No chat is open"));
+            return getChatSubagentTranscript(chatId, childId);
+        },
+        [chatId],
+    );
 
     /** Moves the caller's leaf and asks the host to reload the active path. */
     const moveLeaf = useCallback(
@@ -1395,6 +1405,11 @@ export function ChatView({
                                                     ) : (
                                                         <AssistantMessage
                                                             messageId={msg.id}
+                                                            onLoadSubagentTranscript={
+                                                                chatId
+                                                                    ? loadSubagentTranscript
+                                                                    : undefined
+                                                            }
                                                             sibling={sibling}
                                                             onRegenerate={
                                                                 branchActionsEnabled &&

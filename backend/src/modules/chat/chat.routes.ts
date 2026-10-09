@@ -47,6 +47,7 @@ import { normalizeEmail } from "../../lib/access";
 import { can } from "../../lib/permissions";
 import { generateAssistantChatTitle, logChatTitleFailure } from "./chat.title";
 import { sendInternalError } from "../../lib/httpError";
+import { sendServiceFailure } from "../../lib/serviceResult";
 import { titleModelForChat } from "../../lib/modelSelection";
 import {
     releaseMemoryConversationTurn,
@@ -68,6 +69,7 @@ import {
     generateChatTitle,
     getAccessibleChat,
     getChatMessages,
+    getChatSubagentTranscript,
     grantChatAccess,
     listChatGrants,
     listChatPeople,
@@ -183,6 +185,21 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
         // showing the hidden reservation as "no answer".
         active_turn: getActiveAssistantTurn(chatId),
     });
+}));
+
+// GET /chat/:chatId/subagents/:childId
+// The work of a subagent one of this chat's turns delegated to: its task,
+// its steps and its report. Visibility of the chat is enough, as it is for
+// reading the transcript the subagent's report fed.
+chatRouter.get("/:chatId/subagents/:childId", requireAuth, asyncRoute(async (req, res) => {
+    const result = await getChatSubagentTranscript(createDb(), {
+        chatId: req.params.chatId,
+        childId: req.params.childId,
+        userId: res.locals.userId as string,
+        userEmail: res.locals.userEmail as string | undefined,
+    });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
 }));
 
 // GET /chat/:chatId/turn/:turnId/stream?from=<seq>

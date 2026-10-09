@@ -409,11 +409,13 @@ vi.mock("../../modules/user/user.settings", () => ({
 
 // generate-title calls completeText; stub it so the success-path tests don't
 // reach a real LLM. Everything else in lib/llm stays real.
+const subagents = vi.hoisted(() => ({ transcript: vi.fn() }));
 vi.mock("../../lib/llm", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../lib/llm")>();
     return {
         ...actual,
         completeText: vi.fn(async () => "Generated Title"),
+        subagentTranscript: subagents.transcript,
     };
 });
 
@@ -3173,6 +3175,54 @@ describe("chat grants, deletion and roster", () => {
 
         expect(res.status).toBe(404);
         expect(res.body.detail).toBe("Chat not found");
+    });
+
+    it("serves a subagent's transcript to a caller who can read its chat", async () => {
+        mockedCreate.mockImplementation(() => makeRbacDb("member") as never);
+        subagents.transcript.mockResolvedValue({ childId: "7", chatKey: "chat-1", status: "done", entries: [] });
+
+        const res = await request(app)
+            .get("/chat/chat-1/subagents/7")
+            .set("Authorization", "Bearer test");
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({ childId: "7", status: "done" });
+        expect(subagents.transcript).toHaveBeenCalledWith("7");
+    });
+
+    it("404s a subagent of another chat, an unknown one, and any for a caller with no access", async () => {
+        mockedCreate.mockImplementation(() => makeRbacDb("member") as never);
+        subagents.transcript.mockResolvedValueOnce({ childId: "7", chatKey: "chat-2", entries: [] });
+        const otherChat = await request(app)
+            .get("/chat/chat-1/subagents/7")
+            .set("Authorization", "Bearer test");
+        expect(otherChat.status).toBe(404);
+        expect(otherChat.body.detail).toBe("Subagent not found");
+
+        subagents.transcript.mockResolvedValueOnce(null);
+        const unknown = await request(app)
+            .get("/chat/chat-1/subagents/99")
+            .set("Authorization", "Bearer test");
+        expect(unknown.status).toBe(404);
+
+        mockedCreate.mockImplementation(() => makeRbacDb(null) as never);
+        subagents.transcript.mockClear();
+        const noAccess = await request(app)
+            .get("/chat/chat-1/subagents/7")
+            .set("Authorization", "Bearer test");
+        expect(noAccess.status).toBe(404);
+        expect(noAccess.body.detail).toBe("Chat not found");
+        expect(subagents.transcript).not.toHaveBeenCalled();
+    });
+
+    it("answers a sanitized 500 when the subagent store fails", async () => {
+        mockedCreate.mockImplementation(() => makeRbacDb("member") as never);
+        subagents.transcript.mockRejectedValueOnce(new Error("relation pi_docs does not exist"));
+        const res = await request(app)
+            .get("/chat/chat-1/subagents/7")
+            .set("Authorization", "Bearer test");
+        expect(res.status).toBe(500);
+        expect(JSON.stringify(res.body)).not.toContain("pi_docs");
     });
 
     it("passes the caller's normalized email to get_chats_overview", async () => {

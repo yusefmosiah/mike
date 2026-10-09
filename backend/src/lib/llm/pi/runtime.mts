@@ -34,6 +34,7 @@ import {
   Harness,
   MemoryStorage,
   ProviderDoc,
+  UsageDoc,
   watchEvents,
   type AgentEvent,
   type Conversation,
@@ -48,6 +49,7 @@ import {
 import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
 import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
 import pg from "pg";
+import { DELEGATE_TOOL_SUMMARY } from "../types.js";
 import type {
   LlmMessage,
   LlmUserContent,
@@ -56,6 +58,10 @@ import type {
   ReasoningLevel,
   StreamChatParams,
   StreamChatResult,
+  SubagentEnvelope,
+  SubagentHost,
+  SubagentOutcome,
+  SubagentTranscript,
   TurnIdentity,
   UserApiKeys,
 } from "../types.js";
@@ -110,7 +116,11 @@ export type DurableTurnRecord = {
   firstEntry: number;
   context: JsonValue;
   startedAt: number;
+  /** The conversation's spend when the turn began; absent on records from before it was kept. */
+  usageAtStart?: TurnUsage;
 };
+
+type TurnUsage = { input: number; output: number; cost: number };
 
 const DurableTurns = defineDoc<Record<string, DurableTurnRecord>>({
   kind: "mike.turns",
@@ -136,6 +146,21 @@ type TurnBinding = {
    * rejects with the error, as Mike's dispatcher expects.
    */
   halt: (error: unknown) => void;
+  /** Output tokens the conversation may spend; past it, tools answer "report now". A subagent's budget. */
+  maxOutputTokens?: number;
+  /** A parent turn's delegation, when it offers the delegate tool. A child never has one. */
+  subagents?: {
+    host: SubagentHost;
+    /** Where the turn's children are recorded and addressed. */
+    chatKey: string;
+    turnKey: string | null;
+    /** Children counted against the per-turn cap, including ones being prepared. */
+    started: number;
+    /** The last child number given out; addresses use it. */
+    ordinal: number;
+    /** Children running, or being prepared, in this process. */
+    running: number;
+  };
 };
 
 /**
@@ -187,6 +212,8 @@ class Bindings {
 type Runtime = {
   harness: Harness;
   installTools: (schemas: readonly OpenAIToolSchema[]) => void;
+  /** Install the delegate tool with this description (global: the same for every user). */
+  installDelegate: (description: string) => void;
   resolve: MikeModels["resolve"];
   bindings: Bindings;
 };
@@ -263,6 +290,15 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   };
   registry.install(defineExtension({ name: "mike-tools", tools: [] }));
   registry.install(defineExtension({ name: "mike-memory", tools: [readMemoryTool(bindings)] }));
+  // Installed from the start so a delegate call a restart interrupted can run
+  // again; the first turn that offers delegation installs its description.
+  let delegateDescription = DELEGATE_BASE_DESCRIPTION;
+  const installDelegate = (description: string) => {
+    if (description === delegateDescription) return;
+    delegateDescription = description;
+    registry.install(defineExtension({ name: "mike-subagents", tools: [delegateTool(bindings, catalog.resolve, description)] }));
+  };
+  registry.install(defineExtension({ name: "mike-subagents", tools: [delegateTool(bindings, catalog.resolve, delegateDescription)] }));
 
   const harness = await Harness.open(
     storage,
@@ -284,6 +320,10 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   );
   for (const record of Object.values((await harness.snapshot(DurableTurns, background)) ?? {})) {
     bindings.resumable.add(record.conversation);
+    // A resumed parent runs its delegate call again, which finds its child
+    // and binds it; until then the child's own tool calls wait like the parent's.
+    const children = await harness.snapshot(SubagentChildren, String(record.conversation), background);
+    for (const child of children?.children ?? []) bindings.resumable.add(child);
   }
   persistTools = (schemas) => {
     void harness
@@ -311,7 +351,7 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       .then((conversation) => conversation?.abort(background))
       .catch((error: unknown) => console.error("[pi] failed to stop an orphaned run", error));
   }
-  return { harness, installTools, resolve: catalog.resolve, bindings };
+  return { harness, installTools, installDelegate, resolve: catalog.resolve, bindings };
 }
 
 /** Current memory, for when the thread's snapshot is not enough. Read-only. */
@@ -375,6 +415,12 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
           isError: true,
         };
       }
+      if (binding.maxOutputTokens !== undefined && (await usageOf(api, api.conversationId)).output >= binding.maxOutputTokens) {
+        return {
+          content: [{ type: "text", text: `Not run: you have used your ${binding.maxOutputTokens} output tokens. Report now with what you have, and say what is left undone.` }],
+          isError: true,
+        };
+      }
       const call: NormalizedToolCall = { id: api.callId, name, input: args as Record<string, unknown> };
       binding.onToolCallStart?.(call);
       let result;
@@ -388,6 +434,364 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
       return { content: [{ type: "text", text: result?.content ?? "" }] };
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Subagents
+// ---------------------------------------------------------------------------
+//
+// A `delegate` call starts a child conversation owned by the call's task
+// (Pi Durable's subagent pattern: aborting the call aborts the child, the
+// parent is idle only once the child is, and a rerun after a crash finds the
+// same child and submission). The parent turn's host (Mike's module side)
+// checks the call and supplies the child's model, instructions, read-only
+// tools and budgets; the child runs on its own binding, so its tool calls
+// reach only its own runner. A child is never offered `delegate` (depth 1).
+
+/** Children one parent turn may start. */
+export const MAX_SUBAGENTS_PER_TURN = 8;
+/** Children one parent turn may have running at once. */
+export const MAX_CONCURRENT_SUBAGENTS = 4;
+
+/** Until a turn installs the host's description (memo included). */
+const DELEGATE_BASE_DESCRIPTION = DELEGATE_TOOL_SUMMARY;
+
+const DELEGATE_PARAMETERS = {
+  type: "object",
+  properties: {
+    type: { type: "string", description: "The subagent type, from the SUBAGENTS list in your instructions." },
+    task: {
+      type: "string",
+      description: "What the subagent should find out or produce, in plain words and self-contained: it sees nothing else of this conversation.",
+    },
+    model: {
+      type: "string",
+      description: "Optional: a model from the table of models a subagent may run on. Omit to use this conversation's model.",
+    },
+    documents: {
+      type: "array",
+      items: { type: "string" },
+      description: "Optional: ids of the documents the task is about (doc-0, doc-1, ...).",
+    },
+  },
+  required: ["type", "task"],
+};
+
+type SubagentRecord = {
+  /** 0 until the record is written: a doc family has no "absent". */
+  parentConversation: number;
+  chatKey: string;
+  turnKey: string | null;
+  callId: string;
+  /** turn/<assistantMessageId>/<type>-<n> */
+  address: string;
+  type: string;
+  model: string;
+  status: SubagentOutcome["status"] | "running";
+  startedAt: number;
+  finishedAt: number | null;
+  usage: SubagentOutcome["usage"] | null;
+  envelopes: SubagentEnvelope[];
+};
+
+const Subagents = defineDocFamily<SubagentRecord, null>({
+  kind: "mike.subagent",
+  version: 1,
+  scope: "session",
+  family: true,
+  initial: () => ({
+    parentConversation: 0,
+    chatKey: "",
+    turnKey: null,
+    callId: "",
+    address: "",
+    type: "",
+    model: "",
+    status: "running",
+    startedAt: 0,
+    finishedAt: null,
+    usage: null,
+    envelopes: [],
+  }),
+});
+
+/** The children each parent conversation started, for recovery after a restart. */
+const SubagentChildren = defineDocFamily<{ children: number[] }, null>({
+  kind: "mike.subagent-children",
+  version: 1,
+  scope: "session",
+  family: true,
+  initial: () => ({ children: [] }),
+});
+
+/** Tokens and cost a conversation has spent on model responses. */
+async function usageOf(
+  api: { commit: <T>(change: (tx: Tx) => T | Promise<T>, context: typeof background) => Promise<T> },
+  conversationId: ConversationId,
+): Promise<TurnUsage> {
+  const ledger = await api.commit(async (tx) => JSON.parse(JSON.stringify(await tx.doc(UsageDoc, conversationId))), background);
+  const total = { input: 0, output: 0, cost: 0 };
+  for (const usage of Object.values((ledger?.models ?? {}) as Record<string, { input?: number; output?: number; cost?: { total?: number } }>)) {
+    total.input += usage.input ?? 0;
+    total.output += usage.output ?? 0;
+    total.cost += usage.cost?.total ?? 0;
+  }
+  return total;
+}
+
+/** The text of a conversation's last assistant entry, if any. */
+async function lastAssistantText(harness: Pick<Harness, "conversation">, conversationId: ConversationId): Promise<string> {
+  const conversation = await harness.conversation(conversationId, background);
+  if (!conversation) return "";
+  const page = await conversation.entries({ order: "descending" }, 20, undefined, background);
+  for (const entry of page.items) {
+    const message = entry.kind === "pi.assistant" ? entry.model?.[0] : undefined;
+    if (message?.role !== "assistant") continue;
+    const text = message.content.map((part) => (part.type === "text" ? part.text : "")).join("").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function delegateTool(bindings: Bindings, resolve: MikeModels["resolve"], description: string): ToolRegistration {
+  return defineTool({
+    name: "delegate",
+    description,
+    parameters: DELEGATE_PARAMETERS as never,
+    // A rerun after a crash finds the child it started and the submission it
+    // made (request id), so it waits for that child instead of starting another.
+    replay: "safe",
+    execute: async (args, api, context) => {
+      const refuse = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
+      const binding = await bindings.wait(api.conversationId, context.abortSignal);
+      if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");
+      const delegation = binding.subagents;
+      if (!delegation) return refuse("Delegation is not available here: a subagent cannot start subagents of its own.");
+      if ((await roundsSince(api, binding.firstEntry)) > binding.maxRounds) {
+        return refuse(`Not run: this turn has used its ${binding.maxRounds} tool rounds. Answer now with what you have.`);
+      }
+      const input = args as Record<string, unknown>;
+      binding.onToolCallStart?.({ id: api.callId, name: "delegate", input });
+
+      const previous = (await api.commit((tx) => tx.scanConversations({ ownerTaskId: api.taskId }, 1), context)).items[0];
+      if (!previous) {
+        if (delegation.started >= MAX_SUBAGENTS_PER_TURN) {
+          return refuse(`Not run: this turn has already started ${MAX_SUBAGENTS_PER_TURN} subagents. Answer with what you have.`);
+        }
+        if (delegation.running >= MAX_CONCURRENT_SUBAGENTS) {
+          return refuse(`Not run: ${MAX_CONCURRENT_SUBAGENTS} subagents are already running. Wait for their reports.`);
+        }
+      }
+      // Take both slots before the next await. Mike runs a round's tool calls
+      // in order today, but under parallel execution every delegate call in
+      // one response would otherwise pass the checks above together.
+      if (!previous) delegation.started += 1;
+      delegation.running += 1;
+      let boundChild: ConversationId | undefined;
+      let releaseKeys = () => {};
+      try {
+        const spec = await delegation.host.prepare(input);
+        if (typeof spec === "string") {
+          if (!previous) delegation.started -= 1;
+          return refuse(spec);
+        }
+        // Numbered when it is certain to start, so a refused call leaves no gap.
+        const ordinal = previous ? 0 : ++delegation.ordinal;
+        const ref = resolve(spec.model);
+
+        let session = "";
+        let address = "";
+        const childId = await api.commit(async (tx) => {
+          const found = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
+          if (found) {
+            session = (await tx.doc(ProviderDoc, found.id)).sessionId;
+            address = (await tx.doc(Subagents, String(found.id), null)).address;
+            return found.id;
+          }
+          const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
+          await configure(tx, created.id, {
+            model: ref,
+            thinkingLevel: thinkingLevel(spec.reasoning),
+            instructions: spec.instructions,
+            tools: spec.tools.map((name) => ({ name }) as ToolRegistration),
+          });
+          session = (await tx.doc(ProviderDoc, created.id)).sessionId;
+          address = `turn/${delegation.turnKey ?? "unsaved"}/${spec.type}-${ordinal}`;
+          const record = await tx.doc(Subagents, String(created.id), null);
+          Object.assign(record, {
+            parentConversation: api.conversationId,
+            chatKey: delegation.chatKey,
+            turnKey: delegation.turnKey,
+            callId: api.callId,
+            address,
+            type: spec.type,
+            model: spec.model,
+            status: "running",
+            startedAt: Date.now(),
+            finishedAt: null,
+            usage: null,
+            envelopes: [
+              {
+                id: randomUUID(),
+                from: `turn/${delegation.turnKey ?? "unsaved"}`,
+                to: address,
+                kind: "task",
+                correlationId: api.callId,
+                body: spec.task,
+                artifactRefs: [],
+                at: Date.now(),
+              },
+            ],
+          });
+          (await tx.doc(SubagentChildren, String(api.conversationId), null)).children.push(created.id);
+          return created.id;
+        }, context);
+
+        const child = await api.conversation(childId, context);
+        if (!child) throw new Error("The subagent's conversation is missing.");
+        let childHalted: unknown;
+        boundChild = childId;
+        bindings.set(childId, {
+          runTools: spec.runTools,
+          maxRounds: spec.maxRounds,
+          maxOutputTokens: spec.maxOutputTokens,
+          // A child's first entry: it has no history of its own.
+          firstEntry: 1 as EntryId,
+          halt: (error) => {
+            childHalted ??= error;
+            void child.abort(background).catch(() => undefined);
+          },
+        });
+        releaseKeys = useRequestKeys(session, spec.apiKeys);
+        await api.details({ conversationId: childId, address }, context);
+        delegation.host.started?.({
+          callId: api.callId,
+          childId: String(childId),
+          address,
+          type: spec.type,
+          model: spec.model,
+          task: spec.task,
+        });
+
+        let status: SubagentOutcome["status"] = "done";
+        let report = "";
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          void child.abort(background).catch(() => undefined);
+        }, spec.timeoutMs);
+        try {
+          const submission = await child.submit(
+            { type: "input", content: spec.task, requestId: `subagent:${api.taskId}`, whenBusy: "reject" },
+            context,
+          );
+          const settled = await submission.wait(context);
+          if (settled.status === "done" && settled.type === "input") {
+            const answer = await api.commit((tx) => tx.entry(settled.answer), context);
+            const message = answer?.model?.[0];
+            report = message?.role === "assistant"
+              ? message.content.map((part) => (part.type === "text" ? part.text : "")).join("").trim()
+              : "";
+          } else {
+            status = timedOut ? "timed_out" : context.abortSignal?.aborted ? "stopped" : "failed";
+          }
+        } catch (error) {
+          if (context.abortSignal?.aborted && !timedOut) throw error;
+          status = timedOut ? "timed_out" : "failed";
+        } finally {
+          clearTimeout(timer);
+        }
+        if (status !== "done") {
+          const partial = await lastAssistantText(api as unknown as Pick<Harness, "conversation">, childId).catch(() => "");
+          const why =
+            status === "timed_out"
+              ? `The subagent ran out of time (${Math.round(spec.timeoutMs / 1000)} s).`
+              : `The subagent could not finish${childHalted instanceof Error ? `: ${childHalted.message}` : "."}`;
+          report = partial ? `${why} Its last words:\n\n${partial}` : why;
+        }
+        const usage = await usageOf(api, childId);
+        await api.commit(async (tx) => {
+          const record = await tx.doc(Subagents, String(childId), null);
+          record.status = status;
+          record.finishedAt = Date.now();
+          record.usage = usage;
+          record.envelopes.push({
+            id: randomUUID(),
+            from: record.address,
+            to: `turn/${record.turnKey ?? "unsaved"}`,
+            kind: "report",
+            correlationId: api.callId,
+            body: report,
+            artifactRefs: [],
+            at: Date.now(),
+          });
+        }, context);
+        delegation.host.finished?.({ callId: api.callId, childId: String(childId), status, report, usage });
+        return {
+          content: [{ type: "text", text: `Report from the ${spec.type} subagent (${spec.model}, ${status}):\n\n${report || "(empty report)"}` }],
+          isError: status !== "done",
+        };
+      } finally {
+        delegation.running -= 1;
+        releaseKeys();
+        if (boundChild !== undefined) bindings.delete(boundChild);
+      }
+    },
+  });
+}
+
+const TRANSCRIPT_TOOL_RESULT_CHARS = 2_000;
+
+/** A child's record and work, or null when no subagent has this id. */
+export async function subagentTranscriptOnPi(childId: string): Promise<SubagentTranscript | null> {
+  if (!/^\d+$/.test(childId)) return null;
+  const { harness } = await piRuntime();
+  const record = await harness.snapshot(Subagents, childId, background);
+  if (!record?.parentConversation) return null;
+  const conversation = await harness.conversation(Number(childId) as ConversationId, background);
+  const entries: SubagentTranscript["entries"] = [];
+  let cursor: Parameters<Conversation["entries"]>[2];
+  do {
+    if (!conversation) break;
+    const page = await conversation.entries({ order: "ascending" }, 200, cursor, background);
+    for (const entry of page.items) {
+      const message = entry.model?.[0];
+      if (!message) continue;
+      if (message.role === "user") {
+        entries.push({ kind: "task", text: userText(message.content) });
+      } else if (message.role === "assistant") {
+        entries.push({
+          kind: "assistant",
+          text: message.content.map((part) => (part.type === "text" ? part.text : "")).join("").trim(),
+          toolCalls: message.content.flatMap((part) => (part.type === "toolCall" ? [{ name: part.name, input: part.arguments }] : [])),
+        });
+      } else if (message.role === "toolResult") {
+        const text = message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+        entries.push({
+          kind: "tool_result",
+          name: message.toolName,
+          text: text.length > TRANSCRIPT_TOOL_RESULT_CHARS ? `${text.slice(0, TRANSCRIPT_TOOL_RESULT_CHARS)}…` : text,
+          isError: Boolean(message.isError),
+        });
+      }
+    }
+    cursor = page.next;
+  } while (cursor);
+  return {
+    childId,
+    chatKey: record.chatKey,
+    turnKey: record.turnKey,
+    callId: record.callId,
+    address: record.address,
+    type: record.type,
+    model: record.model,
+    status: record.status,
+    startedAt: record.startedAt,
+    finishedAt: record.finishedAt,
+    usage: record.usage,
+    envelopes: record.envelopes,
+    entries,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -659,7 +1063,7 @@ export async function streamChatWithToolsOnPi(params: StreamChatParams): Promise
 }
 
 async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<StreamChatResult> {
-  const { harness, installTools, resolve, bindings } = runtime;
+  const { harness, installTools, installDelegate, resolve, bindings } = runtime;
   const ref = resolve(params.model);
   const vision = openModels().models.getModel(ref.provider, ref.modelId)?.input.includes("image") ?? false;
   const memory = params.memoryMessage && params.messages[0] === params.memoryMessage ? params.memoryMessage : undefined;
@@ -670,6 +1074,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
 
   const tools = params.tools ?? [];
   installTools(tools);
+  if (params.subagents) installDelegate(params.subagents.toolDescription);
   const chatKey = params.conversationId ?? `ephemeral:${randomUUID()}`;
   // A durable turn is keyed by its reserved answer; resuming one attaches to
   // the conversation it was already running in.
@@ -702,12 +1107,16 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       tools: [
         ...tools.map((tool: OpenAIToolSchema) => tool.function.name),
         ...(params.readMemory ? ["read_memory"] : []),
+        ...(params.subagents ? ["delegate"] : []),
       ].map((name) => ({ name }) as ToolRegistration),
     });
   }, background);
 
   const callbacks = params.callbacks ?? {};
   const firstEntry = resumed ? (resumed.firstEntry as EntryId) : await nextEntryId(conversation);
+  // What the conversation had spent before this turn: a turn runs alone in
+  // its conversation, so the growth is the turn's own (children keep theirs).
+  const usageAtStart = resumed ? resumed.usageAtStart : await usageOf(conversation, conversation.id);
   if (turnKey && !resumed) {
     // Written before the input is sent, so a crash at any later point leaves a
     // turn the next process can drive again.
@@ -718,6 +1127,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         firstEntry,
         context: params.durableTurn!.context as JsonValue,
         startedAt: Date.now(),
+        ...(usageAtStart ? { usageAtStart } : {}),
       };
     }, background);
   }
@@ -735,6 +1145,9 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         // Not awaited: the abort waits for this very tool to return.
         void conversation.abort(background).catch(() => undefined);
       },
+      ...(params.subagents
+        ? { subagents: { host: params.subagents, chatKey, turnKey: params.turn?.assistantMessageId ?? null, started: 0, ordinal: 0, running: 0 } }
+        : {}),
     });
   }
   let fullText = "";
@@ -866,7 +1279,19 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       if (!fullText.endsWith(text)) fullText = text;
     }
     answered = true;
-    return { fullText };
+    const spent = usageAtStart ? await usageOf(conversation, conversation.id) : undefined;
+    return {
+      fullText,
+      ...(usageAtStart && spent
+        ? {
+            usage: {
+              input: spent.input - usageAtStart.input,
+              output: spent.output - usageAtStart.output,
+              cost: spent.cost - usageAtStart.cost,
+            },
+          }
+        : {}),
+    };
   } finally {
     params.abortSignal?.removeEventListener("abort", onAbort);
     releaseKeys();

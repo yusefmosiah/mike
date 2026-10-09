@@ -1722,3 +1722,82 @@ describe("readAssistantTurn connection handling", () => {
     turn.finish();
   });
 });
+
+describe("subagent frames", () => {
+  const started = {
+    type: "subagent",
+    call_id: "call-1",
+    child_id: "7",
+    address: "turn/a1/document_review-1",
+    agent_type: "document_review",
+    model: "opencode-go/glm-5",
+    task: "Find the governing law",
+    status: "running",
+  };
+
+  it("keeps one line per child, updated when it finishes", async () => {
+    expect(
+      await eventsOf([
+        started,
+        {
+          ...started,
+          status: "done",
+          report_preview: "Delaware",
+          usage: { input: 900, output: 100, cost: 0.002 },
+        },
+      ]),
+    ).toEqual([
+      {
+        ...started,
+        status: "done",
+        report_preview: "Delaware",
+        usage: { input: 900, output: 100, cost: 0.002 },
+      },
+      thinking,
+    ]);
+  });
+
+  it("keeps two children of one turn apart", async () => {
+    const events = await eventsOf([
+      started,
+      { ...started, child_id: "8", address: "turn/a1/document_review-2" },
+      { ...started, child_id: "7", status: "failed" },
+    ]);
+    expect(
+      events
+        ?.filter((event) => event.type === "subagent")
+        .map((event) => [event.child_id, event.status]),
+    ).toEqual([
+      ["7", "failed"],
+      ["8", "running"],
+    ]);
+  });
+
+  it("drops a frame without a child id or with an unknown status, and malformed usage", async () => {
+    expect(
+      await eventsOf([
+        { ...started, child_id: "" },
+        { ...started, status: "exploded" },
+        { ...started, status: "done", usage: { input: "many" } },
+      ]),
+    ).toEqual([{ ...started, status: "done" }, thinking]);
+  });
+});
+
+describe("turn usage frames", () => {
+  it("keeps the turn's own spend with the answer", async () => {
+    const events = await eventsOf([
+      { type: "content_delta", text: "Done." },
+      { type: "turn_usage", input: 900, output: 100, cost: 0.002 },
+    ]);
+    expect(events).toContainEqual({ type: "turn_usage", input: 900, output: 100, cost: 0.002 });
+  });
+
+  it("drops a usage frame with a missing or non-numeric field", async () => {
+    const events = await eventsOf([
+      { type: "turn_usage", input: 900, output: "lots", cost: 0.002 },
+      { type: "turn_usage", input: 900, output: 100 },
+    ]);
+    expect(events?.some((event) => event.type === "turn_usage")).toBe(false);
+  });
+});

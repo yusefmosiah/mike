@@ -21,6 +21,7 @@ export {
   revokeChatAccess,
 } from "./chat.sharing";
 export { updateChatSettings } from "./chat.settings";
+export { getChatSubagentTranscript } from "./chat.subagents";
 export { updateChatTitle, generateChatTitle } from "./chat.titles";
 export { type PreparedChatStream, prepareChatStream } from "./chat.prepare";
 export {

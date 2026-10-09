@@ -71,3 +71,52 @@ citation verification (Mission 6) builds on this later.
   the child reads the document with its own tools, the parent answers from the
   child's report; the transcript control shows the child's work; the cost of
   both appears.
+
+## Built (2026-10-09, branch `feat/subagents`; not owner accepted)
+
+- `delegate` runs a Pi Durable task-owned child conversation
+  (`backend/src/lib/llm/pi/runtime.mts`, "Subagents" section). The child gets
+  its type's instructions, its own tools (filtered to the type's list and to
+  what the parent was offered), its own round and output-token budgets and a
+  timeout. It is never offered `delegate` (depth 1). Records and the
+  `task`/`report` envelopes live in Pi docs (`mike.subagent`); a resumed
+  parent finds the same child by its owner task and drives it again.
+- Types and the model memo are markdown in
+  `backend/src/modules/chat/engine/subagents/` (copied into `dist` by
+  `backend/scripts/copy-build-assets.mjs`); `subagentHost.ts` checks a call
+  and builds the child's spec. `subagentModels.ts` lists the models the user
+  may use, with speed tiers and OpenRouter list prices (none fetched in strict
+  private mode).
+- Wire: a `subagent` event (started, then finished) and a `turn_usage` event
+  with the parent's own spend; `GET /chat/:chatId/subagents/:childId` serves
+  the child's transcript to anyone who can read the chat.
+- Web app: a "Delegated to …" line under the turn's steps shows model, status
+  and cost, and opens to the child's task, steps and report. A delegating
+  answer shows "This answer: … · N subagents: …" under it.
+- Audit: the `chat.message` row carries the turn's own tokens and cost; each
+  child adds a `subagent.run` row with its model, tokens and cost (never its
+  task text). History labels it "Subagent".
+
+Differences from the design, for review:
+
+- **Children run one after another.** Mike's harness runs a round's tool
+  calls in order (`toolExecution: "sequential"`) because the dispatcher keeps
+  per-turn edit and read state. The 4-at-once limit is enforced (slots are
+  taken before the first await) but is not reachable until delegate calls can
+  run in parallel. Running them in parallel needs either a per-tool execution
+  mode in Pi or a batch delegate call.
+- **Costs for flat-rate models are list-price equivalents.** Pi prices
+  opencode-go tokens at catalog rates, so the cost line shows dollars for a
+  subscription the user does not pay per token. Owner decision: show, relabel,
+  or hide for flat-rate lanes.
+- The live stream shows the child's start and end; its steps are loaded when
+  the line is opened (and again when it finishes), not streamed step by step.
+
+Live check (isolated e2e stack, opencode-go/deepseek-v4.1-flash, public UK
+Model Services Contract): the parent delegated, the child read the contract
+with `read_document`/`find_in_document`, hit its 8-round limit on the ninth
+round and reported; the parent answered with clause citations. Run 1: parent
+14,709 in / 5,229 out ($0.0055 list), child 25,874 in / 7,732 out ($0.0090
+list), 132 s. Audit rows and stored events matched. The transcript endpoint
+answered 200 for the chat and 404 for another chat id. Opened in the browser,
+the line expanded to the child's task and steps with no console errors.

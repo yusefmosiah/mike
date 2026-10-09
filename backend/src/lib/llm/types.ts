@@ -138,10 +138,87 @@ export type StreamChatParams = {
      * already in flight instead of sending the input again. Needs `turn`.
      */
     durableTurn?: { context: Record<string, unknown>; resume?: boolean };
+    /**
+     * Let the model delegate to subagents: offers the `delegate` tool, whose
+     * calls this host checks and reports on. Omitted, there is no delegation
+     * (a child turn never has it: depth 1).
+     */
+    subagents?: SubagentHost;
 };
+
+/** The first line of the delegate tool's description; the host appends the model memo. */
+export const DELEGATE_TOOL_SUMMARY =
+    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with its own read-only tools, and cannot talk to the user.";
+
+/**
+ * A child the `delegate` tool may start: what the parent turn's host decided
+ * from the call (type, model, instructions, tools, budgets) and the child's
+ * own tool runner, which only reaches those tools.
+ */
+export type SubagentSpec = {
+    type: string;
+    /** Mike model id. */
+    model: string;
+    reasoning?: ReasoningLevel;
+    /** The child's system instructions. */
+    instructions: string;
+    /** Mike tools the child may call, all already offered to the parent. */
+    tools: string[];
+    /** The child's first and only input. */
+    task: string;
+    maxRounds: number;
+    /** Output tokens the child may spend across its run. */
+    maxOutputTokens: number;
+    timeoutMs: number;
+    apiKeys?: UserApiKeys;
+    runTools: NonNullable<StreamChatParams["runTools"]>;
+};
+
+/** How a child's run ended, as the parent's host is told. */
+export type SubagentOutcome = {
+    callId: string;
+    childId: string;
+    status: "done" | "failed" | "timed_out" | "stopped";
+    /** The child's final answer, or why there is none. */
+    report: string;
+    usage: { input: number; output: number; cost: number };
+};
+
+/**
+ * A parent turn's side of delegation (see modules/chat/engine/subagents).
+ * The runtime owns the child's conversation, limits and records; the host
+ * checks a call and tells the parent's stream and transcript about the child.
+ */
+export type SubagentHost = {
+    /**
+     * The delegate tool's description, model-selection memo included. One
+     * registry serves every user, so it must not vary by user: per-user
+     * choices (types, allowed models) belong in the system prompt.
+     */
+    toolDescription: string;
+    /** The child's spec, or the refusal the model reads instead. */
+    prepare: (input: Record<string, unknown>) => Promise<SubagentSpec | string>;
+    started?: (child: {
+        callId: string;
+        childId: string;
+        address: string;
+        type: string;
+        model: string;
+        task: string;
+    }) => void;
+    finished?: (child: SubagentOutcome) => void;
+};
+
+// The envelope and transcript are wire shapes, declared with the API contracts.
+export type { SubagentEnvelope, SubagentTranscript } from "@mike/contracts";
 
 export type StreamChatResult = {
     fullText: string;
+    /**
+     * Tokens and cost this turn's own model responses spent, subagents not
+     * included (each reports its own). Absent when it could not be measured.
+     */
+    usage?: { input: number; output: number; cost: number };
 };
 
 // ---------------------------------------------------------------------------

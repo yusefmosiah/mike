@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-build-assets.mjs",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "typecheck:contracts": "tsc -p ../packages/contracts/tsconfig.json",
     "start": "node --enable-source-maps dist/index.js",

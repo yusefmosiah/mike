@@ -283,6 +283,7 @@ export async function driveChatTurn(
                       }
                     : undefined,
                 includeMemory: true,
+                includeSubagents: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
                 memoryProjectId: canReadProjectMemory

@@ -38,6 +38,7 @@ import {
     moveDocumentToFolder,
     moveSubfolderToFolder,
     resolveProjectFolderPath,
+    getChatSubagentTranscript,
 } from "@/app/lib/mikeApi";
 import { loadAssistantChat } from "@/app/lib/assistantTurns";
 import {
@@ -489,6 +490,16 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             }
         },
         [branchIntoNewThread, projectId, router],
+    );
+
+    const loadSubagentTranscript = useCallback(
+        (childId: string) => {
+            if (!activeChatId) {
+                return Promise.reject(new Error("No chat is open"));
+            }
+            return getChatSubagentTranscript(activeChatId, childId);
+        },
+        [activeChatId],
     );
 
     const handleNavigateSibling = useCallback(
@@ -2363,6 +2374,11 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                     <AssistantMessage
                                         key={i}
                                         messageId={msg.id}
+                                        onLoadSubagentTranscript={
+                                            activeChatId
+                                                ? loadSubagentTranscript
+                                                : undefined
+                                        }
                                         sibling={msg.sibling ?? null}
                                         onRegenerate={
                                             branchActionsEnabled &&

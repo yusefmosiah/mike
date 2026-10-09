@@ -71,7 +71,26 @@ type TurnEvent = {
     document_id?: string;
     version_id?: string;
   }>;
+  // subagent (see SubagentEvent in @mike/contracts).
+  child_id?: string;
+  address?: string;
+  agent_type?: string;
+  model?: string;
+  status?: string;
+  usage?: { input?: number; output?: number; cost?: number };
+  // turn_usage: the turn's own model spend.
+  input?: number;
+  output?: number;
+  cost?: number;
 };
+
+/** A subagent's end, in the audit trail's three statuses. */
+function subagentAuditStatus(status: string | undefined): AuditStatus {
+  if (status === "done") return "completed";
+  // Still "running" when the turn ended: the turn was cut off around it.
+  if (status === "stopped" || status === "running") return "cancelled";
+  return "failed";
+}
 
 export type ChatTurnAuditBase = {
   userId: string;
@@ -112,6 +131,21 @@ export function chatTurnAuditEvents(
   }>,
 ): AuditEventInput[] {
   const surface = base.surface ?? (base.projectId ? "project" : "assistant");
+  // The turn's own spend rides on its chat.message row; each subagent's on
+  // its own subagent.run row below, so the two add up to the whole turn.
+  const turnUsage = (events ?? []).find(
+    (raw) => (raw as TurnEvent)?.type === "turn_usage",
+  ) as TurnEvent | undefined;
+  const detail = {
+    ...(base.flags ?? {}),
+    ...(turnUsage
+      ? {
+          input_tokens: turnUsage.input ?? null,
+          output_tokens: turnUsage.output ?? null,
+          cost_usd: turnUsage.cost ?? null,
+        }
+      : {}),
+  };
   const rows: AuditEventInput[] = [
     {
       userId: base.userId,
@@ -123,7 +157,7 @@ export function chatTurnAuditEvents(
       projectId: base.projectId ?? null,
       chatId: base.chatId,
       model: base.model,
-      detail: base.flags && Object.keys(base.flags).length ? base.flags : null,
+      detail: Object.keys(detail).length ? detail : null,
     },
   ];
   // Attested-lane receipts the turn produced, drained from the process-local
@@ -170,6 +204,30 @@ export function chatTurnAuditEvents(
           detail: null,
         });
       }
+      continue;
+    }
+    // A subagent the turn delegated to: its own model and what it spent, so
+    // a child's cost is accounted for apart from the turn that started it.
+    if (ev?.type === "subagent") {
+      rows.push({
+        userId: base.userId,
+        userEmail: base.userEmail,
+        action: "subagent.run",
+        status: subagentAuditStatus(ev.status),
+        title: ev.agent_type ?? null,
+        surface,
+        projectId: base.projectId ?? null,
+        chatId: base.chatId,
+        model: ev.model ?? null,
+        detail: {
+          child_id: ev.child_id ?? null,
+          address: ev.address ?? null,
+          outcome: ev.status ?? null,
+          input_tokens: ev.usage?.input ?? null,
+          output_tokens: ev.usage?.output ?? null,
+          cost_usd: ev.usage?.cost ?? null,
+        },
+      });
       continue;
     }
     const action =

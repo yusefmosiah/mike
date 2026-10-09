@@ -46,6 +46,7 @@ const ACTION_LABELS: Record<string, string> = {
   "document.generated": "Generated document",
   "document.edited": "Document edit",
   "workflow.applied": "Workflow",
+  "subagent.run": "Subagent",
   "tabular.created": "Tabular review",
   "tabular.generated": "Tabular run",
   "export.chats": "Chat export",

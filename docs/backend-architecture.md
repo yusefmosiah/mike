@@ -297,6 +297,14 @@ The assistant engine lives in `modules/chat/engine/`. Other chat surfaces use
 named exports from `chat.service.ts`. HTTP framing lives in `lib/assistantSse.ts`;
 message reservation and persistence belong to the chat module.
 
+Subagents split the same way. The runtime (`lib/llm/pi/runtime.mts`) owns the
+`delegate` tool: the child conversation, its limits, its records and its
+restart. The engine (`modules/chat/engine/subagents/`) decides what a child
+may be: the type files, the models the user may pick, and a `SubagentHost`
+that checks each call and runs the child's tools through the ordinary
+dispatcher. A new kind of subagent is a markdown file in `subagents/types/`,
+and its tools must be tier-1 reads.
+
 ## Background jobs
 
 `jobs/registry.ts` composes domain handlers from module facades and supplies both

@@ -41,6 +41,11 @@ import {
     WorkflowAppliedBlock,
     type CourtListenerBlockItem,
 } from "./message/EventBlocks";
+import {
+    delegatedTurnCost,
+    SubagentBlock,
+    type LoadSubagentTranscript,
+} from "./message/SubagentBlock";
 
 interface Props {
     events?: AssistantEvent[];
@@ -129,6 +134,11 @@ interface Props {
     onBranchIntoNewThread?: () => void;
     /** Steps to the previous (-1) or next (1) sibling branch. */
     onNavigateSibling?: (dir: -1 | 1) => void;
+    /**
+     * Loads the work of a subagent this response delegated to. When absent,
+     * a subagent line opens to its task and the start of its report only.
+     */
+    onLoadSubagentTranscript?: LoadSubagentTranscript;
 }
 
 export function AssistantMessage({
@@ -157,6 +167,7 @@ export function AssistantMessage({
     onRegenerate,
     onBranchIntoNewThread,
     onNavigateSibling,
+    onLoadSubagentTranscript,
 }: Props) {
     const contentDivRef = useRef<HTMLDivElement | null>(null);
     const [isCopied, setIsCopied] = useState(false);
@@ -217,7 +228,8 @@ export function AssistantMessage({
         event.type !== "error" &&
         event.type !== "ask_inputs_response" &&
         event.type !== "case_citation" &&
-        event.type !== "case_opinions";
+        event.type !== "case_opinions" &&
+        event.type !== "turn_usage";
 
     // Find the last content event so its raw text can be smoothed before
     // citation preprocessing — slicing already-preprocessed text would risk
@@ -601,6 +613,16 @@ export function AssistantMessage({
                                   })
                             : undefined
                     }
+                />
+            );
+        }
+        if (event.type === "subagent") {
+            return (
+                <SubagentBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
+                    onLoadTranscript={onLoadSubagentTranscript}
                 />
             );
         }
@@ -1164,6 +1186,12 @@ export function AssistantMessage({
                             citationStatus === "partial"
                         }
                     />
+                )}
+
+                {!isStreaming && delegatedTurnCost(events) && (
+                    <p className="pt-2 font-sans text-xs text-gray-500 break-words">
+                        {delegatedTurnCost(events)}
+                    </p>
                 )}
 
                 {/* Copy button */}

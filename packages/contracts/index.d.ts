@@ -387,9 +387,88 @@ export type AssistantEvent =
        * "invalid_api_key": the provider rejected the caller's key.
        */
       code?: AssistantErrorCode;
-    };
+    }
+  | SubagentEvent
+  | TurnUsageEvent;
 
 export type AssistantErrorCode = "invalid_api_key";
+
+/**
+ * A subagent the turn delegated to (the `delegate` tool). Streamed when it
+ * starts and again when it ends; the stored copy is the last one. Its
+ * transcript is read from GET /chat/:chatId/subagents/:child_id, so it never
+ * appears in the chat's own thread.
+ */
+export type SubagentEvent = {
+  type: "subagent";
+  /** The delegate tool call that started it. */
+  call_id: string;
+  /** The child conversation, as the transcript endpoint names it. */
+  child_id: string;
+  /** Stable address: turn/<assistantMessageId>/<type>-<n>. */
+  address: string;
+  agent_type: string;
+  model: string;
+  task: string;
+  status: "running" | "done" | "failed" | "timed_out" | "stopped";
+  /** The start of the child's report, once it has one. */
+  report_preview?: string;
+  /** Tokens and cost the child spent, once it ends. */
+  usage?: { input: number; output: number; cost: number };
+};
+
+/**
+ * A message between a turn and a subagent, addressed by their stable
+ * addresses (turn/<id> and turn/<id>/<type>-<n>). Today a turn sends one
+ * task and receives one report; the other kinds are reserved so steering,
+ * follow-ups and streamed findings can be added without a new shape.
+ */
+export type SubagentEnvelope = {
+  id: string;
+  from: string;
+  to: string;
+  kind: "task" | "steer" | "followUp" | "report" | "finding";
+  /** Ties a report to the task it answers. */
+  correlationId: string;
+  body: string;
+  artifactRefs: string[];
+  /** Milliseconds since the epoch. */
+  at: number;
+};
+
+/** GET /chat/:chatId/subagents/:childId: a subagent's record and its work. */
+export type SubagentTranscript = {
+  childId: string;
+  /** The chat (or other surface key) whose turn started it. */
+  chatKey: string;
+  turnKey: string | null;
+  callId: string;
+  address: string;
+  type: string;
+  model: string;
+  status: SubagentEvent["status"];
+  startedAt: number;
+  finishedAt: number | null;
+  usage: { input: number; output: number; cost: number } | null;
+  envelopes: SubagentEnvelope[];
+  entries: Array<
+    | { kind: "task"; text: string }
+    | { kind: "assistant"; text: string; toolCalls: Array<{ name: string; input: unknown }> }
+    | { kind: "tool_result"; name: string; text: string; isError: boolean }
+  >;
+};
+
+/**
+ * What the turn's own model responses spent, sent once the answer is done.
+ * Subagents are not included; each subagent event carries its own usage.
+ */
+export type TurnUsageEvent = {
+  type: "turn_usage";
+  input: number;
+  output: number;
+  /** US dollars at the provider's list price; 0 when unpriced or flat-rate. */
+  cost: number;
+};
 
 export type WordEditApplyMode = "direct" | "approval";
 

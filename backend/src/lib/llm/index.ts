@@ -1,7 +1,12 @@
 // Mike's model boundary. Every model runs on Pi Durable and pi-ai
 // (`./pi/runtime.mts`); the runtime is ESM-only, so it is loaded with a
 // dynamic import.
-import type { StreamChatParams, StreamChatResult, UserApiKeys } from "./types";
+import type {
+    StreamChatParams,
+    StreamChatResult,
+    SubagentTranscript,
+    UserApiKeys,
+} from "./types";
 
 export * from "./types";
 export * from "./models";
@@ -71,4 +76,12 @@ export async function completeText(params: {
 }): Promise<string> {
     const { completeTextOnPi } = await import("./pi/runtime.mjs");
     return completeTextOnPi(params);
+}
+
+/** A subagent's record and work, or null when no subagent has this id. */
+export async function subagentTranscript(
+    childId: string,
+): Promise<SubagentTranscript | null> {
+    const { subagentTranscriptOnPi } = await import("./pi/runtime.mjs");
+    return subagentTranscriptOnPi(childId);
 }

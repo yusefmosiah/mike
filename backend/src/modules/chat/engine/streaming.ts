@@ -6,6 +6,7 @@ import {
   type LlmUserContent,
   type NormalizedToolCall,
   type OpenAIToolSchema,
+  type StreamChatResult,
 } from "../../../lib/llm";
 import { resolveRequestedModel } from "../../../lib/routerModels";
 import { UserFacingError } from "../../../lib/userFacingError";
@@ -58,6 +59,8 @@ import {
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
+import { safeError } from "../../../lib/safeError";
+import { createSubagentHost } from "./subagents/subagentHost";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
   classifyToolCall,
@@ -430,6 +433,11 @@ export async function runLLMStream(params: {
   turn?: import("../../../lib/llm").TurnIdentity;
   /** Make the turn survive a restart, or drive one that did (see StreamChatParams.durableTurn). */
   durableTurn?: import("../../../lib/llm").StreamChatParams["durableTurn"];
+  /**
+   * Offer the delegate tool: the model may hand self-contained, read-only
+   * tasks to subagents (./subagents). Defaults to false.
+   */
+  includeSubagents?: boolean;
 }): Promise<{
   fullText: string;
   events: AssistantEvent[];
@@ -679,6 +687,7 @@ export async function runLLMStream(params: {
     });
   }
 
+  let turnUsage: StreamChatResult["usage"];
   try {
     throwIfAborted(signal);
     // Single request-time choke point for every runLLMStream caller (chat,
@@ -715,9 +724,38 @@ export async function runLLMStream(params: {
     // after the user's saved selection is applied, before any provider or
     // stored BYOK key can be spent. No-op outside strict mode.
     assertModelAllowed(selectedModel);
-    await streamChatWithTools({
+    let delegation: Awaited<ReturnType<typeof createSubagentHost>> | null = null;
+    if (params.includeSubagents) {
+      try {
+        delegation = await createSubagentHost({
+          db,
+          userId,
+          apiKeys,
+          chatModel: selectedModel,
+          reasoning: params.reasoning ?? "high",
+          docStore,
+          docIndex,
+          workflowStore,
+          tabularStore,
+          projectId,
+          nonce,
+          offeredTools: (activeTools as OpenAIToolSchema[]).map(
+            (tool) => tool.function.name,
+          ),
+          write,
+          events,
+        });
+      } catch (error) {
+        // Delegation is an extra; the turn runs without it.
+        console.error("[subagents] could not offer delegation", safeError(error));
+      }
+    }
+    turnUsage = (await streamChatWithTools({
       model: selectedModel,
-      systemPrompt,
+      systemPrompt: delegation
+        ? `${systemPrompt}\n\n${delegation.promptSection}`
+        : systemPrompt,
+      subagents: delegation?.host,
       messages: chatMessages,
       tools: activeTools as OpenAIToolSchema[],
       // Keep in step with DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts. A literal,
@@ -1059,7 +1097,7 @@ export async function runLLMStream(params: {
             }),
         }));
       },
-    });
+    })).usage;
   } catch (err) {
     if (isAskInputsPause(err)) {
       // The ask_inputs event has already been emitted and persisted in `events`.
@@ -1110,6 +1148,12 @@ export async function runLLMStream(params: {
   }
 
   flushText();
+
+  if (turnUsage) {
+    const usageEvent: AssistantEvent = { type: "turn_usage", ...turnUsage };
+    events.push(usageEvent);
+    write(`data: ${JSON.stringify(usageEvent)}\n\n`);
+  }
 
   // Parse and emit citations from <CITATIONS> block
   const { citations: parsedCitations, diagnostics: citationDiagnostics } =

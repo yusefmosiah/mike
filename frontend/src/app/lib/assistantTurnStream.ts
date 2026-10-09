@@ -102,6 +102,52 @@ function isConnectorApprovalItem(
   );
 }
 
+const SUBAGENT_STATUSES = new Set([
+  "running",
+  "done",
+  "failed",
+  "timed_out",
+  "stopped",
+]);
+
+/** A `subagent` frame, or null when one of its identifying fields is missing. */
+function subagentEventFrom(
+  data: Record<string, unknown>,
+): Extract<AssistantEvent, { type: "subagent" }> | null {
+  const text = (key: string) =>
+    typeof data[key] === "string" ? (data[key] as string) : "";
+  if (!text("child_id") || !SUBAGENT_STATUSES.has(text("status"))) return null;
+  const usage = data.usage as Record<string, unknown> | undefined;
+  return {
+    type: "subagent",
+    call_id: text("call_id"),
+    child_id: text("child_id"),
+    address: text("address"),
+    agent_type: text("agent_type"),
+    model: text("model"),
+    task: text("task"),
+    status: text("status") as Extract<
+      AssistantEvent,
+      { type: "subagent" }
+    >["status"],
+    ...(typeof data.report_preview === "string"
+      ? { report_preview: data.report_preview }
+      : {}),
+    ...(usage &&
+    typeof usage.input === "number" &&
+    typeof usage.output === "number" &&
+    typeof usage.cost === "number"
+      ? {
+          usage: {
+            input: usage.input,
+            output: usage.output,
+            cost: usage.cost,
+          },
+        }
+      : {}),
+  };
+}
+
 function parseCourtlistenerEventCases(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   return value
@@ -643,6 +689,36 @@ export async function consumeAssistantTurnStream(
             }),
           );
           pushThinkingPlaceholder();
+          continue;
+        }
+
+        if (
+          data.type === "turn_usage" &&
+          typeof data.input === "number" &&
+          typeof data.output === "number" &&
+          typeof data.cost === "number"
+        ) {
+          // Sent once the answer's text is done. Kept with the answer and
+          // never drawn as a timeline line (see AssistantMessage).
+          pushEvent({
+            type: "turn_usage",
+            input: data.input,
+            output: data.output,
+            cost: data.cost,
+          });
+          continue;
+        }
+
+        if (data.type === "subagent") {
+          const event = subagentEventFrom(data);
+          if (!event) continue;
+          // Sent when the child starts and again when it ends: one line.
+          const updated = updateMatchingEvent(
+            (e) => e.type === "subagent" && e.child_id === event.child_id,
+            () => event,
+          );
+          if (!updated) pushEvent(event);
+          if (event.status !== "running") pushThinkingPlaceholder();
           continue;
         }
 
