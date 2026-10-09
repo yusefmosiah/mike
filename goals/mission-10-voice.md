@@ -86,7 +86,8 @@ Not done: the browser model was not downloaded live (a few hundred
 megabytes into the owner's browser needs the owner's go-ahead); dictation
 was not recorded live (no microphone use unattended); read-aloud from a chat
 message with a non-default engine is covered by unit tests only. The
-transformers.js dependency brings `onnxruntime-node` (about 209 MB, unused
-by the browser) into the frontend image's `node_modules`, and with it a
+transformers.js dependency grew the staging frontend image from 2.75 GB to
+3.69 GB (`podman images` on node-a); `onnxruntime-node` alone is 536 MB on
+disk, unused by the browser. It also brings a
 moderate `sprintf-js` advisory on a path the app never runs; trimming that
 needs a Dockerfile change, left for the owner.

@@ -79,6 +79,27 @@ On `main` (pushed 2026-10-09, `1e35b24`), awaiting owner review:
   changes; the page title ("Mike - Legal AI Platform") and onboarding step 2
   ("Your legal practice") still read legal-only.
 
+Later on 2026-10-09 (overnight, `44d839c8..908b92fe`), awaiting owner review;
+receipts in `docs/reports/overnight-2026-10-09.md`:
+
+- **Staging** runs at https://choir-ip.com on node-a (Podman compose behind
+  Caddy, all container ports on loopback, daily restore-checked backups,
+  five-minute health checks, kept out of search engines). No account exists
+  there yet; `mike-staging owner-link <email>` signs the owner in.
+- **Mission 13**, phases 1–4 built and exercised, phase 6 started: guest
+  image and `run_command`; `ws-owner` under Cloud Hypervisor reached over
+  vsock from the staging backend; a host snapshot before each turn's first
+  command, restore after `rm -rf ~/*` verified by hash; a logging egress proxy
+  as the VMs' only way out; prompt-injection flags on tool results. Phase 5
+  (dogfooding) is the owner's.
+- **Mission 11**, first slice: `run_script` runs model-written JavaScript in
+  QuickJS with tools as `tools.*`, through the same gate and dispatcher; on
+  in staging behind `CODE_MODE_ENABLED`.
+- **Mission 10**, first slice: Settings → Voice with four engines (operator,
+  OpenRouter, browser on-device, browser open models), prices in each model's
+  unit, consent-gated browser model setup, and a test bench. No browser model
+  has been downloaded live.
+
 The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
 (option B). Mission 3's branching design no longer waits on it.
 
@@ -126,8 +147,8 @@ One mission at a time, in this order. Work lands on `main` as soon as it is
 good (owner direction, 2026-10-09): a short-lived branch off `main` per change,
 fast-forwarded into `main` and pushed to `origin/main` once its tests pass, so
 no long-running branch builds up. Each landing is reported with the commands
-run and what they printed. No deployment, and no mission marked accepted by
-the agent.
+run and what they printed. No mission is marked accepted by the agent.
+Staging (choir-ip.com) is the only deployment; production is not deployed.
 
 | # | Mission | State | File |
 |---|---|---|---|
@@ -136,10 +157,10 @@ the agent.
 | 8 | General knowledge-work system prompt | built, awaiting review | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
 | 9 | Subagent foundation (document review first) | built, awaiting review | [`mission-9-subagents.md`](mission-9-subagents.md) |
 | 4 | Decision models and Auto Mode (plus the layered gate: research meets <1%/0, writes do not) | built, awaiting review | [`mission-4-decision-models.md`](mission-4-decision-models.md); [`docs/reports/auto-mode-gate-eval-2026-10-09.md`](../docs/reports/auto-mode-gate-eval-2026-10-09.md); [`docs/reports/auto-mode-layered-gate-2026-10-09.md`](../docs/reports/auto-mode-layered-gate-2026-10-09.md) |
-| 13 | Workstation VMs: microvm.nix + Cloud Hypervisor, harness outside, recovery and egress boundary (replaces per-call Auto Mode) | next | [`mission-13-workstation-vms.md`](mission-13-workstation-vms.md) |
-| 10 | Voice: local, OpenRouter and self-hosted | after 13 | [`mission-10-voice.md`](mission-10-voice.md) |
-| 3 | Branching, prompt editing and branch threads, end to end | after 10 | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
-| 11 | Code mode | later | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
+| 13 | Workstation VMs: microvm.nix + Cloud Hypervisor, harness outside, recovery and egress boundary (replaces per-call Auto Mode) | phases 1–4 built, 6 started; 5 is the owner's dogfooding | [`mission-13-workstation-vms.md`](mission-13-workstation-vms.md) |
+| 10 | Voice: local, OpenRouter and self-hosted | first slice built, awaiting review | [`mission-10-voice.md`](mission-10-voice.md) |
+| 3 | Branching, prompt editing and branch threads, end to end | next | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
+| 11 | Code mode | first slice built, awaiting review | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
 | 6 | Citation verification subagents | later, on top of 9 | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
 | 5 | Firm thread handoff | later | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
 | 1, 2 | Word editing (1a–1c), compaction | built, awaiting review | mission and station files |
