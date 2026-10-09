@@ -29,6 +29,14 @@ interface Props {
     onNavigateSibling?: (dir: -1 | 1) => void;
 }
 
+/** Visible rows for the editor: wrapped lines included, between 2 and 8. */
+function editorRows(text: string): number {
+    const wrapped = text
+        .split("\n")
+        .reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 72)), 0);
+    return Math.min(8, Math.max(2, wrapped));
+}
+
 export function UserMessage({
     content,
     files,
@@ -68,7 +76,11 @@ export function UserMessage({
 
     return (
         <div className="w-full flex justify-end" data-message-id={messageId}>
-            <div className="max-w-[80%] flex flex-col items-end gap-1">
+            {/* While editing, the bubble takes the full 80% so a long prompt
+                is editable at a readable width instead of its old size. */}
+            <div
+                className={`max-w-[80%] flex flex-col items-end gap-1 ${editing ? "w-full" : ""}`}
+            >
                 {editing ? (
                     <form
                         className="w-full bg-gray-100 rounded-xl px-4 py-3"
@@ -80,7 +92,7 @@ export function UserMessage({
                         <textarea
                             aria-label="Edit message"
                             value={draft}
-                            rows={Math.min(8, draft.split("\n").length)}
+                            rows={editorRows(draft)}
                             onChange={(event) => setDraft(event.target.value)}
                             onKeyDown={(event) => {
                                 if (event.key === "Escape") setEditing(false);

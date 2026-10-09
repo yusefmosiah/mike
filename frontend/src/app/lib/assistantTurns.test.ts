@@ -216,6 +216,34 @@ describe("withLiveTurn", () => {
     const [, replaced] = withLiveTurn([user("hello", "u1"), stored], live);
     expect(replaced).toEqual({ ...live.assistant, sibling: { index: 2, total: 2 } });
   });
+  it("gives the question on screen the id the server stored it under", () => {
+    const handle = beginAssistantTurn(undefined, {
+      userMessage: user("hello"),
+      assistant: assistant(""),
+      cancel: vi.fn(),
+    });
+    handle.identify("chat-1", "answer-1", "prompt-1");
+    const shown = withLiveTurn([user("earlier", "u0"), user("hello"), assistant("")], handle.turn);
+    expect(shown[1]).toEqual({ ...user("hello"), id: "prompt-1" });
+    expect(shown[2].id).toBe("answer-1");
+    handle.finish();
+  });
+  it("never grafts a finished answer onto another branch the reader opened", () => {
+    const handle = beginAssistantTurn(undefined, {
+      userMessage: user("hello"),
+      assistant: assistant("New answer"),
+      cancel: vi.fn(),
+    });
+    handle.identify("chat-1", "answer-2", "prompt-1");
+    handle.finish();
+    const otherBranch = [user("hello", "prompt-1"), assistant("Old answer", "answer-1")];
+    expect(withLiveTurn(otherBranch, handle.turn)).toEqual(otherBranch);
+    // A read that ends with the question still gets the stored answer filled in.
+    expect(withLiveTurn([user("hello", "prompt-1")], handle.turn).map((m) => m.id)).toEqual([
+      "prompt-1",
+      "answer-2",
+    ]);
+  });
   it("replaces the sender's own placeholder before the stream names the row", () => {
     const live = turnOn({ userMessage: user(), assistant: assistant("Streaming") });
     const transcript = [user("hello"), assistant("")];

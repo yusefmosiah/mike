@@ -199,6 +199,32 @@ export function withLiveTurn(
   turn: LiveAssistantTurn | null,
 ): Message[] {
   if (!turn) return messages;
+  return withPromptId(overlayTurn(messages, turn), turn);
+}
+
+/**
+ * Once the server names the stored row of the turn's question, the question
+ * shown above the answer carries that id too: edit and regenerate need it, and
+ * without it they stayed hidden until a reload.
+ */
+function withPromptId(messages: Message[], turn: LiveAssistantTurn): Message[] {
+  const id = turn.userMessage?.id;
+  if (!id) return messages;
+  const answer = messages.findIndex(
+    (message) =>
+      message === turn.assistant ||
+      (!!turn.assistant.id && message.role === "assistant" && message.id === turn.assistant.id),
+  );
+  const prompt = answer > 0 ? messages[answer - 1] : undefined;
+  if (prompt?.role !== "user" || prompt.id || prompt.content !== turn.userMessage?.content) {
+    return messages;
+  }
+  const next = [...messages];
+  next[answer - 1] = { ...prompt, id };
+  return next;
+}
+
+function overlayTurn(messages: Message[], turn: LiveAssistantTurn): Message[] {
   const { assistant, userMessage } = turn;
   if (assistant.id) {
     const index = messages.findIndex(
@@ -221,6 +247,11 @@ export function withLiveTurn(
     last?.role === "user" &&
     (userMessage.id ? last.id === userMessage.id : true) &&
     last.content === userMessage.content;
+  // A finished turn may still fill in a read that ends with its question (the
+  // read began before the answer was stored), but never extends a transcript
+  // that does not: that is another branch the reader moved to, and appending
+  // the old answer there would graft it onto the wrong history.
+  if (turn.finished && !userShown) return messages;
   return [
     ...messages,
     ...(userMessage && !userShown ? [userMessage] : []),
