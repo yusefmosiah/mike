@@ -32,6 +32,10 @@ export function toolCallLabel(name: string): string {
     if (name === "courtlistener_read_case") return "Reading case...";
     if (name === "courtlistener_verify_citations")
         return "Verifying citations...";
+    if (name === "web_search") return "Searching the web...";
+    if (name === "fetch_web_page") return "Reading web page...";
+    if (name === "run_script") return "Running script...";
+    if (name === "run_command") return "Running command in workstation...";
     if (name.startsWith("mcp_")) return "Using connector...";
     return name ? `Running ${name}...` : "Working...";
 }
