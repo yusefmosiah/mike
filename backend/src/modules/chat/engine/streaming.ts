@@ -725,6 +725,20 @@ export async function runLLMStream(params: {
       reasoning: params.reasoning ?? "high",
       abortSignal: signal,
       conversationId,
+      memoryMessage: memory.message ?? undefined,
+      readMemory: includeMemory
+        ? async () =>
+            (
+              await buildMemoryTurn({
+                db,
+                userId,
+                systemPrompt: "",
+                include: true,
+                projectId: memoryProjectId,
+                sharedAudience: memorySharedAudience,
+              })
+            ).message?.content ?? "No memory is enabled for this conversation."
+        : undefined,
       callbacks: {
         onContentDelta: (delta) => {
           iterText += delta;

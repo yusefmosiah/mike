@@ -112,6 +112,14 @@ export type StreamChatParams = {
      * one-shot calls such as the memory curator.
      */
     conversationId?: string | null;
+    /**
+     * The read-only memory turn, when `messages` starts with one. Runtimes that
+     * keep their own transcript (the Pi spike) take it out of the history and
+     * render it with the system prompt instead.
+     */
+    memoryMessage?: LlmMessage;
+    /** Reads the memory this conversation may see, as of now (the memory tool). */
+    readMemory?: () => Promise<string>;
 };
 
 export type StreamChatResult = {
