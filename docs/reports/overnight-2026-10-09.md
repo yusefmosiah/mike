@@ -39,6 +39,7 @@ yours.
 | `36604642`, `bd13d0c1` | Prompt-injection flags on tool results, with a live receipt |
 | `db680985`, `908b92fe` | Voice: OpenRouter lane, Settings → Voice, browser engines, test bench (Mission 10, first slice) |
 | `ed58ee82` | Fix for a CORS test that `db680985` broke (see Verification) |
+| `7aceab67` | Branching flows end to end in Playwright against a scripted model (Mission 3) |
 
 ## Staging (node-a)
 
@@ -204,6 +205,27 @@ Receipts are in `goals/mission-13-workstation-vms.md`.
   same dependency brings a moderate `sprintf-js` advisory on a path the app
   never runs.
 
+## Branching (Mission 3)
+
+- **What changed.** Mission 3's acceptance is Playwright runs of each flow
+  in the real app. `e2e/branching.spec.ts` now runs those flows: regenerate,
+  prompt edit, stepping between siblings with a reload, branch into a new
+  thread, project chat, and a phone viewport. They go through the real web
+  app, backend, Postgres and Pi runtime.
+- **The stub.** Answers come from `e2e/stubModel.mjs`, a scripted
+  OpenAI-compatible server behind the e2e stack's "E2E placeholder" model.
+  No model is called, so CI runs it too. The workflow starts the stub. It
+  runs on pull requests and nightly, not on a push to `main`, so it has not
+  run in Actions yet.
+- **Receipt.** `npx playwright test e2e/branching.spec.ts`: 6 passed
+  (2.0m), counting the sign-in setup. The controls you reported missing were
+  present and worked in these runs; whether that matches what you saw needs
+  your look. Details are in `goals/station-5-pi-tree-branching.md`.
+- **Whole local suite.** 66 passed, 4 skipped (LLM specs, no key), 1 failed.
+  The failure is the tabular upload spec: the run put the web app on port
+  3100 because the Docker dev stack holds 3000, and local storage's CORS
+  allows only port 3000. It is documented in `docs/e2e-ci.md`.
+
 ## Verification run tonight
 
 | Command | Result |
@@ -216,6 +238,8 @@ Receipts are in `goals/mission-13-workstation-vms.md`.
 | `npm test --prefix frontend` | 258 files, 2211 tests passed |
 | `npm run build --prefix frontend` | exit 0 |
 | Docker images | built from the repository root by each staging deploy (`mike-staging deploy` exit 0) |
+| `npx playwright test e2e/branching.spec.ts` (ports 3201/3100) | 6 passed |
+| `npx playwright test` (whole suite, ports 3201/3100) | 66 passed, 4 skipped, 1 failed (upload refused by storage CORS on port 3100; see Branching) |
 | `git diff --check` | clean before every commit |
 
 ## Spend
@@ -251,9 +275,8 @@ Chat turns ran on the OpenCode Go subscription.
 
 ## Housekeeping left running on the Mac
 
-- The local backend on port 3201 runs with code mode and the dev VM
-  mapped to a generated localhost test account.
-- The frontend dev server is on port 3100.
+- The e2e backend on port 3201, the frontend dev server on 3100 and the
+  stub model on 21434 (for the branching runs).
 - The `mike-workstation-dev` container (dev VM on port 2222) is still up.
 
 All are local and safe to stop.

@@ -99,6 +99,9 @@ receipts in `docs/reports/overnight-2026-10-09.md`:
   OpenRouter, browser on-device, browser open models), prices in each model's
   unit, consent-gated browser model setup, and a test bench. No browser model
   has been downloaded live.
+- **Mission 3**: `e2e/branching.spec.ts` runs each branching flow in the real
+  app (both chat surfaces and a phone viewport) against a scripted model, so
+  it also runs in CI; 6 passed locally.
 
 The Pi decision (`pi-durable-decision-2026-10-08.md`) is taken: Pi is embedded
 (option B). Mission 3's branching design no longer waits on it.
@@ -159,7 +162,7 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 | 4 | Decision models and Auto Mode (plus the layered gate: research meets <1%/0, writes do not) | built, awaiting review | [`mission-4-decision-models.md`](mission-4-decision-models.md); [`docs/reports/auto-mode-gate-eval-2026-10-09.md`](../docs/reports/auto-mode-gate-eval-2026-10-09.md); [`docs/reports/auto-mode-layered-gate-2026-10-09.md`](../docs/reports/auto-mode-layered-gate-2026-10-09.md) |
 | 13 | Workstation VMs: microvm.nix + Cloud Hypervisor, harness outside, recovery and egress boundary (replaces per-call Auto Mode) | phases 1–4 built, 6 started; 5 is the owner's dogfooding | [`mission-13-workstation-vms.md`](mission-13-workstation-vms.md) |
 | 10 | Voice: local, OpenRouter and self-hosted | first slice built, awaiting review | [`mission-10-voice.md`](mission-10-voice.md) |
-| 3 | Branching, prompt editing and branch threads, end to end | next | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
+| 3 | Branching, prompt editing and branch threads, end to end | real-app Playwright runs pass locally (6/6), awaiting the owner's look | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
 | 11 | Code mode | first slice built, awaiting review | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
 | 6 | Citation verification subagents | later, on top of 9 | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
 | 5 | Firm thread handoff | later | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
