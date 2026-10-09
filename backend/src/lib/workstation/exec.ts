@@ -84,7 +84,12 @@ export function sshArgs(target: WorkstationTarget, remote: string): string[] {
   } else {
     args.push("-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null");
   }
-  if (target.proxyCommand) args.push("-o", `ProxyCommand=${target.proxyCommand}`);
+  if (target.proxyCommand) {
+    args.push("-o", `ProxyCommand=${target.proxyCommand}`);
+    // systemd-ssh-proxy hands ssh the connected vsock socket instead of
+    // relaying bytes, which ssh accepts only with fd passing on.
+    if (/systemd-ssh-proxy/.test(target.proxyCommand)) args.push("-o", "ProxyUseFdpass=yes");
+  }
   if (target.port) args.push("-p", String(target.port));
   args.push(`${target.user}@${target.host}`, "--", remote);
   return args;

@@ -52,6 +52,7 @@ describe("sshArgs", () => {
   it("uses a proxy command for vsock and checks host keys when given a file", () => {
     const args = sshArgs({ ...target, port: undefined, proxyCommand: "systemd-ssh-proxy vsock-mux/run/vm.sock 22", knownHostsFile: "/state/known" }, "true");
     expect(args).toContain("ProxyCommand=systemd-ssh-proxy vsock-mux/run/vm.sock 22");
+    expect(args).toContain("ProxyUseFdpass=yes");
     expect(args).toContain("StrictHostKeyChecking=yes");
     expect(args).not.toContain("-p");
   });

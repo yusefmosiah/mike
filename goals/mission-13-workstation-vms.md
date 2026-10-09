@@ -165,6 +165,37 @@ First run found a bug, fixed before the receipt above: the empty home disk
 is mounted over `/home` after NixOS creates home directories, so
 `/home/agent` did not exist; a tmpfiles rule now creates it after the mount.
 
+**Phases 3 and 4 (boundary part), 2026-10-09, on node-a** (x86_64, KVM,
+btrfs on md RAID1; ZFS is not available there, so snapshots are btrfs).
+`infra/node-a/workstations.nix` runs `ws-owner` under Cloud Hypervisor
+(4 vCPU, 6 GiB, 64 GiB sparse home disk); its state directory
+`/var/lib/microvms/ws-owner` is a btrfs subvolume.
+
+- Exec over vsock: `ws ssh ws-owner ...` printed `uid=1000(agent)`,
+  `Linux 6.18.37 x86_64`, `/dev/vdb 63G ... /home`, guest address
+  `10.77.1.2/24`. Fix found on the way: `systemd-ssh-proxy` needs
+  `ProxyUseFdpass=yes` (now in the host tool and the harness library).
+- Boundary, probed from inside the guest with TCP connects:
+  `1.1.1.1:443 reachable`, `https://example.com` 200; blocked: the host's
+  tap address and public IP (`10.77.1.1:22`, `51.81.93.94:22`, `:80`),
+  `169.254.169.254:80`, `192.168.1.1:80`, another VM's subnet
+  `10.77.2.2:22`. First probe found the host's ssh reachable from the guest
+  (input path, not forward); input from `ws-*` is now dropped.
+- Recovery: the agent wrote `~/data.xlsx` and a git repo; `ws snapshot`
+  (guest `sync`, then a read-only btrfs snapshot); the agent ran
+  `rm -rf ~/* ~/.[!.]*` (0 entries left); `ws restore ws-owner
+  20261009T171046Z-before-rm` took 17.6 s including the VM restart;
+  afterwards both files had the same SHA-256 as before
+  (`ecd2f4f8...`, `4a28fc25...`) and `git log` showed `6b22f94 init`.
+  Fix found on the way: VM images carry btrfs's no-copy-on-write attribute,
+  and a clone needs a target with the same attribute.
+- Deployed with `nixos-rebuild test` under a 5-minute rollback timer, a fresh
+  ssh login, then `switch` (generation 43). Choir's builder key stayed in
+  `/etc/ssh/authorized_keys.d/root`.
+
+Still open for phase 4: the logging egress proxy and outbound PII checks.
+The NAT path is filtered but not proxied.
+
 ## Open questions for the owner
 
 - Which machine is the first Linux host for phases 3 and 4? Cloud Hypervisor

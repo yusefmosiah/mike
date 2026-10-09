@@ -68,6 +68,8 @@ in
 
     services.openssh = {
       enable = true;
+      # The dev lane opens 22 itself; in production ssh rides vsock only.
+      openFirewall = false;
       settings = {
         PasswordAuthentication = false;
         KbdInteractiveAuthentication = false;
