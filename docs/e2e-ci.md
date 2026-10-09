@@ -234,5 +234,11 @@ npm run test:e2e            # or test:e2e:ui / test:e2e:headed
 `e2e/auth.setup.ts` reads `AUTH_URL` / `AUTH_SERVICE_KEY` from the
 environment or `backend/.env`, so a running local GoTrue + a populated
 `backend/.env` is all the setup needs. `npm run test:e2e:local`
-(`scripts/e2e-local-stack.sh`) starts Postgres and GoTrue under their own
-Compose project and writes those values for you.
+(`scripts/e2e-local-stack.sh`) starts Postgres, GoTrue and storage under their
+own Compose project and passes their URLs and keys to the backend and to
+Playwright as environment variables, which win over `backend/.env`; no env
+file is edited. It also declares one configured model, "E2E placeholder"
+(`MIKE_MODEL_CONFIG_JSON`, unless you set your own), so specs that only need a
+model to be *chosen*, such as creating a tabular review, find one for an
+account with no keys or saved router models. Nothing serves that model; the
+LLM specs pick their own.

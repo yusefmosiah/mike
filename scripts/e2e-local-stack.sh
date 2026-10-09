@@ -68,6 +68,13 @@ export R2_ENDPOINT_URL="http://localhost:$STORAGE_PORT"
 export R2_PUBLIC_ENDPOINT_URL="$R2_ENDPOINT_URL"
 export R2_ACCESS_KEY_ID=rustfsadmin R2_SECRET_ACCESS_KEY=rustfsadmin R2_BUCKET_NAME=mike
 export SENTRY_DISABLED=true
+# The e2e account has no provider keys or saved router models of its own, so
+# without this the model pickers are empty and creating a tabular review
+# stops at "No models available". One configured endpoint is always offered;
+# it names a local OpenAI-compatible server that need not exist, because the
+# specs that pick it never run a model turn (the LLM specs choose their own).
+E2E_MODEL_CONFIG='{"models":[{"id":"e2e-placeholder","label":"E2E placeholder","provider":"openai-compatible","location":"local","baseUrl":"http://127.0.0.1:11434/v1","apiModel":"e2e-placeholder"}]}'
+export MIKE_MODEL_CONFIG_JSON="${MIKE_MODEL_CONFIG_JSON:-$E2E_MODEL_CONFIG}"
 # The suite fires well over the backend's default 300-requests/15-min general
 # cap in one run; once tripped every call 429s and profile/list waits time out.
 # Same overrides CI uses — e2e is not testing throttling.
