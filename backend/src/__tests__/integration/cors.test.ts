@@ -40,11 +40,13 @@ describe("CORS allowlist", () => {
             "https://admin.example.com",
         ]);
     });
-    it("exposes the request id to cross-origin scripts", async () => {
+    it("exposes the request id and audio cost headers to cross-origin scripts", async () => {
         const res = await request(app)
             .get("/health")
             .set("Origin", ALLOWED_ORIGIN);
-        expect(res.headers["access-control-expose-headers"]).toBe("X-Request-ID");
+        expect(res.headers["access-control-expose-headers"]).toBe(
+            "X-Request-ID,X-Mike-Audio-Provider,X-Mike-Audio-Model,X-Mike-Audio-Cost",
+        );
         expect(res.headers["x-request-id"]).toBeTruthy();
     });
 
