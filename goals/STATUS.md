@@ -259,7 +259,11 @@ collide. In the owner's words where quoted.
      backend `npm test` printed `4496 passed`; frontend `npm test`
      `2332 passed`; Word add-in `npx playwright test e2e/chat.spec.ts
      e2e/server-owned-turns.spec.ts --project=chromium` printed
-     `56 passed`. Screenshots of the new UI (citation check states,
+     `56 passed`; `E2E_API_PORT=3202 E2E_WEB_PORT=3100 npx playwright test
+     e2e/firm-handoff.spec.ts --project=chromium --workers=1` printed
+     `2 passed (1.5m)` (a first run failed because a stray local backend
+     already owned the e2e database's durable storage; it passed once that
+     process was stopped). Screenshots of the new UI (citation check states,
      colleague turn, tabular presence, Phala picker, password page) were
      sent to the owner from a mocked-API run of the real app.
    - **Docket, owner's request (2026-10-10):** a web citation should expand
