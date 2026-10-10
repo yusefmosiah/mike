@@ -10,6 +10,20 @@ microVM, and possibly containers (Mission 13).
 Nothing here is built yet. Sources are listed at the end; figures marked
 "vendor" come from the people selling the approach.
 
+## Owner decisions, 2026-10-10 (after the first draft)
+
+- Model quality is not a concern: every model we will use writes Python well.
+  The per-model accuracy evidence below is background, not a gate.
+- Every user has a VM. Firms are small boutiques, so all of a firm's VMs fit on
+  one machine. On staging the harness and the VMs share node-a; production may
+  split them across two machines.
+- `ask_inputs` and the Word add-in's tools should also be callable from Python,
+  so code mode reaches every tool.
+- For the eval, both modes run at once on each message: one visible, one a
+  shadow, with both logged for comparison.
+- User data must survive a corrupted VM. Open: whether btrfs rollback is
+  enough, or recovery needs an app or middleware layer too.
+
 ## Where we are
 
 - **Mission 11's first slice** runs `run_script` in QuickJS inside the backend
