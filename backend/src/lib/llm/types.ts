@@ -246,12 +246,25 @@ export type ConfiguredModel = {
      * required: without a pin the lane would accept whatever the endpoint
      * self-reports.
      */
-    attestation?: {
-        /** Base URL of the verifier; the request goes to `{endpoint}/attestation`. */
-        endpoint: string;
-        /** TEE measurement the endpoint must report; a mismatch fails closed. */
-        expectedMeasurement: string;
-    };
+    attestation?:
+        | {
+              /** Base URL of the verifier; the request goes to `{endpoint}/attestation`. */
+              endpoint: string;
+              /** TEE measurement the endpoint must report; a mismatch fails closed. */
+              expectedMeasurement: string;
+          }
+        | {
+              /**
+               * Attested Confidential Inference (Phala's gateway): a TDX quote
+               * verified to Intel's root, bound to a fresh nonce, with TLS
+               * pinned to the attested keys (lib/llm/attestation/aci.ts).
+               */
+              scheme: "aci";
+              /** Source repository the workload must be built from (default: Phala's gateway). */
+              repoUrl: string;
+              /** Optional pin on the exact measured app compose (sha256 hex). */
+              composeHash?: string;
+          };
     apiKeyEnv?: string;
     apiKeyProvider?: keyof UserApiKeys;
     apiKey?: string;

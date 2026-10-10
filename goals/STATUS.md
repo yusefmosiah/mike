@@ -90,6 +90,7 @@ collide. In the owner's words where quoted.
    `backend/.env` should use the same name for development. Receipt: after
    the deploy of `676abad4`, an authenticated v4 search from inside
    `mike-backend-1` printed `status 200 count 2391`.
+   Phala done 2026-10-10 with a real ACI verifier, see request 7.
    `PHALA_API_KEY` and `COURTLISTENER_API_KEY` are set in
    the local `backend/.env` "so we can send them to node-a and use them".
    Copy them into node-a's `/var/lib/mike-staging/backend.env` without printing
@@ -185,7 +186,33 @@ collide. In the owner's words where quoted.
      and `repo`. Backend: `npx vitest run src/lib/workstation
      src/__tests__/architecture.test.ts
      src/__tests__/migrationLedger.test.ts` printed `64 passed (64)`.
-   - Phala attestation, the automatic citation check, Mission 5: queued.
+   - **Phala attested inference: built, not accepted.** Phala's gateway
+     (inference.phala.com) speaks ACI (`aci/1`, spec in
+     Dstack-TEE/private-ai-gateway). New verifier, written from the spec and
+     Intel's quote layout: `backend/src/lib/llm/attestation/tdx.ts` (TDX v4
+     quote: signature, QE report and identity, PCK chain to Intel's SGX root
+     pinned by fingerprint, debug bit) and `aci.ts` (keyset JCS digest, fresh
+     nonce bound through report_data, RTMR replay of the boot log, measured
+     compose hash, source repository, keyset expiry, TLS pinned to the
+     attested SPKI for every inference connection, `provider.aci_verified`
+     on every request, signed receipt checked against the exact bytes).
+     Declared with `"attestation": {"scheme": "aci"}`
+     (docs/configured-models.md). Live receipt from the Mac before wiring:
+     identity established in 995 ms (`compose 0637b3d5…`, commit
+     `8d0a666a…`), a pinned streaming request answered `status 200`, and
+     the receipt check printed `ok: true` with an upstream `sessionId`.
+     Tests: `npx vitest run src/lib/llm/attestation` printed `37 passed`,
+     on a real captured report and receipt, with tampering cases (edited
+     measurement, nonce, keyset, compose, event log, repository, TLS key,
+     receipt bytes, receipt field) each failing closed. Staging:
+     `PHALA_API_KEY` (never printed) and `MIKE_MODEL_CONFIG_JSON` with three
+     models that made proper tool calls in a probe (GLM 5.3, DeepSeek V4
+     Flash, gpt-oss-120b; Kimi K3 answered tool calls as text and Qwen 3.8
+     returned an unparseable body, so they are left out). Not yet checked:
+     the platform's TCB level (Intel's signed TCB info and revocation lists),
+     the dstack KMS key-custody chain, and our own deep audit of upstream
+     sessions.
+   - The automatic citation check, Mission 5: queued.
    - **Docket, owner's request (2026-10-10):** a web citation should expand
      in place to show the cited passage from the page (transcluded), with a
      link inside the expanded section to open the page, instead of jumping

@@ -88,6 +88,60 @@ configured model:
 }
 ```
 
+## Attested inference (Phala)
+
+`attestation` makes every request to the model verify the endpoint first and
+fail closed: if verification fails, the request never leaves Mike, and there
+is no fallback to another model. Phala's confidential AI gateway speaks
+Attested Confidential Inference (ACI, `aci/1`), declared with
+`"attestation": {"scheme": "aci"}`:
+
+```json
+{
+  "id": "phala/glm-5.3",
+  "label": "GLM 5.3 · Phala attested",
+  "provider": "openai-compatible",
+  "location": "cloud",
+  "baseUrl": "https://inference.phala.com/v1",
+  "apiModel": "z-ai/glm-5.3",
+  "apiKeyEnv": "PHALA_API_KEY",
+  "attestation": { "scheme": "aci" }
+}
+```
+
+What Mike checks (`backend/src/lib/llm/attestation/aci.ts` and `tdx.ts`):
+
+- The gateway's Intel TDX quote verifies to Intel's SGX root CA: the quote
+  signature, the quoting enclave's report and identity, and the PCK chain.
+  The TD must not be in debug mode.
+- The quote binds the gateway's published keys and a fresh 32-byte nonce
+  Mike chose, so the evidence is current and the keys are the attested ones.
+- The boot event log replays to the quote's measurement registers. The
+  measured compose hash is the hash of the published app compose, and the
+  workload's source repository is `repoUrl` (default
+  `https://github.com/Dstack-TEE/private-ai-gateway`). `composeHash`
+  optionally pins the exact compose, so any redeploy fails closed until the
+  pin is updated.
+- The TLS key the gateway presents is the attested one, and every inference
+  connection is pinned to it. A WebPKI certificate alone is not trusted.
+- Each request carries `provider.aci_verified: true`, so the gateway refuses
+  to serve it through an upstream model it has not verified.
+- After a response, its signed receipt is fetched. Mike checks the Ed25519
+  signature under the attested receipt key, the hashes of the exact request
+  and response bytes, and that the upstream was verified. The result is
+  logged.
+
+Identity is re-established with a new nonce every ten minutes, when the
+keyset expires, or when the gateway reports a different keyset.
+
+Not yet checked: the platform's TCB level (Intel's signed TCB info and
+revocation lists), the dstack KMS custody chain for the keys, and Mike's own
+audit of the upstream sessions (the gateway's own verification of them is
+relied on through `aci_verified`).
+
+The older `{ "endpoint", "expectedMeasurement" }` form compares one reported
+measurement string. It is not cryptographic verification.
+
 ## Tool-call tolerance
 
 Self-hosted builds of Qwen, DeepSeek and GLM often describe tool calls in

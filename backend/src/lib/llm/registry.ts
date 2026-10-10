@@ -4,6 +4,7 @@ import type {
   Provider,
   UserApiKeys,
 } from "./types";
+import { PHALA_GATEWAY_REPO } from "./attestation/aci";
 
 // Deployment-declared models. The static catalog in models.ts covers the
 // hosted providers Mike ships with; this registry is how an operator adds a
@@ -218,6 +219,21 @@ function parseAttestation(
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
+  if (record.scheme !== undefined) {
+    // ACI pins the workload by hardware evidence and source repository, so
+    // the repository defaults to Phala's gateway rather than being optional.
+    if (record.scheme !== "aci") return null;
+    const repoUrl = optionalString(record, "repoUrl");
+    const composeHash = optionalString(record, "composeHash");
+    if (repoUrl === null || composeHash === null) return null;
+    if (repoUrl !== undefined && !validBaseUrl(repoUrl)) return null;
+    if (composeHash !== undefined && !/^[0-9a-f]{64}$/i.test(composeHash)) return null;
+    return {
+      scheme: "aci",
+      repoUrl: repoUrl ?? PHALA_GATEWAY_REPO,
+      ...(composeHash ? { composeHash: composeHash.toLowerCase() } : {}),
+    };
+  }
   const endpoint = optionalString(record, "endpoint");
   if (!endpoint || !validBaseUrl(endpoint)) return null;
   const expectedMeasurement = optionalString(record, "expectedMeasurement");
@@ -251,6 +267,8 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     apiKeyEnv === null ||
     apiKey === null ||
     attestation === null ||
+    // ACI pins TLS to the attested keys, which needs TLS.
+    (attestation && "scheme" in attestation && !baseUrl.startsWith("https://")) ||
     (apiKeyProvider !== undefined &&
       (typeof apiKeyProvider !== "string" ||
         !USER_API_KEY_PROVIDERS.has(apiKeyProvider as keyof UserApiKeys))) ||

@@ -25,6 +25,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { vercelAIGatewayProvider } from "@earendil-works/pi-ai/providers/vercel-ai-gateway";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { recordReceipt, verifyAttestation } from "../attestation/index.js";
+import { ACI_VERIFIER_VERSION, aciFetch, establishAci } from "../attestation/aci.js";
 import { assertEgressAllowed } from "../../egress.js";
 import { toProviderStreamError } from "../providerErrors.js";
 import { streamChunkTimeouts } from "../../runtimeConfig.js";
@@ -254,6 +255,8 @@ export function createMikeModels(
       ...options,
       ...(apiKey ? { apiKey } : keyless ? { apiKey: KEYLESS, fetch: withoutPlaceholderAuth(options?.fetch) } : {}),
       ...(route.headers ? { headers: { ...route.headers, ...options?.headers } } : {}),
+      // An ACI endpoint is only ever reached over TLS pinned to its attested keys.
+      ...(route.configured ? aciOptions(route.configured) : {}),
     };
   };
 
@@ -270,7 +273,7 @@ export function createMikeModels(
         // Under STRICT_PRIVATE_MODE a model host outside the segmented network
         // is refused here, before any bytes or credentials leave.
         await assertEgressAllowed(model.baseUrl, "llm");
-        if (configured?.attestation) await attest(configured);
+        if (configured?.attestation) await attest(configured, request.apiKey);
         if (configured && tolerateTextToolCalls(configured) && (context.tools?.length ?? 0) > 0) {
           const message = await base.completeSimple(model, context, request);
           replay(out, tolerantMessage(message));
@@ -359,11 +362,38 @@ function withoutPlaceholderAuth(inner: typeof fetch | undefined): typeof fetch {
   };
 }
 
+/** One pinned fetch per ACI model, so its connections are pooled. */
+const aciFetches = new Map<string, typeof fetch>();
+
+function aciOptions(configured: ConfiguredModel): { fetch?: typeof fetch } {
+  const attestation = configured.attestation;
+  if (!attestation || !("scheme" in attestation)) return {};
+  let pinned = aciFetches.get(configured.id);
+  if (!pinned) {
+    pinned = aciFetch(configured.baseUrl, attestation);
+    aciFetches.set(configured.id, pinned);
+  }
+  return { fetch: pinned };
+}
+
 /** Fail closed: an attested endpoint verifies before each request or the request never reaches it. */
-async function attest(configured: ConfiguredModel): Promise<void> {
+async function attest(configured: ConfiguredModel, apiKey: string | undefined): Promise<void> {
+  const attestation = configured.attestation!;
+  if ("scheme" in attestation) {
+    const identity = await establishAci(configured.baseUrl, apiKey === KEYLESS ? undefined : apiKey, attestation);
+    if (!identity.ok) throw new Error(`Attested inference unavailable: ${identity.reason}`);
+    recordReceipt({
+      endpointId: identity.keysetDigest,
+      modelId: configured.id,
+      measurement: `mrtd:${identity.mrTd} compose:${identity.composeHash}`,
+      verifierVersion: ACI_VERIFIER_VERSION,
+      requestId: crypto.randomUUID(),
+    });
+    return;
+  }
   const verification = await verifyAttestation({
-    verifierUrl: configured.attestation!.endpoint,
-    expectedMeasurement: configured.attestation!.expectedMeasurement,
+    verifierUrl: attestation.endpoint,
+    expectedMeasurement: attestation.expectedMeasurement,
   });
   if (!verification.ok) throw new Error(`Attested inference unavailable: ${verification.reason}`);
   recordReceipt({
