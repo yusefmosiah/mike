@@ -324,3 +324,25 @@ sales.csv`. One model, one run: this shows the plumbing, not robustness.
 - Whether employees get a terminal or file browser on their VM in the web app,
   or reach it only through Mike.
 - Where replicated snapshots live, and how long they are kept.
+
+**A VM per account, 2026-10-10 (node-a, not accepted).** The owner asked
+that every new account get code mode, which means its own VM. node-a now runs
+a pool of four VMs beside `ws-owner` (`ws-01` to `ws-04`, 2 vCPU, 3 GiB, 32 GiB
+home each; memory not overcommitted), generation 52, applied under the
+rollback timer after a fresh login, site, vsock and snapshot check. The
+backend hands an account the first free pool VM the first time it needs one
+and records it in `workstation_assignments` (migration
+`20261010_07_workstation_assignments.sql`); an account keeps its VM, and a VM
+is never given to a second account, because its disk holds the first one's
+files. The owner keeps `ws-owner` through `WORKSTATION_USER_IDS`. When the
+pool is used up, new accounts get the direct tools. Snapshot forking,
+hibernation and waking VMs on demand are deferred until after the
+non-functional pass (owner, 2026-10-10).
+
+Receipts: on node-a, `ws-01` and `ws-04` answered over vsock from the backend
+container (`hostname`, `dill 0.4.1`, empty home), and the control socket
+answered `ok ws-02/20261010T134952Z-turn`. On the isolated local stack with
+`WORKSTATION_POOL=dev` (the dev VM), a fresh test account's first turn was
+given `dev` (`select vm from workstation_assignments` printed `dev`) and its
+cell ran in the VM (`socket.gethostname()` printed `workstation`; SHA-256 of
+`mike` matched `shasum`).

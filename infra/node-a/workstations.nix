@@ -24,9 +24,18 @@ let
   harnessKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJL2zWuvPSHPJUbiy7JysOXsQ/HARKlZNM86hFz/geLZ mike-harness@node-a";
 
   # name -> { index (1..250), vcpu, mem MiB, home disk MiB, directEgress }
+  # ws-owner belongs to the owner (WORKSTATION_USER_IDS); ws-01 and up are the
+  # pool the backend hands out, one per account (WORKSTATION_POOL in
+  # staging.nix, recorded in workstation_assignments). Memory is not
+  # overcommitted: 6 + 4 x 3 GiB of the host's 31.
   workstations = {
     ws-owner = { index = 1; vcpu = 4; mem = 6144; homeMiB = 65536; directEgress = false; };
-  };
+  } // poolVms;
+  poolSize = 4;
+  poolVms = lib.listToAttrs (lib.genList (i: {
+    name = "ws-${lib.fixedWidthString 2 "0" (toString (i + 1))}";
+    value = { index = i + 2; vcpu = 2; mem = 3072; homeMiB = 32768; directEgress = false; };
+  }) poolSize);
 
   proxyPort = 3128;
   # Fixed so the nftables rules can name it: the ruleset is checked at build

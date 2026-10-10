@@ -15,7 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
-import { runInWorkstation, snapshotOncePerTurn, workstationFor } from "../../../../lib/workstation";
+import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
@@ -308,6 +308,8 @@ export async function runToolCalls(
     userEmail?: string | null;
     /** The turn's model, which check_citations' checker uses by default. */
     model?: string | null;
+    /** The user's workstation VM, resolved once per turn (lib/workstation); run_command needs it. */
+    workstation?: WorkstationTarget | null;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -1714,7 +1716,7 @@ export async function runToolCalls(
         });
       }
     } else if (tc.function.name === "run_command") {
-      const target = workstationFor(userId);
+      const target = options.workstation ?? null;
       if (!target) {
         toolResults.push({
           role: "tool",

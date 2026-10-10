@@ -24,6 +24,8 @@ let
   repoUrl = "https://github.com/yusefmosiah/mike.git";
   # The private half is the STAGING_DEPLOY_KEY secret in GitHub Actions.
   deployKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcYQsagy/DP5CBDNQANFALDxb06V5kcu80CjslAvLbZ github-actions mike staging deploy";
+  # The VMs handed out one per account: every workstation but the owner's.
+  workstationPool = lib.filter (name: name != "ws-owner") (lib.attrNames config.microvm.vms);
 
   stagingTool = pkgs.writeShellApplication {
     name = "mike-staging";
@@ -81,10 +83,20 @@ let
       # The compose root .env is the backend's env_file.
       write_backend_env() {
         umask 077
-        cat ${root}/app.env > ${root}/src/.env
-        for extra in backend.env workstation.env; do
-          if [ -f "${root}/$extra" ]; then cat "${root}/$extra" >> ${root}/src/.env; fi
-        done
+        {
+          cat ${root}/app.env
+          if [ -f ${root}/backend.env ]; then cat ${root}/backend.env; fi
+          # The owner's account and VM (owner-link writes them).
+          if [ -f ${root}/workstation.env ]; then
+            grep -E '^WORKSTATION_(USER_IDS|NAME)=' ${root}/workstation.env || true
+          fi
+          # Every account gets its own VM: the owner's above, the rest from
+          # the pool (infra/node-a/workstations.nix). {vm} is the VM's name.
+          echo "WORKSTATION_POOL=${lib.concatStringsSep "," workstationPool}"
+          echo "WORKSTATION_SSH_PROXY_COMMAND=node /app/dist/lib/workstation/vsockProxy.js /run/mike-workstations/{vm}.sock 22"
+          echo "WORKSTATION_SSH_IDENTITY_FILE=/run/workstation-key/harness_ed25519"
+          echo "WORKSTATION_SNAPSHOT_SOCKET=/run/mike-workstations/control.sock"
+        } > ${root}/src/.env
         # A private stack reports errors to no one.
         echo "SENTRY_DISABLED=true" >> ${root}/src/.env
         echo "CODE_MODE_ENABLED=true" >> ${root}/src/.env
@@ -182,9 +194,6 @@ let
             {
               echo "WORKSTATION_USER_IDS=$user_id"
               echo "WORKSTATION_NAME=ws-owner"
-              echo "WORKSTATION_SSH_PROXY_COMMAND=node /app/dist/lib/workstation/vsockProxy.js /run/mike-workstations/ws-owner.sock 22"
-              echo "WORKSTATION_SSH_IDENTITY_FILE=/run/workstation-key/harness_ed25519"
-              echo "WORKSTATION_SNAPSHOT_SOCKET=/run/mike-workstations/control.sock"
             } > ${root}/workstation.env
             write_backend_env
             compose up -d backend >&2

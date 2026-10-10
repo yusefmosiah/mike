@@ -6,6 +6,7 @@ vi.mock("../../../../lib/workstation/exec", async (importOriginal) => ({
   runInWorkstation: run,
 }));
 
+import { workstationFor } from "../../../../lib/workstation";
 import { runToolCalls } from "../tools/toolDispatcher";
 
 afterEach(() => {
@@ -14,7 +15,11 @@ afterEach(() => {
 });
 
 const call = (args: Record<string, unknown>) => [{ id: "c1", function: { name: "run_command", arguments: JSON.stringify(args) } }];
-const dispatch = (args: Record<string, unknown>) => runToolCalls(call(args), new Map(), "u1", {} as never, vi.fn());
+// The turn resolves the workstation once and hands it to the dispatcher.
+const dispatch = (args: Record<string, unknown>) =>
+  runToolCalls(call(args), new Map(), "u1", {} as never, vi.fn(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+    workstation: workstationFor("u1"),
+  });
 const content = (result: Awaited<ReturnType<typeof dispatch>>) => JSON.parse((result.toolResults[0] as { content: string }).content);
 
 it("refuses when the user has no workstation", async () => {

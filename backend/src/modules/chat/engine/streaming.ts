@@ -62,7 +62,7 @@ import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
-import { snapshotOncePerTurn, workstationFor } from "../../../lib/workstation";
+import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import {
   cellResultContent,
   DEFAULT_CELL_TIMEOUT_MS,
@@ -548,7 +548,7 @@ export async function runLLMStream(params: {
     includeAskInputs && !autoMode
       ? TOOLS
       : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
-  const workstation = workstationFor(userId);
+  const workstation = await resolveWorkstation(db, userId);
   const workstationTools = workstation ? WORKSTATION_TOOLS : [];
   const baseTools = [
     ...conversationTools,
@@ -576,7 +576,7 @@ export async function runLLMStream(params: {
   // and pass every gate a direct call does. Where the user's kernel cannot
   // start, turns fall back to the direct tools for a minute (see
   // KernelManager.available).
-  const kernelLauncher = kernelLauncherFor(userId);
+  const kernelLauncher = kernelLauncherFor(workstation);
   const codeMode = !!kernelLauncher && kernels.available(kernelLauncher);
   const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
   const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
@@ -1198,6 +1198,7 @@ export async function runLLMStream(params: {
             scope === "parent" && connectorApprovals && includeAskInputs,
           userEmail,
           model,
+          workstation,
         },
       );
       throwIfAborted(signal);

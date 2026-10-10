@@ -7951,6 +7951,19 @@ $$;
 revoke all on function public.complete_google_workspace_oauth(text,text,jsonb), public.disconnect_google_workspace(uuid,text) from public, anon, authenticated;
 grant execute on function public.complete_google_workspace_oauth(text,text,jsonb), public.disconnect_google_workspace(uuid,text) to service_role;
 
+-- Workstation VMs per user: which pool VM belongs to which account. The row
+-- outlives the account: the VM's disk still holds its files until an operator
+-- wipes it and deletes the row.
+create table if not exists public.workstation_assignments (
+  vm text primary key check (vm ~ '^[a-z0-9-]{1,32}$'),
+  user_id uuid not null unique,
+  assigned_at timestamptz not null default now()
+);
+
+alter table public.workstation_assignments enable row level security;
+revoke all on table public.workstation_assignments from public, anon, authenticated;
+grant select, insert, update, delete on public.workstation_assignments to service_role;
+
 -- ---------------------------------------------------------------------------
 -- Migration ledger (backend/migrations/20261010_06_schema_migrations.sql)
 -- ---------------------------------------------------------------------------
@@ -8087,5 +8100,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_03_citation_checks.sql'),
   ('20261010_04_email_change_moves_grants.sql'),
   ('20261010_05_document_citation_checks.sql'),
-  ('20261010_06_schema_migrations.sql')
+  ('20261010_06_schema_migrations.sql'),
+  ('20261010_07_workstation_assignments.sql')
 on conflict (filename) do nothing;
