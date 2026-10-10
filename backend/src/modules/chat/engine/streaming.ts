@@ -38,7 +38,6 @@ import {
   TOOLS,
   WORKFLOW_TOOLS,
   WORKSTATION_TOOLS,
-  CODE_MODE_TOOLS,
   toolName,
   isDocumentMutatingTool,
   withoutDocumentMutatingTools,
@@ -63,12 +62,18 @@ import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
-import { workstationFor } from "../../../lib/workstation";
+import { snapshotOncePerTurn, workstationFor } from "../../../lib/workstation";
 import {
-  codeModeEnabled,
-  RUN_SCRIPT_TOOL,
-  runScript,
-  scriptResultContent,
+  cellResultContent,
+  DEFAULT_CELL_TIMEOUT_MS,
+  kernelLauncherFor,
+  kernels,
+  MAX_CELL_TIMEOUT_MS,
+  pythonToolsPromptSection,
+  pythonToolSpecs,
+  RUN_PYTHON_SCHEMA,
+  RUN_PYTHON_TOOL,
+  type HostReply,
 } from "../../../lib/codemode";
 import { createSubagentHost } from "./subagents/subagentHost";
 import { getAutoModeDecisionModel } from "../../user/user.service";
@@ -538,14 +543,13 @@ export async function runLLMStream(params: {
     includeAskInputs && !autoMode
       ? TOOLS
       : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
-  const workstationTools = workstationFor(userId) ? WORKSTATION_TOOLS : [];
-  const codeMode = codeModeEnabled();
+  const workstation = workstationFor(userId);
+  const workstationTools = workstation ? WORKSTATION_TOOLS : [];
   const baseTools = [
     ...conversationTools,
     ...researchTools,
     ...WORKFLOW_TOOLS,
     ...workstationTools,
-    ...(codeMode ? CODE_MODE_TOOLS : []),
   ];
   const advertisedTools = [
     ...baseTools,
@@ -562,6 +566,16 @@ export async function runLLMStream(params: {
   const activeTools = allowDocumentMutation
     ? advertisedTools
     : withoutDocumentMutatingTools(advertisedTools);
+  // Code mode: the model sees run_python alone, and every tool above is a
+  // function in it (lib/codemode). Its calls come back through runTurnTools
+  // and pass every gate a direct call does. Where the user's kernel cannot
+  // start, turns fall back to the direct tools for a minute (see
+  // KernelManager.available).
+  const kernelLauncher = kernelLauncherFor(userId);
+  const codeMode = !!kernelLauncher && kernels.available(kernelLauncher);
+  const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
+  const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
+  const modelTools = codeMode ? [RUN_PYTHON_SCHEMA] : activeTools;
 
   // Extract system prompt; pass remaining turns to the adapter as
   // plain user/assistant messages.
@@ -582,7 +596,9 @@ export async function runLLMStream(params: {
     projectId: memoryProjectId,
     sharedAudience: memorySharedAudience,
   });
-  const systemPrompt = memory.systemPrompt;
+  const systemPrompt = codeMode
+    ? `${memory.systemPrompt}\n\n${pythonToolsPromptSection(pythonSpecs)}`
+    : memory.systemPrompt;
   const chatMessages: LlmMessage[] = rawMsgs
     .filter((m) => m.role !== "system")
     .map(
@@ -618,6 +634,8 @@ export async function runLLMStream(params: {
   // across batches to let subsequent edit_document calls overwrite the
   // turn's existing version instead of creating a new one.
   const turnEditState: TurnEditState = new Map();
+  // A conversation's kernel is keyed by its id; a turn without one gets its own.
+  const turnKernelId = crypto.randomUUID();
   // Suppress repeated full-document reads for the same document/version in
   // one assistant response. The guard is invalidated when edit_document
   // changes that document so a post-edit verification read can still happen.
@@ -837,19 +855,19 @@ export async function runLLMStream(params: {
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
     ): Promise<{ tool_use_id: string; content: string }[]> => {
-      if (codeMode && calls.some((call) => call.name === RUN_SCRIPT_TOOL)) {
-        // Scripts run in the model's call order with the calls around them,
+      if (calls.some((call) => call.name === RUN_PYTHON_TOOL)) {
+        // Cells run in the model's call order with the calls around them,
         // and outside the write queue: their own writes queue there.
         const results: { tool_use_id: string; content: string }[] = [];
         let pending: NormalizedToolCall[] = [];
         for (const call of calls) {
-          if (call.name !== RUN_SCRIPT_TOOL) {
+          if (call.name !== RUN_PYTHON_TOOL) {
             pending.push(call);
             continue;
           }
           if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
           pending = [];
-          results.push({ tool_use_id: call.id, content: await runScriptCall(call, scope) });
+          results.push({ tool_use_id: call.id, content: await runPythonCall(call, scope) });
         }
         if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
         return results;
@@ -860,51 +878,80 @@ export async function runLLMStream(params: {
       return runTurnToolsNow(calls, scope);
     };
     /**
-     * Code mode: runs one `run_script` call in the QuickJS sandbox. Each
-     * `tools.x(...)` the script makes is an ordinary call in this turn: same
-     * guardrails, same mutation gate, same events, with writes taking turns.
-     * A script cannot start another script, ask the user a question, or reach
-     * the Word add-in's client tools.
+     * Code mode: runs one `run_python` cell in the conversation's kernel.
+     * Each `await tools.x(...)` the cell makes is an ordinary call in this
+     * turn: same guardrails, same mutation gate, same events, with writes
+     * taking turns. A question for the user (ask_inputs, a connector
+     * approval) ends the cell with UserQuestionPending and then pauses the
+     * turn as a direct call would; the kernel keeps its variables for the
+     * answer in the next message.
      */
-    const runScriptCall = async (
+    const runPythonCall = async (
       call: NormalizedToolCall,
       scope: "parent" | "child",
     ): Promise<string> => {
+      if (!codeMode || !kernelLauncher || scope !== "parent") {
+        return JSON.stringify({ error: `Tool '${RUN_PYTHON_TOOL}' is not available.` });
+      }
       const code = typeof call.input.code === "string" ? call.input.code : "";
       if (!code.trim()) return JSON.stringify({ error: "code is empty" });
-      const toolNames = activeTools
-        .map(toolName)
-        .filter(
-          (name): name is string =>
-            !!name &&
-            name !== RUN_SCRIPT_TOOL &&
-            name !== "ask_inputs" &&
-            !clientTools?.owns(name),
-        );
+      const key = conversationId ?? `turn-${turnKernelId}`;
+      if (call.input.reset === true) kernels.discard(key);
+      if (workstation) await snapshotOncePerTurn(turnEditState, workstation.snapshot);
+      let session;
+      try {
+        session = await kernels.acquire(key, kernelLauncher, pythonSpecs);
+      } catch (error) {
+        console.error("[code-mode] kernel unavailable", safeError(error));
+        return "[error]\nThe Python workstation is unavailable right now. Tell the user their workstation could not be reached; tools will work directly in the next message.";
+      }
       let seq = 0;
-      const timeoutSeconds = Number(call.input.timeout_seconds);
-      const result = await runScript({
-        code,
-        toolNames,
-        timeoutMs: Number.isFinite(timeoutSeconds) ? timeoutSeconds * 1000 : undefined,
-        signal,
-        callTool: async (name, args) => {
-          const inner: NormalizedToolCall = {
-            id: `${call.id}.${++seq}`,
-            name,
-            input: args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {},
-          };
-          const run = () => runTurnToolsNow([inner], scope);
+      let stopTurn: unknown = null;
+      const onHostRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
+        if (stopTurn) return { ok: false, error: "the turn is ending" };
+        const name = typeof data.name === "string" ? data.name : "";
+        if (data.type !== "tool" || !pythonToolNames.has(name)) {
+          return { ok: false, error: `No tool named '${name}'.` };
+        }
+        const args = data.args && typeof data.args === "object" && !Array.isArray(data.args)
+          ? (data.args as Record<string, unknown>)
+          : {};
+        const inner: NormalizedToolCall = { id: `${call.id}.${++seq}`, name, input: args };
+        const run = () => runTurnToolsNow([inner], scope);
+        try {
           const [answer] = isParallelSafeTool(name) ? await run() : await inWriteOrder(run);
-          return answer?.content ?? JSON.stringify({ error: `${name} returned nothing` });
-        },
+          return { ok: true, content: answer?.content ?? JSON.stringify({ error: `${name} returned nothing` }) };
+        } catch (error) {
+          if (isAskInputsPause(error)) {
+            stopTurn = error;
+            return { paused: true, message: "The user has been asked; their answer arrives in the next message." };
+          }
+          if (isAbortError(error)) {
+            stopTurn = error;
+            return { ok: false, error: "the turn was cancelled" };
+          }
+          console.error("[code-mode] tool call failed", { tool: name, ...safeError(error) });
+          return { ok: false, error: "the tool call failed" };
+        }
+      };
+      const timeoutSeconds = Number(call.input.timeout_seconds);
+      const outcome = await session.execute(code, {
+        timeoutMs: Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+          ? Math.min(timeoutSeconds * 1000, MAX_CELL_TIMEOUT_MS)
+          : DEFAULT_CELL_TIMEOUT_MS,
+        onHostRequest,
+        signal,
       });
-      console.info("[code-mode] script", {
-        ok: result.ok,
-        tool_calls: result.toolCalls,
-        duration_ms: result.durationMs,
+      console.info("[code-mode] cell", {
+        status: outcome.status,
+        tool_calls: outcome.hostRequests,
+        duration_ms: outcome.durationMs,
+        timed_out: outcome.timedOut,
+        kernel_lost: outcome.kernelLost,
       });
-      return scriptResultContent(result);
+      if (!outcome.kernelLost) void kernels.afterCell(key, kernelLauncher);
+      if (stopTurn) throw stopTurn;
+      return cellResultContent(outcome);
     };
     const runTurnToolsNow = async (
       calls: NormalizedToolCall[],
@@ -1245,6 +1292,7 @@ export async function runLLMStream(params: {
           chatModel: selectedModel,
           reasoning: params.reasoning ?? "high",
           docIndex,
+          // Subagents call tools directly, also in code mode.
           offeredTools: (activeTools as OpenAIToolSchema[]).map(
             (tool) => tool.function.name,
           ),
@@ -1264,7 +1312,7 @@ export async function runLLMStream(params: {
         : systemPrompt,
       subagents: delegation?.host,
       messages: chatMessages,
-      tools: activeTools as OpenAIToolSchema[],
+      tools: modelTools as OpenAIToolSchema[],
       // Keep in step with DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts. A literal,
       // not an import: tests mock the "../llm" barrel, and the runtime is an
       // ESM module loaded only on demand.

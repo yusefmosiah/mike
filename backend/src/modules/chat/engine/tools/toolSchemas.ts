@@ -165,35 +165,6 @@ export const WORKSTATION_TOOLS = [
   },
 ];
 
-/**
- * Code mode (goals/mission-11-code-mode.md): one script instead of a long
- * chain of tool calls. Offered only when CODE_MODE_ENABLED is set.
- */
-export const CODE_MODE_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "run_script",
-      description:
-        "Run JavaScript in a sandbox that can call your other tools. Use it when a task needs many tool calls, loops, filtering or arithmetic over results: read twenty documents and tabulate a field, search several queries and merge the hits, check every row of a table. Call any other tool you have as `await tools.<tool_name>({ ...arguments })` with the same arguments its schema takes; results come back parsed from JSON, and a failed call returns an object with an `error` field. Run independent calls together with `await Promise.all([...])`. The code is the body of an async function: `return` a value and/or `console.log(...)`; only those come back to you, so return a compact summary rather than raw documents. There is no network, filesystem, require, fetch or timers; each call your script makes is checked exactly as if you had made it directly. Limits: 100 tool calls, 120 s by default, 20,000 characters of output.",
-      parameters: {
-        type: "object",
-        properties: {
-          code: {
-            type: "string",
-            description: "JavaScript: the body of an async function.",
-          },
-          timeout_seconds: {
-            type: "number",
-            description: "Time limit in seconds (default 120, at most 600).",
-          },
-        },
-        required: ["code"],
-      },
-    },
-  },
-];
-
 export const TOOLS = [
   {
     type: "function",

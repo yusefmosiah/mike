@@ -1,19 +1,24 @@
 // Copy the non-TypeScript files the backend reads at runtime into dist/,
 // beside the compiled modules that read them: subagent types and the model
-// memo (src/modules/chat/engine/subagents). tsc copies only what it compiles.
+// memo (src/modules/chat/engine/subagents), and the code-mode kernel that is
+// uploaded to workstation VMs (src/lib/codemode/kernel). tsc copies only what
+// it compiles.
 import { cpSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ASSET_DIRS = ["modules/chat/engine/subagents"];
+const ASSET_DIRS = [
+    { dir: "modules/chat/engine/subagents", extensions: [".md"] },
+    { dir: "lib/codemode/kernel", extensions: [".py", ".md"] },
+];
 
-for (const dir of ASSET_DIRS) {
+for (const { dir, extensions } of ASSET_DIRS) {
     const from = path.join(root, "src", dir);
     const to = path.join(root, "dist", dir);
     mkdirSync(to, { recursive: true });
     for (const entry of readdirSync(from, { withFileTypes: true, recursive: true })) {
-        if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+        if (!entry.isFile() || !extensions.some((ext) => entry.name.endsWith(ext))) continue;
         const source = path.join(entry.parentPath, entry.name);
         const target = path.join(to, path.relative(from, source));
         mkdirSync(path.dirname(target), { recursive: true });

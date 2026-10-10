@@ -38,7 +38,7 @@ describe("injectionSignals", () => {
 
 describe("carriesExternalContent", () => {
   it("covers web, workstation, documents and connectors, not Mike's own instructions", () => {
-    for (const name of ["web_search", "fetch_web_page", "run_command", "run_script", "read_document", "mcp_github_x_1", "gmail_read_message", "google_drive_read_file", "courtlistener_read_case"]) {
+    for (const name of ["web_search", "fetch_web_page", "run_command", "run_python", "read_document", "mcp_github_x_1", "gmail_read_message", "google_drive_read_file", "courtlistener_read_case"]) {
       expect(carriesExternalContent(name)).toBe(true);
     }
     for (const name of ["read_workflow", "list_workflows", "ask_inputs", "generate_docx", "edit_document"]) {

@@ -72,7 +72,7 @@ const EXTERNAL_CONTENT_TOOLS: ReadonlySet<string> = new Set([
   "web_search",
   "fetch_web_page",
   "run_command",
-  "run_script",
+  "run_python",
   "read_document",
   "fetch_documents",
   "find_in_document",

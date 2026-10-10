@@ -52,44 +52,83 @@ subagent workflows.
   following the data, taint bit) belong to the later non-functional pass
   unless the owner pulls them forward.
 
-## Direction under review, 2026-10-10
+## Python code mode, 2026-10-10 (not accepted)
 
-The owner ruled out a no-network sandbox as the main path: code mode is for
-more power. The research pass
-([`docs/reports/code-mode-research-2026-10-10.md`](../docs/reports/code-mode-research-2026-10-10.md))
-recommends Python, a stateful IPython kernel per conversation in the employee's
-VM (Mission 13), Mike's tools as a generated async `mike` package calling back
-over a per-run vsock capability, and a with/without eval on the flash models.
-Nothing of it is built; the QuickJS slice below stays until it is replaced.
+Built on the owner's decision above. Readiness stays as the owner set it
+until they review this.
 
-## First slice, 2026-10-09 (not accepted)
+- **The kernel** (`backend/src/lib/codemode/kernel/mike_kernel/`): Mike's own
+  persistent CPython REPL, protocol in `PROTOCOL.md` there, design credited to
+  Prime Agent and OMP in `CREDITS.md` (no code copied). Newline-delimited JSON
+  over stdin and stdout; top-level `await` on one event loop; tool calls go
+  to the harness as `host_request` frames on the same channel; output tagged
+  per cell, subprocess output included; interrupts reach both blocking and
+  awaiting code; `SystemExit` and `KeyboardInterrupt` end only the cell;
+  `input()` reads end-of-file; a cell sent on one line with literal `\n`
+  escapes is repaired when that parses (the failure mode the research found
+  in smaller models). Namespace snapshots with dill, one variable at a time,
+  and a final snapshot when the harness disconnects; without dill the kernel
+  works and snapshots are off.
+- **The harness side** (`backend/src/lib/codemode/kernel/*.ts`): every frame
+  is parsed as untrusted (16 MiB line cap, shape checks). A session's time
+  limit counts the cell's own time only and stops while a tool call is with
+  the harness; at the limit, or when the turn is cancelled, the cell is
+  interrupted and the kernel killed 5 s later if it does not stop. Tool calls
+  from a task the cell left running are refused. The kernel's files travel in
+  the ssh command and install under `~/.mike/kernel/<hash>/` in the VM.
+  `KernelManager` keeps one kernel per conversation across turns, snapshots
+  after each cell, restores when it starts a new kernel, stops kernels idle
+  for 30 minutes, and counts a VM as down for a minute after a kernel fails
+  to start.
+- **The tool** (`run_python`, `backend/src/lib/codemode/python.ts`): offered
+  alone to every user with a workstation VM (`CODE_MODE_ENABLED=false` turns
+  it off). Every other tool the turn would have offered is documented in the
+  system prompt as a Python signature (`TOOLS IN PYTHON`) and bound as
+  `await tools.<name>(...)` in the kernel. Each call goes through
+  `runTurnToolsNow` like a direct call: Auto Mode gate, mutation gate, events,
+  write queue, Word add-in client tools. `ask_inputs` and connector approvals
+  end the cell with `UserQuestionPending` (a `BaseException`, so `except
+  Exception` cannot swallow it) and then pause the turn; the variables wait
+  for the answer. `run_command` is not offered in Python, where `subprocess`
+  does its job. Subagents still call tools directly. The first cell of a turn
+  takes the workstation snapshot, as `run_command` does. When the VM cannot
+  be reached, the cell says so and the next turns get the direct tools for a
+  minute.
+- **Retired:** the QuickJS `run_script` slice of 2026-10-09 and the
+  `quickjs-emscripten` dependency.
+- **Development without a VM:** `CODE_MODE_LOCAL_KERNEL_DIR` runs kernels as
+  local python3 processes (ignored in production); the tests use it.
 
-Built on the owner's overnight go-ahead ("make code mode work with
-sandboxing"); readiness above is unchanged until the owner reviews it.
+Not yet: dill and data packages in the guest image (`infra/workstation/guest.nix`),
+a UI that shows a cell's code and output, `llm()` / `llm_batch()` for the RLM
+path, an outbox for email, and the scenario eval the deep research describes.
 
-- `backend/src/lib/codemode/runScript.ts`: QuickJS (`quickjs-emscripten`
-  0.32.0, WebAssembly) in the backend process. The script is the body of an
-  async function; globals are `tools` (a proxy over the allowed names) and
-  `console`; there is no `process`, `require`, `fetch` or timers. Tool calls
-  return promises, so `Promise.all` runs them concurrently. Limits: 64 MiB
-  heap, 1 MiB stack, wall-clock deadline (default 120 s, at most 600 s)
-  enforced by the interpreter's interrupt handler, 100 tool calls, 20,000
-  characters of output; the turn's abort signal cancels the script.
-- `run_script` (`CODE_MODE_TOOLS` in `toolSchemas.ts`), offered only when
-  `CODE_MODE_ENABLED` is set. `runTurnTools` in `streaming.ts` intercepts it
-  and sends each `tools.x(...)` through `runTurnToolsNow` as an ordinary call
-  in the same scope, so the Auto Mode gate, the mutation gate (an unwritable
-  conversation's script sees no write tools) and the turn's events all apply.
-  Writes take turns in the write queue; reads run concurrently. A script
-  cannot call `run_script`, `ask_inputs` or the Word add-in's client tools.
-- `run_script` is not in the Tier 1 set on purpose: the durable runtime
-  replays Tier 1 calls after a crash (`replay: "safe"`), and a script may
-  write.
+Receipts, 2026-10-10 (run from `backend/` unless noted):
 
-Not yet: `agents.delegate()` (delegation lives in the Pi runtime's subagent
-host, not in the tool list), per-tool exposure modes and discovery
-(`searchTools`/`describeTool`), `store`/`load`, and a UI for the script and
-its inner calls beyond the events those calls already emit.
+```
+$ npx vitest run src/lib/codemode src/modules/chat/engine/__tests__/streamingCodeMode.test.ts src/modules/chat/engine/__tests__/streamingInjectionFlags.test.ts src/lib/guardrails
+ Test Files  7 passed (7)
+      Tests  137 passed (137)
+$ npm test            # whole backend suite
+ Test Files  250 passed | 13 skipped (263)
+      Tests  4454 passed | 100 skipped (4554)
+```
+
+Live, the Mac dev VM (QEMU in Docker, Python 3.14.7, no dill) through
+`sshKernelLauncher` and `KernelManager`:
+
+| step | time | result |
+|---|---|---|
+| first kernel start (install + ssh) | 12,820 ms | ready; a bare `ssh true` on this lane takes about 3 s |
+| `sys.version`, `platform.machine()`, `os.getcwd()` | 62 ms | `3.14.7 aarch64 /home/agent` |
+| one tool call | 101 ms | `{'echoed': 'over ssh'}` |
+| 50 tool calls with `tools.gather` | 351 ms | `50 291 ms for 50 calls` |
+| `import pandas` and a sum | 10,495 ms | `6` |
+| `subprocess.run(['uname','-a'])` | 113 ms | `Linux workstation 6.18.55 ... aarch64` |
+| `urllib.request.urlopen('https://www.sec.gov')` | 1,654 ms | `HTTP Error 403`: SEC requires a User-Agent |
+| snapshot | | `No module named 'dill'`, logged once, then snapshots off |
+
+### Receipts of the retired QuickJS slice, 2026-10-09
 
 Receipt (run from `backend/`):
 

@@ -33,3 +33,7 @@ qa-contracts/
 # Local review artifact; it is a nested repository, not application source.
 /pr-267-analysis-site/
 .agentic-consensus/
+
+# Python bytecode (the code-mode kernel in backend/src/lib/codemode/kernel)
+__pycache__/
+*.pyc

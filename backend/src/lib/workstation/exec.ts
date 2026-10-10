@@ -98,7 +98,7 @@ export function sshArgs(target: WorkstationTarget, remote: string): string[] {
 }
 
 /** Keeps the first and last part of a stream once it passes `max` characters. */
-class Capped {
+export class Capped {
   private head = "";
   private tail = "";
   private dropped = 0;
