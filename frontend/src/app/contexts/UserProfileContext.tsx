@@ -18,7 +18,6 @@ import {
     type PracticeSetting,
     type ProfessionalTitle,
     type UserProfile as ApiUserProfile,
-    completeUserOnboarding,
     getUserProfile,
     isMfaRequiredError,
     saveApiKey,
@@ -85,7 +84,6 @@ interface UserProfileContextType {
     apiKeysDegraded: boolean;
     updateDisplayName: (name: string) => Promise<boolean>;
     updateOrganisation: (organisation: string) => Promise<boolean>;
-    completeOnboarding: (details?: PersonalisationDetails) => Promise<boolean>;
     updatePersonalisation: (
         details: PersonalisationDetails,
     ) => Promise<boolean>;
@@ -311,20 +309,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 return true;
             } catch (error) {
                 if (isMfaRequiredError(error)) throw error;
-                return false;
-            }
-        },
-        [user],
-    );
-
-    const completeOnboarding = useCallback(
-        async (details: PersonalisationDetails = {}): Promise<boolean> => {
-            if (!user) return false;
-            try {
-                const updated = await completeUserOnboarding(details);
-                setProfile(toProfile(updated));
-                return true;
-            } catch {
                 return false;
             }
         },
@@ -659,7 +643,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             apiKeysDegraded,
             updateDisplayName,
             updateOrganisation,
-            completeOnboarding,
             updatePersonalisation,
             syncPasswordSet,
             updateModelPreference,
@@ -683,7 +666,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             apiKeysDegraded,
             updateDisplayName,
             updateOrganisation,
-            completeOnboarding,
             updatePersonalisation,
             syncPasswordSet,
             updateModelPreference,

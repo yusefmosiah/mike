@@ -15,7 +15,7 @@ export default function SignupCheckEmailPage() {
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            router.replace("/onboarding/profile");
+            router.replace("/assistant");
         }
     }, [authLoading, isAuthenticated, router]);
 

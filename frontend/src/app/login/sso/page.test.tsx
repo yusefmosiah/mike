@@ -42,7 +42,7 @@ describe("SsoLoginPage", () => {
         await user.click(button);
 
         expect(startSso).toHaveBeenCalledWith(
-            "/onboarding/profile",
+            "/assistant",
             "Lawyer@Example.com",
         );
         expect(

@@ -24,7 +24,7 @@ export function GoogleAuthButton({
         onError("");
 
         try {
-            const { url } = await startGoogleOAuth("/onboarding/profile");
+            const { url } = await startGoogleOAuth("/assistant");
             window.location.assign(url);
         } catch (error: unknown) {
             onError(

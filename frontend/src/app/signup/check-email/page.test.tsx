@@ -46,7 +46,7 @@ describe("SignupCheckEmailPage", () => {
         render(<SignupCheckEmailPage />);
 
         await waitFor(() => {
-            expect(replace).toHaveBeenCalledWith("/onboarding/profile");
+            expect(replace).toHaveBeenCalledWith("/assistant");
         });
         expect(
             screen.queryByRole("heading", { name: "Check your email" }),

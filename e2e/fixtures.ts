@@ -44,9 +44,7 @@ export const test = base.extend<object, WorkerFixtures>({
                 await page.fill("#email", e2eAccount.email);
                 await page.fill("#password", e2eAccount.password);
                 await page.click('button[type="submit"]');
-                /* A new account must finish onboarding before its session
-                   lands on the app; an onboarded one goes straight to
-                   /assistant. */
+                /* Every account lands straight on /assistant. */
                 await completeOnboardingIfRequired(page);
                 await page.context().storageState({ path: file });
                 await page.close();

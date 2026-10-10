@@ -61,7 +61,7 @@ describe("LoginPage", () => {
         await user.click(screen.getByRole("button", { name: "Log in" }));
 
         expect(login).toHaveBeenCalledWith("existing@example.com", "oldpass");
-        expect(push).toHaveBeenCalledWith("/onboarding/profile");
+        expect(push).toHaveBeenCalledWith("/assistant");
     });
 
     it("places Google and SSO after the primary login action", () => {

@@ -153,9 +153,11 @@ test.describe("firm thread handoff", () => {
             await reply.fill(continuation);
             await reply.press("Enter");
             await expect(associatePage.getByText(continuation, { exact: true })).toBeVisible();
-            // The slow answer has started streaming: the associate holds the thread.
+            // The answer is streaming and the turn is held open: the associate
+            // holds the thread. (The view keeps the last chunk back until the
+            // stream ends, so match the start of the answer.)
             await expect(
-                associatePage.getByText(/^Stub answer \d+ to: Handoff c/),
+                associatePage.getByText(/^Stub answer \d+ to: Handoff continuation/),
             ).toBeVisible({ timeout: 15_000 });
 
             // 3. The partner's view, idle since sharing, sends meanwhile: the
@@ -173,13 +175,12 @@ test.describe("firm thread handoff", () => {
                 .filter({ hasText: "is generating a response" });
             await expect(generatingNotice).toContainText(associateName, { timeout: 15_000 });
 
-            await expect(answerTo(associatePage, continuation)).toBeVisible({ timeout: 45_000 });
             // The partner's thread catches up on its own once the turn ends.
+            await expect(generatingNotice).toHaveCount(0, { timeout: 45_000 });
             await expect(answerTo(page, continuation)).toBeVisible({ timeout: 20_000 });
             await expect(promptRow(page, continuation)).toContainText(associateName, {
                 timeout: 20_000,
             });
-            await expect(generatingNotice).toHaveCount(0);
 
             // 4. The third member reads it all, attributed, and cannot send.
             const thirdPage = await thirdContext.newPage();

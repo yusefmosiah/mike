@@ -22,7 +22,6 @@ import {
     UPSTREAM_UNAVAILABLE_MESSAGE,
     addDocumentToProject,
     clearTabularCells,
-    completeUserOnboarding,
     copyDocumentVersionFromDocument,
     copyDocumentsToWorkflowAssets,
     createChat,
@@ -2367,27 +2366,6 @@ describe("thin endpoint wrappers", () => {
             url: "/user/profile",
             method: "PATCH",
             body: { displayName: "Amal", titleModel: "m1" },
-        },
-        {
-            name: "completeUserOnboarding (defaults)",
-            call: () => completeUserOnboarding(),
-            url: "/user/onboarding",
-            method: "POST",
-            body: {},
-        },
-        {
-            name: "completeUserOnboarding (personalisation)",
-            call: () =>
-                completeUserOnboarding({
-                    jurisdiction: "Singapore",
-                    practiceAreas: ["Litigation"],
-                }),
-            url: "/user/onboarding",
-            method: "POST",
-            body: {
-                jurisdiction: "Singapore",
-                practiceAreas: ["Litigation"],
-            },
         },
         {
             name: "syncUserPasswordSet",

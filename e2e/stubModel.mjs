@@ -11,8 +11,9 @@
  *     Stub answer 3 to: <the last user message>
  *
  * Streaming (`stream: true`) and plain JSON completions are both served; tools
- * are ignored. A prompt containing "(slow)" streams over about twenty seconds,
- * so a spec can watch a turn while it is still generating. Usage: `node e2e/stubModel.mjs [port]` (default 21434).
+ * are ignored. A prompt containing "(slow)" sends its answer at once and then
+ * holds the stream open for about twenty seconds before finishing, so a spec
+ * can watch a turn while it is still generating. Usage: `node e2e/stubModel.mjs [port]` (default 21434).
  */
 import { createServer } from "node:http";
 
@@ -92,12 +93,11 @@ const server = createServer(async (req, res) => {
     const send = (chunk) => res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, ...chunk })}\n\n`);
     send({ choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] });
     // A few chunks, so the client exercises its streaming path.
-    const pieces = text.match(/.{1,16}/gs) ?? [text];
-    const pause = prompt.includes("(slow)") ? Math.ceil(20_000 / pieces.length) : 15;
-    for (const piece of pieces) {
+    for (const piece of text.match(/.{1,16}/gs) ?? [text]) {
         send({ choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] });
-        await new Promise((resolve) => setTimeout(resolve, pause));
+        await new Promise((resolve) => setTimeout(resolve, 15));
     }
+    if (prompt.includes("(slow)")) await new Promise((resolve) => setTimeout(resolve, 20_000));
     send({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
     send({ choices: [], usage });
     res.end("data: [DONE]\n\n");

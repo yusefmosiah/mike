@@ -16,7 +16,6 @@ describe("safeAuthNext", () => {
             "/settings?emailChange=processed",
         );
         expect(safeAuthNext("/reset-password")).toBe("/reset-password");
-        expect(safeAuthNext("/onboarding/profile")).toBe("/onboarding/profile");
     });
 
     it.each([

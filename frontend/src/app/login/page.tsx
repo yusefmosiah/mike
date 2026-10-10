@@ -40,7 +40,7 @@ export default function LoginPage() {
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            router.replace("/onboarding/profile");
+            router.replace("/assistant");
         }
     }, [authLoading, isAuthenticated, router]);
 
@@ -52,7 +52,7 @@ export default function LoginPage() {
         try {
             await login(email, password);
             await refreshSession();
-            router.push("/onboarding/profile");
+            router.push("/assistant");
         } catch (error: unknown) {
             setError(
                 knownErrorCodeMessage(

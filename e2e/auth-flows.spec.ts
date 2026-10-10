@@ -58,12 +58,10 @@ test.describe("unauthenticated", () => {
     }) => {
         /* Sign in as THIS worker's account (e2eAccount; e2e@mike.local on
            worker 0). Depending on `workerStorageState` makes Playwright run the
-           worker fixture first, which creates the account and finishes its
-           onboarding; this test's own page stays signed out because the
-           describe overrides `storageState`. Without that dependency, a run
-           on worker 1+ could log in as a user another worker has not
-           onboarded yet and land on /onboarding/profile instead of
-           /assistant. */
+           worker fixture first, which creates the account; this test's own
+           page stays signed out because the describe overrides
+           `storageState`. Without that dependency, a run on worker 1+ could
+           try to log in as a user that does not exist yet. */
         void workerStorageState;
         const { email, password } = e2eAccount;
 

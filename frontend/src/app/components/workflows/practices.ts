@@ -1,4 +1,4 @@
-import { PRACTICE_AREA_OPTIONS } from "@/app/onboarding/options";
+import { PRACTICE_AREA_OPTIONS } from "@/app/components/settings/personalisationOptions";
 
 export const PRACTICE_OPTIONS = [
     "General Transactions",

@@ -48,7 +48,7 @@ function SignupContent() {
     useEffect(() => {
         if (isAccountCreatedPreview) return;
         if (!authLoading && isAuthenticated && !success) {
-            router.replace("/onboarding/profile");
+            router.replace("/assistant");
         }
     }, [
         authLoading,
@@ -82,14 +82,14 @@ function SignupContent() {
             const result = await signup(
                 trimmedEmail,
                 password,
-                "/onboarding/profile",
+                "/assistant",
             );
 
             if (!result.requiresEmailConfirmation) {
                 await refreshSession();
                 setSuccess(true);
                 setTimeout(() => {
-                    router.push("/onboarding/profile");
+                    router.push("/assistant");
                 }, 2000);
             } else {
                 router.push("/signup/check-email");
@@ -120,10 +120,10 @@ function SignupContent() {
                             Account created!
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                            Redirecting you to finish setting up your account...
+                            Taking you to Mike...
                         </p>
                         <Link
-                            href="/onboarding/profile"
+                            href="/assistant"
                             className={pillButtonUIClassName({
                                 tone: "black",
                                 size: "normal",

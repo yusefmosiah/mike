@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRACTICE_AREA_OPTIONS } from "@/app/onboarding/options";
+import { PRACTICE_AREA_OPTIONS } from "@/app/components/settings/personalisationOptions";
 import { PRACTICE_OPTIONS } from "./practices";
 
 describe("workflow practice options", () => {

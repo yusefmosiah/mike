@@ -151,7 +151,7 @@ authRouter.post("/signup", asyncRoute(async (req, res) => {
     const { data, error } = await signUpWithPassword(
       client,
       parsed.data,
-      callbackUrl(req, req.body?.next, "/onboarding/profile"),
+      callbackUrl(req, req.body?.next, "/assistant"),
     );
     if (error || !data.user) return authError(res, error);
     res.status(201).json({
@@ -194,7 +194,7 @@ async function startSso(req: Request, res: Response) {
     const { data, error } = await startSsoSignIn(
       client,
       domain,
-      callbackUrl(req, req.body?.next, "/onboarding/profile"),
+      callbackUrl(req, req.body?.next, "/assistant"),
     );
     if (error) {
       if (error.status && error.status >= 400 && error.status < 500) {
@@ -227,7 +227,7 @@ authRouter.post("/oauth", asyncRoute(async (req, res) => {
       callbackUrl(
         req,
         req.body?.next,
-        "/onboarding/profile",
+        "/assistant",
         req.body?.callbackPath === "/oauth-dialog.html"
           ? "/oauth-dialog.html"
           : "/auth/callback",

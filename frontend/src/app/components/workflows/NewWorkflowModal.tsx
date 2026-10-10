@@ -26,7 +26,7 @@ import {
 import {
     COUNTRY_OPTIONS,
     OTHER_JURISDICTION_OPTION,
-} from "@/app/onboarding/options";
+} from "@/app/components/settings/personalisationOptions";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import {

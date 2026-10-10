@@ -26,7 +26,7 @@ describe("GoogleAuthButton", () => {
             screen.getByRole("button", { name: "Continue with Google" }),
         );
 
-        expect(startGoogleOAuth).toHaveBeenCalledWith("/onboarding/profile");
+        expect(startGoogleOAuth).toHaveBeenCalledWith("/assistant");
         expect(onError).toHaveBeenCalledWith("");
         expect(
             screen.getByRole("button", { name: "Continuing…" }),

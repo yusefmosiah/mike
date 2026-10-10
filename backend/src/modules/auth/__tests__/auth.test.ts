@@ -147,7 +147,7 @@ describe("auth routes", () => {
       provider: "google",
       options: {
         redirectTo:
-          "https://app.example.test/oauth-dialog.html?next=%2Fonboarding%2Fprofile",
+          "https://app.example.test/oauth-dialog.html?next=%2Fassistant",
         skipBrowserRedirect: true,
       },
     });
@@ -182,7 +182,7 @@ describe("auth routes", () => {
     expect(authClient.signInWithSSO).toHaveBeenCalledWith({
       domain: "example.com",
       options: {
-        redirectTo: `${origin}/auth/callback?next=%2Fonboarding%2Fprofile`,
+        redirectTo: `${origin}/auth/callback?next=%2Fassistant`,
         skipBrowserRedirect: true,
       },
     });

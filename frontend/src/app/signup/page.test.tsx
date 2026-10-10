@@ -69,7 +69,7 @@ describe("SignupPage", () => {
         expect(signup).toHaveBeenCalledWith(
             "alex@example.com",
             "secret1234",
-            "/onboarding/profile",
+            "/assistant",
         );
         expect(push).toHaveBeenCalledWith("/signup/check-email");
     });

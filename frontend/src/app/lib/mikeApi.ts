@@ -901,16 +901,6 @@ export async function updateUserProfile(payload: {
     });
 }
 
-export async function completeUserOnboarding(
-    payload: PersonalisationDetails = {},
-): Promise<UserProfile> {
-    return apiRequest<UserProfile>("/user/onboarding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-    });
-}
-
 export async function syncUserPasswordSet(): Promise<UserProfile> {
     return apiRequest<UserProfile>("/user/security/password-set", {
         method: "POST",

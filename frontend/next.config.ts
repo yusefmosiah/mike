@@ -39,6 +39,13 @@ const nextConfig: NextConfig = {
                 destination: "/settings/:path*",
                 permanent: true,
             },
+            // Onboarding was removed; a link or OAuth callback that still
+            // names it lands in the app.
+            {
+                source: "/onboarding/:path*",
+                destination: "/assistant",
+                permanent: false,
+            },
         ];
     },
     skipTrailingSlashRedirect: true,

@@ -26,7 +26,7 @@ import {
   PROFESSIONAL_TITLE_OPTIONS,
   type PracticeSetting,
   type ProfessionalTitle,
-} from "@/app/onboarding/options";
+} from "@/app/components/settings/personalisationOptions";
 
 const COMMON_PRACTICE_AREAS = PRACTICE_AREA_OPTIONS.filter(
   (area) => area !== "Other",

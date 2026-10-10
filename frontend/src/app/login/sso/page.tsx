@@ -34,7 +34,7 @@ export default function SsoLoginPage() {
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            router.replace("/onboarding/profile");
+            router.replace("/assistant");
         }
     }, [authLoading, isAuthenticated, router]);
 
@@ -45,7 +45,7 @@ export default function SsoLoginPage() {
 
         try {
             const { url } = await startSso(
-                "/onboarding/profile",
+                "/assistant",
                 email.trim(),
             );
             window.location.assign(url);
