@@ -1,0 +1,62 @@
+# Deploy main to staging (https://choir-ip.com on node-a) once CI passes.
+#
+# The runner never sends code: it asks node-a to serve one commit, and node-a
+# fetches main from this public repository, refuses a commit that is not on
+# main or is older than what it serves, builds that exact tree, waits for the
+# health checks and restores the previous tree if they fail
+# (`mike-staging deploy-sha` in infra/node-a/staging.nix). The key in
+# STAGING_DEPLOY_KEY belongs to the mike-deploy user, whose only permitted
+# command is that deploy. No model is called.
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one halfway through.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: staging
+      url: https://choir-ip.com
+    steps:
+      - name: Deploy the commit CI tested
+        env:
+          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # node-a's host key, pinned: a different host is refused.
+          echo '51.81.93.94 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKYpptwKiBVbvuEzT2fE/NfaGDO5CfDBOveEy6UlC/XJ' > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            mike-deploy@51.81.93.94 "deploy $SHA"
+
+      - name: Check the public site
+        run: |
+          set -euo pipefail
+          for path in / /api/health /gotrue/health; do
+            code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://choir-ip.com$path")
+            echo "$path $code"
+            test "$code" = 200
+          done

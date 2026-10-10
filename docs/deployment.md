@@ -579,3 +579,24 @@ of on the next fresh install.
 
 See [Safe local testing](safe-local-testing.md), the [security policy](../SECURITY.md),
 and [Troubleshooting](troubleshooting.md) for related guidance.
+
+## This repository's staging (node-a)
+
+https://choir-ip.com runs the Compose stack on node-a under rootful Podman,
+configured by `infra/node-a/staging.nix`. Every push to `main` deploys there
+once CI passes (`.github/workflows/deploy-staging.yml`):
+
+1. The workflow connects as `mike-deploy`, a user whose key may only run
+   `deploy <full commit sha>` (no shell, no forwarding).
+2. node-a fetches `main` from GitHub and refuses a commit that is not on
+   `main`, or that is older than the commit it already serves.
+3. It builds that exact tree (`.git-sha` names it), starts it, and waits up
+   to five minutes for `/`, `/api/health` and `/gotrue/health`. If they fail,
+   it restores the previous tree and the workflow fails.
+
+Deploy a commit by hand with `ssh root@51.81.93.94 mike-staging deploy-sha
+<sha>`, or rerun the workflow with "Run workflow". The deploy key's private
+half is the `STAGING_DEPLOY_KEY` Actions secret; replace it by generating a
+new pair, putting the public key in `deployKey` in `staging.nix`, and setting
+the secret. New migrations reach staging through the `db-init` service, so
+add them to `docker-compose.yml` as for any Compose install.

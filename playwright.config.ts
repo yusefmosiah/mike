@@ -15,7 +15,7 @@ const SYNTHETIC_SPECS = [
    GoTrue too (e2e/users.ts). CI sets these itself. */
 /* E2E_API_PORT and E2E_WEB_PORT move the servers Playwright starts locally,
    for a machine whose development stack already holds 3000 and 3001. Uploads
-   need the web app on 3000: local storage's CORS allows only that origin
+   need the web app on 3000 or 3100, the origins local storage's CORS allows
    (docker/storage-cors.json). */
 const API_PORT = process.env.E2E_API_PORT ?? "3001";
 const WEB_PORT = process.env.E2E_WEB_PORT ?? "3000";

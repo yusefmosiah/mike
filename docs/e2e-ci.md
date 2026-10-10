@@ -212,7 +212,6 @@ LLM specs pick their own.
 
 If your development stack already holds ports 3000 and 3001, move the servers
 Playwright starts: `E2E_API_PORT=3201 E2E_WEB_PORT=3100 npm run test:e2e`.
-Browser uploads then fail, because the local storage's CORS rule
-(`docker/storage-cors.json`) allows only `http://localhost:3000`; the tabular
-review "adds a document" spec fails for that reason alone. Use the override
-for specs that upload nothing, such as `e2e/branching.spec.ts`.
+Local storage's CORS rule (`docker/storage-cors.json`) allows the web app on
+3000 and on 3100, so uploads work with that override; another web port needs
+its origin added there (the stack script re-applies the rule on each start).
