@@ -99,10 +99,50 @@ Verification run:
   (`sharp ok arm64 png 4`). The lockfile carries `@img/sharp-linux-x64` for
   the staging host.
 
+Staging, for acceptance 4 (2026-10-10, owner's permission):
+
+- `/var/lib/mike-staging/backend.env` was backed up, then `jq` added
+  `"supportsVision": true` to the two Phala entries in that file and in the
+  compose `.env` it produces. The edit printed only ids and flags:
+
+  ```text
+  {"id":"phala/qwen3.8-27b-uncensored","supportsVision":true}
+  {"id":"phala/glm-5.3","supportsVision":null}
+  {"id":"phala/glm-5.3-flash","supportsVision":null}
+  {"id":"phala/gemma-4-26b-a4b-uncensored","supportsVision":true}
+  ```
+
+- `mike-staging compose up -d backend`, then `modelSeesImages` in the running
+  container:
+
+  ```text
+  phala/qwen3.8-27b-uncensored true
+  phala/gemma-4-26b-a4b-uncensored true
+  phala/glm-5.3 false
+  ```
+
+- A throwaway script in the container generated a 1800×1200 JPEG (red left
+  half, blue right half), sized it with `imageForModel(imageSizingFor(id))`
+  and sent it with pi's `completeSimple`. It asked for the colour of each
+  half. The script was then deleted. Gemma 4:
+
+  ```text
+  sent image/jpeg 1344x912 17764 bytes
+  catalog input: text,image
+  stop: stop
+  answer: The left half is red and the right half is blue.
+  ```
+
+  Qwen3.8-27B: `sent image/jpeg 1376x928 18491 bytes`, same answer.
+
+  This exercised the sizing, the pi catalog and Phala's image input. It did
+  not go through an upload and a chat turn in the web app, because that
+  needs a signed-in staging account.
+
 Not yet done:
 
-- Acceptance 4: staging's `MIKE_MODEL_CONFIG_JSON` still needs
-  `"supportsVision": true` on the two Phala models, and a live photo turn.
+- Acceptance 4 end to end: upload a real photo in the staging web app and
+  ask Gemma 4 about it.
 - Ollama vision (probe `/api/show`).
 - OpenRouter models outside pi's catalog stay text-only.
 - Image parts are stored base64 in Pi Durable's transcript, about 1 to 3 MB
