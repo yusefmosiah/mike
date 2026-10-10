@@ -7,7 +7,8 @@ subagents reviewed upstream's recent commits. I chose and applied the picks
 below, then ran the backend and frontend test suites before each push.
 
 **Stopped at the owner's request:** no further upstream changes are applied
-until these are approved.
+until these are approved. On 2026-10-10 the owner asked for two more, the
+migration ledger and the contract templates (#11 and #12).
 
 ## Applied
 
@@ -23,6 +24,8 @@ until these are approved.
 | 8 | `fbaf92b8` | `725f5a21`, applied cleanly | **New feature.** The new-review access step lists the project members who inherit access | 4 files, +142/−10 | Low, but a feature you did not ask for | `git revert fbaf92b8` |
 | 9 | `534553e8` | `9d327292`, applied cleanly | **Comment only.** Fixes a code comment's file path | 1 file | None | `git revert 534553e8` |
 | 10 | `0cfeeacb` | `c94052d7`, policy part only, adapted | **Passwords.** Details below the table | 8 files, +109/−10 | Low. Existing users are unaffected at sign-in | `git revert 0cfeeacb` |
+| 11 | `124d832b`, `43220382`, `d617576e`, `0501ee14` | `a86784aa`, `e66ecd34`, applied cleanly, then adapted | **Contract templates.** Library → Templates → "Browse presets" offers 83 public templates (General Legal, Common Paper, Bonterms) to add as personal copies or download. Details below the table | ~95 files, about 13 MB of DOCX/PDF | Low. Bundled static files plus a picker; imports use the existing upload path | `git revert` the four commits |
+| 12 | the `feat(db): record applied migrations` commit | `49efc046`, `a178e85a`, ported by hand | **Migration ledger.** Each database records the migrations it has applied in `public.schema_migrations`; `backend/scripts/migrate.sh` applies only the rest, each in a transaction, under an advisory lock. Compose's db-init (and so staging) runs it instead of re-applying a hard-coded list on every start | 14 files | Medium: changes how staging migrates. Tested on a fresh volume, on a volume made by the old db-init, and on the local e2e database | `git revert`; the `schema_migrations` table can stay, nothing else reads it |
 
 ### Details
 
@@ -49,6 +52,29 @@ GoTrue also gave an opaque error for passwords over 72 bytes. Sign-in still
 accepts any existing password. Upstream's toast refactor that came with this
 change was not taken.
 
+**#11 Contract templates:** I read the licence notice inside every file and
+checked the publishers' pages. General Legal is CC0 (its page says so; the files
+carry no notice). Common Paper is CC BY 4.0, but its Amendment and Statement of
+Work carry no notice and are not clearly covered, so I removed them. Bonterms is
+licensed per file: 20 CC BY 4.0, 14 CC0 (example cover pages, order form, SOW,
+policies), and 3 CC BY-ND 4.0 (End User Agreement, Reseller Agreement for
+Marketplaces, Online Cloud Terms), which forbid sharing edited copies. The
+picker now shows each file's own licence, with a "share unmodified only" note
+on the BY-ND ones. Upstream's later rework of the picker into a full page
+(`16c908dc`) was not taken: it rewrites the document table and toolbars across
+the app. Taking the picker also exposed a phone bug in every table toolbar: the
+actions menu stayed open over the dialog an action opened. Fixed in `0501ee14`.
+
+**#12 Migration ledger:** the ledger migration is
+`20261010_06_schema_migrations.sql` (upstream's `20261009_03`, renamed to our
+date sequence). `schema.sql` creates the table and lists all 115 files, so a
+fresh install has nothing pending. On staging's first deploy, db-init finds
+no ledger and runs `docker/db-init/adopt-ledger.sh`: one last replay of the old
+list under the old rules (the same two old files fail and are ignored, as on
+every start today), then records everything up to `20261010_05`. Adding a
+migration no longer needs compose mount and psql lines; AGENTS.md says so. The
+local schema-drift reproduction gave identical fingerprints (7842 lines each).
+
 ### Notes on #1
 
 - **Confirmed emails.** Shares, invitations and organization grants keyed by
@@ -70,12 +96,10 @@ change was not taken.
 |---|---|---|
 | `31ff48e3` | Stream idle timeout ignores keep-alive pings | Barely applies here. Our periodic keep-alive writes to the HTTP response, not into the turn run, so it cannot hold a stuck turn open. Porting it would also cut off Word's legitimate `tool-wait` pauses and the citation tool's progress pings unless both were rewired |
 | `54b6b3a1`, `55ec6955`, `f4cf97c7`, `89f61ccd` (+ dependabot `e72b3bf4`, `1609d4f8`) | Sentry SDK v11 with explicit privacy controls | A dependency upgrade across three apps. We are on v10 with `sendDefaultPii: false`, which is already privacy-safe |
-| `49efc046`, `a178e85a` | Migration ledger (`schema_migrations`) with an advisory lock | Worth considering: today db-init re-applies every migration on each deploy. Large change to compose, deployment and CI |
 | `017b6741` | Shared toast and notice store, turn-scoped Retry | UI framework change; Retry would need rebuilding on our turn claims and branches |
 | `e44fbf30` | Caps on ask-input choice length | Small hardening; needs hand-porting |
 | `6829c525` | Batched asset lookup in workflow add-ons | Performance; conflicts |
 | `f3fa62e6` | PDF text-layer review fixes | Conflicts with our PDF code |
-| `a86784aa`, `e66ecd34` | 25 preset contract templates | Licences need checking (CC BY attribution, Bonterms CC BY-ND) |
 | `2f30082a` (+ tests) | Model catalog refresh and direct Mistral API | Built for upstream's AI SDK; ours runs on Pi |
 | `9c5ffa31`, `25779536`, `81429370` | Bring-your-own-key for Bedrock, Azure, Vertex, xAI, custom endpoints | Built for upstream's AI SDK; large |
 | `663d3b16`, `8cc1ffcc`, `c65c84c6` | Response language, style, custom instructions | Features this fork does not have |

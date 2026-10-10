@@ -53,7 +53,9 @@ DATABASE_URL=postgres://postgres:postgres@localhost:54322/postgres
 ```
 
 Load the schema once (`docker compose up db-init` does it, or run
-`backend/schema.sql` with `psql`), then `npm run dev --prefix backend`.
+`backend/schema.sql` with `psql`), then `npm run dev --prefix backend`. After
+pulling new migrations, `docker compose up db-init` (or
+`DATABASE_URL=... backend/scripts/migrate.sh up`) applies the pending ones.
 
 ## Local service endpoints
 

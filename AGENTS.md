@@ -181,12 +181,22 @@ For every new migration:
    not exists`, `create or replace` for functions, drop-before-create for
    policies and constraints, and guarded data backfills or type changes.
 4. Update `backend/schema.sql` with the migration's final database shape in the
-   same change.
+   same change, and add the migration's filename to the `schema_migrations`
+   list at the end of that file (`backend/src/__tests__/migrationLedger.test.ts`
+   checks the list matches the directory). Compose needs no change: `db-init`
+   mounts the whole directory.
 5. Preserve RLS, grants, ownership, security-definer settings, and explicit
    `search_path` hardening when changing database objects.
 
-Existing deployments apply only files newer than their recorded version, in
-filename order. Do not assume every historical migration is safely replayable,
+Each database records the migrations it has applied in
+`public.schema_migrations`; `backend/scripts/migrate.sh` (also run by Compose's
+`db-init`, and so by staging) applies the files it does not list, in filename
+order, exactly once, each inside a transaction with its ledger row. Do not
+write `begin` / `commit` in a new migration; if it cannot run in a transaction
+(for example `create index concurrently`), add a line reading
+`-- migrate:no-transaction`. Never edit or rename a migration that has
+shipped: deployments that ran it would not run the new version. Do not assume
+every historical migration is safely replayable,
 and do not apply migrations to a remote or production database unless the user
 explicitly requests it and the target has been confirmed. See
 `docs/deployment.md` for deployment procedure and `.github/workflows/schema-drift.yml`
