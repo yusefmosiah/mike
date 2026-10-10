@@ -145,9 +145,14 @@ be read, the turn goes ahead, as before. Tests:
 - refusal tests: `tabular.turn.resume.test.ts` and `wordChat.turn.resume.test.ts`;
 - backend `npm test`: 4478 passed.
 
-Not done: presence (the "someone is generating" notice) is not shown on the tabular and
-Word UIs.
-
-Still open from before: an editor whose tab
-attaches to a colleague's live turn sees the Stop control for it, as before this
-change.
+Follow-up (2026-10-10, assistant-run; not accepted):
+- Tabular presence: `GET /tabular-review/:id/chats` carries each chat's turn-claim
+  holder (`generating`, with name and email); the review chat panel shows "<name> is
+  generating a response", re-reads every 3 s while it lasts, then loads the thread.
+  Test: `src/modules/tabular/__tests__/tabular.presence.test.ts`.
+- Word: chats belong to one person, so presence there is the refusal. A send while
+  the chat's turn runs in another window says so instead of printing the server's
+  raw 409 body. Test: `frontend/src/wordAddin/streamRefusal.test.ts`.
+- Stop: only the person generating can stop a turn. The composer dims and disables
+  Stop for a colleague's turn, and the stop endpoint answers 403 `turn_not_yours`.
+  Test: `chat.routes.test.ts` "refuses a stop from anyone but the person generating".

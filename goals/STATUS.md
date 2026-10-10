@@ -208,7 +208,13 @@ collide. In the owner's words where quoted.
      `PHALA_API_KEY` (never printed) and `MIKE_MODEL_CONFIG_JSON` with three
      models that made proper tool calls in a probe (GLM 5.3, DeepSeek V4
      Flash, gpt-oss-120b; Kimi K3 answered tool calls as text and Qwen 3.8
-     returned an unparseable body, so they are left out). On staging after
+     returned an unparseable body, so they are left out). The owner then
+     chose the staging models (2026-10-10): `phala/qwen3.8-27b-uncensored`,
+     `z-ai/glm-5.3`, `z-ai/glm-5.3-flash`, `phala/gemma-4-26b-a4b-uncensored`,
+     all four making proper tool calls in a probe. After the deploy of
+     `4fba2674`, `completeText` in `mike-backend-1` printed each answering
+     `"attested ok"` (2620, 877, 1624 and 577 ms), each followed by
+     `[attestation] ACI receipt verified`. On staging after
      the deploy of `84a4d76d`, `completeText` inside `mike-backend-1`
      printed `phala/glm-5.3 reply: "attested ok" 6150 ms` and
      `phala/gpt-oss-120b reply: "attested ok" 957 ms`, with an
@@ -239,7 +245,23 @@ collide. In the owner's words where quoted.
      src/modules/citations src/lib/__tests__/toolDispatcherCheckCitations.test.ts
      src/__tests__/architecture.test.ts` printed `30 passed`; frontend
      `npm test` printed `2331 passed`. Not yet seen live on staging.
-   - Mission 5: next.
+   - **Mission 5, remaining pieces: built, not accepted.** A colleague
+     attached to someone else's live turn no longer gets a working Stop:
+     the composer dims and disables it ("Only the person generating can
+     stop this response"), and `POST /chat/:id/turn/:turnId/stop` answers
+     403 `turn_not_yours` (test: "refuses a stop from anyone but the person
+     generating"). Tabular review chats show who is generating: the chat
+     list carries the turn claim's holder with their name, the panel shows
+     the notice and re-reads every 3 s until the turn ends, then loads the
+     thread. Word chats belong to one person, so their presence is the
+     refusal: a send while the chat's turn runs in another window now says
+     so, and the pane no longer prints the server's raw reply. Tests:
+     backend `npm test` printed `4496 passed`; frontend `npm test`
+     `2332 passed`; Word add-in `npx playwright test e2e/chat.spec.ts
+     e2e/server-owned-turns.spec.ts --project=chromium` printed
+     `56 passed`. Screenshots of the new UI (citation check states,
+     colleague turn, tabular presence, Phala picker, password page) were
+     sent to the owner from a mocked-API run of the real app.
    - **Docket, owner's request (2026-10-10):** a web citation should expand
      in place to show the cited passage from the page (transcluded), with a
      link inside the expanded section to open the page, instead of jumping
@@ -385,7 +407,7 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 | 3 | Branching, prompt editing and branch threads, end to end | real-app Playwright runs pass locally (6/6), awaiting the owner's look | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
 | 11 | Code mode | first slice built, awaiting review | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
 | 6 | Citation checks of documents (owner re-scope 2026-10-10) | built, awaiting review; no UI beyond the tool | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
-| 5 | Firm thread handoff | built, awaiting review; tabular and Word surfaces not yet on the DB claim | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
+| 5 | Firm thread handoff | built, awaiting review; tabular and Word on the DB claim, presence on every surface | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
 | 1, 2 | Word editing (1a–1c), compaction | built, awaiting review | mission and station files |
 
 Still open from the earlier agenda, not scheduled tonight: Station 3 search and
