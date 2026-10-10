@@ -1,11 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-vi.mock("../../../word-addin/src/taskpane/lib/errorReporting", () => ({
-    reportNetworkFailure: vi.fn(),
-    reportApiFailure: vi.fn(),
-}));
-
-import { refusalMessage } from "../../../word-addin/src/taskpane/api/stream";
+import { refusalMessage } from "../../../word-addin/src/taskpane/api/refusal";
 
 const reply = (status: number, body: string) => new Response(body, { status });
 
