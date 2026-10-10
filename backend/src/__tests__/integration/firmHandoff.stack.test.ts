@@ -13,7 +13,7 @@ import { chatTurnAuditEvents } from "../../lib/audit";
 // Gated: runs only under npm run test:stack, which starts both services.
 const maybeDescribe = stackConfigured ? describe : describe.skip;
 
-type ChatModule = typeof import("../../modules/chat/chat.service");
+type ChatModule = typeof import("../../modules/chat/chat.service.js");
 
 // One local model the senders choose; preparing a turn never calls it.
 const MODEL_CONFIG = JSON.stringify({
@@ -22,7 +22,7 @@ const MODEL_CONFIG = JSON.stringify({
 
 async function replica(): Promise<ChatModule> {
     vi.resetModules();
-    return import("../../modules/chat/chat.service");
+    return import("../../modules/chat/chat.service.js");
 }
 
 maybeDescribe("firm thread handoff against Postgres", () => {
@@ -193,7 +193,7 @@ maybeDescribe("firm thread handoff against Postgres", () => {
     });
 
     it("stamps who created a document version", async () => {
-        const { createDocumentVersion } = await import("../../modules/documents/documents.service");
+        const { createDocumentVersion } = await import("../../modules/documents/documents.service.js");
         const { data: doc, error } = await db
             .from("documents")
             .insert({ user_id: people.associate.id })
