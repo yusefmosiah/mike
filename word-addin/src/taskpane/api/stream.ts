@@ -116,15 +116,30 @@ export interface WordTurnHandlers {
  * reattaches to it — so a resumed turn behaves identically to the one it
  * resumed, tool calls included.
  */
+/**
+ * What the pane says when the server refuses a turn. The server's own text
+ * never reaches the transcript; a known refusal gets an intentional message.
+ */
+export async function refusalMessage(res: Response): Promise<string> {
+  let code: unknown = null;
+  try {
+    code = ((await res.json()) as { code?: unknown }).code;
+  } catch {
+    // Not JSON: fall through to the generic message.
+  }
+  if (res.status === 409 && code === "turn_in_progress") {
+    // Word chats belong to one person, so the other turn is theirs.
+    return "A response is still being generated for this chat in another window. Try again once it finishes.";
+  }
+  return `The chat request failed (${res.status}). Please try again.`;
+}
+
 async function consumeTurnStream(
   res: Response,
   params: WordTurnHandlers & { signal?: AbortSignal },
   onText: (text: string) => void,
 ): Promise<void> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Chat request failed (${res.status}): ${body}`);
-  }
+  if (!res.ok) throw new Error(await refusalMessage(res));
   let streamError: string | null = null;
   const result = await readSSE(
     res,
