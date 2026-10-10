@@ -38,7 +38,7 @@ describe("fetchWebPage", () => {
         const body = textPdf("The person in custody must be warned of the right to remain silent.");
         vi.stubGlobal(
             "fetch",
-            vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "application/octet-stream" } })),
+            vi.fn(async () => new Response(new Uint8Array(body), { status: 200, headers: { "content-type": "application/octet-stream" } })),
         );
         const page = await fetchWebPage("https://example.org/opinion.pdf");
         expect(page.status).toBe(200);
