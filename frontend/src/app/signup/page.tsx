@@ -25,7 +25,7 @@ const SIGNUP_ERROR_MESSAGES = {
 } as const;
 import {
     MIN_PASSWORD_LENGTH,
-    minimumPasswordMessage,
+    newPasswordProblem,
 } from "@/app/components/auth/passwordPolicy";
 import { AuthDivider } from "@/app/components/auth/AuthDivider";
 import { GoogleAuthButton } from "@/app/components/auth/GoogleAuthButton";
@@ -70,9 +70,10 @@ function SignupContent() {
             return;
         }
 
-        // Validate password length
-        if (password.length < MIN_PASSWORD_LENGTH) {
-            setError(minimumPasswordMessage);
+        // Validate password length (characters and bytes)
+        const passwordProblem = newPasswordProblem(password);
+        if (passwordProblem) {
+            setError(passwordProblem);
             setLoading(false);
             return;
         }

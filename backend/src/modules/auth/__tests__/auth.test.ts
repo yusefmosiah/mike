@@ -127,6 +127,34 @@ describe("auth routes", () => {
     expect(JSON.stringify(response.body)).not.toContain("server-only-token");
   });
 
+  it("holds a new password to 10 characters and 72 UTF-8 bytes", async () => {
+    authClient.signUp.mockResolvedValue({ data: { user, session }, error: null });
+    const signup = (password: string) =>
+      request(app).post("/auth/signup").set("Origin", origin).send({ email: user.email, password });
+
+    const short = await signup("nine char");
+    expect(short.status).toBe(400);
+    expect(short.body).toMatchObject({ code: "weak_password", detail: expect.stringMatching(/at least 10/) });
+
+    // 18 four-byte characters are 72 bytes; one more two-byte character is 74.
+    expect((await signup("\u{1F512}".repeat(18))).status).toBe(201);
+    const long = await signup(`${"\u{1F512}".repeat(18)}é`);
+    expect(long.status).toBe(400);
+    expect(long.body.detail).toMatch(/72 bytes/);
+    expect(authClient.signUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("still signs in with a password set under earlier rules", async () => {
+    authClient.signInWithPassword.mockResolvedValue({ data: { user, session }, error: null });
+    for (const password of ["short", "x".repeat(80)]) {
+      const response = await request(app)
+        .post("/auth/login")
+        .set("Origin", origin)
+        .send({ email: user.email, password });
+      expect(response.status).toBe(200);
+    }
+  });
+
   it("keeps OAuth redirects on the requesting client origin", async () => {
     authClient.signInWithOAuth.mockResolvedValue({
       data: { url: "https://accounts.google.test/authorize" },

@@ -38,6 +38,7 @@ import {
   listMfaFactors,
   mfaAssuranceLevel,
   passwordSchema,
+  newPasswordProblem,
   sendPasswordReset,
   signInWithPassword,
   signOut,
@@ -116,6 +117,10 @@ function invalidBody(res: Response) {
   });
 }
 
+function weakPassword(res: Response, detail: string) {
+  res.status(400).json({ code: "weak_password", detail });
+}
+
 function cookieClient(req: Request, res: Response): AuthClient | null {
   const client = res.locals.authClient as AuthClient | undefined;
   if (!client || res.locals.authSource !== "cookie") {
@@ -145,6 +150,8 @@ authRouter.post("/login", asyncRoute(async (req, res) => {
 authRouter.post("/signup", asyncRoute(async (req, res) => {
   const parsed = credentialsSchema.safeParse(req.body);
   if (!parsed.success) return invalidBody(res);
+  const passwordProblem = newPasswordProblem(parsed.data.password);
+  if (passwordProblem) return weakPassword(res, passwordProblem);
 
   try {
     const client = createRequestAuth(req, res);
@@ -377,6 +384,8 @@ authRouter.patch("/email", requireAuth, asyncRoute(async (req, res) => {
 authRouter.patch("/password", requireAuth, asyncRoute(async (req, res) => {
   const parsed = passwordSchema.safeParse(req.body);
   if (!parsed.success) return invalidBody(res);
+  const passwordProblem = newPasswordProblem(parsed.data.password);
+  if (passwordProblem) return weakPassword(res, passwordProblem);
   const client = cookieClient(req, res);
   if (!client) return;
   const { data, error } = await updatePassword(client, parsed.data.password);

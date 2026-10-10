@@ -14,7 +14,7 @@ import {
 } from "@/app/components/auth/authStyles";
 import {
     MIN_PASSWORD_LENGTH,
-    minimumPasswordMessage,
+    newPasswordProblem,
 } from "@/app/components/auth/passwordPolicy";
 import { getAuthSession, updateAuthPassword } from "@/app/lib/authApi";
 import { FieldLabel } from "@/app/components/ui/form-field";
@@ -68,8 +68,9 @@ function ResetPasswordContent() {
     async function handleSubmit(event: React.FormEvent) {
         event.preventDefault();
         setError(null);
-        if (password.length < MIN_PASSWORD_LENGTH) {
-            setError(`${minimumPasswordMessage}.`);
+        const passwordProblem = newPasswordProblem(password);
+        if (passwordProblem) {
+            setError(`${passwordProblem}.`);
             return;
         }
         if (password !== confirmPassword) {

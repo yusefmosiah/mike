@@ -60,6 +60,27 @@ export const friendlyNameSchema = z.string().trim().min(1).max(100);
 
 export type Credentials = z.infer<typeof credentialsSchema>;
 
+export const MIN_PASSWORD_LENGTH = 10;
+/** bcrypt hashes at most 72 bytes, so GoTrue refuses to set a longer password. */
+export const MAX_PASSWORD_BYTES = 72;
+
+/**
+ * Why a NEW password (sign-up, password change) is not accepted, or null; the
+ * web forms apply the same rule (frontend passwordPolicy.ts). Sign-in does
+ * not: a password set under earlier rules (or before GoTrue refused long
+ * ones) must still sign in, or its owner could never reach the page that
+ * changes it.
+ */
+export function newPasswordProblem(password: string): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+    return "Password is too long: use at most 72 bytes (fewer characters with accents or emoji).";
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Redirect targets
 // ---------------------------------------------------------------------------

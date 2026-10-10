@@ -4,7 +4,7 @@ import { useState } from "react";
 import { authInputClassName } from "@/app/components/auth/authStyles";
 import {
   MIN_PASSWORD_LENGTH,
-  minimumPasswordMessage,
+  newPasswordProblem,
 } from "@/app/components/auth/passwordPolicy";
 import { Modal } from "@/app/components/modals/Modal";
 import { Input } from "@/app/components/ui/input";
@@ -34,8 +34,9 @@ export function PasswordSettingsSection() {
 
   async function addPassword() {
     setPasswordSetError(null);
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setPasswordSetError(`${minimumPasswordMessage}.`);
+    const passwordProblem = newPasswordProblem(password);
+    if (passwordProblem) {
+      setPasswordSetError(`${passwordProblem}.`);
       return;
     }
     if (password !== confirmPassword) {
