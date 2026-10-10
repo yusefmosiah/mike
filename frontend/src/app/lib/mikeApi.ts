@@ -3038,6 +3038,11 @@ export interface TRChat {
      * of showing a transcript whose last answer is simply missing.
      */
     active_turn?: ActiveAssistantTurn | null;
+    /**
+     * Who is generating in this thread now (the database turn claim), so a
+     * colleague viewing the review sees it whichever server answers.
+     */
+    generating?: (ThreadAuthor & { since: string | null }) | null;
 }
 
 const TABULAR_CHAT_SELECTION_PREFIX = "tabular-review-chat:";

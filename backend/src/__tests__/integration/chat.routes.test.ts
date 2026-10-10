@@ -358,12 +358,14 @@ vi.mock("../../lib/memory/schedule", () => ({
 // the app) imports it at module load.
 vi.mock("../../middleware/auth", () => ({
     requireAuth: (
-        _req: unknown,
+        req: { headers?: Record<string, string | undefined> },
         res: { locals: Record<string, unknown> },
         next: () => void,
     ) => {
-        res.locals.userId = "u1";
-        res.locals.userEmail = "u1@test.local";
+        // A test may act as a colleague; everyone else is u1.
+        const user = req.headers?.["x-test-user"] ?? "u1";
+        res.locals.userId = user;
+        res.locals.userEmail = `${user}@test.local`;
         next();
     },
     requireMfaIfEnrolled: (_req: unknown, _res: unknown, next: () => void) =>
@@ -3554,6 +3556,28 @@ describe("server-owned turns: resume, stop, concurrency", () => {
         expect(replay.status).toBe(200);
         expect(records(replay.text)[0]).toContain('"type":"chat_id"');
         expect(replay.text).toContain("data: [DONE]");
+    });
+
+    it("refuses a stop from anyone but the person generating", async () => {
+        const held = heldGeneration();
+        // The chat's creator is u1; a colleague (u2) is the one generating.
+        const first = request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .set("X-Test-User", "u2")
+            .send(VALID_BODY);
+        const firstDone = first.then((res) => res);
+        await held.started;
+        const turnId = (findAssistantReservation()?.value as { id: string }).id;
+
+        const byCreator = await request(app)
+            .post(`/chat/chat-1/turn/${turnId}/stop`)
+            .set("Authorization", "Bearer test");
+        expect(byCreator.status).toBe(403);
+        expect(byCreator.body.code).toBe("turn_not_yours");
+
+        held.release();
+        expect((await firstDone).text).toContain("data: [DONE]");
     });
 
     it("answers 404 for a turn that belongs to another chat or is unknown", async () => {

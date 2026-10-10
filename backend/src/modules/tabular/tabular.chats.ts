@@ -175,7 +175,47 @@ export type ReviewChatSummary = {
     created_at: string;
     updated_at: string;
     user_id: string;
+    /**
+     * Who is generating in this chat now, from the database turn claim
+     * (mission 5), so a colleague viewing the review sees it on any replica.
+     */
+    generating?: { id: string; name: string | null; email: string | null; since: string | null } | null;
 };
+
+/** Each chat's current turn holder, read in two queries; never fails the listing. */
+export async function withGenerating(db: Db, chats: ReviewChatSummary[]): Promise<ReviewChatSummary[]> {
+    if (chats.length === 0) return chats;
+    try {
+        const { data: claims } = await db
+            .from("chat_turn_claims")
+            .select("chat_id, actor_user_id, claimed_at")
+            .eq("surface", "tabular")
+            .in("chat_id", chats.map((chat) => chat.id))
+            .gt("expires_at", new Date().toISOString());
+        const held = ((claims ?? []) as Array<{ chat_id: string; actor_user_id: string | null; claimed_at: string | null }>)
+            .filter((claim) => claim.actor_user_id);
+        if (held.length === 0) return chats.map((chat) => ({ ...chat, generating: null }));
+        const { data: profiles } = await db
+            .from("user_profiles")
+            .select("user_id, email, display_name")
+            .in("user_id", [...new Set(held.map((claim) => claim.actor_user_id as string))]);
+        const people = new Map(
+            ((profiles ?? []) as Array<{ user_id: string; email: string | null; display_name: string | null }>).map((row) => [
+                row.user_id,
+                { name: row.display_name?.trim() || null, email: row.email ?? null },
+            ]),
+        );
+        const byChat = new Map(held.map((claim) => [claim.chat_id, claim]));
+        return chats.map((chat) => {
+            const claim = byChat.get(chat.id);
+            if (!claim?.actor_user_id) return { ...chat, generating: null };
+            const person = people.get(claim.actor_user_id) ?? { name: null, email: null };
+            return { ...chat, generating: { id: claim.actor_user_id, ...person, since: claim.claimed_at } };
+        });
+    } catch {
+        return chats;
+    }
+}
 
 export async function listTabularReviewChats(
     db: Db,
@@ -203,7 +243,7 @@ export async function listTabularReviewChats(
         .eq("review_id", reviewId)
         .order("updated_at", { ascending: false });
 
-    return { ok: true, data: (chats ?? []) as ReviewChatSummary[] };
+    return { ok: true, data: await withGenerating(db, (chats ?? []) as ReviewChatSummary[]) };
 }
 
 /**

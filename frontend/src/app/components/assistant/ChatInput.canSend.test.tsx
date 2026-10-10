@@ -192,6 +192,15 @@ describe("ChatInput canSend gating", () => {
         expect(onCancel).toHaveBeenCalledOnce();
     });
 
+    it("cannot stop a colleague's response in a shared thread", () => {
+        const onCancel = vi.fn();
+        render(<ChatInput onSubmit={vi.fn()} onCancel={onCancel} isLoading canStop={false} canSend projectId="p1" />);
+        const control = screen.getByRole("button", { name: "Only the person generating can stop this response" });
+        expect(control).toBeDisabled();
+        fireEvent.click(control);
+        expect(onCancel).not.toHaveBeenCalled();
+    });
+
     it("says a response is still arriving rather than blaming permissions", () => {
         // Returning to a thread whose answer is still streaming, while its
         // history is on its way, closes the composer, but the reader may

@@ -18,6 +18,9 @@ import { TRChatPanel } from "./TRChatPanel";
 vi.mock("@/app/hooks/useDocumentCitationChecks", () => ({
     useDocumentCitationChecks: () => ({ status: "idle" }),
 }));
+vi.mock("@/app/contexts/AuthContext", () => ({
+    useAuth: () => ({ user: { id: "viewer" } }),
+}));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn() }),
 }));

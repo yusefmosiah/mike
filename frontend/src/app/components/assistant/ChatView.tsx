@@ -1619,6 +1619,10 @@ export function ChatView({
                                                 onSubmit={handleChat}
                                                 onCancel={cancel}
                                                 isLoading={isResponseLoading}
+                                                canStop={
+                                                    !generatingBy ||
+                                                    generatingBy.id === viewerId
+                                                }
                                                 chatKey={chatId}
                                                 chatModel={chatModel}
                                                 chatReasoningLevel={chatReasoningLevel}

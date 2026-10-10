@@ -31,6 +31,9 @@ import {
     type Message,
 } from "../shared/types";
 import { ChatInput } from "../assistant/ChatInput";
+import { generatingNotice, threadPersonLabel } from "../assistant/threadAuthors";
+import { THREAD_GENERATING_POLL_MS } from "@/app/hooks/useThreadGenerating";
+import { useAuth } from "@/app/contexts/AuthContext";
 import { PreResponseWrapper } from "../assistant/PreResponseWrapper";
 import {
     DocReadBlock,
@@ -802,6 +805,63 @@ export function TRChatPanel({
         );
         void resumeTurnRef.current(currentChatId, active.id);
     }, [chats, currentChatId, isLoadingChats, isLoadingMessages, isLoading]);
+
+    // Presence (goals/mission-5-firm-thread-handoff.md): someone else's turn
+    // generating in this review chat. The chat list says who; while they hold
+    // it, re-read the list every few seconds, and when their turn ends, load
+    // the thread so their prompt and answer appear.
+    const { user } = useAuth();
+    const viewerId = user?.id ?? null;
+    const generatingBy =
+        (currentChatId &&
+            chats.find((chat) => chat.id === currentChatId)?.generating) ||
+        null;
+    const watchingColleague = !!generatingBy && !isLoading;
+    const loadHistoryRef = useRef(loadHistory);
+    useEffect(() => {
+        loadHistoryRef.current = loadHistory;
+    });
+    const refreshPresence = useCallback(
+        async (chatId: string | null) => {
+            const loaded = await getTabularChats(reviewId);
+            const fresh = new Map(loaded.map((chat) => [chat.id, chat]));
+            setChats((prev) =>
+                prev.map((chat) =>
+                    fresh.has(chat.id)
+                        ? {
+                              ...chat,
+                              generating: fresh.get(chat.id)!.generating ?? null,
+                          }
+                        : chat,
+                ),
+            );
+            return chatId ? (fresh.get(chatId)?.generating ?? null) : null;
+        },
+        [reviewId],
+    );
+    // A thread opened from the list may have started generating since the
+    // list loaded.
+    useEffect(() => {
+        if (!currentChatId || isLoadingChats) return;
+        void refreshPresence(currentChatId).catch(() => {});
+    }, [currentChatId, isLoadingChats, refreshPresence]);
+    useEffect(() => {
+        if (!watchingColleague || !currentChatId) return;
+        const chatId = currentChatId;
+        let cancelled = false;
+        const timer = setInterval(() => {
+            refreshPresence(chatId)
+                .then((holder) => {
+                    if (!cancelled && !holder) void loadHistoryRef.current(chatId);
+                })
+                // A failed poll is retried on the next tick.
+                .catch(() => {});
+        }, THREAD_GENERATING_POLL_MS);
+        return () => {
+            cancelled = true;
+            clearInterval(timer);
+        };
+    }, [watchingColleague, currentChatId, refreshPresence]);
 
     // ---- drip ----
 
@@ -2186,10 +2246,22 @@ export function TRChatPanel({
                 ref={composerRef}
                 className="absolute bottom-0 left-0 right-0 z-10 px-3 pb-3"
             >
+                {generatingBy &&
+                    !(isLoading && generatingBy.id === viewerId) && (
+                        <p
+                            role="status"
+                            className="px-2 pb-2 text-sm text-gray-600 [overflow-wrap:anywhere]"
+                        >
+                            {canSend
+                                ? generatingNotice(generatingBy, viewerId)
+                                : `${threadPersonLabel(generatingBy, viewerId)} is generating a response.`}
+                        </p>
+                    )}
                 <ChatInput
                     onSubmit={(message) => void handleSubmit(message)}
                     onCancel={handleCancel}
                     isLoading={isLoading}
+                    canStop={!generatingBy || generatingBy.id === viewerId}
                     canSend={canSend}
                     hideAddDocButton
                     hideWorkflowButton

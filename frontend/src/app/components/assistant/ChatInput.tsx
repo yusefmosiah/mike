@@ -94,6 +94,11 @@ interface Props {
     onCancel: () => void;
     isLoading: boolean;
     /**
+     * Whether the Stop control may stop the response arriving. False while a
+     * colleague's turn generates in a shared thread: only they can stop it.
+     */
+    canStop?: boolean;
+    /**
      * Whether the caller may write into this chat. False renders a read-only
      * composer — sending, attaching, and drop-uploads stay off, matching
      * what the server would refuse for a project viewer.
@@ -167,6 +172,7 @@ function ChatInputForChatImpl(
         onSubmit,
         onCancel,
         isLoading,
+        canStop = true,
         canSend = true,
         chatLoading = false,
         hideAddDocButton,
@@ -666,7 +672,7 @@ function ChatInputForChatImpl(
 
     const handleActionClick = () => {
         if (isLoading) {
-            onCancel();
+            if (canStop) onCancel();
         } else {
             handleSubmit();
         }
@@ -975,7 +981,16 @@ function ChatInputForChatImpl(
                             <button
                                 type="button"
                                 aria-label={
-                                    isLoading ? "Stop response" : "Send message"
+                                    isLoading
+                                        ? canStop
+                                            ? "Stop response"
+                                            : "Only the person generating can stop this response"
+                                        : "Send message"
+                                }
+                                title={
+                                    isLoading && !canStop
+                                        ? "Only the person generating can stop this response"
+                                        : undefined
                                 }
                                 className={cn(
                                     "relative bg-gradient-to-b from-neutral-700 to-black text-white rounded-[11px] h-8 w-8 flex items-center justify-center cursor-pointer disabled:cursor-default disabled:from-neutral-600 disabled:to-black backdrop-blur-xl border-0 active:enabled:scale-95 transition-all duration-150",
@@ -983,10 +998,11 @@ function ChatInputForChatImpl(
                                 )}
                                 onClick={handleActionClick}
                                 disabled={
-                                    !isLoading &&
-                                    (!composerOpen ||
-                                        !value.trim() ||
-                                        slashCommandsLoading)
+                                    isLoading
+                                        ? !canStop
+                                        : !composerOpen ||
+                                          !value.trim() ||
+                                          slashCommandsLoading
                                 }
                             >
                                 {isLoading ? (

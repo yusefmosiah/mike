@@ -2851,7 +2851,7 @@ describe("tabular.routes", () => {
 
             expect(res.status).toBe(200);
             expect(res.body).toEqual([
-                { id: "chat-1", title: "T", user_id: "u1", active_turn: null },
+                { id: "chat-1", title: "T", user_id: "u1", active_turn: null, generating: null },
             ]);
         });
     });

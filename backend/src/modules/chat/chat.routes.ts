@@ -260,6 +260,14 @@ chatRouter.post("/:chatId/turn/:turnId/stop", requireAuth, asyncRoute(async (req
         });
     }
     if (run.finished) return void res.json({ stopped: false, finished: true });
+    // In a shared thread, a colleague watching someone else's turn cannot cut
+    // it short; only the person generating can (mission 5).
+    if (run.userId !== userId) {
+        return void res.status(403).json({
+            code: "turn_not_yours",
+            detail: "Only the person generating this response can stop it.",
+        });
+    }
     run.stop();
     res.json({ stopped: true, finished: false });
 }));
