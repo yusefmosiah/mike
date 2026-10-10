@@ -6870,6 +6870,9 @@ create index if not exists chat_turn_claims_actor_idx
 
 alter table public.chat_turn_claims enable row level security;
 revoke all on table public.chat_turn_claims from public, anon, authenticated;
+grant select, insert, update, delete
+  on public.chat_turn_claims
+  to service_role;
 
 -- Grants the thread to p_turn_id unless another live turn holds it. Returns
 -- one row: granted, plus the holder (the caller when granted).
