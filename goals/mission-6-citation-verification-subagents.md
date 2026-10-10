@@ -201,6 +201,18 @@ Receipts:
   - Not covered: snapshots were not stored in this probe (audit inserts went to a
     stub). Durable storage and re-checks are covered by the stack test.
 
+- Live probe on the default checker model `opencode-go/deepseek-v4.1-flash`, which
+  runs on the subscription:
+  - First run: Miranda came back `unverifiable`. The judge said "holds the
+    opposite", but its excerpt failed the strict match. The scanned opinion's text
+    has OCR noise inside the sentence ("he-does", "and'that").
+  - `evidenceInSource` now accepts the same words in the same order (at least 20
+    characters, line-break hyphens joined, punctuation ignored). Changed words still
+    fail; this has a test.
+  - Second run printed `model calls 7, outbound audited 20, total 18904ms`, with the
+    same five verdicts as the OpenRouter run: Marbury verified, Miranda
+    contradicted, Varghese not-found, § 107 verified, Brown contradicted.
+
 Open items:
 
 - The acceptance probe's "third person re-runs months later" part is covered by the

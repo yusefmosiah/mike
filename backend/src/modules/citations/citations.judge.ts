@@ -7,9 +7,8 @@
 // The judge must quote the source for "supports" and "contradicts": an
 // excerpt that is not actually in the source turns the judgement into
 // "unclear", so a judge cannot invent its own evidence.
-import { verifyQuoteAgainstSource } from "../chat/chat.service";
 import { parseJsonObject, type Complete, type ExtractedCitation } from "./citations.extract";
-import type { Verdict } from "./citations.verifier";
+import { evidenceInSource, type Verdict } from "./citations.verifier";
 
 export type Support = "supports" | "partial" | "does-not-support" | "contradicts" | "unclear";
 
@@ -99,7 +98,7 @@ export async function judgeSupport(
     let support: Support = SUPPORTS.includes(parsed.support as Support) ? (parsed.support as Support) : "unclear";
     let reason = typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : "No reason given.";
     let evidence = typeof parsed.evidence === "string" && parsed.evidence.trim() ? parsed.evidence.trim() : null;
-    if (evidence && !verifyQuoteAgainstSource(args.source, evidence).verified) evidence = null;
+    if (evidence && !evidenceInSource(args.source, evidence)) evidence = null;
     if (!evidence && (support === "supports" || support === "partial" || support === "contradicts")) {
         reason = `${reason} (Not confirmed: the checker's excerpt is not in the source.)`;
         support = "unclear";

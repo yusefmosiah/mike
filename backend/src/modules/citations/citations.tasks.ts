@@ -35,7 +35,7 @@ import {
     type WebFetch,
     type WebSearch,
 } from "./citations.sources";
-import { matchQuote, sha256, type SnapshotInput, type Verdict } from "./citations.verifier";
+import { evidenceInSource, matchQuote, sha256, type SnapshotInput, type Verdict } from "./citations.verifier";
 
 export const CITATION_CHECK_JOB = "citations.verify";
 /** One step per citation; verification_tasks allows at most 500. */
@@ -504,7 +504,7 @@ export async function recheckCitation(db: Db, args: Actor & { checkId: string })
     const content = snapshot.content as string;
     const hashOk = sha256(content) === snapshot.content_sha256;
     const quoteFound = stored.quote ? matchQuote(content, stored.quote).found : null;
-    const excerptOk = stored.excerpt ? matchQuote(content, stored.excerpt).found : true;
+    const excerptOk = stored.excerpt ? evidenceInSource(content, stored.excerpt) : true;
     return ok({
         check_id: stored.id,
         hash_ok: hashOk,

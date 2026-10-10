@@ -248,6 +248,18 @@ describe("judging support", () => {
         expect(judgement.evidence).toBeNull();
     });
 
+    it("accepts real evidence through OCR noise, but not changed words", async () => {
+        const { evidenceInSource } = await import("../citations.verifier.js");
+        const scanned =
+            "Held: Prior to any questioning, the person must be warned that he has a right to remain silent, that any statement he-does make may be used as evi-\n dence against him, and'that he has a right to the presence of an attorney.";
+        const excerpt =
+            "Prior to any questioning, the person must be warned that he has a right to remain silent, that any statement he does make may be used as evidence against him, and that he has a right to the presence of an attorney.";
+        expect(evidenceInSource(scanned, excerpt)).toBe(true);
+        expect(evidenceInSource(scanned, excerpt.replace("must be warned", "need not be warned"))).toBe(false);
+        expect(evidenceInSource(scanned, "the person must be")).toBe(true);
+        expect(evidenceInSource("a b c", "the person must not")).toBe(false);
+    });
+
     it("sends a long source's most relevant passages, not its beginning", async () => {
         const { relevantPassages } = await import("../citations.judge.js");
         const filler = "Procedural history and unrelated discussion of venue. ".repeat(800);

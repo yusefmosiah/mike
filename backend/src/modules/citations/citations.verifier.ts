@@ -50,6 +50,27 @@ export function blockAt(offsets: readonly BlockOffset[] | null | undefined, posi
     return null;
 }
 
+/** Words only: line-break hyphens joined, punctuation and spacing dropped. */
+function words(text: string): string {
+    return text
+        .toLowerCase()
+        .replace(/-\s*\n\s*/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+}
+
+/**
+ * Whether an excerpt the checker offers as evidence is in the source: the
+ * same words in the same order. Scanned court opinions carry OCR noise inside
+ * real sentences ("he-does", "and'that", words split across lines), which a
+ * stricter match rejects; changed or invented words still fail.
+ */
+export function evidenceInSource(content: string, excerpt: string): boolean {
+    if (verifyQuoteAgainstSource(content, excerpt).verified) return true;
+    const wanted = words(excerpt);
+    return wanted.length >= 20 && ` ${words(content)} `.includes(` ${wanted} `);
+}
+
 /**
  * Whether the source contains the passage, allowing the whitespace, case and
  * punctuation drift extraction introduces, and `...` omissions.
