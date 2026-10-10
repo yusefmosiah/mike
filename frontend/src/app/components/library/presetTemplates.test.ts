@@ -41,6 +41,17 @@ describe("bundled preset catalog", () => {
     }
   });
 
+  it("names each file's own license, with the no-derivatives note where it applies", () => {
+    for (const preset of PRESET_TEMPLATES) {
+      if (preset.publisher === "Collection notes") continue;
+      expect(["CC0 1.0", "CC BY 4.0", "CC BY-ND 4.0"]).toContain(preset.license);
+      expect(preset.licenseUrl).toMatch(/^https:\/\/creativecommons\.org\//);
+      expect(Boolean(preset.licenseNote)).toBe(preset.license === "CC BY-ND 4.0");
+    }
+    const noDerivatives = PRESET_TEMPLATES.filter((preset) => preset.license === "CC BY-ND 4.0");
+    expect(noDerivatives.map((preset) => preset.publisher)).toEqual(["Bonterms", "Bonterms", "Bonterms"]);
+  });
+
   it.each(["docx", "pdf"])(
     "uploads original %s bytes to the selected Templates folder",
     async (format) => {

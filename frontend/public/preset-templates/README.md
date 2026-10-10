@@ -17,9 +17,13 @@ were retained.
 
 - General Legal states that its library is released under CC0 1.0.
 - Common Paper states that its standard agreements are released under CC BY 4.0.
-- Bonterms states that its standard agreements are generally released under CC
-  BY 4.0 unless otherwise noted. Some individual Bonterms files use a different
-  license, including CC BY-ND 4.0; check the notice in the applicable document.
+  Its Amendment and Statement of Work carry no license notice and are not
+  clearly covered by that statement, so they are not included.
+- Bonterms licenses each file separately, in a notice inside the file. Its
+  standard terms are CC BY 4.0; its example cover pages, order forms, SOW and
+  policies are CC0 1.0; and its End User Agreement, Reseller Agreement for
+  Marketplaces and Online Cloud Terms are CC BY-ND 4.0, which does not allow
+  distributing edited copies. Each entry in Mike shows its file's license.
 
 These files are templates, not legal advice. Check the publisher's current page
 and have qualified counsel review a template before using it for a transaction.

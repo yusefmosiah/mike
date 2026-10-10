@@ -58,6 +58,25 @@ describe("preset template picker", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows each Bonterms file's own license and warns where edits may not be shared", () => {
+    renderModal();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "online cloud terms" },
+    });
+    const [row] = screen.getAllByRole("listitem");
+    expect(within(row).getByRole("link", { name: "CC BY-ND 4.0" })).toHaveAttribute(
+      "href",
+      "https://creativecommons.org/licenses/by-nd/4.0/",
+    );
+    expect(within(row).getByText(/Share unmodified only/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "Example Cover Page for Bonterms DPA" },
+    });
+    const [example] = screen.getAllByRole("listitem");
+    expect(within(example).getByRole("link", { name: "CC0 1.0" })).toBeInTheDocument();
+    expect(within(example).queryByText(/Share unmodified only/)).toBeNull();
+  });
+
   it("imports to the selected folder once and reports the returned personal copy", async () => {
     let finish!: (document: unknown) => void;
     vi.mocked(addPresetTemplate).mockImplementation(

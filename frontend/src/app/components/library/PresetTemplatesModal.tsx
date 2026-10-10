@@ -194,6 +194,11 @@ export function PresetTemplatesModal({
                   </span>
                 )}
               </div>
+              {preset.licenseNote && (
+                <p className="mt-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                  {preset.licenseNote}
+                </p>
+              )}
             </li>
           ))}
           {presets.length === 0 && (

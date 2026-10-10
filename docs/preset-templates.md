@@ -15,8 +15,8 @@ Add **Browse presets** to Library → Templates. Users can search by name or
 publisher, inspect source and license information, download an original, or
 choose **Add to templates** to save a personal copy in the current folder.
 Keep the publishers' original files and directory structure intact, including
-agreement variants and formation-package instructions. The initial catalog has
-81 PDF/DOCX templates and four Markdown references. Markdown is download-only
+agreement variants and formation-package instructions. The catalog has
+79 PDF/DOCX templates and four Markdown references. Markdown is download-only
 because the existing document pipeline does not support that format.
 
 ## Technical approach / affected areas
@@ -76,16 +76,30 @@ Add original public files beneath the relevant publisher directory in
 test verifies that every public file is cataloged and its checksum still matches.
 Hidden filesystem files are excluded. Only PDF, DOCX, and Markdown are accepted.
 
-Publisher credits and licenses:
+Publisher credits and licenses, checked against each file's own notice and the
+publishers' pages on 2026-10-10:
 
 - [General Legal](https://general.legal/library):
-  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) ("Our templates
+  are released under a CC0 1.0 license"). The files themselves carry no notice.
 - [Common Paper](https://commonpaper.com/standards/):
-  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-- [Bonterms](https://bonterms.com/download-center/): generally CC BY 4.0, with
-  per-document exceptions including CC BY-ND 4.0. Consult the notice in each file.
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Each file carries
+  the notice except the click-through Terms of Service cover page, which the
+  publisher's page lists among its standard agreements. Common Paper's Amendment
+  and Statement of Work carry no notice and sit outside that list, so they were
+  removed from the bundle.
+- [Bonterms](https://bonterms.com/download-center/): per file. Standard terms
+  are [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the example cover
+  pages, order form, SOW and policies are
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/); the End User
+  Agreement, Reseller Agreement for Marketplaces and Online Cloud Terms are
+  [CC BY-ND 4.0](https://creativecommons.org/licenses/by-nd/4.0/). The generator
+  (`scripts/build-preset-templates.mjs`) lists every exception by path, and the
+  dialog shows each file's license, with a "share unmodified only" note on the
+  BY-ND files.
 
 All bundled publisher files are unmodified. Their licenses are separate from
 Mike's software license, and attribution and other notices remain in the files.
-The snapshot was downloaded on 2026-09-30; adding a new publisher requires updating
-the generator's publisher metadata and verifying the supplied files' notices.
+The snapshot was downloaded on 2026-09-30. Adding a file or a publisher means
+reading the license notice in each new file, recording any exception in the
+generator, and updating the publisher metadata.
