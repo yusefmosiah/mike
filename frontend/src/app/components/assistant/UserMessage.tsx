@@ -125,7 +125,7 @@ export function UserMessage({
                     </form>
                 ) : (
                     <div className="w-full bg-gray-100 rounded-xl px-4 py-3">
-                        <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                        <p className="text-sm text-gray-900 whitespace-pre-wrap [overflow-wrap:anywhere]">
                             {content}
                         </p>
                         {(workflow || hasFiles) && (

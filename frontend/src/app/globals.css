@@ -681,3 +681,23 @@
     --tw-ring-shadow: 0 0 #0000;
     --tw-ring-offset-shadow: 0 0 #0000;
 }
+
+/* iOS Safari zooms the page into a focused field whose text is smaller than
+   16px, and the zoomed page then scrolls sideways. On touch screens, a field
+   not sized larger on purpose shows its text at 16px or more. Deliberately
+   unlayered: it must outrank layered utilities such as `text-sm`. */
+@media (pointer: coarse) {
+    :is(
+            input:not(
+                    [type="checkbox"],
+                    [type="radio"],
+                    [type="range"],
+                    [type="color"],
+                    [type="file"]
+                ),
+            textarea,
+            select
+        ):not(.text-base, .text-lg, .text-xl, .text-2xl, .text-3xl, .text-4xl) {
+        font-size: max(16px, 1em);
+    }
+}
