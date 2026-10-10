@@ -63,7 +63,19 @@ None of it is accepted until the owner says so.
   - MCP trailing-dot SSRF;
   - upload outcomes;
   - paused-ask status;
-  - storage URL signing, autosave flush and three small UI fixes.
+  - storage URL signing, autosave flush and three small UI fixes;
+  - at the owner's request, the migration ledger (`schema_migrations` plus
+    `backend/scripts/migrate.sh`, run by db-init) and the preset contract
+    templates, with each file's licence checked
+    ([`docs/reports/upstream-picks-2026-10-10.md`](../docs/reports/upstream-picks-2026-10-10.md), #11 and #12).
+    Staging's first ledger deploy (`3a007fa9`): `select count(*), count(checksum),
+    max(filename) filter (where checksum is not null) from public.schema_migrations`
+    printed `115|1|20261010_06_schema_migrations.sql`; db-init logged 43 replays,
+    2 ignored old failures, "Recorded 114 migration(s) up to
+    20261010_05_document_citation_checks.sql" and "Up to date."
+- **Mobile:** fields no longer trigger iOS focus zoom, long words wrap in
+  messages, and a table toolbar's phone menu closes once an action runs.
+- **Mac app:** planned, not started ([`docs/mac-app.md`](../docs/mac-app.md)).
 - **Model costs:** volume work defaults to OpenCode Go flash models; OpenRouter is
   kept for decision models ([`docs/model-costs.md`](../docs/model-costs.md)).
 
