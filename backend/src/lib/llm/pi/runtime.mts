@@ -218,8 +218,11 @@ type Runtime = {
   bindings: Bindings;
 };
 
-/** Mike's default tool-round budget for a turn. */
-const DEFAULT_MAX_ROUNDS = 16;
+/**
+ * Mike's default tool-round budget for a turn: a backstop against a runaway
+ * loop, not a working limit. A long task should finish, not be cut off.
+ */
+const DEFAULT_MAX_ROUNDS = 1_000;
 
 let opening: Promise<Runtime> | undefined;
 

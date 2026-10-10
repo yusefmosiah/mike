@@ -1516,7 +1516,7 @@ export async function runLLMStream(params: {
       // Keep in step with DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts. A literal,
       // not an import: tests mock the "../llm" barrel, and the runtime is an
       // ESM module loaded only on demand.
-      maxIterations: params.maxIterations ?? 16,
+      maxIterations: params.maxIterations ?? 1_000,
       apiKeys,
       reasoning: params.reasoning ?? "high",
       abortSignal: signal,
