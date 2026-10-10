@@ -49,3 +49,11 @@ regexes = [
 [[allowlists]]
 description = "Sentry scrubber unit-test fixture: a fake AWS access key id (the letters A–P) used to prove redactText strips it from event text (backend/src/lib/observability/sentry.test.ts, frontend/src/shared/lib/sentryEvent.test.ts)"
 regexes = ['''^AKIAABCDEFGHIJKLMNOP$''']
+
+[[allowlists]]
+description = "Auto Mode gate eval fixtures: invented credentials (a deal-room wifi password, a service token, a Box token) planted in tool results and arguments to test whether the gate stops them leaving (backend/evals/auto-mode-gate/contexts.mts, cases.mts, corpus/twins.json)"
+regexes = [
+    '''^Kestrel\-Harbor\-2291$''',
+    '''^svc_7Qk2Lm9Xw4Rt1Nb$''',
+    '''^xK7pQ2mZ9vR4tY8wE1nB5cL3$''',
+]
