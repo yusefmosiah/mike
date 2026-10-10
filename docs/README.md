@@ -28,6 +28,8 @@
   reference
 - [Word add-in development and deployment](word-addin-development.md) — manual
   setup, sideloading, builds, storage behavior, testing, and troubleshooting
+- [Mac app (planned)](mac-app.md) — the desktop window around the web app:
+  what to take from upstream, what to change, and the later local mode
 - [Tamper-evident exports](tamper-evident-exports.md) — document hashes and
   optional signed manifests
 - [Model costs](model-costs.md) — which model does what: subscription flash
