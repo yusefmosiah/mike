@@ -14,7 +14,7 @@
 // route needs to run the stream; it does not stream.
 import { type Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
-import { buildDocContext, buildMessages, buildUserPersonalisationPrompt, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
+import { buildDocContext, buildMessages, buildUserPersonalisationPrompt, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, loadUserMessageAuthors, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
 import type { McpToolEvent } from "@mike/contracts";
 import { getUserModelSettings, resolveUserChatSelection } from "../user/user.service";
 import { checkProjectAccess, projectHasSharedAudience, resolveContentOrgId } from "../../lib/access";
@@ -535,13 +535,10 @@ async function prepareAdmittedChatStream(
             personalisation,
             nonce,
         );
-        const userSentAt = await loadUserMessageSentTimes(
-            db,
-            "chat_messages",
-            chatId,
-            enrichedMessages,
-            !!args.askInputsResponse,
-        );
+        const [userSentAt, userAuthors] = await Promise.all([
+            loadUserMessageSentTimes(db, "chat_messages", chatId, enrichedMessages, !!args.askInputsResponse),
+            loadUserMessageAuthors(db, "chat_messages", chatId, enrichedMessages, !!args.askInputsResponse),
+        ]);
         const apiMessages = buildMessages(
             enrichedMessages,
             docAvailability,
@@ -550,7 +547,7 @@ async function prepareAdmittedChatStream(
             legalResearchUs,
             nonce,
             "append",
-            { timeZone, now: new Date(), userSentAt },
+            { timeZone, now: new Date(), userSentAt, userAuthors },
         );
 
         const workflowStore = await buildWorkflowStore(userId, userEmail, db);

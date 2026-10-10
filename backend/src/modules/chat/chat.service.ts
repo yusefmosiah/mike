@@ -64,6 +64,7 @@ export {
   buildProjectDocContext,
   buildMessages,
   loadUserMessageSentTimes,
+  loadUserMessageAuthors,
   userMessageStamper,
   type MessageTimeContext,
   buildUserPersonalisationPrompt,

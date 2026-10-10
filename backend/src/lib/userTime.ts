@@ -93,6 +93,7 @@ export const MESSAGE_TIME_PROMPT = `MESSAGE TIMES:
 - Each user message begins with a [Sent: …] stamp: the date and time it was sent, in the user's local time zone.
 - When the user answers your questions or approves an action, your previous turn's tool activity includes an [Answered: …] stamp with when they responded.
 - The latest stamp is the current date and time. Use it to resolve "today", "tomorrow", deadlines, and other relative dates.
+- In a thread more than one person writes in, each user message also has a [From: …] line naming who wrote it. Keep track of who asked what, and address the person whose message you are answering.
 - The stamps are added by the application, not typed by the user. Do not repeat or mention them.`;
 
 /** The stamp prepended to a user message. */

@@ -154,14 +154,16 @@ maybeDescribe("firm thread handoff against Postgres", () => {
             userId: people.associate.id,
             userEmail: people.associate.email,
             content: "  Client called: they want the cap at 1x fees.  ",
+            files: [{ filename: "call-notes.pdf", document_id: randomUUID() }],
         });
         if (!note.ok) throw new Error(`note refused: ${JSON.stringify(note)}`);
         const { data: stored } = await db
             .from("chat_messages")
-            .select("role, content, author_user_id")
+            .select("role, content, files, author_user_id")
             .eq("id", note.data.id)
             .single();
         expect(stored).toMatchObject({ role: "user", content: "Client called: they want the cap at 1x fees.", author_user_id: people.associate.id });
+        expect((stored?.files as Array<{ filename: string }>)[0].filename).toBe("call-notes.pdf");
 
         // A viewer cannot add one, and nobody can while a response is being written.
         const viewer = await replicaB.postChatNote(db, { chatId, userId: people.third.id, userEmail: people.third.email, content: "Me too" });
@@ -182,6 +184,12 @@ maybeDescribe("firm thread handoff against Postgres", () => {
             .limit(1)
             .single();
         expect(prompt?.parent_message_id).toBe(note.data.id);
+
+        // The model is told who wrote what in a thread several people carry.
+        const sent = (turn.prepared.apiMessages as Array<{ role: string; content: unknown }>)
+            .filter((m) => m.role === "user")
+            .map((m) => String(m.content));
+        expect(sent.at(-1)).toContain("[From: The partner]\nDraft the reply.");
         await turn.prepared.turnClaim?.release();
     });
 

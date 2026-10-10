@@ -528,8 +528,13 @@ function stampUserMessageContent(
     : isLatestUserMessage
       ? time.now
       : null;
-  if (!sentAt || Number.isNaN(sentAt.getTime())) return content;
-  return `${userMessageTimeStamp(sentAt, time.timeZone)}\n${content}`;
+  const lines: string[] = [];
+  if (sentAt && !Number.isNaN(sentAt.getTime())) {
+    lines.push(userMessageTimeStamp(sentAt, time.timeZone));
+  }
+  const author = time.userAuthors?.[userIndex];
+  if (author) lines.push(`[From: ${author}]`);
+  return lines.length ? `${lines.join("\n")}\n${content}` : content;
 }
 
 /** The user's time zone, the current time, and when each user message was sent. */
@@ -538,6 +543,11 @@ export type MessageTimeContext = {
   now: Date;
   /** One entry per user message in the history, in order; null if unknown. */
   userSentAt: readonly (string | null)[];
+  /**
+   * Who wrote each user message, in the same order, in a thread more than
+   * one person writes in; absent or null otherwise.
+   */
+  userAuthors?: readonly (string | null)[];
 };
 
 /**
@@ -575,6 +585,60 @@ export async function loadUserMessageSentTimes(
     times[savedCount - k] = stored[stored.length - k];
   }
   return times;
+}
+
+/** A member's name as the model sees it: one short line, no brackets. */
+function authorLabel(name: string | null | undefined, email: string | null | undefined): string {
+  const raw = name?.trim() || email?.trim() || "A member";
+  return raw.replace(/[\[\]\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "A member";
+}
+
+/**
+ * Who wrote the history's user messages, aligned like the send times: from
+ * the newest stored message back. Only a thread with more than one author
+ * gets names; in anyone's own thread every entry is null, so single-person
+ * prompts are unchanged.
+ */
+export async function loadUserMessageAuthors(
+  db: Db,
+  messageTable: string,
+  chatId: string | null | undefined,
+  messages: readonly ChatMessage[],
+  latestUnsaved = false,
+): Promise<(string | null)[]> {
+  const userCount = messages.filter((m) => m.role === "user").length;
+  const authors: (string | null)[] = new Array(userCount).fill(null);
+  if (!chatId || userCount === 0) return authors;
+  const { data, error } = await db
+    .from(messageTable)
+    .select("author_user_id")
+    .eq("chat_id", chatId)
+    .eq("role", "user")
+    .order("created_at", { ascending: true });
+  if (error || !Array.isArray(data)) return authors;
+  const stored = (data as { author_user_id?: unknown }[]).map((row) =>
+    typeof row.author_user_id === "string" ? row.author_user_id : null,
+  );
+  const ids = [...new Set(stored.filter((id): id is string => !!id))];
+  if (ids.length < 2) return authors;
+  const { data: profiles } = await db
+    .from("user_profiles")
+    .select("user_id, email, display_name")
+    .in("user_id", ids);
+  const names = new Map<string, string>();
+  for (const row of (Array.isArray(profiles) ? profiles : []) as {
+    user_id: string;
+    email: string | null;
+    display_name: string | null;
+  }[]) {
+    names.set(row.user_id, authorLabel(row.display_name, row.email));
+  }
+  const savedCount = latestUnsaved ? userCount - 1 : userCount;
+  for (let k = 1; k <= Math.min(savedCount, stored.length); k++) {
+    const id = stored[stored.length - k];
+    authors[savedCount - k] = id ? (names.get(id) ?? "A member") : null;
+  }
+  return authors;
 }
 
 export function extractCitations(

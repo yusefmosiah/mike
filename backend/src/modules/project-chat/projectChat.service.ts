@@ -22,6 +22,7 @@ import {
     buildWorkflowStore,
     enrichWithPriorEvents,
     loadUserMessageSentTimes,
+    loadUserMessageAuthors,
     appendAskInputsResponseToAssistantMessage,
     linkedPrompt,
     resolveLeaf,
@@ -587,13 +588,10 @@ async function prepareAdmittedProjectChatStream(
         if (personalisationPrompt) {
             systemPromptExtra += `\n\n${personalisationPrompt}`;
         }
-        const userSentAt = await loadUserMessageSentTimes(
-            db,
-            "chat_messages",
-            chatId,
-            messagesForLLM,
-            !!args.askInputsResponse,
-        );
+        const [userSentAt, userAuthors] = await Promise.all([
+            loadUserMessageSentTimes(db, "chat_messages", chatId, messagesForLLM, !!args.askInputsResponse),
+            loadUserMessageAuthors(db, "chat_messages", chatId, messagesForLLM, !!args.askInputsResponse),
+        ]);
         const apiMessages = buildMessages(
             messagesForLLM,
             docAvailability,
@@ -602,7 +600,7 @@ async function prepareAdmittedProjectChatStream(
             legalResearchUs,
             nonce,
             "append",
-            { timeZone, now: new Date(), userSentAt },
+            { timeZone, now: new Date(), userSentAt, userAuthors },
         );
 
         const workflowStore = await buildWorkflowStore(userId, userEmail, db);
