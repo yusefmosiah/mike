@@ -480,22 +480,26 @@ matplotlib and openpyxl.
 | I5. HTML and email | Hidden-text stripping; .eml, .mbox, .msg, TNEF | A page with hidden instructions arrives without them, flagged |
 | I6. Data files | Raw bytes into the workstation; Parquet, SQLite, Stata/SPSS/SAS, .npy; pickle refused | "Plot column x from this Parquet" works without the file entering context |
 | I7. Office-adjacent and ebooks | RTF, ODF, FB2, EPUB with DRM refusal, iWork, then MOBI | A DRM'd EPUB is refused with a clear reason |
-| I8. Archives | List and choose; bomb and path defences | A Fifield bomb and a zip-slip archive are both refused |
+| I8. Archives | List and choose, with Select all; bomb and path defences | A Fifield bomb and a zip-slip archive are both refused |
 | I9. Audio and video | Local transcription | A recorded meeting becomes a cited transcript |
 
 I0 and I3 together are the vision work the desktop scope calls V0. I1 should
 come before any new format. I4 also closes the existing LibreOffice gap.
 
-## 6. Decisions for the owner
+## 6. Decisions (owner, 2026-10-10)
 
-1. **Converter sandbox:** a disposable microVM per job (strongest; it reuses
-   the workstation tooling), or gVisor (lighter; one more component).
-2. **Malware scanning:** ship ClamAV in the on-premises install by default,
-   or only an ICAP hook to the firm's own scanner.
-3. **Archives:** list-and-choose (recommended), or refuse until there's a
-   need.
-4. **Image defaults:** the 3072 px canonical cap and the last-5-screenshots
-   window are judgement calls to check on our own pages.
+All phases approved, in this order. Settled:
+
+1. **Converter sandbox:** a throwaway VM per job, smaller than the
+   workstation, with no network.
+2. **Malware scanning:** included by default (ClamAV out of process), with
+   an ICAP hook for firms that bring their own scanner.
+3. **Archives:** list and choose, with a "Select all" control. Making
+   someone tick many boxes one by one adds no security, because the same
+   pipeline checks every member either way.
+
+Still judgement calls to check on our own pages: the 3072 px canonical cap
+and the last-5-screenshots window.
 
 ## Unknown or unverified
 
