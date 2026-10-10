@@ -5,9 +5,14 @@ Date: 2026-10-10. Status: scoping only; nothing here is built or decided.
 Owner direction: getting Mike running on a Mac is fine but not the point.
 The interesting uses are browsing from the user's residential IP, full
 computer use, passing the browser or screen to the phone, and a shared
-drive onto the workstation VM. A second deployment matters as much as the
-firm one: a person running the whole thing on a spare laptop, reached from
-the phone over Tailscale (2.6). Windows and Linux are scoped, not
+drive onto the workstation VM. Two deployments (owner, 2026-10-10):
+
+- *Firms* run Mike on their own premises, mainly on local GPUs with Phala
+  as a fallback; we install and support it (a private AI stack consulting
+  business). We do not host firms.
+- *Individuals*, for example a grad student who does not want an agent on
+  her own computer, run the whole thing on a spare laptop, reached from the
+  phone over Tailscale (2.6). Data science tools matter most here. Windows and Linux are scoped, not
 deliverables. The research behind this report used six parallel
 literature searches (provider patterns, small-model computer use, desktop
 architecture, file sync, decision models in browser loops, verifiers and
@@ -19,7 +24,8 @@ them as directional.
 ## The short answer
 
 1. **For a firm, the Mac is a node, not a server.** The desktop app dials
-   out to Mike's server and executes typed capabilities the harness asks
+   out to the firm's Mike server (on-premises, on the firm's own
+   hardware) and executes typed capabilities the harness asks
    for (open a page, read its accessibility tree, click, capture the
    screen, sync a folder). It holds a device key and the user's own logins;
    it never holds model keys or firm records. This is the rule we already
@@ -39,7 +45,7 @@ them as directional.
    prompt-injection exposure of anything we could ship.
 4. **Two channels on one session.** The model sees screenshots and
    accessibility trees over the node protocol. The human sees a live
-   video view, relayed through our server, and can take over. Taking over
+   video view, relayed through the Mike server, and can take over. Taking over
    pauses the agent and invalidates its references. Windows 365 for Agents
    ships this split (an agent channel and a human channel on one session),
    as does OpenClaw (`take_control`).
@@ -131,7 +137,7 @@ phone / web app ──► Mike server: harness (Pi Durable, tools, policy, audit
                (cloud browser,        ├─ agent browser: dedicated Chrome profile over CDP
                 code, files)          ├─ native helper (Swift): ScreenCaptureKit, AX, input
                                       ├─ sync client (Mutagen, later File Provider)
-                                      └─ live view publisher ──► SFU on our server ──► phone
+                                      └─ live view publisher ──► SFU on the Mike server ──► phone
 ```
 
 ### 2.1 The node protocol (design once, used by every phase)
@@ -211,9 +217,11 @@ the same code runs on Mac, Windows and Linux.
     special identification. The realistic risk is a site's terms of
     service and an account suspension, which the user carries just as
     with any browser automation they run.
-  - *Firm:* the browser still runs on the user's machine, but the firm (or
-    we, if we host it) operates the agent. That sits closer to the
-    litigated facts, so counsel should look at the hosted-firm case
+  - *Firm:* the firm runs the agent on its own premises for its own
+    staff, in accounts they signed into; the browser runs on the
+    employee's machine. That is an employer automating its own work, not a
+    third-party service acting in consumers' accounts, but the firm is a
+    commercial operator, so its counsel should look at the firm case
     before release. This is not legal advice.
   - *Both:* egress is never pooled or resold. No fingerprint rotation, and
     no CAPTCHA solving; the user takes over for a CAPTCHA, as OpenAI's
@@ -227,11 +235,12 @@ the same code runs on Mac, Windows and Linux.
   dialogs, and synthetic CDP input breaks some IME composition (one team
   uses a VNC-style viewer for human takeover for that reason).
 - **Whole screen, later:** WebRTC. The native helper captures with
-  ScreenCaptureKit and encodes in hardware; it publishes to an SFU we run
-  (LiveKit, with TURN over TLS on 443 for hostile networks); the phone
-  subscribes and sends touch input over a data channel, mapped to the
-  target display and injected with CGEvent. One audited hop, recording and
-  kill switch on our side; the cost is relayed bandwidth. Peer-to-peer is
+  ScreenCaptureKit and encodes in hardware; it publishes to an SFU on the
+  firm's Mike server (LiveKit, with TURN over TLS on 443 for hostile
+  networks); the phone subscribes and sends touch input over a data
+  channel, mapped to the target display and injected with CGEvent. One
+  audited hop, with recording and the kill switch on the server; the cost
+  is relayed bandwidth, which stays inside the firm's network. Peer-to-peer is
   an optimisation for later.
 - **Through the server, not to the computer.** The phone never connects to
   the Mac directly. This keeps one authentication model and lets the
@@ -325,7 +334,7 @@ spare laptop, host OS (macOS; Windows or a Linux desktop later)
 
 - **It is the firm topology on one box.** The server VM plays node-a, and
   the host plays the paired Mac. The host's node dials the server VM
-  instead of choir-ip.com. Nothing in the node protocol knows the
+  instead of a firm's server. Nothing in the node protocol knows the
   difference, so this costs no second design.
 - **Why the server goes in a VM, not native on the host.**
   - It is the same Linux build as node-a: one deployment target.
@@ -405,19 +414,20 @@ spare laptop, host OS (macOS; Windows or a Linux desktop later)
   - How server updates ship: an image the app pulls (migrations apply
     through the `schema_migrations` ledger) or an app release.
   - Backups: a database dump plus storage to a folder the user picks.
-  - Phone notifications without our servers: a small relay we host, ntfy,
+  - Phone notifications without a public server: a small relay, ntfy,
     or none.
 
 | | Firm | Personal |
 |---|---|---|
-| Server | Mike's servers (node-a and later) | Linux VM on the spare laptop |
+| Server | The firm's own on-premises server | Linux VM on the spare laptop |
 | The user's machine | Node (browser, computer use, sync) | Host of the server VM, and its node |
 | Code sandbox | microVM on the server | Sibling VM on the laptop |
 | Residential IP | Through the node's browser | Every VM already has it |
-| Phone access | Public HTTPS | Tailscale |
-| Live view relay | LiveKit SFU on our servers | Inside the laptop |
+| Phone access | The firm's VPN or reverse proxy | Tailscale |
+| Live view relay | LiveKit SFU on the firm's server | Inside the laptop |
 | Who operates the agent | The firm | The user |
-| Cost | Hosting plus tokens | Tokens and electricity |
+| Models | Local GPUs, Phala as fallback | Phala or another hosted API |
+| Cost | Hardware, GPUs, our consulting | Tokens and electricity |
 
 ## 3. Scaling computer use down
 
@@ -459,6 +469,13 @@ numbers. A model that does not refuse also leaves the harness's gates
 design anyway. Because the enclave attests, screenshots of private work can
 go to these models without a local GPU. That changes the "private screens
 stay local" rule to "private screens stay local or attested".
+
+For firms, the open-weight tier *is* the main tier: the same weights run on
+the firm's own GPUs (vLLM or SGLang), with Phala as the fallback. So D6
+should evaluate the open weights, served the way a firm would serve them
+(the standard instruction-tuned builds, not only Phala's uncensored
+variants). That way the results tell a firm what its hardware can do. A
+frontier API is then an option a firm chooses, not an assumption.
 
 What lets weak models succeed:
 
@@ -658,7 +675,8 @@ approval.
 | D6. Small-model tiers | An evaluation set from recurring tasks; runs on a flash model, Phala's Qwen3.8-27B and Gemma 4 26B-A4B, a small grounder, and a decision-model loop; record-and-replay | A table of success, cost and time per tier on our tasks, reproduced, not vendor numbers |
 | D7. Other platforms | Sync API and File Provider; Windows node and personal mode (Hyper-V siblings); Linux node | Each with its own acceptance when scheduled |
 
-V0 is needed by everything that looks at a screen. Today Mike has the
+V0 is needed by everything that looks at a screen; its design is in
+[the file and image intake report](file-intake-2026-10-10.md) (phases I0 and I3). Today Mike has the
 plumbing (image parts in the model layer, a per-model `supportsVision` flag,
 a text fallback in the runtime) but nothing feeds it: uploads accept only
 PDF and Office files, and no tool returns an image. D0 is the foundation for
@@ -675,9 +693,9 @@ Phala's models, with browser tasks run in the workstation.
 2. **Order:** firm node first (D1), or personal mode first (D2). Personal
    mode exercises the same protocol with no hosting cost, and it is the
    easier thing to hand to an outside user to try.
-3. **Live-view relay for firms:** self-host LiveKit on our servers for D5,
-   accepting the relayed bandwidth. Personal mode needs none.
-4. **Legal:** counsel on the hosted-firm case before release (2.2).
+3. **Live-view relay for firms:** LiveKit as part of the on-premises
+   install for D5. Personal mode needs none.
+4. **Legal:** each firm's counsel on its own deployment (2.2).
    Personal mode acts as the user's browser.
 5. **FileVault versus unattended restarts** on a personal agent Mac: our
    default recommendation, and whether the app should set it up.
