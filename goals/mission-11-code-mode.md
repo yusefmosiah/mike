@@ -1,5 +1,5 @@
 ---
-readiness: later (owner, 2026-10-09)
+readiness: required (owner, 2026-10-10)
 ---
 
 # Mission 11: Code mode
@@ -20,6 +20,37 @@ tool calls; basic ones (reading a document) may stay direct. Every inner call
 goes through the same dispatcher and Auto Mode checks as a direct call, and
 `delegate` becomes `agents.delegate()`, enabling parallel and pipelined
 subagent workflows.
+
+## Owner decisions, 2026-10-10
+
+- **Code mode is a full requirement.** The model reaches every tool through
+  Python, including asking the user and the Word add-in's tools.
+- **No shadow or dual mode.** Verify code mode with scenario tests and trace
+  review instead, then go all in.
+- **Plain Python code mode now; the RLM pattern later.** Context as variables
+  and sub-model calls from code, once affordable open models handle it. Keep
+  the door open now.
+- **Every user has a VM.** Boutique firms; staging runs the harness and the VMs
+  on node-a, and production may split them across two machines.
+- **Target work:**
+  - overnight research runs over a NAS of terabytes and, later, a vector
+    database;
+  - web data (for example SEC filings) analysed with Python alongside firm
+    data;
+  - reports and documents written and updated;
+  - email sent (the firm's own mail server later). The system is meant to
+    grow.
+- **Off-machine backups, immutable logs, security hardening and auth** wait
+  for a non-functional pass after the owner's demo with their partner. For
+  now: functional and usable.
+- Wide and deep research on performance, memory, security and alternatives,
+  run with Sonnet:
+  [`docs/reports/code-mode-deep-research-2026-10-10.md`](../docs/reports/code-mode-deep-research-2026-10-10.md).
+  Its first action item, Cloud Hypervisor v52.0 or later on node-a, already
+  holds: the only Cloud Hypervisor build in node-a's Nix store is
+  `cloud-hypervisor-52.0`. Its security measures (outbox approval, egress
+  following the data, taint bit) belong to the later non-functional pass
+  unless the owner pulls them forward.
 
 ## Direction under review, 2026-10-10
 
