@@ -72,6 +72,18 @@ describe("router model persistence", () => {
         },
     );
 
+    it("starts someone with no OpenCode Go selection on its flash models", async () => {
+        const db = { from: vi.fn(() => queryResult([])) };
+        await expect(getUserRouterModels("user-1", "opencode-go", db as never)).resolves.toEqual([
+            "deepseek-v4.1-flash",
+            "glm-5.3-flash",
+            "muse-spark-1.3-contributor",
+        ]);
+        await expect(getUserRouterModels("user-1", "openrouter", db as never)).resolves.toEqual([]);
+        const chosen = { from: vi.fn(() => queryResult([{ model_id: "kimi-k3" }])) };
+        await expect(getUserRouterModels("user-1", "opencode-go", chosen as never)).resolves.toEqual(["kimi-k3"]);
+    });
+
     it("still surfaces an undefined_table error about a different relation", async () => {
         // 42P01 says "some relation is missing", not "user_router_models is
         // missing" — a policy or view referencing another dropped table raises

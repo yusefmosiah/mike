@@ -1,7 +1,7 @@
 import { createDb } from "./db";
 import { UserFacingError } from "./userFacingError";
 import type { Db } from "./db";
-import { resolveModel } from "./llm/models";
+import { OPENCODE_FLASH_MODELS, resolveModel } from "./llm/models";
 
 export type RouterSlug = "openrouter" | "vercel" | "opencode-go";
 
@@ -153,11 +153,19 @@ export async function getUserRouterModels(
         throw error;
     }
 
-    return (data ?? []).flatMap((row) =>
+    const selected = (data ?? []).flatMap((row) =>
         typeof row.model_id === "string" && row.model_id.trim()
             ? [row.model_id.trim()]
             : [],
     );
+    // Someone who has never chosen OpenCode Go models starts with its
+    // subscription flash models (OPENCODE_FLASH_MODELS), so a signed-in person
+    // on a deployment with an OpenCode Go key can chat without setting up
+    // anything. Saving a selection in settings replaces this.
+    if (router === "opencode-go" && selected.length === 0) {
+        return OPENCODE_FLASH_MODELS.map((id) => id.slice("opencode-go/".length));
+    }
+    return selected;
 }
 
 export async function replaceUserRouterModels(

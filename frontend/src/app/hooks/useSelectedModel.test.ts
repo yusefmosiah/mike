@@ -26,6 +26,32 @@ describe("useSelectedModel", () => {
         expect(result.current[0]).toBe("");
     });
 
+    it("starts someone with nothing chosen on the first flash model they can run", () => {
+        const openCodeOnly: ApiKeyState = {
+            ...keys,
+            claude: { configured: false, source: null },
+            openai: { configured: false, source: null },
+            openrouter: { configured: true, source: "env" },
+            "opencode-go": { configured: true, source: "env" },
+        };
+        const { result } = renderHook(() =>
+            useSelectedModel({
+                apiKeys: openCodeOnly,
+                routerSelections: {
+                    openRouterModels: [],
+                    vercelModels: [],
+                    openCodeGoModels: ["glm-5.3-flash", "deepseek-v4.1-flash"],
+                },
+            }),
+        );
+        expect(result.current[0]).toBe("opencode-go/deepseek-v4.1-flash");
+
+        const { result: noKey } = renderHook(() =>
+            useSelectedModel({ apiKeys: keys, routerSelections }),
+        );
+        expect(noKey.current[0]).toBe("");
+    });
+
     it("uses the saved chat model before the shared last-selected model", () => {
         const { result } = renderHook(() =>
             useSelectedModel({

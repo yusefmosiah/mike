@@ -2,6 +2,7 @@ import {
     CLAUDE_LOW_MODELS,
     GEMINI_LOW_MODELS,
     OPENAI_LOW_MODELS,
+    OPENCODE_FLASH_MODELS,
     providerForModel,
     normalizeReasoningLevelForModel,
     resolveModel,
@@ -91,6 +92,15 @@ export function hasApiKeyForModel(
         );
     }
     return !!apiKeys[provider]?.trim();
+}
+
+/**
+ * The subscription flash models these keys can run, cheapest-allowance first
+ * (see OPENCODE_FLASH_MODELS). Empty without an OpenCode Go key.
+ */
+export function flashModelsFor(apiKeys: UserApiKeys | null | undefined): string[] {
+    if (!apiKeys) return [];
+    return OPENCODE_FLASH_MODELS.filter((model) => hasApiKeyForModel(model, apiKeys));
 }
 
 type EffectiveChatModelResult =
@@ -191,9 +201,11 @@ export async function resolveEffectiveChatModel(args: {
  * Pick the model used for automatic title generation.
  *
  * A saved title preference is an explicit override. Otherwise first-party
- * chat models map to that provider's cheapest title-tier model. Routers and
- * local models reuse the exact chat model because Mike cannot safely infer a
- * cheaper equivalent within an external/dynamic catalog.
+ * chat models map to that provider's cheapest title-tier model, and OpenCode
+ * Go chats to its first flash model (the chat already holds that key).
+ * Other routers and local models reuse the exact chat model because Mike
+ * cannot safely infer a cheaper equivalent within an external/dynamic
+ * catalog.
  */
 export function titleModelForChat(
     chatModel: string,
@@ -214,9 +226,10 @@ export function titleModelForChat(
             return GEMINI_LOW_MODELS[0];
         case "openai":
             return OPENAI_LOW_MODELS[0];
+        case "opencode-go":
+            return OPENCODE_FLASH_MODELS[0];
         case "openrouter":
         case "vercel":
-        case "opencode-go":
         case "ollama":
         case "openai-compatible":
             return resolvedChatModel;

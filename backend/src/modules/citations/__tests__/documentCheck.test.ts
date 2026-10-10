@@ -11,8 +11,14 @@ import { MEMO_PARAGRAPHS, SMITH_TEXT, fetchWeb, lookupCase, makeDocx, scriptedMo
 
 const STORAGE_PATH = "documents/fixture/memo.docx";
 
-const { state } = vi.hoisted(() => ({
-    state: { docx: null as Buffer | null, denied: new Set<string>(), enqueued: [] as unknown[] },
+const { state, llm } = vi.hoisted(() => ({
+    state: {
+        docx: null as Buffer | null,
+        denied: new Set<string>(),
+        enqueued: [] as unknown[],
+        apiKeys: {} as Record<string, string>,
+    },
+    llm: { completeText: vi.fn() },
 }));
 
 vi.mock("../../../lib/storage", async (original) => ({
@@ -35,9 +41,14 @@ vi.mock("../../documents/documents.service", async () => {
     };
 });
 vi.mock("../../user/user.service", () => ({
-    getUserModelSettings: vi.fn(async () => ({ api_keys: {}, last_selected_chat_model: "test-model" })),
+    getUserModelSettings: vi.fn(async () => ({ api_keys: state.apiKeys, last_selected_chat_model: "test-model" })),
 }));
-vi.mock("../../../lib/modelSelection", () => ({
+vi.mock("../../../lib/llm", async (original) => ({
+    ...(await original<typeof import("../../../lib/llm")>()),
+    completeText: llm.completeText,
+}));
+vi.mock("../../../lib/modelSelection", async (original) => ({
+    ...(await original<typeof import("../../../lib/modelSelection")>()),
     resolveEffectiveChatModel: vi.fn(async () => ({ ok: true, model: "test-model", source: "request" })),
 }));
 vi.mock("../../../lib/dbq/enqueue", () => ({
@@ -61,6 +72,7 @@ beforeEach(async () => {
     vi.clearAllMocks();
     state.denied.clear();
     state.enqueued.length = 0;
+    state.apiKeys = {};
     state.docx = await makeDocx(MEMO_PARAGRAPHS);
     documentId = randomUUID();
     store = memoryDb({
@@ -243,5 +255,33 @@ describe("judging support", () => {
         const passages = relevantPassages(source, "covenant quiet enjoyment implied residential tenancy", 4_000);
         expect(passages.length).toBeLessThanOrEqual(4_000 + 40);
         expect(passages).toContain("quiet enjoyment is implied");
+    });
+});
+
+describe("checker model", () => {
+    it("runs on the subscription flash models and hands over when one fails", async () => {
+        state.apiKeys = { "opencode-go": "key" };
+        const tasks = await loadTasks();
+        const started = await tasks.startCitationCheck(store.db, { ...actor, documentId, model: "opencode-go/kimi-k3" });
+        if (!started.ok) throw new Error("not started");
+        expect(started.data.model).toBe("opencode-go/deepseek-v4.1-flash");
+
+        const scripted = scriptedModel(log);
+        llm.completeText.mockImplementation(async (args: { model: string; systemPrompt: string; user: string }) => {
+            if (args.model === "opencode-go/deepseek-v4.1-flash") throw new Error("allowance used up");
+            return scripted(args);
+        });
+        expect(await tasks.runCitationCheck(store.db, started.data.id, { fetchWeb, searchWeb, lookupCase })).toEqual({
+            outcome: "completed",
+        });
+        const models = new Set(llm.completeText.mock.calls.map(([args]) => (args as { model: string }).model));
+        expect(models).toEqual(new Set(["opencode-go/deepseek-v4.1-flash", "opencode-go/glm-5.3-flash"]));
+        expect(store.tables.citation_checks).toHaveLength(5);
+    });
+
+    it("uses the person's model when they have no OpenCode Go key", async () => {
+        const tasks = await loadTasks();
+        const started = await tasks.startCitationCheck(store.db, { ...actor, documentId });
+        expect(started.ok && started.data.model).toBe("test-model");
     });
 });

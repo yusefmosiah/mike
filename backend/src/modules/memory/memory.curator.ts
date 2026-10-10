@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { checkProjectAccess, ensureChatAccess, ensureReviewAccess, projectHasSharedAudience } from "../../lib/access";
 import { hasDirectContentGrants } from "../../lib/contentAccess";
 import { streamChatWithTools, type OpenAIToolSchema, type UserApiKeys } from "../../lib/llm";
-import { hasApiKeyForModel, resolveEffectiveChatModel } from "../../lib/modelSelection";
+import { flashModelsFor, hasApiKeyForModel, resolveEffectiveChatModel } from "../../lib/modelSelection";
 import { resolveModel } from "../../lib/llm/models";
 import { can } from "../../lib/permissions";
 import { assertModelAllowed } from "../../lib/privateMode";
@@ -105,9 +105,13 @@ export function memoryCuratorModelForChat(args: {
    */
   apiKeys?: UserApiKeys;
 }): string {
+  // Curation is background volume work: with no override and no saved
+  // preference it runs on the subscription flash models when the actor can
+  // use them (OPENCODE_FLASH_MODELS), not on the chat's possibly premium model.
   const preferred =
     args.environmentOverride?.trim() ||
     args.memoryCuratorModel ||
+    flashModelsFor(args.apiKeys)[0] ||
     args.chatModel;
   if (!args.apiKeys || preferred === args.chatModel) return preferred;
   const canonical = resolveModel(preferred, "");

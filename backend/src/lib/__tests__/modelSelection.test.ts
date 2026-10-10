@@ -4,6 +4,7 @@ import {
     normalizeOptionalModelPreference,
     resolveEffectiveChatModel,
     resolveEffectiveReasoningLevel,
+    flashModelsFor,
     titleModelForChat,
 } from "../modelSelection";
 import { resetModelRegistryCache } from "../llm/registry";
@@ -30,10 +31,23 @@ describe("titleModelForChat", () => {
     it.each([
         "openrouter/anthropic/claude-sonnet-4.5",
         "vercel/openai/gpt-5.4",
-        "opencode-go/glm-5",
         "ollama/llama3.2",
     ])("reuses dynamic model %s", (chatModel) => {
         expect(titleModelForChat(chatModel)).toBe(chatModel);
+    });
+
+    it("titles an OpenCode Go chat with its subscription flash model", () => {
+        expect(titleModelForChat("opencode-go/glm-5")).toBe("opencode-go/deepseek-v4.1-flash");
+    });
+
+    it("lists the flash models only for an OpenCode Go key", () => {
+        expect(flashModelsFor({ "opencode-go": "key" } as never)).toEqual([
+            "opencode-go/deepseek-v4.1-flash",
+            "opencode-go/glm-5.3-flash",
+            "opencode-go/muse-spark-1.3-contributor",
+        ]);
+        expect(flashModelsFor({ openrouter: "key" } as never)).toEqual([]);
+        expect(flashModelsFor(null)).toEqual([]);
     });
 
     it("honors the saved title override", () => {

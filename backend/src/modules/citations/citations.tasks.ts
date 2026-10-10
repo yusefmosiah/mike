@@ -20,7 +20,7 @@ import { enqueueDbJob } from "../../lib/dbq/enqueue";
 import { completeText } from "../../lib/llm";
 import { loadActiveVersion } from "../../lib/documentVersions";
 import { documentSuffix } from "../../lib/documentTypes";
-import { resolveEffectiveChatModel } from "../../lib/modelSelection";
+import { flashModelsFor, resolveEffectiveChatModel } from "../../lib/modelSelection";
 import { failure, internalFailure, ok, type ServiceResult } from "../../lib/serviceResult";
 import { getDocument } from "../documents/documents.service";
 import { getUserModelSettings } from "../user/user.service";
@@ -93,9 +93,12 @@ async function egressFor(db: Db, projectId: string | null): Promise<"allow" | "d
 }
 
 /**
- * The checker's model: CITATION_CHECK_MODEL when the deployment sets one,
- * else the model asked for (the turn's own model, when the assistant asks),
- * else the person's last selected model, provided they hold a key for it.
+ * The checker's model. A check makes two model calls per citation, so it runs
+ * on the subscription flash models whenever the person can use them (see
+ * OPENCODE_FLASH_MODELS), not on the conversation's model, which may be a
+ * premium one. CITATION_CHECK_MODEL overrides; without an OpenCode Go key the
+ * model asked for (the turn's own model) or the person's last selected model
+ * is used, provided they hold a key for it.
  */
 async function checkerModel(
     db: Db,
@@ -103,6 +106,8 @@ async function checkerModel(
     requested: string | null | undefined,
 ): Promise<ServiceResult<string>> {
     const settings = await getUserModelSettings(userId, db);
+    const flash = flashModelsFor(settings.api_keys);
+    if (!process.env.CITATION_CHECK_MODEL?.trim() && flash.length) return ok(flash[0]);
     const resolved = await resolveEffectiveChatModel({
         requested: process.env.CITATION_CHECK_MODEL?.trim() || requested,
         lastSelectedModel: settings.last_selected_chat_model,
@@ -289,6 +294,31 @@ async function checkOne(db: Db, ctx: SourceContext, complete: Complete, citation
     };
 }
 
+/**
+ * The task's model, then the other flash models after it when it is one: each
+ * has its own subscription allowance, so a model whose allowance is used up
+ * (or that is failing) hands over to the next rather than to a paid one.
+ */
+function modelLadder(model: string, apiKeys: Parameters<typeof flashModelsFor>[0]): string[] {
+    const flash = flashModelsFor(apiKeys);
+    const at = flash.indexOf(model);
+    return at < 0 ? [model] : [...flash.slice(at), ...flash.slice(0, at)];
+}
+
+function fallingOver(models: string[], apiKeys: Parameters<typeof completeText>[0]["apiKeys"]): Complete {
+    return async (args) => {
+        let lastError: unknown;
+        for (const model of models) {
+            try {
+                return await completeText({ model, ...args, apiKeys });
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        throw lastError;
+    };
+}
+
 /** Run (or resume) one task to its end. Safe to call again after a crash. */
 export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {}): Promise<Record<string, unknown>> {
     const { data: row } = await db.from("verification_tasks").select("*").eq("id", taskId).maybeSingle();
@@ -314,9 +344,7 @@ export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {
     if (!access.ok) return finish(db, task.id, "failed", "access_revoked");
 
     const settings = deps.complete ? null : await getUserModelSettings(actor.userId, db);
-    const complete: Complete =
-        deps.complete ??
-        ((args) => completeText({ model: task.model ?? "", ...args, apiKeys: settings?.api_keys }));
+    const complete: Complete = deps.complete ?? fallingOver(modelLadder(task.model ?? "", settings?.api_keys), settings?.api_keys);
 
     let citations = task.checkpoint?.citations;
     if (!citations) {

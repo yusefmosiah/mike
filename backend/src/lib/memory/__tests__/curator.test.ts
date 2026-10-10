@@ -46,6 +46,22 @@ describe("memory curator model selection", () => {
     ).toBe("gpt-5.6-sol");
   });
 
+  it("runs on the subscription flash model when nothing else is chosen", () => {
+    expect(
+      memoryCuratorModelForChat({
+        chatModel: "opencode-go/kimi-k3",
+        apiKeys: { "opencode-go": "key" },
+      }),
+    ).toBe("opencode-go/deepseek-v4.1-flash");
+    expect(
+      memoryCuratorModelForChat({
+        chatModel: "opencode-go/kimi-k3",
+        memoryCuratorModel: "opencode-go/glm-5.3",
+        apiKeys: { "opencode-go": "key" },
+      }),
+    ).toBe("opencode-go/glm-5.3");
+  });
+
   it("ignores a preferred model the actor holds no key for", () => {
     // A stale preference or a deployment-wide override for another provider
     // must not fail every curator run for this user; the verified chat

@@ -72,7 +72,22 @@ function usableStoredModel(
     return canonical;
 }
 
-/** Resolve chat model → profile last-selected model, without a product default. */
+/**
+ * Where nothing is chosen yet, the subscription flash models, cheapest
+ * allowance first: OpenCode Go is a flat monthly plan, and these run about a
+ * tenth of a premium model's token price with four times its allowance
+ * (backend OPENCODE_FLASH_MODELS, docs/model-costs.md).
+ */
+export const PREFERRED_FIRST_MODEL_IDS = [
+    "opencode-go/deepseek-v4.1-flash",
+    "opencode-go/glm-5.3-flash",
+    "opencode-go/muse-spark-1.3-contributor",
+] as const;
+
+/**
+ * Resolve chat model → profile last-selected model → the first preferred
+ * flash model the person can run (only once their keys are known).
+ */
 export function useSelectedModel(
     sources: SelectedModelSources = {},
 ): [string, (id: string) => void] {
@@ -134,6 +149,11 @@ export function useSelectedModel(
                 selectionSources.lastSelectedModel,
                 selectionSources,
             ) ??
+            (selectionSources.apiKeys
+                ? PREFERRED_FIRST_MODEL_IDS.map((id) =>
+                      usableStoredModel(id, selectionSources),
+                  ).find(Boolean)
+                : null) ??
             "";
         setModelState(next);
     }, [selectionSources]);

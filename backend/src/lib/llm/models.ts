@@ -52,6 +52,25 @@ export const GEMINI_LOW_MODELS = [
 ] as const;
 export const OPENAI_LOW_MODELS = ["gpt-5.6-luna", "gpt-5.4-mini"] as const;
 
+/**
+ * Models for volume work nobody chose a model for: checking every citation in
+ * a document, titles, background memory. OpenCode Go is a flat monthly
+ * subscription in which each model has its own monthly allowance priced at
+ * its token rates; these flash models cost about a tenth of the premium ones
+ * per token and get four times the allowance ($60 against $15 on the $10
+ * plan), so one call is effectively free until that model's allowance runs
+ * out, and the next model on the list has an allowance of its own.
+ * Pay-per-token routers (OpenRouter) bill every call, so they are kept for
+ * the few small decisions where accuracy is worth paying for. Cheapest
+ * DeepSeek is off-peak; Muse Spark Contributor is regional.
+ * See docs/model-costs.md.
+ */
+export const OPENCODE_FLASH_MODELS = [
+    "opencode-go/deepseek-v4.1-flash",
+    "opencode-go/glm-5.3-flash",
+    "opencode-go/muse-spark-1.3-contributor",
+] as const;
+
 export const DEFAULT_MAIN_MODEL = "gemini-3-flash-preview";
 export const DEFAULT_TITLE_MODEL = "gemini-3.5-flash-lite";
 export const DEFAULT_TABULAR_MODEL = "gemini-3-flash-preview";
