@@ -17,6 +17,8 @@ import {
   createTurnEventSink,
   isAbortError,
   readAssistantTurn,
+  TURN_IN_PROGRESS_MESSAGE,
+  TurnInProgressError,
 } from "@/app/lib/assistantTurnStream";
 import {
   beginAssistantTurn,
@@ -450,6 +452,14 @@ export function useAssistantChat({
       if (isAbortError(error)) {
         sink.finalizeStreamingReasoning();
         sink.appendCancellation();
+      } else if (error instanceof TurnInProgressError) {
+        // Not a failure: someone else's turn holds the thread, and nothing
+        // of this send was stored.
+        sink.endStreamingAfterFailure();
+        turn.update((assistantMessage) => ({
+          ...assistantMessage,
+          error: TURN_IN_PROGRESS_MESSAGE,
+        }));
       } else {
         // The stream broke for a reason other than the user stopping it:
         // the user sees a generic message, Sentry gets the real one.

@@ -1,3 +1,4 @@
+import { answerTurnClaimRpc } from "../helpers/turnClaimsMock";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 
@@ -71,7 +72,8 @@ function makeQuery(table: string) {
 function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
-    rpc: vi.fn((name: string) =>
+    rpc: vi.fn((name: string, args?: unknown) =>
+      answerTurnClaimRpc(name, args) ??
       Promise.resolve({
         data: name.startsWith("append_chat_") ? "appended" : null,
         error: null,

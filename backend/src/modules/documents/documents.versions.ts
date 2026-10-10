@@ -243,6 +243,7 @@ export async function createVersionFromDocument(
         db,
         {
             document_id: documentId,
+            created_by: userId,
             storage_path: key,
             pdf_storage_path: pdfStoragePath,
             source: "user_upload",

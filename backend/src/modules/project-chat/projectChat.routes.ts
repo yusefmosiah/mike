@@ -135,12 +135,18 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
+        // The turn's identity, which is also its claim on the thread.
+        turnId:
+            assistantMessageId ??
+            askInputsResponse?.assistant_message_id ??
+            randomUUID(),
     });
     if (!prep.ok) {
         if ("internal" in prep) return void sendInternalError(res, prep.error);
         return void res.status(prep.status).json({
             ...(prep.code ? { code: prep.code } : {}),
             detail: prep.detail,
+            ...(prep.generating ? { generating: prep.generating } : {}),
         });
     }
 

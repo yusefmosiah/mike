@@ -18,6 +18,9 @@ const branchApi = vi.hoisted(() => ({
 // whether to close the editor or keep the draft.
 const editSaves = vi.hoisted(() => [] as Array<void | Promise<void>>);
 
+vi.mock("@/app/contexts/AuthContext", () => ({
+    useAuth: () => ({ user: { id: "user-1", email: "me@example.com" } }),
+}));
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => {
     const original = await importOriginal<Record<string, unknown>>();
     return {

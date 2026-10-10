@@ -114,6 +114,34 @@ describe("branch navigation", () => {
         expect((await getChat("chat-1")).messages.some((m) => "sibling" in m)).toBe(false);
     });
 
+    it("names each prompt's sender and who is generating, on a chat read", async () => {
+        const chat = { id: "chat-1", title: "T", is_owner: false, access_role: "editor" };
+        fetchMock.mockResolvedValue(json({
+            chat,
+            messages: [
+                { id: "u1", role: "user", content: "a", author_user_id: "partner" },
+                { id: "a1", role: "assistant", content: [], author_user_id: "partner" },
+                { id: "u2", role: "user", content: "b", author_user_id: "stranger" },
+                { id: "u3", role: "user", content: "c" },
+                { role: "user", content: "d", author_user_id: "partner" },
+            ],
+            authors: { partner: { name: "The partner", email: "p@example.com" } },
+            generating: { user_id: "partner", since: "t0" },
+        }));
+        const detail = await getChat("chat-1");
+        expect(detail.messages[0].author).toEqual({ id: "partner", name: "The partner", email: "p@example.com" });
+        expect(detail.messages[1]).not.toHaveProperty("author");
+        expect(detail.messages[2].author).toEqual({ id: "stranger", name: null, email: null });
+        expect(detail.messages[3]).not.toHaveProperty("author");
+        expect(detail.messages[4]).not.toHaveProperty("author");
+        expect(detail.generating).toEqual({ id: "partner", name: "The partner", email: "p@example.com" });
+
+        fetchMock.mockResolvedValue(json({ chat, messages: [], generating: { user_id: null, since: "t0" } }));
+        expect((await getChat("chat-1")).generating).toBeNull();
+        fetchMock.mockResolvedValue(json({ chat, messages: [] }));
+        expect((await getChat("chat-1")).generating).toBeNull();
+    });
+
     it("re-attaches to a turn in a given server incarnation", async () => {
         fetchMock.mockResolvedValue(new Response("", { status: 200 }));
         await streamChatTurn({ chatId: "c", turnId: "t", from: 4, incarnation: "inc-1" });

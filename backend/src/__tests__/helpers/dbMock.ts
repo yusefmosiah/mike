@@ -33,6 +33,7 @@
  * the module-level state is per-suite, not shared across files.
  */
 import { vi } from "vitest";
+import { answerTurnClaimRpc } from "./turnClaimsMock";
 
 export type QueryResult = { data: unknown; error: unknown };
 
@@ -134,6 +135,9 @@ export function mockDb(): DbStub {
             return makeQuery(table);
         }),
         rpc: vi.fn((name: string, args?: unknown) => {
+            // The turn-claim functions answer like Postgres; see turnClaimsMock.
+            const claimed = answerTurnClaimRpc(name, args);
+            if (claimed) return claimed;
             dbState.operations.push(`rpc:${name}`);
             dbState.rpcCalls.push({ fn: name, args });
             return Promise.resolve(dbState.rpc);

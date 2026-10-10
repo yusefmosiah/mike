@@ -226,6 +226,7 @@ export async function copyDocumentsToWorkflowAssets(
       const { error } = await createDocumentVersion(db, {
           id: plan.versionId,
           document_id: plan.documentId,
+          created_by: userId,
           storage_path: plan.sourcePath,
           pdf_storage_path: plan.pdfPath,
           source: "upload",

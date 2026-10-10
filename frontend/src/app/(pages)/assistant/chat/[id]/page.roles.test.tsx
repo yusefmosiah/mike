@@ -6,9 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // the caller's standing; this file pins that the page actually consumes it
 // — dropping it handed a viewer a live composer whose sends 403.
 
-const { getChat, loadChats, chatOptions } = vi.hoisted(() => ({
+const { getChat, loadChats, chatOptions, setMessages } = vi.hoisted(() => ({
     getChat: vi.fn(),
     loadChats: vi.fn(),
+    setMessages: vi.fn(),
     chatOptions: {
         current: null as null | { onChatCreated?: (chatId: string) => void },
     },
@@ -38,7 +39,7 @@ vi.mock("@/app/hooks/useAssistantChat", () => ({
             messages: [],
             isResponseLoading: false,
             handleChat: vi.fn(),
-            setMessages: vi.fn(),
+            setMessages,
             cancel: vi.fn(),
             resetChat: vi.fn(),
         };
@@ -49,12 +50,15 @@ vi.mock("@/app/components/assistant/ChatView", () => ({
         canSend,
         accessResolved,
         chat,
+        generatingBy,
     }: {
         canSend?: boolean | null;
         accessResolved?: boolean;
         chat?: { access_role?: string } | null;
+        generatingBy?: { name: string | null } | null;
     }) => (
         <>
+            <span data-testid="generating">{generatingBy?.name ?? "nobody"}</span>
             <span data-testid="can-send">{String(canSend)}</span>
             <span data-testid="access-resolved">{String(accessResolved)}</span>
             <span data-testid="chat-role">{chat?.access_role ?? "unknown"}</span>
@@ -190,5 +194,29 @@ describe("global chat page composer gating", () => {
         await waitFor(() => expect(getChat).toHaveBeenCalled());
         // null, not true: an unknown standing is never a licence.
         expect(screen.getByTestId("can-send")).not.toHaveTextContent("true");
+    });
+});
+
+describe("a colleague generating in the thread", () => {
+    it("shows who, polls the chat, and takes the fresh transcript once they finish", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            const partner = { id: "partner", name: "The partner", email: "p@example.com" };
+            const finished = [{ id: "m2", role: "assistant", content: "done" }];
+            getChat
+                .mockResolvedValueOnce({ ...chatDetail("editor"), generating: partner })
+                .mockResolvedValueOnce({ ...chatDetail("editor"), messages: finished, generating: null });
+            render(<AssistantChatPage />);
+            await waitFor(() =>
+                expect(screen.getByTestId("generating")).toHaveTextContent("The partner"),
+            );
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(3000);
+            });
+            expect(screen.getByTestId("generating")).toHaveTextContent("nobody");
+            expect(setMessages).toHaveBeenCalledWith(finished);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

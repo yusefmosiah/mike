@@ -69,6 +69,7 @@ import {
     generateChatTitle,
     getAccessibleChat,
     getChatMessages,
+    threadPresence,
     getChatSubagentTranscript,
     grantChatAccess,
     listChatGrants,
@@ -169,6 +170,7 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
         return void res.status(404).json({ detail: "Chat not found" });
 
     const transcript = await getChatMessages(db, chatId, userId);
+    const presence = await threadPresence(db, chatId, transcript.messages);
     // access_role/is_owner mirror the project and review detail responses so
     // the client can render per-role affordances instead of re-deriving them.
     res.json({
@@ -184,6 +186,10 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
         // loaded (a refresh, a second tab) can attach to it instead of
         // showing the hidden reservation as "no answer".
         active_turn: getActiveAssistantTurn(chatId),
+        // Who wrote each message and who is generating now, for a thread
+        // more than one person carries.
+        authors: presence.authors,
+        generating: presence.generating,
     });
 }));
 
@@ -633,12 +639,18 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
+        // The turn's identity, which is also its claim on the thread.
+        turnId:
+            assistantMessageId ??
+            askInputsResponse?.assistant_message_id ??
+            randomUUID(),
     });
     if (!prep.ok) {
         if ("internal" in prep) return void sendInternalError(res, prep.error);
         return void res.status(prep.status).json({
             ...(prep.code ? { code: prep.code } : {}),
             detail: prep.detail,
+            ...(prep.generating ? { generating: prep.generating } : {}),
         });
     }
 

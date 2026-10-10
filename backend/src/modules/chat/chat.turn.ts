@@ -433,6 +433,8 @@ export async function driveChatTurn(
                     title:
                         chatTitle ?? lastUser?.content?.slice(0, 120) ?? null,
                     model: selectedModel,
+                    // Who sent it and under what standing, for the firm's audit.
+                    flags: { actor_role: prepared.actorRole },
                 },
                 persistedEvents,
                 drainReceiptsSince(),
@@ -461,6 +463,7 @@ export async function driveChatTurn(
                         title: chatTitle,
                         model: selectedModel,
                         status: "cancelled",
+                        flags: { actor_role: prepared.actorRole },
                     },
                     null,
                     drainReceiptsSince(),
@@ -561,6 +564,8 @@ export async function driveChatTurn(
             stream.finish();
         }
     } finally {
+        // The thread is free for the next sender, on any replica.
+        await prepared.turnClaim?.release();
         if (memoryTurn && !memoryTurnScheduled) {
             try {
                 await releaseMemoryConversationTurn({
@@ -689,8 +694,14 @@ async function resumeChatTurn(
         requestedModel: context.model ?? undefined,
         requestedReasoning: (context.reasoning ?? undefined) as Parameters<typeof prepareChatStream>[1]["requestedReasoning"],
         requestedTimeZone: context.timeZone ?? undefined,
+        // The same turn re-claims the thread its earlier process held.
+        turnId: assistantMessageId,
     });
-    if (!prep.ok || prep.prepared.turnUserMessageId !== context.turnUserMessageId) return false;
+    if (!prep.ok) return false;
+    if (prep.prepared.turnUserMessageId !== context.turnUserMessageId) {
+        await prep.prepared.turnClaim?.release();
+        return false;
+    }
 
     const outcome = await driveChatTurn(db, {
         prepared: prep.prepared,

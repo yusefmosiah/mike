@@ -417,6 +417,8 @@ export async function driveProjectChatTurn(
                     title:
                         chatTitle ?? lastUser?.content?.slice(0, 120) ?? null,
                     model: selectedModel,
+                    // Who sent it and under what standing, for the firm's audit.
+                    flags: { actor_role: args.prepared.actorRole },
                 },
                 persistedEvents,
                 drainReceiptsSince(),
@@ -538,6 +540,8 @@ export async function driveProjectChatTurn(
             stream.finish();
         }
     } finally {
+        // The thread is free for the next sender, on any replica.
+        await args.prepared.turnClaim?.release();
         if (memoryTurn && !memoryTurnScheduled) {
             try {
                 await releaseMemoryConversationTurn({

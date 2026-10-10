@@ -9,7 +9,7 @@ import {
     within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Chat, Document, Message } from "@/app/components/shared/types";
+import type { Chat, Document, Message, ThreadAuthor } from "@/app/components/shared/types";
 import { ChatView } from "./ChatView";
 import {
     listDocumentVersions,
@@ -127,7 +127,12 @@ vi.mock("../shared/views/PdfView", () => ({
     PdfView: () => <div data-testid="pdf-viewer" />,
 }));
 vi.mock("./UserMessage", () => ({
-    UserMessage: ({ content }: { content: string }) => <div>{content}</div>,
+    UserMessage: ({ content, authorLabel }: { content: string; authorLabel?: string | null }) => (
+        <div>
+            {authorLabel && <span>{authorLabel}</span>}
+            {content}
+        </div>
+    ),
 }));
 vi.mock("./AssistantMessage", () => ({
     AssistantMessage: ({ minHeight }: { minHeight?: string }) => (
@@ -982,5 +987,52 @@ describe("assistant document tab actions", () => {
             ).toBeNull(),
         );
         expect(deleteDocument).toHaveBeenCalledWith("excel-1");
+    });
+});
+
+describe("shared thread presence", () => {
+    const prompt = (id: string, authorId: string, name: string): Message => ({
+        id,
+        role: "user",
+        content: `prompt ${id}`,
+        author: { id: authorId, name, email: `${authorId}@example.com` },
+    });
+
+    function renderShared(
+        generatingBy: ThreadAuthor | null,
+        isResponseLoading = false,
+    ) {
+        render(
+            <PageChromeContext.Provider value={{ mobileActionsContainer: null }}>
+                <ChatView
+                    chatId="chat-1"
+                    chat={activeChat}
+                    messages={[
+                        prompt("u1", "partner", "The partner"),
+                        { id: "a1", role: "assistant", content: "" },
+                        prompt("u2", "user-1", "Me"),
+                    ]}
+                    isResponseLoading={isResponseLoading}
+                    handleChat={vi.fn().mockResolvedValue("chat-1")}
+                    cancel={vi.fn()}
+                    onNewChat={vi.fn()}
+                    generatingBy={generatingBy}
+                />
+            </PageChromeContext.Provider>,
+        );
+    }
+
+    it("names each prompt's sender and says who is generating", () => {
+        renderShared({ id: "partner", name: "The partner", email: "partner@example.com" });
+        expect(screen.getByText("The partner", { exact: true })).toBeInTheDocument();
+        expect(screen.getByText("You", { exact: true })).toBeInTheDocument();
+        expect(screen.getByRole("status")).toHaveTextContent(
+            "The partner is generating a response. You can send once it finishes.",
+        );
+    });
+
+    it("does not send the reader to another tab for the turn streaming in this one", () => {
+        renderShared({ id: "user-1", name: "Me", email: "user@example.com" }, true);
+        expect(screen.queryByText(/another tab or window/)).not.toBeInTheDocument();
     });
 });

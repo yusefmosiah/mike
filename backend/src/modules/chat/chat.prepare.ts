@@ -23,6 +23,7 @@ import { can } from "../../lib/permissions";
 import { resolveEffectiveReasoningLevel } from "../../lib/modelSelection";
 import { beginMemoryConversationTurn, releaseMemoryConversationTurn, type MemoryConversationTurn } from "../../lib/memory/schedule";
 import { getAccessibleChat, validateAccessibleProjectId } from "./chat.access";
+import { createTurnAdmission, type TurnClaim } from "../../lib/turnClaims";
 import { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
 
 // ---------------------------------------------------------------------------
@@ -88,11 +89,13 @@ export type PreparedChatStream = {
         typeof resolveEffectiveReasoningLevel
     >;
     nonce: ReturnType<typeof generateSpotlightNonce>;
+    /** This turn's hold on the thread across replicas; released when it ends. */
+    turnClaim: TurnClaim | null;
+    /** The standing the sender held when the turn was admitted. */
+    actorRole: string | null;
 };
 
-export async function prepareChatStream(
-    db: Db,
-    args: {
+type PrepareChatStreamArgs = {
         userId: string;
         userEmail: string | undefined;
         messages: ChatMessage[];
@@ -127,14 +130,54 @@ export async function prepareChatStream(
             | undefined;
         /** The browser's IANA time zone; unvalidated request input. */
         requestedTimeZone?: unknown;
-    },
-): Promise<
-    | { ok: true; prepared: PreparedChatStream }
-    | { ok: false; status: number; code?: string; detail: string }
+        /** The turn being admitted: its assistant row's id. */
+        turnId: string;
+};
+
+type PrepareFailure =
+    | {
+          ok: false;
+          status: number;
+          code?: string;
+          detail: string;
+          /** On a 409 turn_in_progress: who is generating, and since when. */
+          generating?: { user_id: string | null; since: string | null };
+      }
     // "internal" carries the raw error so the route can hand it to
     // sendInternalError, preserving the request_id in the body and the
     // [http/internal-error] correlation log.
-    | { ok: false; internal: true; error: unknown }
+    | { ok: false; internal: true; error: unknown };
+
+/**
+ * Admits the turn into a thread (claims it across replicas) before anything
+ * is written to it: a second sender is refused here, with no prompt row left
+ * behind. Returns the refusal, or null when admitted.
+ */
+type AdmitTurn = (chatId: string, role: string | null) => Promise<PrepareFailure | null>;
+
+export async function prepareChatStream(
+    db: Db,
+    args: PrepareChatStreamArgs,
+): Promise<{ ok: true; prepared: PreparedChatStream } | PrepareFailure> {
+    const admission = createTurnAdmission(db, { surface: "chat", userId: args.userId, turnId: args.turnId });
+    const result = await prepareAdmittedChatStream(db, args, admission.admit);
+    if (!result.ok) {
+        await admission.abandon();
+        return result;
+    }
+    return {
+        ok: true,
+        prepared: { ...result.prepared, turnClaim: admission.claim(), actorRole: admission.role() },
+    };
+}
+
+async function prepareAdmittedChatStream(
+    db: Db,
+    args: PrepareChatStreamArgs,
+    admit: AdmitTurn,
+): Promise<
+    | { ok: true; prepared: Omit<PreparedChatStream, "turnClaim" | "actorRole"> }
+    | PrepareFailure
 > {
     const { userId, userEmail, messages } = args;
     let chatId = args.chatId;
@@ -170,6 +213,8 @@ export async function prepareChatStream(
                 status: 403,
                 detail: "You do not have permission to modify this chat",
             };
+        const refused = await admit(chatId, access.projectRole);
+        if (refused) return refused;
         const existing = access.chat;
 
         const existingProjectId = existing.project_id ?? null;
@@ -304,6 +349,10 @@ export async function prepareChatStream(
         }
         chatId = newChat.id as string;
         chatTitle = newChat.title;
+        // Nobody else can be sending into a chat created just now; the claim
+        // still records who is generating, for readers on any replica.
+        const refused = await admit(chatId, "owner");
+        if (refused) return refused;
     }
 
     if (!chatId) {

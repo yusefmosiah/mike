@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Db } from "../../lib/db";
 import {
     activePathIds,
     buildSiblingsIndex,
     latestMessageId,
     newestLeafUnder,
+    resolveLeaf,
     walkPathFromRows,
     type TreeRow,
 } from "../../modules/chat/chat.tree";
@@ -261,5 +263,43 @@ describe("newestLeafUnder", () => {
     it("keeps a message nothing answers, and an unknown id", () => {
         expect(newestLeafUnder(rows, "a3")).toBe("a3");
         expect(newestLeafUnder(rows, "missing")).toBe("missing");
+    });
+});
+
+describe("resolveLeaf", () => {
+    // The partner's stored leaf is a1; an associate then carried the branch on.
+    const rows = [
+        row("u1", "user", null, "2026-01-01T00:00:01Z"),
+        row("a1", "assistant", "u1", "2026-01-01T00:00:02Z"),
+        row("u2", "user", "a1", "2026-01-01T00:00:03Z"),
+        row("a2", "assistant", "u2", "2026-01-01T00:00:04Z"),
+    ];
+
+    function leafDb(stored: string | null, chatRowsResult: { data: unknown; error: unknown }) {
+        const query = (result: unknown) => {
+            const q: Record<string, unknown> = {};
+            for (const method of ["select", "eq", "order"]) q[method] = vi.fn(() => q);
+            q.maybeSingle = vi.fn(() => Promise.resolve(result));
+            q.limit = vi.fn(() => Promise.resolve(result));
+            return q;
+        };
+        return {
+            from: vi.fn((table: string) =>
+                table === "chat_leaf_state"
+                    ? query({ data: stored ? { leaf_message_id: stored } : null, error: null })
+                    : query(chatRowsResult),
+            ),
+        } as unknown as Db;
+    }
+
+    it("follows a stored leaf to where someone else continued its branch", async () => {
+        expect(await resolveLeaf(leafDb("a1", { data: rows, error: null }), "chat-1", "partner")).toBe("a2");
+        expect(await resolveLeaf(leafDb("a2", { data: rows, error: null }), "chat-1", "partner")).toBe("a2");
+    });
+
+    it("keeps the stored leaf when the chat rows cannot be read", async () => {
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        expect(await resolveLeaf(leafDb("a1", { data: null, error: new Error("down") }), "chat-1", "partner")).toBe("a1");
+        log.mockRestore();
     });
 });

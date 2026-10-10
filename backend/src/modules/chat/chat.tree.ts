@@ -149,6 +149,12 @@ export function buildSiblingsIndex(
  * The caller's leaf for a chat: their leaf-state row, else the chat's newest
  * message, else null. Never throws — a leaf-state read failure falls back to
  * the newest message rather than failing the request that asked.
+ *
+ * A stored leaf resolves to the newest message under it, as opening a message
+ * does (newestLeafUnder). It is a tip when stored; it gains replies when
+ * someone else carries that branch on in a shared thread
+ * (goals/mission-5-firm-thread-handoff.md), and the reader then sees, and
+ * sends after, the continuation rather than the branch as they left it.
  */
 export async function resolveLeaf(
   db: Db,
@@ -164,7 +170,7 @@ export async function resolveLeaf(
   if (error) {
     console.error("[chat/tree] failed to read leaf state", chatId, error);
   } else if (data?.leaf_message_id) {
-    return data.leaf_message_id as string;
+    return newestLeafUnder(await chatRows(db, chatId), data.leaf_message_id as string);
   }
 
   const { data: latest, error: latestError } = await db

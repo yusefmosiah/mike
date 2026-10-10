@@ -623,6 +623,7 @@ async function persistMemo(
             {
                 id: versionId,
                 document_id: documentId,
+                created_by: args.userId,
                 storage_path: storagePath,
                 source: MEMO_SOURCE,
                 filename: args.filename,

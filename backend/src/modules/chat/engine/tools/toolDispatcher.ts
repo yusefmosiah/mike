@@ -1908,6 +1908,7 @@ export async function runToolCalls(
             } else {
               // Bulk insert N versions in one round-trip.
               const versionRows = newDocs.map((d, idx) => ({
+                created_by: userId,
                 document_id: d.id,
                 storage_path: newKeys[idx],
                 pdf_storage_path: newPdfKeys[idx],

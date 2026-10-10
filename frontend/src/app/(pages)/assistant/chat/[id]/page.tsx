@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAssistantChat } from "@/app/hooks/useAssistantChat";
 import { useChatRoute } from "@/app/hooks/useChatRoute";
+import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { ChatView } from "@/app/components/assistant/ChatView";
@@ -58,6 +59,13 @@ export default function AssistantChatPage() {
             setMessages,
             handleChat,
         });
+    // A colleague's turn running in this thread: shown, and polled until it
+    // ends, when their prompt and answer replace the transcript.
+    const { generating, setGenerating } = useThreadGenerating({
+        chatId: id || null,
+        localTurnActive: isResponseLoading,
+        onFinished: (detail) => setMessages(detail.messages),
+    });
     // A branched thread is a new chat: list it, then open it.
     const openBranchedThread = useCallback(
         async (message: Message) => {
@@ -150,9 +158,10 @@ export default function AssistantChatPage() {
         setMessages([]);
 
         loadAssistantChat(id)
-            .then(({ chat, messages: loaded }) => {
+            .then(({ chat, messages: loaded, generating: holder }) => {
                 if (cancelled) return;
                 setChat(chat);
+                setGenerating(id, holder);
                 setChatModel(chat.model ?? null);
                 setChatReasoningLevel(chat.reasoning_level ?? null);
                 setCanSend(can(roleFrom(chat), "content.edit"));
@@ -226,6 +235,7 @@ export default function AssistantChatPage() {
             onEditPrompt={editPrompt}
             onRegenerate={regenerate}
             onBranchIntoNewThread={openBranchedThread}
+            generatingBy={generating}
         />
     );
 }

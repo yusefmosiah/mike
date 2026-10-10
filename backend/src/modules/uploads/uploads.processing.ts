@@ -431,6 +431,7 @@ async function processCreatedDocument(
   const { error: versionError } = await createDocumentVersion(db, {
     id: versionId,
     document_id: documentId,
+    created_by: session.user_id,
     storage_path: sourcePath,
     pdf_storage_path: pdfPath,
     source: "upload",
@@ -521,6 +522,7 @@ async function processNewDocumentVersion(
   const { data: version, error } = await createDocumentVersion(db, {
     id: versionId,
     document_id: documentId,
+    created_by: session.user_id,
     storage_path: sourcePath,
     pdf_storage_path: pdfPath,
     source: "user_upload",

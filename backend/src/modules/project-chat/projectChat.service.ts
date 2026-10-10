@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { abandonTurn } from "../../lib/llm";
 import { safeError } from "../../lib/safeError";
+import { createTurnAdmission, type TurnClaim } from "../../lib/turnClaims";
 import type { Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import type { McpToolEvent } from "@mike/contracts";
@@ -115,11 +116,13 @@ export type PreparedProjectChatStream = {
         typeof resolveEffectiveReasoningLevel
     >;
     nonce: ReturnType<typeof generateSpotlightNonce>;
+    /** This turn's hold on the thread across replicas; released when it ends. */
+    turnClaim: TurnClaim | null;
+    /** The standing the sender held when the turn was admitted. */
+    actorRole: string | null;
 };
 
-export async function prepareProjectChatStream(
-    db: Db,
-    args: {
+type PrepareProjectChatStreamArgs = {
         userId: string;
         userEmail: string | undefined;
         projectId: string;
@@ -152,14 +155,42 @@ export async function prepareProjectChatStream(
             | undefined;
         /** The browser's IANA time zone; unvalidated request input. */
         requestedTimeZone?: unknown;
-    },
-): Promise<
-    | { ok: true; prepared: PreparedProjectChatStream }
-    | { ok: false; status: number; code?: string; detail: string }
+        /** The turn being admitted: its assistant row's id. */
+        turnId: string;
+};
+
+type ProjectChatPrepareFailure =
+    | { ok: false; status: number; code?: string; detail: string; generating?: { user_id: string | null; since: string | null } }
     // "internal" carries the raw error so the route can hand it to
     // sendInternalError, preserving the request_id in the body and the
     // [http/internal-error] correlation log.
-    | { ok: false; internal: true; error: unknown }
+    | { ok: false; internal: true; error: unknown };
+
+export async function prepareProjectChatStream(
+    db: Db,
+    args: PrepareProjectChatStreamArgs,
+): Promise<{ ok: true; prepared: PreparedProjectChatStream } | ProjectChatPrepareFailure> {
+    // The thread is claimed across replicas before anything is written to
+    // it; see createTurnAdmission.
+    const admission = createTurnAdmission(db, { surface: "chat", userId: args.userId, turnId: args.turnId });
+    const result = await prepareAdmittedProjectChatStream(db, args, admission.admit);
+    if (!result.ok) {
+        await admission.abandon();
+        return result;
+    }
+    return {
+        ok: true,
+        prepared: { ...result.prepared, turnClaim: admission.claim(), actorRole: admission.role() },
+    };
+}
+
+async function prepareAdmittedProjectChatStream(
+    db: Db,
+    args: PrepareProjectChatStreamArgs,
+    admit: (chatId: string, role: string | null) => Promise<ProjectChatPrepareFailure | null>,
+): Promise<
+    | { ok: true; prepared: Omit<PreparedProjectChatStream, "turnClaim" | "actorRole"> }
+    | ProjectChatPrepareFailure
 > {
     const {
         userId,
@@ -283,6 +314,10 @@ export async function prepareProjectChatStream(
             status: 403,
             detail: "You do not have permission to write in this project.",
         };
+    if (chatId) {
+        const refused = await admit(chatId, writeRole);
+        if (refused) return refused;
+    }
 
     const selection = await resolveUserChatSelection(db, {
         userId,
@@ -335,6 +370,8 @@ export async function prepareProjectChatStream(
             return { ok: false, status: 500, detail: "Failed to create chat" };
         chatId = newChat.id as string;
         chatTitle = newChat.title;
+        const refused = await admit(chatId, "owner");
+        if (refused) return refused;
     }
 
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
@@ -687,8 +724,13 @@ async function resumeProjectChatTurn(
             typeof prepareProjectChatStream
         >[1]["requestedReasoning"],
         requestedTimeZone: context.timeZone ?? undefined,
+        turnId: assistantMessageId,
     });
-    if (!prep.ok || prep.prepared.turnUserMessageId !== context.turnUserMessageId) return false;
+    if (!prep.ok) return false;
+    if (prep.prepared.turnUserMessageId !== context.turnUserMessageId) {
+        await prep.prepared.turnClaim?.release();
+        return false;
+    }
 
     const outcome = await driveProjectChatTurn(db, {
         prepared: prep.prepared,

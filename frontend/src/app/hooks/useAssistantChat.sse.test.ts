@@ -37,6 +37,7 @@ vi.mock("@/app/contexts/ChatHistoryContext", () => ({
     }),
 }));
 import { useAssistantChat } from "./useAssistantChat";
+import { TURN_IN_PROGRESS_MESSAGE } from "@/app/lib/assistantTurnStream";
 
 const fetchMock = vi.fn();
 
@@ -560,6 +561,25 @@ describe("useAssistantChat SSE parsing", () => {
             (m) => m.role === "assistant",
         );
         expect(assistant?.error).toBe("Sorry, something went wrong.");
+        expect(result.current.isResponseLoading).toBe(false);
+    });
+
+    it("says a colleague holds the thread when the send is refused for a running turn", async () => {
+        fetchMock.mockResolvedValue(
+            new Response(
+                JSON.stringify({ code: "turn_in_progress", generating: { user_id: "partner" } }),
+                { status: 409 },
+            ),
+        );
+        const { result } = renderHook(() => useAssistantChat({ chatId: "chat-1" }));
+        await act(async () => {
+            await result.current.handleChat(userMessage());
+        });
+
+        const assistant = result.current.messages.findLast(
+            (m) => m.role === "assistant",
+        );
+        expect(assistant?.error).toBe(TURN_IN_PROGRESS_MESSAGE);
         expect(result.current.isResponseLoading).toBe(false);
     });
 

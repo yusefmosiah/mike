@@ -62,6 +62,12 @@ import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { UserMessage } from "@/app/components/assistant/UserMessage";
 import { AssistantMessage } from "@/app/components/assistant/AssistantMessage";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
+import {
+    generatingNotice,
+    threadHasOtherAuthors,
+    threadPersonLabel,
+} from "@/app/components/assistant/threadAuthors";
+import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
 import { ChatInput } from "@/app/components/assistant/ChatInput";
 import { ChatInputPrompt } from "@/app/components/assistant/ChatInputPrompt";
 import type { ChatInputHandle } from "@/app/components/assistant/ChatInput";
@@ -423,6 +429,14 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // transcript, so the reload plus the queued re-answer live here. While a
     // turn streams the controls stay off — the mutation would race it.
     const branchActionsEnabled = !isResponseLoading;
+
+    // A colleague's turn running in this thread: shown, and polled until it
+    // ends, when their prompt and answer replace the transcript.
+    const { generating, setGenerating } = useThreadGenerating({
+        chatId: activeChatId || null,
+        localTurnActive: isResponseLoading,
+        onFinished: (detail) => setMessages(detail.messages),
+    });
     const { editPrompt, regenerate, branchIntoNewThread, navigateSibling } =
         useChatBranchActions({
             chatId: activeChatId,
@@ -767,8 +781,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         }
 
         loadAssistantChat(activeChatId)
-            .then(({ chat, messages: loaded }) => {
+            .then(({ chat, messages: loaded, generating: holder }) => {
                 if (cancelled) return;
+                setGenerating(activeChatId, holder);
                 setChatTitle(chat.title);
                 setChatModel(chat.model ?? null);
                 setChatReasoningLevel(chat.reasoning_level ?? null);
@@ -2324,6 +2339,10 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                             const lastAssistantIdx = messages
                                 .map((m) => m.role)
                                 .lastIndexOf("assistant");
+                            const showAuthors = threadHasOtherAuthors(
+                                messages,
+                                user?.id,
+                            );
                             return messages.map((msg, i) =>
                                 msg.role === "user" ? (
                                     <div
@@ -2337,6 +2356,14 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                         <UserMessage
                                             messageId={msg.id}
                                             sibling={msg.sibling ?? null}
+                                            authorLabel={
+                                                showAuthors && msg.author
+                                                    ? threadPersonLabel(
+                                                          msg.author,
+                                                          user?.id,
+                                                      )
+                                                    : null
+                                            }
                                             onEditBranch={
                                                 branchActionsEnabled && msg.id
                                                     ? (content) =>
@@ -2461,6 +2488,15 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     <div className="absolute bottom-3 left-3 right-3 z-30">
                         <div className="pointer-events-none absolute -bottom-3 inset-x-0 z-0 h-7 bg-app-surface" />
                         <div className="relative z-20 w-full">
+                            {generating &&
+                                !(isResponseLoading && generating.id === user?.id) && (
+                                <p
+                                    role="status"
+                                    className="px-2 pb-2 text-sm text-gray-600 [overflow-wrap:anywhere]"
+                                >
+                                    {generatingNotice(generating, user?.id)}
+                                </p>
+                            )}
                             <ChatInputPrompt
                                 messages={messages}
                                 chatKey={activeChatId}

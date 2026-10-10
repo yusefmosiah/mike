@@ -8,6 +8,8 @@ import {
   createTurnEventSink,
   isAbortError,
   readAssistantTurn,
+  TURN_IN_PROGRESS_MESSAGE,
+  TurnInProgressError,
 } from "./assistantTurnStream";
 
 /**
@@ -308,7 +310,10 @@ export function resumeAssistantTurn(
       sink.endStreamingAfterFailure();
       handle.update((message) => ({
         ...message,
-        error: "Sorry, something went wrong.",
+        error:
+          error instanceof TurnInProgressError
+            ? TURN_IN_PROGRESS_MESSAGE
+            : "Sorry, something went wrong.",
       }));
     })
     .finally(() => handle.finish());

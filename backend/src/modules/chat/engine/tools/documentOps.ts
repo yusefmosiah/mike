@@ -1237,6 +1237,7 @@ async function persistGeneratedFile(params: {
 
   const { data: versionRow, error: verErr } = await createDocumentVersion(db, {
       document_id: documentId,
+      created_by: userId,
       storage_path: key,
       pdf_storage_path: pdfStoragePath,
       source: "generated",
@@ -1493,6 +1494,7 @@ export async function runEditDocument(params: {
 
     const { data: versionRow, error: verErr } = await createDocumentVersion(db, {
         document_id: documentId,
+        created_by: userId,
         storage_path: newPath,
         source: "assistant_edit",
 

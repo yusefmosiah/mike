@@ -95,3 +95,46 @@ per-resource access rosters (`AccessModal`, `ChatAccessModal`, `OrganizationWork
    exist; what is absent is per-turn attribution display ("who generated this"), a
    "who is generating now" affordance, and an honest answer to a second sender beyond
    the 409.
+
+## Receipts (2026-10-10, assistant-run; not accepted until the owner says so)
+
+What was built: a database turn claim (`chat_turn_claims`, `claim_chat_turn` /
+`renew_chat_turn` / `release_chat_turn`, migration
+`backend/migrations/20261010_01_firm_thread_handoff.sql`) taken in prepare before any
+write, carrying the actor and their role, with a 90 s lease renewed every 30 s;
+`document_versions.created_by` stamped at every version-creation site; `actor_role` on
+`chat.message` audit rows; prompt attribution and a "who is generating" notice in the
+global and project chat views, polled until the turn ends; a refused sender is told why
+and nothing of the send is stored. A stored per-user leaf now resolves to the newest
+message under it (`resolveLeaf`), so a colleague's continuation shows up on your branch
+and your next send follows it, rather than forking from where you left off.
+
+Deviation from the acceptance paths above: the replica tests need a real Postgres, so
+they live in the gated stack suite as
+`backend/src/__tests__/integration/firmHandoff.stack.test.ts`, not
+`src/modules/chat/__tests__/firmHandoff.test.ts`.
+
+- `npm run test:stack --prefix backend` printed `Test Files  11 passed (11)` /
+  `Tests  72 passed (72)`, including the 7 handoff cases: concurrent senders on two
+  replicas (one admitted, one 409 naming the holder, one prompt stored), viewer 403 with
+  no write, grant added/removed effective on the next request, lease lapse frees a dead
+  holder's thread, a restart resumes its own turn, `actor_role` on the audit row,
+  `created_by` on a version.
+- `E2E_API_PORT=3201 E2E_WEB_PORT=3100 npx playwright test e2e/firm-handoff.spec.ts
+  e2e/branching.spec.ts --project=chromium --workers=1 --repeat-each=2` printed
+  `13 passed (2.3m)`. The handoff spec: three signed-in browsers; the partner shares via
+  the Share dialog (associate Editor, third Viewer); the associate sees the partner's
+  prompt attributed and sends a slow turn; the partner's idle view sends meanwhile and
+  is refused with the explanation; reopened, it names the associate as generating,
+  then shows the associate's prompt (attributed) and answer without a reload; the third
+  member sees both senders named, no composer, and no trace of the refused send.
+- `npm test --prefix backend`: 4429 passed, 97 skipped, 1 failed. The failure was
+  `blockIds.test.ts › aligns the 12,600-paragraph schedules quickly`, a timing test
+  outside this change, which passed on its own (`Tests  6 passed (6)`).
+- `npm run test:coverage --prefix frontend`: `Tests  2283 passed`, statements, functions
+  and lines 100%, branches 99.94%. Lint: 0 errors (33 pre-existing warnings). Typecheck: 0.
+
+Still open: the tabular and Word surfaces keep the in-process registry only (the claim
+table admits `tabular` and `word` but nothing claims them yet). An editor whose tab
+attaches to a colleague's live turn sees the Stop control for it, as before this
+change.

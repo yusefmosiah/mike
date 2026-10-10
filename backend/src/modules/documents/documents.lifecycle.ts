@@ -16,6 +16,8 @@ export type NewDocumentVersion = {
   size_bytes?: number | null;
   page_count?: number | null;
   content_sha256?: string | null;
+  /** The person whose action produced this version (Mission 5). */
+  created_by?: string | null;
 };
 
 export type DocumentVersionRecord = NewDocumentVersion & {

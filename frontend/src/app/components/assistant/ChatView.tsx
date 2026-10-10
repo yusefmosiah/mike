@@ -41,6 +41,7 @@ import type {
     Message,
     MessageSibling,
     PanelDocument,
+    ThreadAuthor,
 } from "../shared/types";
 import {
     panelDocumentFromCaseEvent,
@@ -69,6 +70,8 @@ import {
     providerLabel,
 } from "@/app/lib/modelAvailability";
 import { can, roleFrom } from "@/app/lib/permissions";
+import { useAuth } from "@/app/contexts/AuthContext";
+import { generatingNotice, threadHasOtherAuthors, threadPersonLabel } from "./threadAuthors";
 import {
     createBranch,
     deleteDocument,
@@ -175,6 +178,11 @@ interface Props {
      * chat and opens it. Without it, no control renders.
      */
     onBranchIntoNewThread?: (message: Message) => Promise<void>;
+    /**
+     * Someone whose turn is generating in this thread and that this reader
+     * is not attached to, usually a colleague in a shared chat.
+     */
+    generatingBy?: ThreadAuthor | null;
 }
 
 const ASSISTANT_PANEL_TRANSITION_MS = 500;
@@ -212,8 +220,13 @@ export function ChatView({
     onRegenerate,
     onEditPrompt,
     onBranchIntoNewThread,
+    generatingBy = null,
 }: Props) {
     const router = useRouter();
+    const { user } = useAuth();
+    const viewerId = user?.id ?? null;
+    // Prompts name their sender once someone besides the reader has written.
+    const showAuthors = threadHasOtherAuthors(messages, viewerId);
     // The model is what we asked for, so it identifies whose key was rejected.
     const rejectedKeyProvider = useMemo(
         () =>
@@ -1354,6 +1367,11 @@ export function ChatView({
                                                         <UserMessage
                                                             messageId={msg.id}
                                                             sibling={sibling}
+                                                            authorLabel={
+                                                                showAuthors && msg.author
+                                                                    ? threadPersonLabel(msg.author, viewerId)
+                                                                    : null
+                                                            }
                                                             onEditBranch={
                                                                 branchActionsEnabled &&
                                                                 chatId &&
@@ -1563,6 +1581,15 @@ export function ChatView({
                                     className="relative z-20 w-full max-w-4xl mx-auto px-4 md:px-6"
                                 >
                                     <div className="w-full rounded-t-[20px] bg-transparent">
+                                        {generatingBy &&
+                                            !(isResponseLoading && generatingBy.id === viewerId) && (
+                                            <p
+                                                role="status"
+                                                className="px-2 pb-2 text-sm text-gray-600 [overflow-wrap:anywhere]"
+                                            >
+                                                {generatingNotice(generatingBy, viewerId)}
+                                            </p>
+                                        )}
                                         <ChatInputPrompt
                                             messages={messages}
                                             chatKey={chatId}

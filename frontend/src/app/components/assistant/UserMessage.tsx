@@ -27,6 +27,8 @@ interface Props {
     onEditBranch?: (content: string) => void | Promise<void>;
     /** Steps to the previous (-1) or next (1) sibling branch. */
     onNavigateSibling?: (dir: -1 | 1) => void;
+    /** Who sent this prompt, shown when more than one person carries the thread. */
+    authorLabel?: string | null;
 }
 
 /** Visible rows for the editor: wrapped lines included, between 2 and 8. */
@@ -47,6 +49,7 @@ export function UserMessage({
     sibling,
     onEditBranch,
     onNavigateSibling,
+    authorLabel,
 }: Props) {
     const hasFiles = files && files.length > 0;
     const [editing, setEditing] = useState(false);
@@ -81,6 +84,11 @@ export function UserMessage({
             <div
                 className={`max-w-[80%] flex flex-col items-end gap-1 ${editing ? "w-full" : ""}`}
             >
+                {authorLabel && (
+                    <span className="max-w-full px-1 text-right text-xs text-gray-500 [overflow-wrap:anywhere]">
+                        {authorLabel}
+                    </span>
+                )}
                 {editing ? (
                     <form
                         className="w-full bg-gray-100 rounded-xl px-4 py-3"

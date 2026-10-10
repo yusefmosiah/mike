@@ -16,6 +16,9 @@ const { listDocumentVersions } = vi.hoisted(() => ({
     listDocumentVersions: vi.fn(),
 }));
 
+vi.mock("@/app/contexts/AuthContext", () => ({
+    useAuth: () => ({ user: { id: "user-1", email: "me@example.com" } }),
+}));
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/lib/mikeApi")>()),
     listDocumentVersions: (...args: unknown[]) => listDocumentVersions(...args),

@@ -39,6 +39,7 @@ import type {
     AssistantEvent,
     Chat,
     ChatDetailOut,
+    ThreadAuthor,
     ActiveAssistantTurn,
     Citation,
     Document,
@@ -84,6 +85,8 @@ interface ServerMessage {
     workflow?: { id: string; title: string } | null;
     citations?: Citation[] | null;
     created_at: string;
+    /** Who sent it; on shared threads, not always the reader. */
+    author_user_id?: string | null;
 }
 interface ServerChatDetailOut {
     chat: Chat;
@@ -97,6 +100,10 @@ interface ServerChatDetailOut {
      */
     siblings?: Record<string, { index: number; total: number }>;
     active_turn?: ActiveAssistantTurn | null;
+    /** Name and email of each author on the transcript, by user id. */
+    authors?: Record<string, { name: string | null; email: string | null }>;
+    /** Whose turn is generating in the thread now, on any server. */
+    generating?: { user_id: string | null; since: string | null } | null;
 }
 
 export const API_BASE = "/api";
@@ -2281,11 +2288,29 @@ function mapServerMessages(messages: ServerTranscriptRow[]): Message[] {
 
 export async function getChat(chatId: string): Promise<ChatDetailOut> {
     const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
+    const person = (id: string | null | undefined): ThreadAuthor | undefined =>
+        id
+            ? {
+                  id,
+                  name: raw.authors?.[id]?.name ?? null,
+                  email: raw.authors?.[id]?.email ?? null,
+              }
+            : undefined;
+    const authorOf = new Map(raw.messages.map((m) => [m.id, m.author_user_id]));
     const messages = mapServerMessages(raw.messages).map((message) => {
         // Branch position rides along on the read, so a navigator renders
         // without one sibling lookup per message.
         const sibling = message.id ? raw.siblings?.[message.id] : undefined;
-        return sibling ? { ...message, sibling } : message;
+        // A prompt carries its sender: shared threads have several.
+        const author =
+            message.role === "user" && message.id
+                ? person(authorOf.get(message.id))
+                : undefined;
+        return {
+            ...message,
+            ...(sibling ? { sibling } : {}),
+            ...(author ? { author } : {}),
+        };
     });
     return {
         // Fold the caller's served standing into the row so consumers gate
@@ -2299,6 +2324,7 @@ export async function getChat(chatId: string): Promise<ChatDetailOut> {
         },
         messages,
         active_turn: raw.active_turn ?? null,
+        generating: raw.generating ? (person(raw.generating.user_id) ?? null) : null,
     };
 }
 

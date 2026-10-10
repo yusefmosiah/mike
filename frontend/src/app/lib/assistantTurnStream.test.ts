@@ -8,6 +8,7 @@ import {
   createTurnCursor,
   createTurnEventSink,
   readAssistantTurn,
+  TurnInProgressError,
 } from "./assistantTurnStream";
 
 vi.mock("./mikeApi", () => ({ streamChatTurn: vi.fn(), stopChatTurn: vi.fn() }));
@@ -363,6 +364,25 @@ describe("readAssistantTurn", () => {
         cursor: createTurnCursor("chat-a"),
       }),
     ).rejects.toThrow("Chat request failed with status 409");
+    turn.finish();
+  });
+
+  it("names who holds the thread when the send was refused for a running turn", async () => {
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const refused = (body: unknown) => async () =>
+      new Response(JSON.stringify(body), { status: 409 });
+    const read = (open: () => Promise<Response>) =>
+      readAssistantTurn({ open, turn, sink, cursor: createTurnCursor("chat-a") });
+
+    const error = await read(
+      refused({ code: "turn_in_progress", generating: { user_id: "partner" } }),
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TurnInProgressError);
+    expect((error as TurnInProgressError).generatingUserId).toBe("partner");
+
+    const anonymous = await read(refused({ code: "turn_in_progress" })).catch((e: unknown) => e);
+    expect((anonymous as TurnInProgressError).generatingUserId).toBeNull();
     turn.finish();
   });
 });

@@ -1,3 +1,4 @@
+import { answerTurnClaimRpc } from "../helpers/turnClaimsMock";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { AssistantEvent, ConnectorApprovalItem } from "@mike/contracts";
@@ -309,6 +310,8 @@ function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
     rpc: vi.fn((name: string, args: unknown) => {
+      const claimed = answerTurnClaimRpc(name, args);
+      if (claimed) return claimed;
       dbRpcCalls.push({ name, args });
       // Model the append-only persistence seam for the wired pause/resume
       // tests. The RPC implementation itself is not exercised here.
@@ -2262,6 +2265,8 @@ function makeRbacDb(
             return tableQuery(null, table);
         }),
         rpc: vi.fn((fn: string, args: unknown) => {
+            const claimed = answerTurnClaimRpc(fn, args);
+            if (claimed) return claimed;
             rbacRpcCalls.push({ fn, args });
             return Promise.resolve({ data: [], error: null });
         }),
@@ -3474,10 +3479,19 @@ describe("server-owned turns: resume, stop, concurrency", () => {
             .set("Authorization", "Bearer test")
             .send({ ...VALID_BODY, chat_id: "chat-1" });
         expect(second.status).toBe(409);
+        // The second sender learns who is generating, not just "busy".
         expect(second.body).toEqual({
             code: "turn_in_progress",
             detail: "A response is already being generated for this chat.",
+            generating: { user_id: "u1", since: expect.any(String) },
         });
+        // Refused before anything was written: only the first prompt exists.
+        const prompts = dbInserts.filter(
+            (insert) =>
+                insert.table === "chat_messages" &&
+                (insert.value as { role?: string }).role === "user",
+        );
+        expect(prompts).toHaveLength(1);
         held.release();
         expect((await firstDone).text).toContain("data: [DONE]");
         expect(runLLMStream).toHaveBeenCalledTimes(1);

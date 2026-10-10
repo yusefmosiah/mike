@@ -296,6 +296,7 @@ export async function importWorkflowAddon(
       const { error: versionError } = await createDocumentVersion(db, {
           id: versionId,
           document_id: documentId,
+          created_by: userId,
           storage_path: sourcePath,
           pdf_storage_path: pdfStoragePath,
           source: "upload",

@@ -387,7 +387,16 @@ export interface Message {
   error?: string;
   /** Branch position when this message has siblings (tree chats). */
   sibling?: MessageSibling;
+  /** Who sent a prompt, in a thread more than one person carries. */
+  author?: ThreadAuthor;
 }
+
+/** A person on a shared thread: who sent a prompt, or who is generating. */
+export type ThreadAuthor = {
+  id: string;
+  name: string | null;
+  email: string | null;
+};
 
 export type MessageFile = {
   filename: string;
@@ -887,6 +896,11 @@ export interface ChatDetailOut {
    * instead of treating the hidden reservation as "no answer".
    */
   active_turn?: ActiveAssistantTurn | null;
+  /**
+   * Who is generating in the thread now, on any server: in a shared chat,
+   * often a colleague whose turn this reader cannot attach to.
+   */
+  generating?: ThreadAuthor | null;
 }
 
 export interface TabularReviewDetailOut {

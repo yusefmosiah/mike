@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Message } from "@/app/components/shared/types";
 import { getChat, stopChatTurn, streamChatTurn } from "./mikeApi";
+import { TURN_IN_PROGRESS_MESSAGE } from "./assistantTurnStream";
 import {
   beginAssistantTurn,
   cancelAssistantTurn,
@@ -397,6 +398,18 @@ describe("resuming a server-owned turn after a reload", () => {
     await tick();
     expect(live.finished).toBe(true);
     expect(live.assistant.error).toBe("Sorry, something went wrong.");
+    streamChatTurnMock.mockReset();
+  });
+
+  it("tells the reader a colleague's turn holds the thread when the resume is refused", async () => {
+    streamChatTurnMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: "turn_in_progress", generating: { user_id: "partner" } }), { status: 409 }),
+    );
+    resumeAssistantTurn("a", active);
+    const live = getAssistantTurn("a")!;
+    await tick();
+    expect(live.finished).toBe(true);
+    expect(live.assistant.error).toBe(TURN_IN_PROGRESS_MESSAGE);
     streamChatTurnMock.mockReset();
   });
 });

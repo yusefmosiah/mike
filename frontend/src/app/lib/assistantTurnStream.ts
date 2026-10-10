@@ -1346,6 +1346,21 @@ export async function consumeAssistantTurnStream(
   finalizeStreamingReasoning();
 }
 
+/** What the sender reads when their send was refused for that reason. */
+export const TURN_IN_PROGRESS_MESSAGE =
+  "Someone else is generating a response in this chat. Nothing was sent; send again once it finishes.";
+
+/**
+ * The server refused the send because another turn is generating into the
+ * thread, usually a colleague's (a shared chat). Nothing was stored.
+ */
+export class TurnInProgressError extends Error {
+  constructor(readonly generatingUserId: string | null) {
+    super("A response is already being generated for this chat.");
+    this.name = "TurnInProgressError";
+  }
+}
+
 /**
  * Read a turn to its end, reconnecting to the server's copy of it when the
  * connection drops. `open` produces the first response (the POST that starts
@@ -1370,7 +1385,17 @@ export async function readAssistantTurn(args: {
   const policy = createTurnReconnectPolicy(args.reconnect);
   let response = await args.open();
   if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => null)) as {
+        code?: string;
+        generating?: { user_id?: string | null } | null;
+      } | null;
+      if (body?.code === "turn_in_progress") {
+        throw new TurnInProgressError(body.generating?.user_id ?? null);
+      }
+    } else {
+      await response.body?.cancel().catch(() => {});
+    }
     throw new Error(`Chat request failed with status ${response.status}`);
   }
   for (;;) {
