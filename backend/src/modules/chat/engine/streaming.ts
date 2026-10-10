@@ -48,12 +48,14 @@ import {
   createCitation,
   CITATIONS_OPEN_TAG,
 } from "./citations";
+import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import {
   getCachedCaseOpinionTexts,
   type CourtlistenerTurnState,
 } from "./tools/courtlistenerTurnState";
 import {
+  documentModelFor,
   readDocumentContent,
   type TurnEditState,
   type TurnReadState,
@@ -653,7 +655,7 @@ export async function runLLMStream(params: {
   const systemPrompt = isGuest && workstation
     ? `${promptWithCode}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
     : promptWithCode;
-  const chatMessages: LlmMessage[] = rawMsgs
+  const chatMessages: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")
     .map(
       (m): LlmMessage =>
@@ -677,7 +679,7 @@ export async function runLLMStream(params: {
         : m.content.some(
             (part) => part.type === "image" || part.text.trim().length > 0,
           );
-    });
+    }));
   // Before every real turn: see MemoryTurn for why it goes there.
   if (memory.message) chatMessages.unshift(memory.message);
 
@@ -688,6 +690,8 @@ export async function runLLMStream(params: {
   // across batches to let subsequent edit_document calls overwrite the
   // turn's existing version instead of creating a new one.
   const turnEditState: TurnEditState = new Map();
+  // Documents Python's `docs` has loaded this turn, so each shows as read once.
+  const modelsRead = new Set<string>();
   // A conversation's kernel is keyed by its id; a turn without one gets its own.
   const turnKernelId = crypto.randomUUID();
   // Suppress repeated full-document reads for the same document/version in
@@ -1015,6 +1019,53 @@ export async function runLLMStream(params: {
             : `${host} did not answer the request to run this command in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`;
         }
       : undefined;
+    /**
+     * Python's `docs` (goals/mission-14-document-model.md): the list of
+     * documents this turn can read, and one document as the common reading
+     * model. A load is a read, so it shows in the transcript like one.
+     */
+    const documentsRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
+      if (data.op === "list") {
+        const documents = [...docStore.entries()]
+          .filter(([, info]) => info.inline_text === undefined)
+          .map(([docId, info]) => ({
+            doc_id: docId,
+            filename: info.filename,
+            file_type: info.file_type ?? null,
+            version_id: docIndex?.[docId]?.version_id ?? null,
+          }));
+        return { ok: true, content: JSON.stringify(documents) };
+      }
+      if (data.op !== "load" || typeof data.doc_id !== "string") {
+        return { ok: false, error: "documents requests are list, or load with a doc_id" };
+      }
+      const docLabel = resolveDocLabel(data.doc_id, docStore, docIndex) ?? data.doc_id;
+      const loaded = await documentModelFor({ docLabel, docStore, docIndex, db });
+      if (!loaded.ok) return { ok: false, error: loaded.error };
+      const readKey = `${docLabel}@${loaded.versionId ?? ""}`;
+      if (!modelsRead.has(readKey)) {
+        modelsRead.add(readKey);
+        const read: AssistantEvent = {
+          type: "doc_read",
+          filename: loaded.filename,
+          document_id: loaded.readIdentity?.documentId ?? docIndex?.[docLabel]?.document_id,
+          version_id: loaded.versionId,
+          version_number: loaded.readIdentity?.versionNumber ?? docIndex?.[docLabel]?.version_number ?? null,
+        } as AssistantEvent;
+        flushText();
+        events.push(read);
+        write(`data: ${JSON.stringify(read)}\n\n`);
+      }
+      return {
+        ok: true,
+        content: JSON.stringify({
+          doc_id: docLabel,
+          filename: loaded.filename,
+          version_id: loaded.versionId,
+          ...loaded.model,
+        }),
+      };
+    };
     const runPythonCall = async (
       call: NormalizedToolCall,
       scope: "parent" | "child",
@@ -1048,6 +1099,7 @@ export async function runLLMStream(params: {
       let stopTurn: unknown = null;
       const onHostRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
         if (stopTurn) return { ok: false, error: "the turn is ending" };
+        if (data.type === "documents") return documentsRequest(data);
         const name = typeof data.name === "string" ? data.name : "";
         if (data.type !== "tool" || !pythonToolNames.has(name)) {
           return { ok: false, error: `No tool named '${name}'.` };
@@ -1465,7 +1517,7 @@ export async function runLLMStream(params: {
       // Keep in step with DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts. A literal,
       // not an import: tests mock the "../llm" barrel, and the runtime is an
       // ESM module loaded only on demand.
-      maxIterations: params.maxIterations ?? 16,
+      maxIterations: params.maxIterations ?? 1_000,
       apiKeys,
       reasoning: params.reasoning ?? "high",
       abortSignal: signal,

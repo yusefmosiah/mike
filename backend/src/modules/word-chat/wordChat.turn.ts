@@ -318,9 +318,9 @@ export async function driveWordChatTurn(
               }),
               // The edit flow is built around retry round-trips (propose →
               // fail → read_active_document → retry), each costing one
-              // iteration; the default budget of 10 can end the loop before
-              // the model gets to write its summary.
-              maxIterations: 16,
+              // iteration; a small budget ends the loop before the model
+              // writes its summary. The same runaway backstop as chat.
+              maxIterations: 1_000,
             }
           : {}),
         model: selectedModel,

@@ -391,6 +391,11 @@ export interface Message {
   sibling?: MessageSibling;
   /** Who sent a prompt, in a thread more than one person carries. */
   author?: ThreadAuthor;
+  /**
+   * Sent with `/nr`: added to the thread without asking for a reply. The
+   * next message that does ask sees it in the history.
+   */
+  noResponse?: boolean;
 }
 
 /** A person on a shared thread: who sent a prompt, or who is generating. */

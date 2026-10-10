@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Workflow } from "../shared/types";
 import {
     exactSlashWorkflow,
+    matchesNoResponseCommand,
     matchingSlashWorkflows,
+    noResponseContent,
     slashCommandQuery,
     withoutSlashCommand,
     workflowSlashCommand,
@@ -98,5 +100,23 @@ describe("workflow slash commands", () => {
         expect(exactSlashWorkflow([workflow], "/CONTRACT-INTAKE")).toBe(
             workflow,
         );
+    });
+});
+
+describe("the /nr command", () => {
+    it("reads a leading /nr or /no-response, and nothing else", () => {
+        expect(noResponseContent("/nr  Noted ")).toBe("Noted");
+        expect(noResponseContent("  /No-Response\nline two")).toBe("line two");
+        expect(noResponseContent("/nr")).toBe("");
+        expect(noResponseContent("/nrx hello")).toBeNull();
+        expect(noResponseContent("hello /nr")).toBeNull();
+    });
+
+    it("is offered only while the command itself is being typed at the start", () => {
+        expect(matchesNoResponseCommand("/", "/")).toBe(true);
+        expect(matchesNoResponseCommand("/no", "/no")).toBe(true);
+        expect(matchesNoResponseCommand("/NR", "/nr")).toBe(true);
+        expect(matchesNoResponseCommand("note /n", "/n")).toBe(false);
+        expect(matchesNoResponseCommand("/x", "/x")).toBe(false);
     });
 });

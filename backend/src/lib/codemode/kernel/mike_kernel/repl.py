@@ -51,7 +51,7 @@ _SNAPSHOT_MAGIC = b"MIKE-KERNEL-SNAPSHOT-1\n"
 # usefully; never snapshotted.
 _SKIP_NAMES = {
     "__builtins__", "__name__", "__doc__", "__loader__", "__spec__", "__package__",
-    "tools", "ToolError", "UserQuestionPending", "emit", "In", "Out", "exit", "quit",
+    "tools", "docs", "ToolError", "UserQuestionPending", "emit", "In", "Out", "exit", "quit",
 }
 
 _protocol_fd = -1
@@ -71,6 +71,9 @@ _pending_interrupts: set[str] = set()
 _cell_counter = 0
 
 _pending_host: dict[str, asyncio.Future[dict[str, Any]]] = {}
+# Blocking host requests (docs): answered from the reader thread directly,
+# since the cell waiting on them holds the loop thread.
+_sync_waiters: dict[str, tuple[threading.Event, list[dict[str, Any]]]] = {}
 _host_closed = False
 _last_snapshot: dict[str, Any] | None = None
 
@@ -244,7 +247,39 @@ async def host_request(data: dict[str, Any]) -> dict[str, Any]:
         _pending_host.pop(rid, None)
 
 
+def host_request_sync(data: dict[str, Any], timeout: float = 600.0) -> dict[str, Any]:
+    """Send one request to the host and block until it answers (used by docs.py).
+
+    For calls a cell makes without ``await``. The wait polls in short steps,
+    so an interrupt still stops the cell while it waits.
+    """
+    if _host_closed:
+        raise RuntimeError("the host connection is closed")
+    _check_payload("host_request", data)
+    rid = uuid.uuid4().hex
+    event = threading.Event()
+    box: list[dict[str, Any]] = []
+    _sync_waiters[rid] = (event, box)
+    try:
+        _send({"event": "host_request", "id": rid, "cell": _current_cell.get(), "data": data})
+        deadline = time.monotonic() + timeout
+        while not event.wait(0.1):
+            if _host_closed:
+                raise RuntimeError("the host connection is closed")
+            if time.monotonic() > deadline:
+                raise TimeoutError("the host did not answer")
+        return box[0]
+    finally:
+        _sync_waiters.pop(rid, None)
+
+
 def _resolve_host_reply(rid: str, data: dict[str, Any]) -> None:
+    waiter = _sync_waiters.get(rid)
+    if waiter is not None:
+        waiter[1].append(data)
+        waiter[0].set()
+        return
+
     def deliver() -> None:
         future = _pending_host.get(rid)
         if future is not None and not future.done():
@@ -389,6 +424,9 @@ async def _handle_execute(req: dict[str, Any], ns: dict[str, Any]) -> None:
     linecache.cache[filename] = (len(code), None, code.splitlines(True), filename)
     token = _current_cell.set(rid)
     status = "ok"
+    docs_module = sys.modules.get("mike_kernel.docs")
+    if docs_module is not None:
+        docs_module.new_cell()
     try:
         try:
             body, expr = _compile_cell(code, filename)
@@ -558,6 +596,9 @@ def _handle_configure(req: dict[str, Any], ns: dict[str, Any]) -> None:
         _send({"event": "done", "id": req["id"], "status": "error", "reason": "configure needs a tools list"})
         return
     count = tools.install(ns, specs)
+    from . import docs
+
+    docs.install(ns)
     _send({"event": "done", "id": req["id"], "status": "ok", "tools": count})
 
 

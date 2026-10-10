@@ -2,7 +2,7 @@
 name: general
 description: Does one self-contained task with every tool you have except delegate and asking the user: reading and searching documents, web search, case law, connectors, and changing or creating documents when the task asks for it. Use it to split work into independent parts that can run at the same time.
 tools: *
-max_rounds: 12
+max_rounds: 1000
 max_output_tokens: 32000
 timeout_ms: 600000
 ---

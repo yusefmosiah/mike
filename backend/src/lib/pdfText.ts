@@ -162,14 +162,24 @@ function positionedFormItem(field: ExtractedFormField): PdfTextItem | null {
   };
 }
 
+/** One reconstructed line: its text and where it sits on the page. */
+export type PdfLine = {
+  text: string;
+  /** Left edge and baseline, in PDF user space (y grows upward). */
+  x: number;
+  y: number;
+  /** Tallest glyph height on the line: its type size. */
+  h: number;
+  /** Column gaps inside the line (signature blocks, simple tables). */
+  wide: boolean;
+};
+
 /**
- * Rebuild a page's text from positioned pdfjs items, preserving the visual
- * layout: lines are reconstructed from y-coordinates, words
- * are joined (or split) based on measured x-gaps rather than a blanket
- * space, paragraph breaks become blank lines, and indentation is kept
- * relative to the page's left margin.
+ * Lines of a page from positioned pdfjs items, in reading order: grouped by
+ * column and baseline (pdfTextOrder), with words joined or split by their
+ * measured x-gaps rather than a blanket space.
  */
-function layoutPageText(items: PdfTextItem[]): string {
+export function pageLines(items: PdfTextItem[]): PdfLine[] {
   type Item = {
     str: string;
     x: number;
@@ -193,34 +203,17 @@ function layoutPageText(items: PdfTextItem[]): string {
         10,
     });
   }
-  if (!clean.length) return "";
+  if (!clean.length) return [];
 
   const lines: Item[][] = orderTextItemLines(clean).map((line) =>
     line.map((index) => clean[index]),
   );
-
-  const marginX = Math.min(...lines.map((line) => line[0]?.x ?? 0));
-
-  const out: string[] = [];
-  let prevY: number | null = null;
-  let prevLineH: number | null = null;
+  const out: PdfLine[] = [];
   for (const line of lines) {
     const lineH = Math.max(...line.map((c) => c.h));
-
-    // Paragraph break: a vertical gap well above the line height.
-    if (prevY !== null && prevLineH !== null) {
-      const vGap = Math.abs((line[0]?.y ?? 0) - prevY);
-      if (vGap > prevLineH * 1.7) out.push("");
-    }
-
-    // Indentation relative to the page's left margin.
     const charW = Math.max(1, lineH * 0.5);
-    const indent = Math.min(
-      24,
-      Math.max(0, Math.round(((line[0]?.x ?? 0) - marginX) / charW)),
-    );
-
     let s = "";
+    let wide = false;
     let prevEnd: number | null = null;
     for (const it of line) {
       if (prevEnd !== null) {
@@ -231,6 +224,7 @@ function layoutPageText(items: PdfTextItem[]): string {
           // Preserve obvious columns (signature blocks and simple tables)
           // without exaggerating ordinary word spacing in justified text.
           s += " ".repeat(Math.min(16, Math.max(4, Math.round(gap / charW))));
+          wide = true;
         } else if (gap > lineH * 0.15) {
           // Common spaces are about 0.25em; leave room below that while
           // keeping zero/tiny kerning gaps joined.
@@ -240,9 +234,41 @@ function layoutPageText(items: PdfTextItem[]): string {
       s += it.str;
       prevEnd = it.x + it.w;
     }
-    const trimmed = s.trimEnd();
-    if (trimmed) out.push(" ".repeat(indent) + trimmed);
-    prevY = line[0]?.y ?? prevY;
+    out.push({ text: s.trimEnd(), x: line[0]?.x ?? 0, y: line[0]?.y ?? 0, h: lineH, wide });
+  }
+  return out;
+}
+
+/**
+ * Rebuild a page's text from positioned pdfjs items, preserving the visual
+ * layout: paragraph breaks become blank lines, and indentation is kept
+ * relative to the page's left margin.
+ */
+function layoutPageText(items: PdfTextItem[]): string {
+  const lines = pageLines(items);
+  if (!lines.length) return "";
+  const marginX = Math.min(...lines.map((line) => line.x));
+
+  const out: string[] = [];
+  let prevY: number | null = null;
+  let prevLineH: number | null = null;
+  for (const line of lines) {
+    const lineH = line.h;
+
+    // Paragraph break: a vertical gap well above the line height.
+    if (prevY !== null && prevLineH !== null) {
+      const vGap = Math.abs(line.y - prevY);
+      if (vGap > prevLineH * 1.7) out.push("");
+    }
+
+    // Indentation relative to the page's left margin.
+    const charW = Math.max(1, lineH * 0.5);
+    const indent = Math.min(
+      24,
+      Math.max(0, Math.round((line.x - marginX) / charW)),
+    );
+    if (line.text) out.push(" ".repeat(indent) + line.text);
+    prevY = line.y;
     prevLineH = lineH;
   }
   return out.join("\n");
@@ -580,6 +606,106 @@ export async function extractPdfText(buf: ArrayBuffer): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/** A page as the common document model reads it (lib/documentModel/fromPdf). */
+export type PdfPageLines = {
+  number: number;
+  lines: PdfLine[];
+  /** Text recovered by OCR for a scanned page. */
+  ocrText?: string;
+  /** A scanned page whose OCR did not run or failed. */
+  ocrPending: boolean;
+  /** Filled form fields with no position on the page. */
+  fields: string[];
+};
+
+/** One entry of the PDF's own outline (bookmarks), resolved to its page. */
+export type PdfOutlineEntry = { title: string; depth: number; page: number | null };
+
+type PdfOutlineNode = { title?: unknown; dest?: unknown; items?: PdfOutlineNode[] };
+type PdfDocumentWithOutline = PdfDocument & {
+  getOutline?: () => Promise<PdfOutlineNode[] | null>;
+  getDestination?: (name: string) => Promise<unknown[] | null>;
+  getPageIndex?: (ref: unknown) => Promise<number>;
+};
+
+async function outlineEntries(pdf: PdfDocumentWithOutline): Promise<PdfOutlineEntry[]> {
+  if (!pdf.getOutline) return [];
+  const entries: PdfOutlineEntry[] = [];
+  const pageOf = async (dest: unknown): Promise<number | null> => {
+    try {
+      const explicit = typeof dest === "string" ? await pdf.getDestination?.(dest) : dest;
+      if (!Array.isArray(explicit) || explicit[0] == null) return null;
+      const target = explicit[0];
+      if (typeof target === "number") return target + 1;
+      const index = await pdf.getPageIndex?.(target);
+      return typeof index === "number" ? index + 1 : null;
+    } catch {
+      return null;
+    }
+  };
+  const walk = async (nodes: PdfOutlineNode[] | null | undefined, depth: number) => {
+    for (const node of nodes ?? []) {
+      const title = typeof node.title === "string" ? node.title.replaceAll(/\s+/g, " ").trim() : "";
+      if (title) entries.push({ title, depth, page: await pageOf(node.dest) });
+      if (entries.length >= 2000) return;
+      await walk(node.items, depth + 1);
+    }
+  };
+  try {
+    await walk(await pdf.getOutline(), 1);
+  } catch {
+    return entries;
+  }
+  return entries;
+}
+
+/**
+ * Each page's lines with their geometry, OCR text for scanned pages, and the
+ * PDF's bookmarks: what the common document model needs to find paragraphs
+ * and headings. The same reading order and OCR policy as extractPdfText.
+ */
+export async function extractPdfPages(
+  buf: ArrayBuffer,
+): Promise<{ pages: PdfPageLines[]; outline: PdfOutlineEntry[] }> {
+  const pdfjsLib = (await import(
+    "pdfjs-dist/legacy/build/pdf.mjs" as string
+  )) as unknown as PdfJsLib;
+  const pdf = (await pdfjsLib.getDocument({
+    data: new Uint8Array(buf),
+    standardFontDataUrl: STANDARD_FONT_DATA_URL,
+  }).promise) as PdfDocumentWithOutline;
+  const ocrRun: OcrRun = { used: 0, suspended: false };
+  const pages: PdfPageLines[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    let fields: ExtractedFormField[] = [];
+    try {
+      fields = extractFormFields(await page.getAnnotations());
+    } catch {
+      // Keep the page's content-stream text if its annotations are malformed.
+    }
+    const positioned = fields
+      .map(positionedFormItem)
+      .filter((item): item is PdfTextItem => item !== null);
+    const lines = pageLines([...textContent.items, ...positioned]);
+    const entry: PdfPageLines = {
+      number: i,
+      lines,
+      ocrPending: false,
+      fields: fields.filter((field) => !field.rect).map((field) => field.text),
+    };
+    const chars = lines.map((line) => line.text).join("").replaceAll(/\s+/g, "").length;
+    if (chars < SCANNED_PAGE_MAX_TEXT_CHARS && (await pageDrawsImage(page, pdfjsLib.OPS))) {
+      const ocrText = await ocrPage(page, ocrRun);
+      if (ocrText) entry.ocrText = ocrText;
+      else entry.ocrPending = true;
+    }
+    pages.push(entry);
+  }
+  return { pages, outline: await outlineEntries(pdf) };
 }
 
 /**

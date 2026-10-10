@@ -73,7 +73,17 @@ export function citationReminder(
 }
 
 export { extractPdfText, extractLegacyOfficeText } from "../../../../lib/pdfText";
-import { extractPdfText, extractLegacyOfficeText } from "../../../../lib/pdfText";
+import { extractPdfPages, extractPdfText, extractLegacyOfficeText } from "../../../../lib/pdfText";
+import {
+  cachedModel,
+  docxToModel,
+  markdownToModel,
+  pdfToModel,
+  presentationToModel,
+  spreadsheetToModel,
+  textToModel,
+  type DocumentModel,
+} from "../../../../lib/documentModel";
 
 export async function generateDocx(
   title: string,
@@ -2502,3 +2512,51 @@ export type DocReplicatedResult = {
     version_id: string;
   }[];
 };
+
+/**
+ * A document as the common reading model (lib/documentModel): what Python's
+ * `docs` serves (goals/mission-14-document-model.md). Only documents in the
+ * turn's store, so the access rules are read_document's; request-scoped
+ * inline text (the Word add-in's open document) is read with read_document
+ * instead. Built once per version and cached.
+ */
+export async function documentModelFor(params: {
+  docLabel: string;
+  docStore: DocStore;
+  docIndex?: DocIndex;
+  db?: Db;
+}): Promise<
+  | { ok: true; model: DocumentModel; versionId: string | null; filename: string; readIdentity: TurnReadIdentity | null }
+  | { ok: false; error: string }
+> {
+  const { docLabel, docStore, docIndex, db } = params;
+  const docInfo = docStore.get(docLabel);
+  if (!docInfo) return { ok: false, error: `No document '${docLabel}' here.` };
+  if (docInfo.inline_text !== undefined) {
+    return { ok: false, error: `${docLabel} is the document open in Word; read it with tools.read_document.` };
+  }
+  const documentId = docIndex?.[docLabel]?.document_id;
+  const readIdentity = await getTurnReadIdentity({ docLabel, docStore, docIndex, db });
+  const versionId = readIdentity?.versionId ?? docIndex?.[docLabel]?.version_id ?? null;
+  try {
+    const model = await cachedModel(versionId ?? docInfo.storage_path ?? null, async () => {
+      const loaded = await loadDocumentBytes({ docInfo, documentId, db, versionId });
+      if (!loaded) throw new Error("no bytes");
+      const raw = Buffer.from(loaded.raw);
+      const fileType = docInfo.file_type?.toLowerCase?.() ?? "";
+      if (fileType === "pdf") return pdfToModel(await extractPdfPages(loaded.raw));
+      if (fileType === "docx") return docxToModel(await docxView(raw, documentId, db, loaded.versionId));
+      if (isSpreadsheetDocumentType(fileType) || fileType === "csv") return spreadsheetToModel(raw);
+      if (fileType === "pptx") return presentationToModel(raw);
+      if (fileType === "md" || fileType === "markdown") return markdownToModel(raw.toString("utf8"));
+      if (fileType === "txt") return textToModel(raw.toString("utf8"));
+      // Legacy Office (.doc, .ppt): through their PDF rendering, as reads do.
+      const pdf = await docxToPdf(raw);
+      return pdfToModel(await extractPdfPages(pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer));
+    });
+    return { ok: true, model, versionId, filename: docInfo.filename, readIdentity };
+  } catch (error) {
+    devLog(`[document_model] could not build a model for "${docInfo.filename}"`, error);
+    return { ok: false, error: `${docInfo.filename} could not be read.` };
+  }
+}

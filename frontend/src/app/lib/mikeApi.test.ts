@@ -203,6 +203,10 @@ import {
     updateUserMemory,
     importWorkflowAddon,
     listQuickActions,
+    getCodeApprovals,
+    decideCodeApproval,
+    revokeCodeApproval,
+    postChatNote,
 } from "./mikeApi";
 
 const fetchMock = vi.fn();
@@ -1612,6 +1616,37 @@ describe("getProjectFilterOptions", () => {
         const { url, init } = lastFetchCall();
         expect(url).toBe("/api/projects/filter-options");
         expect(init.signal).toBe(controller.signal);
+    });
+});
+
+describe("shared thread requests", () => {
+    it("reads, answers and withdraws code approvals", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse({ approvals: [{ id: "r1" }] }));
+        expect(await getCodeApprovals("c1")).toEqual([{ id: "r1" }]);
+        expect(lastFetchCall().url).toBe("/api/chat/c1/code-approvals");
+
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        await decideCodeApproval("c1", "r1", "thread");
+        expect(lastFetchCall()).toMatchObject({
+            url: "/api/chat/c1/code-approvals/r1",
+            init: { method: "POST", body: JSON.stringify({ decision: "thread" }) },
+        });
+
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        await revokeCodeApproval("c1", "guest-1");
+        expect(lastFetchCall()).toMatchObject({
+            url: "/api/chat/c1/code-approvals/guests/guest-1",
+            init: { method: "DELETE" },
+        });
+    });
+
+    it("adds a message to the thread without a reply", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse({ id: "m2", parent_message_id: "m1" }, { status: 201 }));
+        expect(await postChatNote("c1", "Noted")).toEqual({ id: "m2", parent_message_id: "m1" });
+        expect(lastFetchCall()).toMatchObject({
+            url: "/api/chat/c1/notes",
+            init: { method: "POST", body: JSON.stringify({ content: "Noted" }) },
+        });
     });
 });
 

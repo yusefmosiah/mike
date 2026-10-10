@@ -15,6 +15,7 @@ import {
     type TabularCellStore,
 } from "../chat/chat.service";
 import { MESSAGE_TIME_PROMPT, resolveRequestTimeZone } from "../../lib/userTime";
+import { MIKE_OPEN_SOURCE } from "../../lib/agentIdentity";
 import { type ReasoningLevel, type UserApiKeys } from "../../lib/llm";
 import { randomUUID } from "node:crypto";
 import {
@@ -113,7 +114,7 @@ export function buildTabularMessages(
         .map((c, i) => `- COL:${i} "${c.name}"`)
         .join("\n");
 
-    const systemContent = `You are Mike, a general knowledge-work assistant. You are helping with the tabular review titled "${reviewTitle}".
+    const systemContent = `This is the system prompt for Mike, an open-source AI agent for knowledge work, here helping with the tabular review titled "${reviewTitle}". "You" below means the model running as Mike. ${MIKE_OPEN_SOURCE}
 
 The review extracts specific fields from multiple documents into a structured table.
 You do NOT have the cell content yet — call read_table_cells to fetch the cells you need before answering.

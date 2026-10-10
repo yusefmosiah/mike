@@ -111,7 +111,7 @@ function headingMarker(p: ParagraphBlock): string {
  * (legal templates give every clause one): short, and either unpunctuated at
  * the end or only a few words ("Article 4. Financial Obligations.").
  */
-function isTitleLike(p: ParagraphBlock): boolean {
+export function isTitleLike(p: ParagraphBlock): boolean {
   const t = p.text.trim();
   if (t.length === 0 || t.length > 120) return false;
   if (!/[.;:,]$/.test(t)) return true;

@@ -2,7 +2,7 @@
 name: citation_check
 description: Checks every citation and quotation in a draft or answer against its source (the conversation's documents, case law, or the web) and reports each as verified, misquoted, unsupported or not found, with the evidence. Read-only.
 tools: read_document, fetch_documents, find_in_document, list_documents, courtlistener_search_case_law, courtlistener_get_cases, courtlistener_find_in_case, courtlistener_read_case, courtlistener_verify_citations, web_search, fetch_web_page
-max_rounds: 16
+max_rounds: 1000
 max_output_tokens: 32000
 timeout_ms: 600000
 ---

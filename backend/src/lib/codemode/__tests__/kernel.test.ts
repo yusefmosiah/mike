@@ -18,7 +18,9 @@ const workDir = mkdtempSync(path.join(tmpdir(), "mike-kernel-test-"));
 const launcher = localKernelLauncher(workDir);
 const sessions: KernelSession[] = [];
 
-async function startSession(tools = [{ name: "echo", parameters: { type: "object", properties: { text: { type: "string" } } } }]) {
+async function startSession(
+  tools: Parameters<KernelSession["configure"]>[0] = [{ name: "echo", parameters: { type: "object", properties: { text: { type: "string" } } } }],
+) {
   const session = await KernelSession.start(launcher.spawn);
   sessions.push(session);
   await session.configure(tools);
@@ -175,6 +177,8 @@ describe("kernel bundle", () => {
     const home = realpathSync(mkdtempSync(path.join(tmpdir(), "mike-kernel-home-")));
     const bundle = kernelBundle();
     const command = kernelStartCommand(bundle);
+    // One argument of an exec is capped at 128 KiB on Linux; keep well clear.
+    expect(Buffer.byteLength(command)).toBeLessThan(64 * 1024);
     const session = await KernelSession.start(() =>
       spawn("bash", ["-c", command], { env: { PATH: process.env.PATH, HOME: home }, stdio: ["pipe", "pipe", "pipe"] }),
     );

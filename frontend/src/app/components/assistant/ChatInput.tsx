@@ -25,10 +25,17 @@ import { UploadOverlay } from "./UploadOverlay";
 import { FileTypeIcon } from "../shared/FileTypeIcon";
 import { AddDocumentsModal } from "../modals/AddDocumentsModal";
 import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
-import { WORKFLOW_SLASH_MENU_ID, WorkflowSlashMenu } from "./WorkflowSlashMenu";
+import {
+    WORKFLOW_SLASH_MENU_ID,
+    WorkflowSlashMenu,
+    type SlashCommandOption,
+} from "./WorkflowSlashMenu";
 import {
     exactSlashWorkflow,
+    matchesNoResponseCommand,
     matchingSlashWorkflows,
+    NO_RESPONSE_COMMAND,
+    noResponseContent,
     slashCommandQuery,
     withoutSlashCommand,
     workflowSlashCommand,
@@ -324,14 +331,21 @@ function ChatInputForChatImpl(
         slashQuery,
     );
     const slashCommandsLoading = slashQuery !== null && slashWorkflows === null;
+    // `/nr` is built in: offered at the start of a message, whatever
+    // workflows exist, and never attached to a selected workflow.
+    const builtInCommands: SlashCommandOption[] = matchesNoResponseCommand(
+        value,
+        slashQuery,
+    )
+        ? [{ command: NO_RESPONSE_COMMAND, description: "Add to the thread without a reply" }]
+        : [];
+    const menuWorkflows = selectedWorkflow ? [] : matchingWorkflows;
+    const slashOptionCount = builtInCommands.length + menuWorkflows.length;
     const slashMenuOpen =
-        !slashMenuDismissed &&
-        !selectedWorkflow &&
-        slashQuery !== null &&
-        matchingWorkflows.length > 0;
+        !slashMenuDismissed && slashQuery !== null && slashOptionCount > 0;
     const resolvedSlashIndex = Math.min(
         activeSlashIndex,
-        Math.max(0, matchingWorkflows.length - 1),
+        Math.max(0, slashOptionCount - 1),
     );
 
     useEffect(() => {
@@ -599,6 +613,18 @@ function ChatInputForChatImpl(
         updateInput(el);
     };
 
+    // `/nr`: the message joins the thread and no reply is asked for, so no
+    // model is needed. Attachments and a selected workflow stay in the
+    // composer for the next message that does ask.
+    const submitNote = (content: string) => {
+        if (!content || isLoading) return;
+        setValue("");
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+        }
+        onSubmit?.({ role: "user", content, noResponse: true });
+    };
+
     const submitMessage = (
         query: string,
         workflow: { id: string; title: string } | null,
@@ -657,9 +683,29 @@ function ChatInputForChatImpl(
         }
     };
 
+    const selectSlashCommand = (option: SlashCommandOption) => {
+        setValue(`${option.command} `);
+        setSlashMenuDismissed(true);
+        textareaRef.current?.focus();
+    };
+
+    const selectSlashOption = (index: number) => {
+        if (index < builtInCommands.length) {
+            selectSlashCommand(builtInCommands[index]);
+        } else {
+            selectSlashWorkflow(menuWorkflows[index - builtInCommands.length]);
+        }
+    };
+
     const handleSubmit = () => {
         const query = value.trim();
-        if (!composerOpen || slashCommandsLoading) return;
+        if (!composerOpen) return;
+        const note = noResponseContent(value);
+        if (note !== null) {
+            submitNote(note);
+            return;
+        }
+        if (slashCommandsLoading) return;
         const slashWorkflow = slashQuery
             ? exactSlashWorkflow(slashWorkflows ?? [], slashQuery)
             : undefined;
@@ -679,25 +725,23 @@ function ChatInputForChatImpl(
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (slashMenuOpen && matchingWorkflows.length > 0) {
+        if (slashMenuOpen && slashOptionCount > 0) {
             if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setActiveSlashIndex(
-                    (resolvedSlashIndex + 1) % matchingWorkflows.length,
-                );
+                setActiveSlashIndex((resolvedSlashIndex + 1) % slashOptionCount);
                 return;
             }
             if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setActiveSlashIndex(
-                    (resolvedSlashIndex - 1 + matchingWorkflows.length) %
-                        matchingWorkflows.length,
+                    (resolvedSlashIndex - 1 + slashOptionCount) %
+                        slashOptionCount,
                 );
                 return;
             }
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                selectSlashWorkflow(matchingWorkflows[resolvedSlashIndex]);
+                selectSlashOption(resolvedSlashIndex);
                 return;
             }
         }
@@ -717,9 +761,11 @@ function ChatInputForChatImpl(
             <div className="relative w-full">
                 {slashMenuOpen && (
                     <WorkflowSlashMenu
-                        workflows={matchingWorkflows}
+                        workflows={menuWorkflows}
                         activeIndex={resolvedSlashIndex}
                         onSelect={selectSlashWorkflow}
+                        commands={builtInCommands}
+                        onSelectCommand={selectSlashCommand}
                     />
                 )}
                 <div
@@ -853,7 +899,7 @@ function ChatInputForChatImpl(
                             }
                             aria-expanded={slashMenuOpen}
                             aria-activedescendant={
-                                slashMenuOpen && matchingWorkflows.length > 0
+                                slashMenuOpen && slashOptionCount > 0
                                     ? `${WORKFLOW_SLASH_MENU_ID}-${resolvedSlashIndex}`
                                     : undefined
                             }

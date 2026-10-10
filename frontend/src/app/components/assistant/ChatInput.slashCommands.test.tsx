@@ -243,7 +243,7 @@ describe("ChatInput workflow slash commands", () => {
         expect(input).toHaveValue("Document Quick Action prompt");
     });
 
-    it("treats slash as ordinary input when workflow titles cannot form commands", async () => {
+    it("treats a slash word as ordinary input when no command matches it", async () => {
         let resolveWorkflows!: (workflows: Workflow[]) => void;
         vi.mocked(listWorkflows).mockReturnValue(
             new Promise((resolve) => {
@@ -271,9 +271,9 @@ describe("ChatInput workflow slash commands", () => {
         );
 
         const input = screen.getByRole("combobox");
-        await user.type(input, "/");
+        await user.type(input, "/x");
 
-        expect(input).toHaveValue("/");
+        expect(input).toHaveValue("/x");
         expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
         expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -281,7 +281,7 @@ describe("ChatInput workflow slash commands", () => {
             resolveWorkflows(workflowsWithoutCommands);
         });
 
-        expect(input).toHaveValue("/");
+        expect(input).toHaveValue("/x");
         expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
         expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -291,10 +291,66 @@ describe("ChatInput workflow slash commands", () => {
             expect(onSubmit).toHaveBeenCalledWith(
                 expect.objectContaining({
                     role: "user",
-                    content: "/",
+                    content: "/x",
                     workflow: undefined,
                 }),
             ),
         );
+    });
+
+    it("offers /nr at the start of a message and sends it without asking for a reply", async () => {
+        const onSubmit = vi.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatInput
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+                isLoading={false}
+            />,
+        );
+
+        const input = screen.getByRole("combobox");
+        await user.type(input, "/n");
+        const option = await screen.findByRole("option", {
+            name: "/nr Add to the thread without a reply",
+        });
+        expect(option).toHaveAttribute("aria-selected", "true");
+        await user.keyboard("{Enter}");
+        expect(input).toHaveValue("/nr ");
+        expect(onSubmit).not.toHaveBeenCalled();
+
+        await user.type(input, "Client called; wants the draft Friday");
+        await user.keyboard("{Enter}");
+        expect(onSubmit).toHaveBeenCalledWith({
+            role: "user",
+            content: "Client called; wants the draft Friday",
+            noResponse: true,
+        });
+        expect(input).toHaveValue("");
+
+        await user.type(input, "/NO-RESPONSE  second note");
+        await user.keyboard("{Enter}");
+        expect(onSubmit).toHaveBeenLastCalledWith({
+            role: "user",
+            content: "second note",
+            noResponse: true,
+        });
+    });
+
+    it("does not offer /nr in the middle of a message", async () => {
+        const user = userEvent.setup();
+        render(
+            <ChatInput
+                onSubmit={vi.fn()}
+                onCancel={vi.fn()}
+                isLoading={false}
+            />,
+        );
+
+        await user.type(screen.getByRole("combobox"), "check /n");
+        await waitFor(() => expect(listWorkflows).toHaveBeenCalled());
+        expect(
+            screen.queryByRole("option", { name: /^\/nr / }),
+        ).not.toBeInTheDocument();
     });
 });
