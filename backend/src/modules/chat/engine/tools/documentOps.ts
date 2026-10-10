@@ -25,6 +25,7 @@ import { lintDocx } from "../../../../lib/docxLinter";
 import { DocxDocument } from "../../../../lib/docx/view";
 import { findInDocument as findInDocx } from "../../../../lib/docx/render";
 import { renderDocxRead, type DocxReadRequest } from "../../../../lib/docx/read";
+import { docxReadingText } from "../../../../lib/docx/readingText";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
 import {
   contentSha256,
@@ -1900,6 +1901,12 @@ export async function readDocumentContent(
      */
     fullText?: boolean;
     /**
+     * With fullText: for a .docx, also return the text as a reader sees it,
+     * list numbers included (lib/docx/readingText), ahead of the flat text.
+     * Citation verification only; a quote matching either is the source's.
+     */
+    readingText?: boolean;
+    /**
      * Segmented .docx read (section, block range, or full). Model-facing
      * .docx reads always go through the document view; see lib/docx/read.ts.
      */
@@ -2032,6 +2039,14 @@ export async function readDocumentContent(
         devLog(
           `[read_document] docx mammoth fallback length=${text.length} for filename="${docInfo.filename}"`,
         );
+      }
+      if (opts?.fullText && opts.readingText) {
+        try {
+          const view = await docxView(Buffer.from(raw), documentId, db, loaded.versionId);
+          text = `${docxReadingText(view).content}\n\n${text}`;
+        } catch {
+          // The flat text alone still verifies every quote it did before.
+        }
       }
     } else if (isSpreadsheetDocumentType(fileType)) {
       // SheetJS reads .xlsx/.xlsm/.xls directly (no PDF detour), emitting a

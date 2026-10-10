@@ -1402,6 +1402,8 @@ export async function runLLMStream(params: {
               // Quote verification compares against the whole source; a
               // bounded window would mark every quote past it unverified.
               fullText: true,
+              // List numbers ("23.7.1") are text the model read and quotes.
+              readingText: true,
             })
           : Promise.resolve("");
         sourceTextByDocId.set(docId, pending);

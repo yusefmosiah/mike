@@ -8,7 +8,7 @@ import type { Db } from "../../lib/db";
 import { downloadFile, extractedTextKey } from "../../lib/storage";
 import { extractPdfText } from "../../lib/pdfText";
 import { requiresLibreOfficeTextExtraction, documentSuffix } from "../../lib/documentTypes";
-import { idSlots } from "../../lib/docx/blockIds";
+import { docxReadingText } from "../../lib/docx/readingText";
 import { insertAuditEvent } from "../../lib/audit";
 import { assertSafeEgressUrl, EgressSecurityError } from "../../lib/search/egress";
 import { stripHtmlToText } from "../../lib/search/engine";
@@ -147,18 +147,8 @@ export async function documentText(
     if (!raw) return null;
     if (args.fileType === "docx") {
         const view = await docxViewForVersion(db, args.documentId, args.versionId, Buffer.from(raw));
-        const offsets: BlockOffset[] = [];
-        let content = "";
-        for (const block of idSlots(view)) {
-            if (block.kind !== "paragraph") continue;
-            if (content) content += "\n";
-            // A list number ("23.7.1", "(b)") is text a reader sees, and the
-            // model's read of the document shows it, so quotes include it.
-            const line = block.label && !block.isBullet ? `${block.label} ${block.text}` : block.text;
-            offsets.push({ id: block.id, start: content.length, end: content.length + line.length });
-            content += line;
-        }
-        return { content, blockOffsets: offsets };
+        const { content, blocks } = docxReadingText(view);
+        return { content, blockOffsets: blocks };
     }
     if (args.fileType === "pdf") {
         return { content: await extractPdfText(raw), blockOffsets: null };
