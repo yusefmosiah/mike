@@ -2,12 +2,14 @@
  * The kernel's Python files, and the remote command that installs them in a
  * workstation VM and starts the kernel.
  *
- * The files travel inside the ssh command itself (base64 in an argument), so
- * starting a kernel is one ssh connection. They land in
+ * The files travel inside the ssh command itself (deflated, then base64, in
+ * one argument: Linux caps a single argument at 128 KiB), so starting a
+ * kernel is one ssh connection. They land in
  * `~/.mike/kernel/<hash>/`: a VM keeps every version it has run, and a new
  * backend build never changes files under a kernel that is already running.
  */
 import { createHash } from "node:crypto";
+import { deflateSync } from "node:zlib";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -32,11 +34,12 @@ export function kernelBundle(dir = KERNEL_PACKAGE_DIR): KernelBundle {
 
 // Writes the files into a temporary directory beside the target and renames
 // it into place, so a half-written install is never used. Reads its arguments
-// only: the target directory and the base64 JSON of {relative path: text}.
+// only: the target directory and the base64 of the deflated JSON of
+// {relative path: text}.
 const INSTALLER = [
-  "import base64, json, os, sys, tempfile",
+  "import base64, json, os, sys, tempfile, zlib",
   "target = sys.argv[1]",
-  "files = json.loads(base64.b64decode(sys.argv[2]))",
+  "files = json.loads(zlib.decompress(base64.b64decode(sys.argv[2])))",
   "os.makedirs(os.path.dirname(target), exist_ok=True)",
   "tmp = tempfile.mkdtemp(dir=os.path.dirname(target))",
   "for rel, text in files.items():",
@@ -56,7 +59,7 @@ const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
  * then replace the shell with the kernel, started in the agent's home.
  */
 export function kernelStartCommand(bundle: KernelBundle, python = "python3"): string {
-  const payload = Buffer.from(JSON.stringify(bundle.files)).toString("base64");
+  const payload = deflateSync(Buffer.from(JSON.stringify(bundle.files))).toString("base64");
   const dir = `"$HOME/.mike/kernel/${bundle.hash}"`;
   return [
     `test -f ${dir}/mike_kernel/repl.py || ${python} -c ${quote(INSTALLER)} ${dir} ${payload}`,

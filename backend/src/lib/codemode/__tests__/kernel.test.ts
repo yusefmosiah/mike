@@ -175,6 +175,8 @@ describe("kernel bundle", () => {
     const home = realpathSync(mkdtempSync(path.join(tmpdir(), "mike-kernel-home-")));
     const bundle = kernelBundle();
     const command = kernelStartCommand(bundle);
+    // One argument of an exec is capped at 128 KiB on Linux; keep well clear.
+    expect(Buffer.byteLength(command)).toBeLessThan(64 * 1024);
     const session = await KernelSession.start(() =>
       spawn("bash", ["-c", command], { env: { PATH: process.env.PATH, HOME: home }, stdio: ["pipe", "pipe", "pipe"] }),
     );
