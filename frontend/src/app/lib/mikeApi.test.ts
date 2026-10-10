@@ -70,6 +70,7 @@ import {
     getDocumentFileUrl,
     getDocumentUrl,
     getConfiguredModels,
+    getModelsVision,
     getLibrary,
     getLibraryLevels,
     getLibraryFilterOptions,
@@ -3199,6 +3200,23 @@ describe("unwrapping and blob wrappers", () => {
 
         await expect(getOllamaModels()).resolves.toEqual(models);
         expect(lastFetchCall().url).toBe("/api/models/ollama");
+    });
+
+    it("getModelsVision asks the backend which models can see, and skips an empty list", async () => {
+        fetchMock.mockResolvedValue(jsonResponse({ vision: { "claude-opus-5": true, "opencode-go/glm-5.3": false } }));
+
+        await expect(getModelsVision(["claude-opus-5", "opencode-go/glm-5.3"])).resolves.toEqual({
+            "claude-opus-5": true,
+            "opencode-go/glm-5.3": false,
+        });
+        const call = lastFetchCall();
+        expect(call.url).toBe("/api/models/vision");
+        expect(call.init?.method).toBe("POST");
+        expect(JSON.parse(String(call.init?.body))).toEqual({ ids: ["claude-opus-5", "opencode-go/glm-5.3"] });
+
+        fetchMock.mockClear();
+        await expect(getModelsVision([])).resolves.toEqual({});
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("getConfiguredModels unwraps the authenticated catalog", async () => {

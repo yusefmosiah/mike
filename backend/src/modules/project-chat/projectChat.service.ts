@@ -18,6 +18,8 @@ import type { McpToolEvent } from "@mike/contracts";
 import {
     buildProjectDocContext,
     buildMessages,
+    attachImages,
+    refuseImagesForTextModel,
     buildUserPersonalisationPrompt,
     buildWorkflowStore,
     enrichWithPriorEvents,
@@ -335,6 +337,8 @@ async function prepareAdmittedProjectChatStream(
     });
     if (!selection.ok) return selection;
     const { modelSettings, selectedModel, selectedReasoningLevel } = selection;
+    const imageRefusal = await refuseImagesForTextModel(messages, selectedModel);
+    if (imageRefusal) return imageRefusal;
 
     if (
         chatId &&
@@ -602,6 +606,14 @@ async function prepareAdmittedProjectChatStream(
             "append",
             { timeZone, now: new Date(), userSentAt, userAuthors },
         );
+        await attachImages({
+            apiMessages: apiMessages as { role: string; content: unknown }[],
+            messages: messagesForLLM,
+            docIndex,
+            docStore,
+            model: selectedModel,
+            nonce,
+        });
 
         const workflowStore = await buildWorkflowStore(userId, userEmail, db);
 

@@ -16,7 +16,8 @@ import { FileDirectory } from "../shared/FileDirectory";
 import type { DirectoryTab } from "../shared/useDirectoryData";
 import { Modal } from "./Modal";
 import {
-    SUPPORTED_DOCUMENT_ACCEPT,
+    ATTACHMENTS,
+    SUPPORTED_ATTACHMENT_ACCEPT,
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
 } from "@/app/lib/documentUploadValidation";
@@ -248,8 +249,8 @@ export function AddDocumentsModal({
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
         const { supported, unsupported } =
-            partitionSupportedDocumentFiles(files);
-        setUploadWarning(formatUnsupportedDocumentWarning(unsupported));
+            partitionSupportedDocumentFiles(files, ATTACHMENTS);
+        setUploadWarning(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS));
         if (supported.length === 0) {
             if (fileInputRef.current) fileInputRef.current.value = "";
             return;
@@ -401,7 +402,7 @@ export function AddDocumentsModal({
             <input
                 ref={fileInputRef}
                 type="file"
-                accept={SUPPORTED_DOCUMENT_ACCEPT}
+                accept={SUPPORTED_ATTACHMENT_ACCEPT}
                 multiple
                 className="hidden"
                 onChange={handleUpload}

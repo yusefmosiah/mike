@@ -421,6 +421,7 @@ vi.mock("../../lib/llm", async (importOriginal) => {
         ...actual,
         completeText: vi.fn(async () => "Generated Title"),
         subagentTranscript: subagents.transcript,
+        modelSeesImages: vi.fn(async () => true),
     };
 });
 
@@ -681,6 +682,29 @@ describe("POST /chat — streaming endpoint", () => {
             detail: "Select a model before sending a message.",
         });
         expect(runLLMStream).not.toHaveBeenCalled();
+    });
+
+    it("refuses an image for a model that cannot see, before writing anything", async () => {
+        const llm = await import("../../lib/llm");
+        vi.mocked(llm.modelSeesImages).mockResolvedValueOnce(false);
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({
+                ...VALID_BODY,
+                messages: [
+                    {
+                        role: "user",
+                        content: "What is in this photo?",
+                        files: [{ filename: "site.jpg", document_id: "55555555-5555-4555-8555-555555555555" }],
+                    },
+                ],
+            });
+
+        expect(res.status).toBe(400);
+        expect(res.body).toMatchObject({ code: "model_cannot_see_images" });
+        expect(runLLMStream).not.toHaveBeenCalled();
+        expect(dbInserts.some(({ table }) => table === "chat_messages")).toBe(false);
     });
 
     it("uses the profile last-selected model when a new chat omits model", async () => {

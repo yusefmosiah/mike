@@ -52,6 +52,7 @@ import {
     useSelectedModel,
     useSelectedReasoning,
 } from "@/app/hooks/useSelectedModel";
+import { useModelVision } from "@/app/hooks/useModelVision";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import {
     getModelProvider,
@@ -74,7 +75,9 @@ import {
     type UploadProgress,
 } from "@/app/lib/mikeApi";
 import {
-    SUPPORTED_DOCUMENT_ACCEPT,
+    ATTACHMENTS,
+    isImageFilename,
+    SUPPORTED_ATTACHMENT_ACCEPT,
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
 } from "@/app/lib/documentUploadValidation";
@@ -427,8 +430,8 @@ function ChatInputForChatImpl(
                 return;
             }
             const { supported, unsupported } =
-                partitionSupportedDocumentFiles(files);
-            setUploadWarning(formatUnsupportedDocumentWarning(unsupported));
+                partitionSupportedDocumentFiles(files, ATTACHMENTS);
+            setUploadWarning(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS));
             if (supported.length === 0) return;
 
             const uploadInputs = supported.map((file) => ({
@@ -613,6 +616,12 @@ function ChatInputForChatImpl(
         updateInput(el);
     };
 
+    // An image goes into the message itself, so a model that cannot see would
+    // be refused by the server; say so here, before anything is sent.
+    const imagesAttached = attachedDocs.some((doc) => isImageFilename(doc.filename));
+    const vision = useModelVision(imagesAttached && model ? [model] : []);
+    const modelCannotSeeImages = imagesAttached && !!model && vision[model] === false;
+
     /** The attached documents as a message carries them, at their current versions. */
     const attachedFiles = () =>
         attachedDocs.map((d) => ({
@@ -661,6 +670,7 @@ function ChatInputForChatImpl(
             setApiKeyModalProvider(getModelProvider(model));
             return;
         }
+        if (modelCannotSeeImages) return;
         setValue("");
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
@@ -870,6 +880,13 @@ function ChatInputForChatImpl(
                         </div>
                     )}
 
+                    {modelCannotSeeImages && (
+                        <p role="status" className="px-3 pt-1.5 text-xs text-gray-600">
+                            This model can&apos;t see images. Choose a model marked
+                            &ldquo;Sees images&rdquo; in the model menu, or remove the image.
+                        </p>
+                    )}
+
                     {uploadingFiles.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5 px-2 pt-2">
                             {uploadingFiles.map((upload) => (
@@ -1063,7 +1080,9 @@ function ChatInputForChatImpl(
                                         ? !canStop
                                         : !composerOpen ||
                                           !value.trim() ||
-                                          slashCommandsLoading
+                                          slashCommandsLoading ||
+                                          (modelCannotSeeImages &&
+                                              noResponseContent(value) === null)
                                 }
                             >
                                 {isLoading ? (
@@ -1084,7 +1103,7 @@ function ChatInputForChatImpl(
             <input
                 ref={localFileInputRef}
                 type="file"
-                accept={SUPPORTED_DOCUMENT_ACCEPT}
+                accept={SUPPORTED_ATTACHMENT_ACCEPT}
                 multiple
                 hidden
                 aria-label="Upload Documents"

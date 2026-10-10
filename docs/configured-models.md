@@ -197,6 +197,33 @@ their own OpenAI-compatible endpoints set `supportsVision: true` in
 omitted means false. Context/output values in the table are route-specific to
 the OpenCode Go provider, not canonical lab defaults.
 
+One answer serves everything: `modelSeesImages` (`backend/src/lib/llm/index.ts`)
+reads the catalog entry a turn on the model would use. The picker shows
+"Sees images" from `POST /models/vision`, the composer refuses an image for a
+model that cannot see, and the chat routes refuse the same turn with
+`400 model_cannot_see_images` (goals/mission-15-vision.md). Images in older
+messages reach a text-only model as a placeholder. Ollama models are text-only
+until Mike probes `/api/show`.
+
+Images are cleaned once at upload (`backend/src/lib/images.ts`: JPEG, PNG,
+WebP and GIF only; upright; metadata stripped; at most 3072 px) and resized per
+model family when sent (`imageSizingFor` in `backend/src/lib/llm/models.ts`):
+
+| Family | Grid | Photo budget |
+| --- | --- | --- |
+| Qwen | 32 px | 1,280 tokens (about 1.3 MP) |
+| Gemma | 48 px | the 560-token budget (about 1.3 MP) |
+| GPT | 32 px | 2,048 px long edge, 2,500 patches |
+| DeepSeek | 28 px | about 1300 x 1300 (its 1,024-token cap) |
+| Others (Claude's standard size) | 28 px | 1,568 px long edge, about 1.2 MP |
+
+For self-hosted vision models, also cap the server: vLLM and SGLang otherwise
+accept whatever the checkpoint allows (Qwen3.8 allows about 16.8 MP). See
+`docs/reports/file-intake-2026-10-10.md`, section 2.2.
+
+Phala's `phala/qwen3.8-27b-uncensored` and `phala/gemma-4-26b-a4b-uncensored`
+take images; declare them with `"supportsVision": true`.
+
 
 ### Synchronizing New Models from Models.dev
 

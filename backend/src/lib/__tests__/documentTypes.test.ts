@@ -91,6 +91,11 @@ describe("contentTypeForDocumentType", () => {
             xls: "application/vnd.ms-excel",
             pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ppt: "application/vnd.ms-powerpoint",
+            png: "image/png",
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            webp: "image/webp",
+            gif: "image/gif",
         };
         for (const type of ALLOWED_DOCUMENT_TYPES) {
             expect(contentTypeForDocumentType(type)).toBe(expected[type]);

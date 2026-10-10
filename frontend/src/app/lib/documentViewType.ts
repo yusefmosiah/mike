@@ -1,4 +1,4 @@
-export type DocumentViewType = "pdf" | "docx" | "spreadsheet";
+export type DocumentViewType = "pdf" | "docx" | "spreadsheet" | "image";
 
 type LegacyDocViewType = Extract<DocumentViewType, "pdf" | "docx">;
 
@@ -12,7 +12,7 @@ export interface ResolveDocumentViewTypeOptions {
 }
 
 type DocumentTypeToken =
-  "pdf" | "doc" | "docx" | "spreadsheet" | "presentation" | "other";
+  "pdf" | "doc" | "docx" | "spreadsheet" | "presentation" | "image" | "other";
 
 function documentTypeToken(
   value: string | null | undefined,
@@ -28,6 +28,7 @@ function documentTypeToken(
   }
   if (normalized.includes("presentation")) return "presentation";
   if (normalized === "application/pdf") return "pdf";
+  if (/^image\/(png|jpeg|webp|gif)$/.test(normalized)) return "image";
 
   const withoutQuery = normalized.split(/[?#]/, 1)[0];
   // The extension, or the whole value when it has no dot.
@@ -40,12 +41,13 @@ function documentTypeToken(
   if (token === "doc") return "doc";
   if (token === "pptx" || token === "ppt") return "presentation";
   if (token === "pdf") return "pdf";
+  if (["png", "jpg", "jpeg", "webp", "gif"].includes(token)) return "image";
   return "other";
 }
 
 /**
- * Resolve the shared viewer used for a document-like asset. Unsupported and
- * presentation formats fall back to PdfView because the backend supplies a
+ * Resolve the shared viewer used for a document-like asset. Images get
+ * ImageView. Unsupported and presentation formats fall back to PdfView because the backend supplies a
  * PDF rendition for those formats where required.
  */
 export function resolveDocumentViewType({
@@ -60,6 +62,7 @@ export function resolveDocumentViewType({
   if (fileTypeToken === "spreadsheet" || filenameToken === "spreadsheet") {
     return "spreadsheet";
   }
+  if (fileTypeToken === "image" || filenameToken === "image") return "image";
 
   const wordToken =
     fileTypeToken === "doc" || fileTypeToken === "docx"

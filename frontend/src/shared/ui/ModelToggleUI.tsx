@@ -30,6 +30,8 @@ export interface ModelToggleOption {
   group: ModelToggleGroup;
   /** Execution path shown when the same model is available more than once. */
   source?: string;
+  /** Shown as "Sees images" when true; unknown and false show nothing. */
+  seesImages?: boolean;
 }
 
 export const REASONING_LEVELS = [
@@ -282,6 +284,12 @@ export function ModelToggleUI({
                         className="h-1 w-1 shrink-0 rounded-full bg-gray-400/80"
                       />
                       <span className="flex-1">{model.label}</span>
+                      {model.seesImages && (
+                        <span className="text-[9px] font-medium text-gray-400">
+                          <span className="sr-only">, </span>
+                          Sees images
+                        </span>
+                      )}
                       {model.source &&
                         (routeCounts.get(
                           `${model.group}\u0000${model.label.toLocaleLowerCase()}`,

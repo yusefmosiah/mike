@@ -14,7 +14,7 @@ import {
 
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Transform } from "node:stream";
@@ -31,7 +31,8 @@ import {
   type PollFailureGate,
 } from "../../lib/observability/pollFailureGate";
 import { asReportableError } from "../../lib/httpError";
-import { shouldConvertToPdf } from "../../lib/documentTypes";
+import { contentTypeForDocumentType, isImageFileType, shouldConvertToPdf } from "../../lib/documentTypes";
+import { cleanImage, ImageRejectedError } from "../../lib/images";
 import { uploadJobWallClockMs } from "../../lib/runtimeConfig";
 import {
   copyFile,
@@ -100,6 +101,9 @@ const UPLOAD_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const UPLOAD_TEMP_RETENTION_MS = 2 * UPLOAD_JOB_LEASE_SECONDS * 1000;
 const TERMINAL_UPLOAD_ERROR_CODES = new Set([
   "direct_upload_failed",
+  // Not an image sharp may open, or one too large to open safely.
+  "unsupported_image",
+  "image_too_large",
   "size_mismatch",
   "content_type_mismatch",
   // The destination document no longer exists. Retrying cannot make it exist
@@ -156,7 +160,47 @@ type SealedFileArtifact = {
   filePath: string;
   size: number;
   sha256: string;
+  /**
+   * The local file was rewritten (an image, cleaned of metadata), so storage
+   * gets these bytes rather than a copy of the sealed upload.
+   */
+  rewritten?: true;
 };
+
+/**
+ * Puts the upload's bytes at `key`: a server-side copy of the sealed object,
+ * or the local file when processing rewrote it.
+ */
+async function storeSource(
+  artifact: SealedFileArtifact,
+  file: UploadFileRow,
+  key: string,
+): Promise<void> {
+  if (artifact.rewritten) {
+    await uploadFileFromPath(key, artifact.filePath, contentTypeForDocumentType(file.file_type));
+  } else {
+    await copyFile(file.sealed_storage_path, key);
+  }
+}
+
+/**
+ * Images are stored cleaned: upright, metadata (GPS included) removed, at
+ * most 3072 px on the long edge. The original stays only in upload
+ * quarantine, which processing deletes.
+ */
+async function cleanImageArtifact(
+  artifact: SealedFileArtifact,
+  fileType: string,
+): Promise<SealedFileArtifact> {
+  const cleaned = await cleanImage(await readFile(artifact.filePath), fileType);
+  await writeFile(artifact.filePath, cleaned.bytes);
+  return {
+    ...artifact,
+    size: cleaned.bytes.byteLength,
+    sha256: createHash("sha256").update(cleaned.bytes).digest("hex"),
+    rewritten: true,
+  };
+}
 
 async function countPdfPages(filePath: string): Promise<number | null> {
   let loadingTask:
@@ -293,12 +337,15 @@ async function requireSealedFile(
     if (size !== file.expected_size_bytes) {
       throw new Error("sealed_upload_size_mismatch");
     }
-    return {
+    const artifact = {
       directory,
       filePath,
       size,
       sha256: hash.digest("hex"),
     };
+    return isImageFileType(file.file_type)
+      ? await cleanImageArtifact(artifact, file.file_type)
+      : artifact;
   } catch (error) {
     await removeTemporaryArtifact(directory);
     if (error instanceof StorageOperationError) {
@@ -416,7 +463,7 @@ async function processCreatedDocument(
   }
 
   const sourcePath = storageKey(session.user_id, documentId, file.filename);
-  await copyFile(file.sealed_storage_path, sourcePath);
+  await storeSource(artifact, file, sourcePath);
   const pdfPath = await buildPdfRendition({
     sourceFilePath: artifact.filePath,
     workingDirectory: artifact.directory,
@@ -506,7 +553,7 @@ async function processNewDocumentVersion(
     versionSlug,
     file.filename,
   );
-  await copyFile(file.sealed_storage_path, sourcePath);
+  await storeSource(artifact, file, sourcePath);
   const pdfPath = await buildPdfRendition({
     sourceFilePath: artifact.filePath,
     workingDirectory: artifact.directory,
@@ -612,7 +659,7 @@ async function processReplacementDocumentVersion(
     versionSlug,
     file.filename,
   );
-  await copyFile(file.sealed_storage_path, sourcePath);
+  await storeSource(artifact, file, sourcePath);
   // Editor saves only persist the source. Clearing the previous rendition in
   // the same update prevents serving stale PDF content; lifecycle cleanup
   // retires that object. An uploaded PDF is already its own rendition.
@@ -860,8 +907,13 @@ export async function processUploadJob(
         await heartbeatJob(db, jobId, workerId);
         failed = true;
         // These failures cannot be fixed by retrying the same upload.
-        terminalProcessingFailure = error instanceof DeletedDocumentError || error instanceof ChangedDocumentError;
-        if (!(error instanceof ChangedDocumentError)) {
+        terminalProcessingFailure =
+          error instanceof DeletedDocumentError ||
+          error instanceof ChangedDocumentError ||
+          error instanceof ImageRejectedError;
+        // A stale editor save and an image that is not one are the person's
+        // to fix, not ours to be alerted about.
+        if (!(error instanceof ChangedDocumentError || error instanceof ImageRejectedError)) {
           reportError(error, {
             tags: {
               component: "upload-worker",
@@ -889,6 +941,7 @@ export async function processUploadJob(
             error_code: error instanceof ChangedDocumentError
               ? "document_changed"
               : error instanceof DeletedDocumentError ? "document_deleted"
+              : error instanceof ImageRejectedError ? error.code
               : "processing_failed",
             updated_at: new Date().toISOString(),
           })

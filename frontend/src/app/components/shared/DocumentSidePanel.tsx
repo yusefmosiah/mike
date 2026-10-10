@@ -18,6 +18,7 @@ import { DocumentPaneTitle } from "@/app/components/shared/DocumentPaneTitle";
 import { PdfView } from "@/app/components/shared/views/PdfView";
 import { DocxView } from "@/app/components/shared/views/DocxView";
 import { SpreadsheetView } from "@/app/components/shared/views/SpreadsheetView";
+import { ImageView } from "@/app/components/shared/views/ImageView";
 import { CloseButton } from "@/shared/ui/CloseButton";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
@@ -552,6 +553,14 @@ export function DocumentSidePanel({
                                 documentId={doc.id}
                                 versionId={selectedVersionId}
                                 displayUrl={displayUrl}
+                            />
+                        ) : selectedViewType === "image" ? (
+                            <ImageView
+                                rounded="top-right"
+                                key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
+                                documentId={doc.id}
+                                versionId={selectedVersionId}
+                                filename={selectedFilename}
                             />
                         ) : selectedViewType === "docx" ? (
                             <DocxView

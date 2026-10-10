@@ -10,8 +10,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagnosticErrorTags } from "../../../lib/observability/sentryPrivacy";
+import { ImageRejectedError } from "../../../lib/images";
 
 const mocks = vi.hoisted(() => ({
   deleteFile: vi.fn(),
@@ -310,6 +312,60 @@ describe("upload processing", () => {
       filename: "contract.pdf",
       active_version_number: 1,
     });
+  });
+
+  it("stores an image cleaned of its metadata, never a copy of the original", async () => {
+    const original = await sharp({ create: { width: 64, height: 32, channels: 3, background: "#808080" } })
+      .withExif({ IFD0: { Copyright: "Client office" }, IFD3: { GPSLatitudeRef: "N" } })
+      .withMetadata({ orientation: 6 })
+      .jpeg()
+      .toBuffer();
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([original]));
+    const stored: Buffer[] = [];
+    mocks.uploadFileFromPath.mockImplementation(async (_key: string, path: string) => {
+      stored.push(await readFile(path));
+    });
+    const file = {
+      ...baseFile,
+      filename: "site.jpg",
+      file_type: "jpg",
+      content_type: "image/jpeg",
+      expected_size_bytes: original.byteLength,
+    };
+    const db = fakeDb({
+      documents: [{ data: { id: file.resource_id, user_id: baseSession.user_id }, error: null }],
+    });
+
+    await processUploadFile(db as never, baseSession, file);
+
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+    expect(mocks.officeFileToPdf).not.toHaveBeenCalled();
+    expect(mocks.uploadFileFromPath).toHaveBeenCalledOnce();
+    expect(mocks.uploadFileFromPath).toHaveBeenCalledWith(
+      expect.stringContaining(file.resource_id),
+      expect.any(String),
+      "image/jpeg",
+    );
+    const meta = await sharp(stored[0]!).metadata();
+    expect([meta.width, meta.height]).toEqual([32, 64]);
+    expect(meta.exif).toBeUndefined();
+    expect(stored[0]!.includes(Buffer.from("Client office"))).toBe(false);
+    expect(db.rpc).toHaveBeenCalledWith(
+      "create_document_version",
+      expect.objectContaining({
+        p_version: expect.objectContaining({ size_bytes: stored[0]!.byteLength, file_type: "jpg" }),
+      }),
+    );
+  });
+
+  it("refuses an upload named as an image that is not one, storing nothing", async () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([svg]));
+    const file = { ...baseFile, filename: "logo.png", file_type: "png", expected_size_bytes: svg.byteLength };
+
+    await expect(processUploadFile(fakeDb({}) as never, baseSession, file)).rejects.toBeInstanceOf(ImageRejectedError);
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+    expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
   });
 
   it("converts Office files from temporary paths and streams the PDF upload", async () => {

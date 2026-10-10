@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+    ATTACHMENTS,
+    IMAGE_TOO_LARGE_WARNING_MESSAGE,
+    MAX_IMAGE_UPLOAD_BYTES,
+    SUPPORTED_ATTACHMENT_ACCEPT,
+    UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+    isImageFilename,
     SUPPORTED_DOCUMENT_ACCEPT,
     UNSUPPORTED_DOCUMENT_WARNING_MESSAGE,
     combineUploadWarnings,
@@ -111,5 +117,44 @@ describe("combineUploadWarnings", () => {
 
     it("does not repeat an identical message twice", () => {
         expect(combineUploadWarnings("Same.", "Same.")).toBe("Same.");
+    });
+});
+
+describe("attachments: documents and images", () => {
+    const sized = (name: string, bytes: number) =>
+        Object.defineProperty(new File(["x"], name), "size", { value: bytes });
+
+    it("accepts every image extension advertised, and every document one", () => {
+        const extensions = SUPPORTED_ATTACHMENT_ACCEPT.split(",").map((s) => s.replace(/^\./, ""));
+        for (const ext of extensions) {
+            expect(isSupportedDocumentFile(file(`photo.${ext}`), ATTACHMENTS)).toBe(true);
+        }
+        expect(isImageFilename("Site.JPG")).toBe(true);
+        expect(isImageFilename("logo.svg")).toBe(false);
+        expect(isImageFilename("README")).toBe(false);
+    });
+
+    it("keeps images out where only documents belong", () => {
+        expect(isSupportedDocumentFile(file("photo.png"))).toBe(false);
+        expect(formatUnsupportedDocumentWarning([file("photo.png")])).toBe(UNSUPPORTED_DOCUMENT_WARNING_MESSAGE);
+    });
+
+    it("refuses an SVG and an image over 20 MB, saying which", () => {
+        const big = sized("scan.jpg", MAX_IMAGE_UPLOAD_BYTES + 1);
+        const { supported, unsupported } = partitionSupportedDocumentFiles(
+            [file("a.png"), file("logo.svg"), big],
+            ATTACHMENTS,
+        );
+        expect(supported.map((f) => f.name)).toEqual(["a.png"]);
+        expect(unsupported.map((f) => f.name)).toEqual(["logo.svg", "scan.jpg"]);
+        expect(formatUnsupportedDocumentWarning([big], ATTACHMENTS)).toBe(IMAGE_TOO_LARGE_WARNING_MESSAGE);
+        expect(formatUnsupportedDocumentWarning([file("logo.svg")], ATTACHMENTS)).toBe(
+            UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+        );
+        expect(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS)).toBe(
+            `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} ${IMAGE_TOO_LARGE_WARNING_MESSAGE}`,
+        );
+        expect(formatUnsupportedDocumentWarning([], ATTACHMENTS)).toBeNull();
+        expect(isSupportedDocumentFile(file("noextension."), ATTACHMENTS)).toBe(false);
     });
 });

@@ -13,6 +13,7 @@
 
 import type { Db } from "../../lib/db";
 import { ollamaAuthHeaders as authHeaders } from "../../lib/llm/endpoints";
+import { modelSeesImages } from "../../lib/llm";
 import { isSupportedOpenCodeGoModel } from "../../lib/llm/models";
 import { configuredEndpointSummaries } from "../../lib/llm/registry";
 import { PrivateModeError, isStrictPrivateMode } from "../../lib/privateMode";
@@ -128,6 +129,19 @@ export async function listOllamaModels(): Promise<LocalModel[]> {
     } catch {
         return [];
     }
+}
+
+/** The most model ids one vision lookup answers. */
+export const MAX_VISION_LOOKUP_IDS = 500;
+
+/**
+ * Which of `ids` can see images, answered by the catalog entry a turn on each
+ * would use. The picker and the composer ask this instead of keeping a list.
+ */
+export async function modelsVision(ids: readonly string[]): Promise<Record<string, boolean>> {
+    const unique = [...new Set(ids)];
+    const answers = await Promise.all(unique.map((id) => modelSeesImages(id)));
+    return Object.fromEntries(unique.map((id, i) => [id, answers[i]!]));
 }
 
 /** Secret-free configured endpoint catalog, filtered to models this user can use. */

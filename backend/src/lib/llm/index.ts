@@ -19,6 +19,15 @@ export async function streamChatWithTools(
 }
 
 /**
+ * Whether `model` can see images, from the same catalog entry a turn on it
+ * uses. Unknown models cannot.
+ */
+export async function modelSeesImages(model: string): Promise<boolean> {
+    const { modelSeesImagesOnPi } = await import("./pi/runtime.mjs");
+    return modelSeesImagesOnPi(model);
+}
+
+/**
  * A chat forked into a new one: the new chat's model transcript forks at the
  * same answer, so its first turn continues from the cached prefix.
  */

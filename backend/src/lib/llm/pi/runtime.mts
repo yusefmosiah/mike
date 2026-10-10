@@ -269,6 +269,21 @@ function openModels(): MikeModels {
   return (catalog ??= overrides?.models ?? createMikeModels());
 }
 
+/**
+ * Whether the model a turn would run can take image parts: the catalog entry
+ * the turn itself uses, so the answer and the turn never disagree. A model the
+ * catalog cannot resolve cannot see.
+ */
+export function modelSeesImagesOnPi(mikeModel: string): boolean {
+  try {
+    const models = openModels();
+    const ref = models.resolve(mikeModel);
+    return models.models.getModel(ref.provider, ref.modelId)?.input.includes("image") ?? false;
+  } catch {
+    return false;
+  }
+}
+
 async function openRuntime(storage?: Storage): Promise<Runtime> {
   storage ??= await openStorage();
   const catalog = openModels();
@@ -1073,7 +1088,7 @@ export async function streamChatWithToolsOnPi(params: StreamChatParams): Promise
 async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<StreamChatResult> {
   const { harness, installTools, installDelegate, resolve, bindings } = runtime;
   const ref = resolve(params.model);
-  const vision = openModels().models.getModel(ref.provider, ref.modelId)?.input.includes("image") ?? false;
+  const vision = modelSeesImagesOnPi(params.model);
   const memory = params.memoryMessage && params.messages[0] === params.memoryMessage ? params.memoryMessage : undefined;
   const conversationMessages = memory ? params.messages.slice(1) : params.messages;
   const history = conversationMessages.slice(0, -1);

@@ -61,7 +61,8 @@ import { useRemountPersistentState } from "@/app/hooks/useRemountPersistentState
 import {
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
-    SUPPORTED_DOCUMENT_ACCEPT,
+    ATTACHMENTS,
+    SUPPORTED_ATTACHMENT_ACCEPT,
 } from "@/app/lib/documentUploadValidation";
 import {
     collectDroppedDocumentUploadEntries,
@@ -1539,8 +1540,9 @@ export function DocTable({
             return;
         const { supported, unsupported } = partitionSupportedDocumentFiles(
             entries.map((entry) => entry.file),
+            ATTACHMENTS,
         );
-        setDocumentUploadWarning(formatUnsupportedDocumentWarning(unsupported));
+        setDocumentUploadWarning(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS));
         if (supported.length === 0) return;
         const supportedFiles = new Set(supported);
         const supportedEntries = entries.filter((entry) =>
@@ -3864,7 +3866,7 @@ export function DocTable({
             <input
                 ref={documentUploadInputRef}
                 type="file"
-                accept={SUPPORTED_DOCUMENT_ACCEPT}
+                accept={SUPPORTED_ATTACHMENT_ACCEPT}
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -3876,7 +3878,7 @@ export function DocTable({
             <input
                 ref={directoryUploadInputRef}
                 type="file"
-                accept={SUPPORTED_DOCUMENT_ACCEPT}
+                accept={SUPPORTED_ATTACHMENT_ACCEPT}
                 multiple
                 className="hidden"
                 {...{ webkitdirectory: "", directory: "" }}

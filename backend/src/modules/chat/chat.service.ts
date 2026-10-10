@@ -63,6 +63,8 @@ export {
   parseOptionalReasoning,
   buildProjectDocContext,
   buildMessages,
+  attachImages,
+  refuseImagesForTextModel,
   loadUserMessageSentTimes,
   loadUserMessageAuthors,
   userMessageStamper,

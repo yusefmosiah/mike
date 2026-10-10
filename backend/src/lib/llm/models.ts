@@ -224,6 +224,33 @@ export function modelSupportsVision(modelId: string): boolean {
 }
 
 /**
+ * How images are sized for a model, by family (docs/reports/file-intake-2026-10-10.md,
+ * section 2.2). The numbers are for photos and attachments; each family's own
+ * grid makes its internal resample a no-op. Unknown families get Claude's
+ * standard size, which every vision model accepts.
+ */
+export type ImageSizing = { grid: number; maxLongEdge: number; maxPixels: number };
+
+const DEFAULT_IMAGE_SIZING: ImageSizing = { grid: 28, maxLongEdge: 1568, maxPixels: 1568 * 784 };
+
+const IMAGE_SIZING_BY_FAMILY: ReadonlyArray<[RegExp, ImageSizing]> = [
+    // 32 px per token; about 1,280 tokens.
+    [/qwen/, { grid: 32, maxLongEdge: 2048, maxPixels: 1280 * 32 * 32 }],
+    // 16 px patches pooled 3x3; the 560-token budget.
+    [/gemma/, { grid: 48, maxLongEdge: 2048, maxPixels: 560 * 9 * 16 * 16 }],
+    // 32 px patches; `detail: high` allows 2,500.
+    [/(^|\/)(gpt-|o\d)/, { grid: 32, maxLongEdge: 2048, maxPixels: 2500 * 32 * 32 }],
+    // Capped at 1,024 tokens, about 1300 x 1300; larger is wasted.
+    [/deepseek/, { grid: 28, maxLongEdge: 1568, maxPixels: 1300 * 1300 }],
+];
+
+export function imageSizingFor(modelId: string): ImageSizing {
+    const configured = getConfiguredModel(modelId);
+    const name = `${modelId} ${configured?.apiModel ?? ""}`.toLowerCase();
+    return IMAGE_SIZING_BY_FAMILY.find(([family]) => family.test(name))?.[1] ?? DEFAULT_IMAGE_SIZING;
+}
+
+/**
  * Canonical maximum output tokens by model ID for OpenCode Go models.
  * Sourced from Models.dev (https://models.dev/providers/opencode-go/ and https://models.dev/api.json).
  *

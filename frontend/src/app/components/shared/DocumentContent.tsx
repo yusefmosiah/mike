@@ -5,6 +5,7 @@ import { PdfView } from "./views/PdfView";
 import { DocxView } from "./views/DocxView";
 import type { DocxCloseGuard, DocxSaveState } from "./views/DocxRenderer.types";
 import { SpreadsheetView } from "./views/SpreadsheetView";
+import { ImageView } from "@/app/components/shared/views/ImageView";
 import {
     CitationQuotesSection,
     documentQuoteId,
@@ -352,6 +353,14 @@ export function DocumentContent({
                         onWarningDismiss={onWarningDismiss}
                         initialScrollTop={initialScrollTop ?? null}
                         onScrollChange={onScrollChange}
+                    />
+                ) : viewType === "image" ? (
+                    <ImageView
+                        documentId={documentId}
+                        versionId={versionId}
+                        filename={resolvedDocument.title}
+                        refetchKey={refetchKey}
+                        rounded={false}
                     />
                 ) : viewType === "spreadsheet" ? (
                     <SpreadsheetView

@@ -12,6 +12,7 @@ import { isModelAvailable } from "@/app/lib/modelAvailability";
 import type { ApiKeyState } from "@/app/lib/mikeApi";
 import { useOllamaModels } from "@/app/hooks/useOllamaModels";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
+import { useModelVision } from "@/app/hooks/useModelVision";
 
 export type ModelOption = ModelToggleOption;
 export type { ReasoningLevel };
@@ -278,6 +279,10 @@ export function ModelToggle({
     if (!apiKeys) return true; // unknown after a failed load → fail open
     return isModelAvailable(model.id, apiKeys);
   });
+  const vision = useModelVision(availableModels.map((model) => model.id));
+  const pickerModels = availableModels.map((model) =>
+    vision[model.id] ? { ...model, seesImages: true } : model,
+  );
   const selected = availableModels.find((model) => model.id === value);
   const supportedReasoningLevels = reasoningLevelsForModel(value);
   const normalizedReasoningLevel = reasoningLevel
@@ -306,7 +311,7 @@ export function ModelToggle({
     <ModelToggleUI
       value={value}
       onChange={onChange}
-      models={availableModels}
+      models={pickerModels}
       selectedLabel={selectedLabel}
       selectedAvailable={selected !== undefined}
       loading={apiKeysLoading}

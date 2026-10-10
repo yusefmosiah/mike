@@ -7,10 +7,27 @@ export const ALLOWED_DOCUMENT_TYPES = new Set([
   "xls",
   "pptx",
   "ppt",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
 ]);
 
 export const ALLOWED_DOCUMENT_TYPES_LABEL =
-  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt";
+  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif";
+
+/**
+ * Upload extensions handled as images (lib/images cleans them on the way in),
+ * and the format each one names.
+ */
+export const IMAGE_FORMAT_BY_FILE_TYPE: Readonly<
+  Record<string, "jpeg" | "png" | "webp" | "gif">
+> = { jpg: "jpeg", jpeg: "jpeg", png: "png", webp: "webp", gif: "gif" };
+
+export function isImageFileType(fileType: string | null | undefined): boolean {
+  return Object.hasOwn(IMAGE_FORMAT_BY_FILE_TYPE, (fileType ?? "").toLowerCase());
+}
 
 // The lowercased extension of a filename, or "" when it has none. Three call
 // sites spelled this out with the same semantics; the other extension readers
@@ -79,6 +96,12 @@ export function contentTypeForDocumentType(fileType: string | null | undefined) 
       return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     case "ppt":
       return "application/vnd.ms-powerpoint";
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "webp":
+    case "gif":
+      return `image/${IMAGE_FORMAT_BY_FILE_TYPE[(fileType ?? "").toLowerCase()]}`;
     default:
       return "application/octet-stream";
   }

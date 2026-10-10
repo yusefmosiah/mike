@@ -146,7 +146,8 @@ import {
     type DocumentUploadEntry,
 } from "@/app/lib/documentDirectoryUpload";
 import {
-    SUPPORTED_DOCUMENT_ACCEPT,
+    ATTACHMENTS,
+    SUPPORTED_ATTACHMENT_ACCEPT,
     combineUploadWarnings,
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
@@ -1343,12 +1344,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         // files the server is guaranteed to refuse.
         const { supported, unsupported } = partitionSupportedDocumentFiles(
             selectedEntries.map((entry) => entry.file),
+            ATTACHMENTS,
         );
         const supportedFiles = new Set(supported);
         const entries = selectedEntries.filter((entry) =>
             supportedFiles.has(entry.file),
         );
-        const unsupportedWarning = formatUnsupportedDocumentWarning(unsupported);
+        const unsupportedWarning = formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS);
         setUploadWarning(unsupportedWarning);
         if (!entries.length) return;
 
@@ -2016,7 +2018,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept={SUPPORTED_DOCUMENT_ACCEPT}
+                                    accept={SUPPORTED_ATTACHMENT_ACCEPT}
                                     multiple
                                     className="hidden"
                                     onChange={(event) => {
@@ -2030,7 +2032,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                 <input
                                     ref={folderInputRef}
                                     type="file"
-                                    accept={SUPPORTED_DOCUMENT_ACCEPT}
+                                    accept={SUPPORTED_ATTACHMENT_ACCEPT}
                                     multiple
                                     className="hidden"
                                     {...{

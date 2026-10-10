@@ -41,6 +41,7 @@ import {
 } from "../types";
 import {
   contentTypeForDocumentType,
+  isImageFileType,
   isPresentationDocumentType,
   isSpreadsheetDocumentType,
   isWordDocumentType,
@@ -50,6 +51,10 @@ import {
 import { extractPresentationText } from "../../../../lib/officeText";
 import { spreadsheetToLLMText } from "../../../../lib/spreadsheet";
 
+/** What reading an image as text answers: images reach the model as images. */
+function imageNotText(docLabel: string): string {
+  return `${docLabel} is an image, not a text document. An image attached to a message is shown to you in that message; read_document and docs read text.`;
+}
 
 export function citationReminder(
   docLabel: string,
@@ -2036,6 +2041,10 @@ export async function readDocumentContent(
       return windowed;
     }
 
+    if (isImageFileType(docInfo.file_type)) {
+      emitDocRead();
+      return imageNotText(docLabel);
+    }
     const loaded = await loadDocumentBytes({ docInfo, documentId, db, versionId });
     if (!loaded) {
       devLog(
@@ -2535,6 +2544,7 @@ export async function documentModelFor(params: {
   if (docInfo.inline_text !== undefined) {
     return { ok: false, error: `${docLabel} is the document open in Word; read it with tools.read_document.` };
   }
+  if (isImageFileType(docInfo.file_type)) return { ok: false, error: imageNotText(docLabel) };
   const documentId = docIndex?.[docLabel]?.document_id;
   const readIdentity = await getTurnReadIdentity({ docLabel, docStore, docIndex, db });
   const versionId = readIdentity?.versionId ?? docIndex?.[docLabel]?.version_id ?? null;

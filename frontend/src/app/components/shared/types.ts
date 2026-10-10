@@ -1,4 +1,5 @@
 import type { AssistantEvent as WireAssistantEvent } from "@mike/contracts";
+import { isImageFilename } from "@/app/lib/documentUploadValidation";
 // Shared TypeScript types for the Mike web app
 
 import type {
@@ -512,6 +513,7 @@ export function panelDocumentType(filename: string): PanelDocumentType {
   if (extension === "xlsx" || extension === "xlsm" || extension === "xls") {
     return "spreadsheet";
   }
+  if (extension && isImageFilename(filename)) return "image";
   return "pdf";
 }
 

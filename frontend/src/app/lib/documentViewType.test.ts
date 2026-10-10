@@ -33,6 +33,13 @@ describe("resolveDocumentViewType", () => {
     },
   );
 
+  it("shows images in the image viewer, by type, MIME or filename", () => {
+    expect(resolveDocumentViewType({ fileType: "jpg" })).toBe("image");
+    expect(resolveDocumentViewType({ fileType: "image/webp" })).toBe("image");
+    expect(resolveDocumentViewType({ filename: "Site Photo.PNG" })).toBe("image");
+    expect(resolveDocumentViewType({ fileType: "image/svg+xml" })).toBe("pdf");
+  });
+
   it("allows a caller to override the legacy Word viewer", () => {
     expect(
       resolveDocumentViewType({

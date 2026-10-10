@@ -21,6 +21,9 @@ vi.mock("@/app/hooks/useOllamaModels", () => ({
 vi.mock("@/app/hooks/useConfiguredModels", () => ({
     useConfiguredModels: () => configuredModels,
 }));
+vi.mock("@/app/hooks/useModelVision", () => ({
+    useModelVision: () => ({ "gemini-3-flash-preview": true, "gemini-3.5-flash": false }),
+}));
 
 beforeEach(() => configuredModels.splice(0));
 
@@ -53,6 +56,17 @@ function keys(configured: Partial<Record<keyof ApiKeyState, boolean>>) {
         ]),
     ) as ApiKeyState;
 }
+
+describe("ModelToggle vision", () => {
+    it("says which models can see images, in plain text", async () => {
+        const user = userEvent.setup();
+        render(<ModelToggle value="gemini-3-flash-preview" onChange={vi.fn()} apiKeys={keys({ gemini: true })} />);
+
+        await user.click(screen.getByRole("button", { name: "Choose model" }));
+        expect(screen.getByRole("menuitem", { name: /^Gemini 3 Flash,\s*Sees images$/ })).toBeInTheDocument();
+        expect(screen.getByRole("menuitem", { name: "Gemini 3.5 Flash" })).not.toHaveTextContent("Sees images");
+    });
+});
 
 describe("ModelToggle responsive trigger", () => {
     it("offers every supported reasoning level through a discrete slider", async () => {

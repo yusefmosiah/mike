@@ -21,6 +21,12 @@ describe("fileTypeKind", () => {
         expect(fileTypeKind("model.final.xlsx")).toBe("excel");
     });
 
+    it("names images by file type or filename", () => {
+        expect(fileTypeKind("jpg")).toBe("image");
+        expect(fileTypeKind("Site Photo.PNG")).toBe("image");
+        expect(fileTypeKind("logo.svg")).toBe("other");
+    });
+
     it("is case-insensitive and trims whitespace", () => {
         expect(fileTypeKind("  PDF ")).toBe("pdf");
         expect(fileTypeKind("DOCX")).toBe("word");
@@ -37,6 +43,12 @@ describe("fileTypeKind", () => {
 describe("FileTypeIcon", () => {
     const svgOf = (container: HTMLElement) => container.querySelector("svg");
     const imgOf = (container: HTMLElement) => container.querySelector("img");
+
+    it("renders a decorative image icon for an image", () => {
+        const { container } = render(<FileTypeIcon fileType="webp" />);
+        expect(imgOf(container)).toBeNull();
+        expect(svgOf(container)).toHaveAttribute("aria-hidden", "true");
+    });
 
     it("renders the PDF icon image", () => {
         const { container } = render(<FileTypeIcon fileType="pdf" />);

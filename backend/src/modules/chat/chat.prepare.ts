@@ -14,7 +14,7 @@
 // route needs to run the stream; it does not stream.
 import { type Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
-import { buildDocContext, buildMessages, buildUserPersonalisationPrompt, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, loadUserMessageAuthors, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
+import { attachImages, buildDocContext, buildMessages, buildUserPersonalisationPrompt, refuseImagesForTextModel, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, loadUserMessageAuthors, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
 import type { McpToolEvent } from "@mike/contracts";
 import { getUserModelSettings, resolveUserChatSelection } from "../user/user.service";
 import { checkProjectAccess, projectHasSharedAudience, resolveContentOrgId } from "../../lib/access";
@@ -289,6 +289,8 @@ async function prepareAdmittedChatStream(
     });
     if (!selection.ok) return selection;
     const { modelSettings, selectedModel, selectedReasoningLevel } = selection;
+    const imageRefusal = await refuseImagesForTextModel(messages, selectedModel);
+    if (imageRefusal) return imageRefusal;
 
     if (
         chatId &&
@@ -549,6 +551,14 @@ async function prepareAdmittedChatStream(
             "append",
             { timeZone, now: new Date(), userSentAt, userAuthors },
         );
+        await attachImages({
+            apiMessages: apiMessages as { role: string; content: unknown }[],
+            messages: enrichedMessages,
+            docIndex,
+            docStore,
+            model: selectedModel,
+            nonce,
+        });
 
         const workflowStore = await buildWorkflowStore(userId, userEmail, db);
 

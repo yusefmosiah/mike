@@ -981,6 +981,20 @@ export async function getConfiguredModels(): Promise<ConfiguredModelOption[]> {
     return models;
 }
 
+/**
+ * Which of these models can see images. The backend answers from the catalog
+ * entry a turn on each model would use, so the picker and the turn agree.
+ */
+export async function getModelsVision(ids: readonly string[]): Promise<Record<string, boolean>> {
+    if (ids.length === 0) return {};
+    const { vision } = await apiRequest<{ vision: Record<string, boolean> }>("/models/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+    });
+    return vision;
+}
+
 export async function getOpenRouterModels(): Promise<RouterCatalogModel[]> {
     const { models } = await apiRequest<{ models: RouterCatalogModel[] }>(
         "/models/openrouter",

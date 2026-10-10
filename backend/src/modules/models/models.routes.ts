@@ -18,6 +18,8 @@ import {
     listOpenCodeGoModels,
     listOpenRouterModels,
     listVercelModels,
+    MAX_VISION_LOOKUP_IDS,
+    modelsVision,
     type CatalogFailure,
     type CatalogResult,
 } from "./models.service";
@@ -91,5 +93,19 @@ modelsRouter.get("/vercel", requireAuth, (_req, res) =>
 modelsRouter.get("/opencode-go", requireAuth, (_req, res) =>
     sendCatalog(res, listOpenCodeGoModels),
 );
+
+// POST /models/vision  { ids: string[] } -> { vision: { [id]: boolean } }
+modelsRouter.post("/vision", requireAuth, asyncRoute(async (req, res) => {
+    const ids: unknown = req.body?.ids;
+    if (
+        !Array.isArray(ids) ||
+        ids.length > MAX_VISION_LOOKUP_IDS ||
+        !ids.every((id) => typeof id === "string" && id.length > 0 && id.length <= 300)
+    ) {
+        res.status(400).json({ detail: `ids must be a list of at most ${MAX_VISION_LOOKUP_IDS} model ids.` });
+        return;
+    }
+    res.json({ vision: await modelsVision(ids) });
+}));
 
 modelsRouter.use(routerErrorHandler("[models]"));
