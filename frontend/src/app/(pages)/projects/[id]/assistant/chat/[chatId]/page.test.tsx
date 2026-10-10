@@ -15,6 +15,7 @@ import type {
     Message,
 } from "@/app/components/shared/types";
 import ProjectAssistantChatPage from "./page";
+import { PageChromeContext } from "@/app/contexts/PageChromeContext";
 import { getProject } from "@/app/lib/mikeApi";
 import type { DocxCloseGuard } from "@/app/components/shared/views/DocxRenderer.types";
 
@@ -1292,5 +1293,120 @@ describe("leaving a project chat mid-stream", () => {
         expect(body.state.cancelled).toBe(false);
         expect(screen.queryByText(/First answer/)).not.toBeInTheDocument();
         expect(screen.queryByText(/and the rest/)).not.toBeInTheDocument();
+    });
+});
+describe("mobile pane overlays", () => {
+    function stubMobileViewport() {
+        vi.stubGlobal(
+            "matchMedia",
+            vi.fn().mockImplementation((query: string) => ({
+                matches: !query.includes("min-width: 768px"),
+                media: query,
+                addEventListener: vi.fn(),
+                removeEventListener: vi.fn(),
+            })),
+        );
+    }
+
+    async function renderMobile() {
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const params = Promise.resolve({ id: "p1" });
+        await act(async () => {
+            render(
+                <PageChromeContext.Provider
+                    value={{ mobileActionsContainer: container }}
+                >
+                    <Suspense fallback="Loading">
+                        <ProjectAssistantChatPage params={params} />
+                    </Suspense>
+                </PageChromeContext.Provider>,
+            );
+        });
+        await waitFor(() =>
+            expect(
+                screen.getByRole("button", { name: "Send question" }),
+            ).toBeEnabled(),
+        );
+        return container;
+    }
+
+    const paneHidden = (el: HTMLElement | null) =>
+        expect(el).toHaveAttribute("inert");
+
+    it("overlays explorer and document panes on the chat thread and returns", async () => {
+        stubMobileViewport();
+        const container = await renderMobile();
+
+        const explorerPane = screen.getByRole("region", {
+            name: "Project explorer",
+            hidden: true,
+        });
+        const documentPane = screen.getByRole("region", {
+            name: "Document viewer",
+            hidden: true,
+        });
+
+        // Both panes park off-screen; the chat thread is the only laid-out pane.
+        paneHidden(explorerPane);
+        paneHidden(documentPane);
+        expect(explorerPane.className).toContain("-translate-x-full");
+        expect(documentPane.className).toContain("translate-x-full");
+
+        // Chrome toggles live in the app header container.
+        const explorerToggle = within(container).getByRole("button", {
+            name: "Explorer",
+        });
+        const documentToggle = within(container).getByRole("button", {
+            name: "Document viewer",
+        });
+        expect(explorerToggle).toHaveAttribute("aria-pressed", "false");
+
+        // Explorer slides in over the chat.
+        fireEvent.click(explorerToggle);
+        expect(explorerPane).not.toHaveAttribute("inert");
+        expect(explorerPane.className).toContain("translate-x-0");
+        expect(explorerToggle).toHaveAttribute("aria-pressed", "true");
+
+        // Opening a document from the explorer surfaces the document pane.
+        fireEvent.click(screen.getByRole("button", { name: "Open draft" }));
+        await waitFor(() =>
+            expect(documentPane).not.toHaveAttribute("inert"),
+        );
+        expect(documentPane.className).toContain("translate-x-0");
+        paneHidden(explorerPane);
+
+        // The pane's close control and the chrome toggle both return to chat.
+        fireEvent.click(
+            screen.getByRole("button", { name: "Close panel" }),
+        );
+        paneHidden(documentPane);
+        fireEvent.click(documentToggle);
+        expect(documentPane).not.toHaveAttribute("inert");
+        fireEvent.click(documentToggle);
+        paneHidden(documentPane);
+    });
+
+    it("lets desktop collapse and mobile overlay coexist", async () => {
+        stubMobileViewport();
+        const container = await renderMobile();
+        const explorerPane = screen.getByRole("region", {
+            name: "Project explorer",
+            hidden: true,
+        });
+
+        // The in-pane close button dismisses the overlay without collapsing
+        // the desktop explorer.
+        fireEvent.click(
+            within(container).getByRole("button", { name: "Explorer" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Close explorer" }),
+        );
+        paneHidden(explorerPane);
+        fireEvent.click(
+            within(container).getByRole("button", { name: "Explorer" }),
+        );
+        expect(explorerPane).not.toHaveAttribute("inert");
     });
 });

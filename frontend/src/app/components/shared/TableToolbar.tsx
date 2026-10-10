@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useSyncExternalStore } from "react";
+import React, { useState } from "react";
 import { Settings2 } from "lucide-react";
 import { TabPillButtonUI } from "@/shared/ui/TabPillButtonUI";
+import { useIsDesktop } from "@/app/hooks/useIsDesktop";
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -13,23 +14,6 @@ import {
     LIQUID_GLASS_SUBTLE_CLASS,
 } from "@/shared/ui/LiquidGlassUI";
 
-const DESKTOP_QUERY = "(min-width: 768px)";
-
-function subscribeToDesktopQuery(onStoreChange: () => void) {
-    if (typeof window === "undefined") return () => {};
-    const query = window.matchMedia(DESKTOP_QUERY);
-    query.addEventListener("change", onStoreChange);
-    return () => query.removeEventListener("change", onStoreChange);
-}
-
-function getDesktopSnapshot() {
-    if (typeof window === "undefined") return true;
-    return window.matchMedia(DESKTOP_QUERY).matches;
-}
-
-function getDesktopServerSnapshot() {
-    return true;
-}
 
 interface ToolbarItem<T extends string> {
     id: T;
@@ -55,11 +39,7 @@ export function TableToolbar<T extends string>({
 }: Props<T>) {
     const hasItems = items.length > 0;
     const [menuOpen, setMenuOpen] = useState(false);
-    const isDesktop = useSyncExternalStore(
-        subscribeToDesktopQuery,
-        getDesktopSnapshot,
-        getDesktopServerSnapshot,
-    );
+    const isDesktop = useIsDesktop();
 
     return (
         <div className="mx-4 mb-2 flex h-10 items-center md:mx-8">

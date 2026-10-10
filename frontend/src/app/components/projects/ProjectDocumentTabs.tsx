@@ -23,6 +23,8 @@ interface Props {
     addToChatDisabled?: boolean;
     downloading?: boolean;
     onClose: (documentId: string) => void;
+    /** Renders a trailing control that closes the whole panel (mobile overlay). */
+    onClosePanel?: () => void;
     onReorder: (
         draggedId: string,
         targetId: string,
@@ -31,6 +33,7 @@ interface Props {
 }
 
 export function ProjectDocumentTabs({
+    onClosePanel,
     tabs,
     documents,
     activeTabId,
@@ -104,6 +107,7 @@ export function ProjectDocumentTabs({
             activeTabId={activeTabId}
             onActivate={onActivate}
             onClose={onClose}
+            onClosePanel={onClosePanel}
             onReorder={onReorder}
         />
     );

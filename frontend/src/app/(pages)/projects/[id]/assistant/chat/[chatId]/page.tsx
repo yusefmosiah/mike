@@ -14,12 +14,14 @@ import {
     useRef,
     useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
     ArrowUpRight,
     Brain,
     ChevronLeft,
     ChevronRight,
+    FileText,
     FolderOpen,
     FolderPlus,
     Pencil,
@@ -62,6 +64,9 @@ import {
 } from "@/app/lib/projectDragTypes";
 import { useExplorerDownload } from "@/app/hooks/useExplorerDownload";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
+import { usePageChrome } from "@/app/contexts/PageChromeContext";
+import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
+import { useIsDesktop } from "@/app/hooks/useIsDesktop";
 import { UserMessage } from "@/app/components/assistant/UserMessage";
 import { AssistantMessage } from "@/app/components/assistant/AssistantMessage";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
@@ -127,7 +132,10 @@ import {
     removeDeletedDocumentTabs,
 } from "@/app/lib/folderDeleteState";
 import { can, roleFromLoaded } from "@/app/lib/permissions";
-import { LIQUID_GLASS_FLAT_CLASS } from "@/app/components/ui/liquid-surface";
+import {
+    LIQUID_GLASS_FLAT_CLASS,
+    LIQUID_GLASS_SELECTED_CLASS,
+} from "@/app/components/ui/liquid-surface";
 import { cn } from "@/app/lib/utils";
 import { readDocumentDragPayload } from "@/app/lib/docTableSelection";
 import { userFacingApiError } from "@/app/lib/userFacingError";
@@ -159,6 +167,8 @@ const PANEL_DIVIDERS_WIDTH = 12;
 const COLLAPSED_EXPLORER_FOOTPRINT = 42;
 const DEFAULT_ASSISTANT_BOTTOM_PADDING = 116;
 const ASSISTANT_HEADER_HEIGHT = 48;
+/** Height of the floating mobile chrome bar the pane overlays must clear. */
+const MOBILE_CHROME_OFFSET = 48;
 
 type WorkspacePanelWidths = {
     explorer: number;
@@ -283,7 +293,7 @@ function Divider({ onDrag }: { onDrag: (dx: number) => void }) {
     }, [onDrag]);
 
     return (
-        <div className="relative z-10 w-1.5 shrink-0">
+        <div className="relative z-10 w-1.5 shrink-0 max-md:hidden">
             <div
                 onMouseDown={onMouseDown}
                 className="absolute inset-y-0 -left-1 -right-1 flex cursor-col-resize items-stretch justify-center"
@@ -306,6 +316,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     const username =
         profile?.displayName?.trim() || user?.email?.split("@")[0] || "there";
     const explorerDownload = useExplorerDownload();
+    const isDesktop = useIsDesktop();
+    const { mobileActionsContainer } = usePageChrome();
+    // On mobile the chat thread owns the viewport and the explorer/document
+    // panes slide over it; on desktop all three sit side by side.
+    const [mobilePane, setMobilePane] = useState<"explorer" | "document" | null>(
+        null,
+    );
 
     const [project, setProject] = useState<Project | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
@@ -646,7 +663,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         messageCount: messages.length,
         chatKey: activeChatId,
         bottomPadding: DEFAULT_ASSISTANT_BOTTOM_PADDING,
-        headerHeight: ASSISTANT_HEADER_HEIGHT,
+        headerHeight: isDesktop
+            ? ASSISTANT_HEADER_HEIGHT
+            : ASSISTANT_HEADER_HEIGHT + MOBILE_CHROME_OFFSET,
     });
 
     const clearFolderDeleteDismissTimer = useCallback(() => {
@@ -917,6 +936,10 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         });
         setActiveTabId(docId);
         setSelectedDocId(docId);
+        // Mobile: every open path funnels here, so the document pane reveals
+        // itself whether the open came from the explorer, a citation, or the
+        // assistant.
+        setMobilePane("document");
     }
 
     function closeTab(docId: string) {
@@ -1872,7 +1895,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     return (
         <div
             ref={workspaceRef}
-            className="my-2 ml-2 mr-3 flex h-[calc(100dvh-1rem)] min-h-0 md:my-3 md:h-[calc(100dvh-1.5rem)]"
+            className="relative my-2 ml-2 mr-3 flex h-[calc(100dvh-1rem)] min-h-0 overflow-hidden md:my-3 md:h-[calc(100dvh-1.5rem)]"
             onDragOver={(event) => {
                 if (isExternalFileDrag(event.dataTransfer)) {
                     event.preventDefault();
@@ -1884,13 +1907,85 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 }
             }}
         >
+            {/* Mobile-only pane toggles rendered into the app chrome; the
+                container only exists below the md breakpoint. */}
+            {mobileActionsContainer &&
+                createPortal(
+                    <div className="flex min-w-0 items-center justify-end gap-2 overflow-visible py-2 -my-2">
+                        <HeaderButtonsUI className="pointer-events-auto">
+                            <HeaderButtonUI
+                                iconOnly
+                                aria-label="Explorer"
+                                aria-pressed={mobilePane === "explorer"}
+                                title="Explorer"
+                                className={cn(
+                                    mobilePane === "explorer" &&
+                                        LIQUID_GLASS_SELECTED_CLASS,
+                                )}
+                                onClick={() => {
+                                    // A desktop-collapsed explorer unmounts the
+                                    // pane, so reopening must clear both.
+                                    setExplorerCollapsed(false);
+                                    setMobilePane((current) =>
+                                        current === "explorer"
+                                            ? null
+                                            : "explorer",
+                                    );
+                                }}
+                            >
+                                <FolderOpen className="h-4 w-4" />
+                            </HeaderButtonUI>
+                            <HeaderButtonUI
+                                iconOnly
+                                aria-label="Document viewer"
+                                aria-pressed={mobilePane === "document"}
+                                title="Document viewer"
+                                className={cn(
+                                    mobilePane === "document" &&
+                                        LIQUID_GLASS_SELECTED_CLASS,
+                                )}
+                                onClick={() =>
+                                    setMobilePane((current) =>
+                                        current === "document"
+                                            ? null
+                                            : "document",
+                                    )
+                                }
+                            >
+                                <FileText className="h-4 w-4" />
+                            </HeaderButtonUI>
+                        </HeaderButtonsUI>
+                    </div>,
+                    mobileActionsContainer,
+                )}
+
+            {/* Mobile scrim for the narrower explorer drawer; tapping it
+                returns to the chat thread. */}
+            <div
+                aria-hidden="true"
+                onClick={() => setMobilePane(null)}
+                className={cn(
+                    "absolute inset-0 z-30 bg-gray-300/20 transition-opacity duration-300 md:hidden",
+                    mobilePane === "explorer"
+                        ? "opacity-100"
+                        : "pointer-events-none opacity-0",
+                )}
+            />
+
             {/* LEFT: Project Explorer */}
             {!explorerCollapsed && (
                 <>
                     <div
+                        role="region"
+                        aria-label="Project explorer"
+                        inert={!isDesktop && mobilePane !== "explorer"}
                         style={{ width: explorerWidth }}
                         className={cn(
                             "flex shrink-0 flex-col overflow-hidden rounded-l-2xl rounded-r-lg",
+                            "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-[min(85vw,340px)]! max-md:transition-[transform,visibility] max-md:duration-300 max-md:ease-out",
+                            mobilePane === "explorer"
+                                ? "max-md:z-50 max-md:translate-x-0 max-md:visible"
+                                : "max-md:z-40 max-md:-translate-x-full max-md:invisible",
                             LIQUID_GLASS_FLAT_CLASS,
                         )}
                         onDragOver={(e) => {
@@ -1993,7 +2088,16 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                 <button
                                     onClick={() => setExplorerCollapsed(true)}
                                     title="Collapse explorer"
-                                    className="rounded p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                                    aria-label="Collapse explorer"
+                                    className="rounded p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 max-md:hidden"
+                                >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                    onClick={() => setMobilePane(null)}
+                                    title="Close explorer"
+                                    aria-label="Close explorer"
+                                    className="rounded p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 md:hidden"
                                 >
                                     <ChevronLeft className="h-3.5 w-3.5" />
                                 </button>
@@ -2076,7 +2180,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             {explorerCollapsed && (
                 <div
                     className={cn(
-                        "flex shrink-0 flex-col overflow-hidden rounded-l-2xl rounded-r-lg",
+                        "flex shrink-0 flex-col overflow-hidden rounded-l-2xl rounded-r-lg max-md:hidden",
                         LIQUID_GLASS_FLAT_CLASS,
                     )}
                 >
@@ -2092,16 +2196,21 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 </div>
             )}
             {explorerCollapsed && (
-                <div className="w-1.5 shrink-0" aria-hidden="true" />
+                <div className="w-1.5 shrink-0 max-md:hidden" aria-hidden="true" />
             )}
 
             {/* CENTER: Document Panel */}
             <div
                 role="region"
                 aria-label="Document viewer"
+                inert={!isDesktop && mobilePane !== "document"}
                 style={{ minWidth: DOCUMENT_MIN }}
                 className={cn(
                     "relative flex flex-1 flex-col overflow-hidden rounded-lg",
+                    "max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:min-w-0! max-md:w-full max-md:transition-[transform,visibility] max-md:duration-300 max-md:ease-out",
+                    mobilePane === "document"
+                        ? "max-md:z-50 max-md:translate-x-0 max-md:visible"
+                        : "max-md:z-40 max-md:translate-x-full max-md:invisible",
                     LIQUID_GLASS_FLAT_CLASS,
                 )}
                 onDragOverCapture={(event) => {
@@ -2130,6 +2239,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     </div>
                 )}
                 <ProjectDocumentTabs
+                    onClosePanel={
+                        isDesktop ? undefined : () => setMobilePane(null)
+                    }
                     onAddToChat={(document) =>
                         chatInputRef.current?.addDoc(document)
                     }
@@ -2221,7 +2333,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             <div
                 style={{ width: chatWidth }}
                 className={cn(
-                    "relative flex shrink-0 flex-col overflow-hidden rounded-l-lg rounded-r-2xl",
+                    "relative flex shrink-0 flex-col overflow-hidden rounded-l-lg rounded-r-2xl max-md:w-full! max-md:isolate",
                     LIQUID_GLASS_FLAT_CLASS,
                 )}
                 onDragEnter={(event) => {
@@ -2257,7 +2369,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                         </p>
                     </div>
                 )}
-                <div className="absolute inset-x-0 top-0 z-40">
+                <div className="absolute inset-x-0 top-0 z-40 max-md:top-12">
                     <ChatPanelHeader
                         chats={availableProjectChats}
                         currentChatId={activeChatId}
@@ -2332,7 +2444,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 </div>
                 <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-0 right-3 top-0 z-30 h-16 bg-gradient-to-b from-app-surface/85 via-app-surface/60 via-50% to-transparent"
+                    className="pointer-events-none absolute left-0 right-3 top-0 z-30 h-16 bg-gradient-to-b from-app-surface/85 via-app-surface/60 via-50% to-transparent max-md:h-28"
                 />
                 <div
                     aria-hidden="true"
@@ -2341,7 +2453,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
 
                 {/* Messages / greeting / shimmer */}
                 {!chatLoaded ? (
-                    <div className="flex-1 space-y-4 px-4 pb-4 pt-16">
+                    <div className="flex-1 space-y-4 px-4 pb-4 pt-16 max-md:pt-[104px]">
                         <div className="flex justify-end">
                             <div className="bg-gray-100 rounded-2xl p-4 w-3/4">
                                 <div className="theme-shimmer h-3 bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded w-full" />
@@ -2363,7 +2475,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 ) : (
                     <div
                         ref={messagesContainerRef}
-                        className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pt-[72px] md:space-y-8 md:pt-20"
+                        className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pt-[120px] md:space-y-8 md:pt-20"
                         style={{
                             paddingBottom: DEFAULT_ASSISTANT_BOTTOM_PADDING,
                             scrollbarGutter: "stable",
