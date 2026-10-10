@@ -8,6 +8,7 @@ export {
 export { getChatMessages } from "./chat.messages";
 export { verifyQuoteAgainstSource } from "./engine/verifyCitations";
 export { threadPresence, type ThreadPresence } from "./chat.presence";
+export { postChatNote } from "./chat.notes";
 export {
     codeApprovalsForViewer,
     decideCodeApproval,

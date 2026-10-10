@@ -70,6 +70,7 @@ import {
     getAccessibleChat,
     getChatMessages,
     threadPresence,
+    postChatNote,
     codeApprovalsForViewer,
     decideCodeApproval,
     revokeThreadCodeApproval,
@@ -202,6 +203,23 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
 
 const CODE_APPROVAL_DECISIONS = new Set<CodeApprovalDecision>(["once", "thread", "denied"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// POST /chat/:chatId/notes  { content }
+// Adds a message to the thread without asking for a reply (the composer's
+// `/nr`). Same standing as sending; refused while a response is generating.
+chatRouter.post("/:chatId/notes", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    if (!UUID.test(chatId))
+        return void res.status(404).json({ detail: "Chat not found" });
+    const content = (req.body as { content?: unknown } | undefined)?.content;
+    if (typeof content !== "string")
+        return void res.status(400).json({ detail: "content must be a string" });
+    const result = await postChatNote(createDb(), { chatId, userId, userEmail, content });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.status(201).json(result.data);
+}));
 
 // GET /chat/:chatId/code-approvals
 // What the chat read's code_approvals carries, polled on its own while a

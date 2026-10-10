@@ -55,11 +55,35 @@ describe("runLLMStream history", () => {
       write: vi.fn(),
     });
     const params = streamChatWithTools.mock.calls[0]![0];
+    // With the empty turn gone, the two prompts it separated arrive as one.
     expect(params.messages.map((m) => [m.role, m.content])).toEqual([
-      ["user", "first"],
-      ["user", "second"],
+      ["user", "first\n\n---\n\nsecond"],
       ["assistant", "kept"],
       ["user", "third"],
+    ]);
+  });
+
+  it("joins back-to-back user messages (/nr notes) into one turn for every provider", async () => {
+    await runLLMStream({
+      model: "gemini-3-flash-preview",
+      apiMessages: [
+        { role: "user", content: "Draft the letter." },
+        { role: "assistant", content: "Done." },
+        { role: "user", content: "Client called: cap at 1x fees." },
+        { role: "user", content: "Also, Friday deadline." },
+        { role: "user", content: "Update the letter." },
+      ],
+      docStore: new Map(),
+      docIndex: {},
+      userId: "u1",
+      db: {} as never,
+      write: vi.fn(),
+    });
+    const params = streamChatWithTools.mock.calls[0]![0];
+    expect(params.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Draft the letter."],
+      ["assistant", "Done."],
+      ["user", "Client called: cap at 1x fees.\n\n---\n\nAlso, Friday deadline.\n\n---\n\nUpdate the letter."],
     ]);
   });
 });

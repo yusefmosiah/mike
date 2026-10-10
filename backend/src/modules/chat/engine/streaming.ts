@@ -48,6 +48,7 @@ import {
   createCitation,
   CITATIONS_OPEN_TAG,
 } from "./citations";
+import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import {
   getCachedCaseOpinionTexts,
@@ -654,7 +655,7 @@ export async function runLLMStream(params: {
   const systemPrompt = isGuest && workstation
     ? `${promptWithCode}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
     : promptWithCode;
-  const chatMessages: LlmMessage[] = rawMsgs
+  const chatMessages: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")
     .map(
       (m): LlmMessage =>
@@ -678,7 +679,7 @@ export async function runLLMStream(params: {
         : m.content.some(
             (part) => part.type === "image" || part.text.trim().length > 0,
           );
-    });
+    }));
   // Before every real turn: see MemoryTurn for why it goes there.
   if (memory.message) chatMessages.unshift(memory.message);
 

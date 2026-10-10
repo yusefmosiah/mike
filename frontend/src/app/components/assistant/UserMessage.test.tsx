@@ -136,4 +136,17 @@ describe("UserMessage", () => {
             screen.queryByRole("button", { name: "Previous branch" }),
         ).not.toBeInTheDocument();
     });
+
+    it("keeps a /nr message that was not saved on screen, with the reason", () => {
+        render(
+            <UserMessage
+                content="Client called: cap at 1x fees."
+                error="Not added. A response is still being generated; send it again once it finishes."
+            />,
+        );
+        expect(screen.getByText("Client called: cap at 1x fees.")).toBeInTheDocument();
+        expect(screen.getByRole("alert")).toHaveTextContent(
+            "Not added. A response is still being generated; send it again once it finishes.",
+        );
+    });
 });

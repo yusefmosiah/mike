@@ -206,6 +206,7 @@ import {
     getCodeApprovals,
     decideCodeApproval,
     revokeCodeApproval,
+    postChatNote,
 } from "./mikeApi";
 
 const fetchMock = vi.fn();
@@ -1636,6 +1637,15 @@ describe("shared thread requests", () => {
         expect(lastFetchCall()).toMatchObject({
             url: "/api/chat/c1/code-approvals/guests/guest-1",
             init: { method: "DELETE" },
+        });
+    });
+
+    it("adds a message to the thread without a reply", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse({ id: "m2", parent_message_id: "m1" }, { status: 201 }));
+        expect(await postChatNote("c1", "Noted")).toEqual({ id: "m2", parent_message_id: "m1" });
+        expect(lastFetchCall()).toMatchObject({
+            url: "/api/chat/c1/notes",
+            init: { method: "POST", body: JSON.stringify({ content: "Noted" }) },
         });
     });
 });

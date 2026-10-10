@@ -29,6 +29,8 @@ interface Props {
     onNavigateSibling?: (dir: -1 | 1) => void;
     /** Who sent this prompt, shown when more than one person carries the thread. */
     authorLabel?: string | null;
+    /** Why this message is not in the thread (a `/nr` message that could not be saved). */
+    error?: string;
 }
 
 /** Visible rows for the editor: wrapped lines included, between 2 and 8. */
@@ -50,6 +52,7 @@ export function UserMessage({
     onEditBranch,
     onNavigateSibling,
     authorLabel,
+    error,
 }: Props) {
     const hasFiles = files && files.length > 0;
     const [editing, setEditing] = useState(false);
@@ -193,6 +196,11 @@ export function UserMessage({
                             </div>
                         )}
                     </div>
+                )}
+                {error && (
+                    <p role="alert" className="max-w-full px-1 text-right text-xs text-red-600 [overflow-wrap:anywhere]">
+                        {error}
+                    </p>
                 )}
                 {!editing &&
                     (onEditBranch ||

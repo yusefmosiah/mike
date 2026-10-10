@@ -3852,6 +3852,18 @@ export type CodeApproval = {
 
 export type CodeApprovalDecision = "once" | "thread" | "denied";
 
+/** Adds a message to the thread without asking for a reply (`/nr`). */
+export async function postChatNote(
+    chatId: string,
+    content: string,
+): Promise<{ id: string; parent_message_id: string | null }> {
+    return apiRequest(`/chat/${chatId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+    });
+}
+
 /** Requests waiting for the viewer and members they allowed; empty unless the viewer started the thread. */
 export async function getCodeApprovals(
     chatId: string,

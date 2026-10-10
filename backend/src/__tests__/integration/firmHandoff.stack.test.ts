@@ -148,6 +148,43 @@ maybeDescribe("firm thread handoff against Postgres", () => {
         expect((await prompts()).length).toBe(before);
     });
 
+    it("adds a /nr message to everyone's thread without a turn, and the next prompt follows it", async () => {
+        const note = await replicaA.postChatNote(db, {
+            chatId,
+            userId: people.associate.id,
+            userEmail: people.associate.email,
+            content: "  Client called: they want the cap at 1x fees.  ",
+        });
+        if (!note.ok) throw new Error(`note refused: ${JSON.stringify(note)}`);
+        const { data: stored } = await db
+            .from("chat_messages")
+            .select("role, content, author_user_id")
+            .eq("id", note.data.id)
+            .single();
+        expect(stored).toMatchObject({ role: "user", content: "Client called: they want the cap at 1x fees.", author_user_id: people.associate.id });
+
+        // A viewer cannot add one, and nobody can while a response is being written.
+        const viewer = await replicaB.postChatNote(db, { chatId, userId: people.third.id, userEmail: people.third.email, content: "Me too" });
+        expect(viewer).toMatchObject({ ok: false, kind: "forbidden" });
+        const turn = await send(replicaA, "partner", "Draft the reply.");
+        if (!turn.ok) throw new Error("turn refused");
+        const during = await replicaB.postChatNote(db, { chatId, userId: people.associate.id, userEmail: people.associate.email, content: "Wait" });
+        expect(during).toMatchObject({ ok: false, kind: "conflict", code: "turn_in_progress" });
+
+        // The partner's prompt (sent from their own, older leaf) hangs off the note.
+        const { data: prompt } = await db
+            .from("chat_messages")
+            .select("parent_message_id")
+            .eq("chat_id", chatId)
+            .eq("role", "user")
+            .eq("author_user_id", people.partner.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+        expect(prompt?.parent_message_id).toBe(note.data.id);
+        await turn.prepared.turnClaim?.release();
+    });
+
     it("applies a grant change on the next request, with no restart", async () => {
         await grant("third", "editor");
         const promoted = await send(replicaB, "third", "Now I can write.");

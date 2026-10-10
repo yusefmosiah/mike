@@ -3602,3 +3602,22 @@ describe("server-owned turns: resume, stop, concurrency", () => {
         await firstDone;
     });
 });
+
+// `/nr`: the route only parses; chat.notes.ts and the stack test
+// (firmHandoff.stack.test.ts) cover what is stored and who may store it.
+describe("POST /chat/:chatId/notes", () => {
+    it("refuses a malformed chat id or a missing message before reading anything", async () => {
+        const badId = await request(app)
+            .post("/chat/not-a-uuid/notes")
+            .set("Authorization", "Bearer test")
+            .send({ content: "Noted" });
+        expect(badId.status).toBe(404);
+
+        const noContent = await request(app)
+            .post("/chat/00000000-0000-4000-8000-000000000001/notes")
+            .set("Authorization", "Bearer test")
+            .send({ content: 42 });
+        expect(noContent.status).toBe(400);
+        expect(noContent.body.detail).toBe("content must be a string");
+    });
+});

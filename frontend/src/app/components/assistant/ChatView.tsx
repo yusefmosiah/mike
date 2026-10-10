@@ -1373,6 +1373,7 @@ export function ChatView({
                                                     {msg.role === "user" ? (
                                                         <UserMessage
                                                             messageId={msg.id}
+                                                            error={msg.error}
                                                             sibling={sibling}
                                                             authorLabel={
                                                                 showAuthors && msg.author

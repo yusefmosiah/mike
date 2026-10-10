@@ -11,7 +11,14 @@ import {
   type SetStateAction,
 } from "react";
 import { useRouter } from "next/navigation";
-import { stopChatTurn, streamChat, streamProjectChat } from "@/app/lib/mikeApi";
+import {
+  createChat,
+  postChatNote,
+  stopChatTurn,
+  streamChat,
+  streamProjectChat,
+} from "@/app/lib/mikeApi";
+import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
   createTurnCursor,
   createTurnEventSink,
@@ -204,6 +211,68 @@ export function useAssistantChat({
     cancelAssistantTurn(viewedChatId);
   };
 
+  /**
+   * `/nr`: store the message in the thread without asking for a reply. It
+   * shows at once; if it could not be stored it stays on screen with the
+   * reason, so the words are not lost. A new chat is created first.
+   */
+  const addNote = async (message: Message): Promise<string | null> => {
+    const content = message.content.trim();
+    if (!content) return null;
+    const note: Message = {
+      role: "user",
+      content,
+      noResponse: true,
+      ...(message.author ? { author: message.author } : {}),
+    };
+    setRawMessages((prev) => {
+      const last = prev[prev.length - 1];
+      const shown = last?.role === "user" && last.noResponse && last.content === content && !last.id;
+      return shown ? prev : [...prev, note];
+    });
+    const markFailed = (error: string) =>
+      setRawMessages((prev) =>
+        prev.map((item) =>
+          item.role === "user" && item.noResponse && !item.id && item.content === content
+            ? { ...item, error }
+            : item,
+        ),
+      );
+    if (hasAssistantTurn(chatId)) {
+      markFailed("Not added. A response is still being generated; send it again once it finishes.");
+      return null;
+    }
+    try {
+      let targetChatId = chatId;
+      if (!targetChatId) {
+        targetChatId = (await createChat(projectId ? { project_id: projectId } : undefined)).id;
+        if (!mountedRef.current) return null;
+        setChatId(targetChatId);
+        setCurrentChatId(targetChatId);
+        if (onChatCreated) {
+          adoptedThreadKeyRef.current = `${projectId ?? ""}:${targetChatId}`;
+          onChatCreated(targetChatId);
+        }
+      }
+      const stored = await postChatNote(targetChatId, content);
+      if (!mountedRef.current) return targetChatId;
+      setRawMessages((prev) =>
+        prev.map((item) =>
+          item.role === "user" && item.noResponse && !item.id && item.content === content
+            ? { ...item, id: stored.id, error: undefined }
+            : item,
+        ),
+      );
+      void loadChats();
+      return targetChatId;
+    } catch (error) {
+      if (mountedRef.current) {
+        markFailed(`Not added. ${userFacingApiError(error, "The message could not be saved. Try again.")}`);
+      }
+      return null;
+    }
+  };
+
   const handleChat = async (
     message: Message,
     opts?: {
@@ -226,6 +295,7 @@ export function useAssistantChat({
       history?: Message[];
     },
   ): Promise<string | null> => {
+    if (message.noResponse) return addNote(message);
     if (!message.content.trim() || hasAssistantTurn(chatId)) return null;
 
     setIsResponseLoading(true);
