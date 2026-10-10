@@ -90,7 +90,12 @@ import {
 } from "../../../lib/guardrails";
 
 export type { AssistantEvent } from "@mike/contracts";
-import type { AssistantEvent, AssistantErrorCode } from "@mike/contracts";
+import type { AssistantEvent, AssistantErrorCode, CodeCellEvent } from "@mike/contracts";
+
+/** How much of a cell's code and output the chat keeps (CodeCellEvent). */
+const MAX_CELL_EVENT_CHARS = 20_000;
+const capText = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max)}\n[... cut at ${max.toLocaleString("en-US")} characters ...]` : text;
 
 /**
  * What a subagent's tool calls put in front of the user: anything that changed
@@ -597,7 +602,10 @@ export async function runLLMStream(params: {
     sharedAudience: memorySharedAudience,
   });
   const systemPrompt = codeMode
-    ? `${memory.systemPrompt}\n\n${pythonToolsPromptSection(pythonSpecs)}`
+    ? `${memory.systemPrompt}\n\n${pythonToolsPromptSection(
+        pythonSpecs,
+        conversationId ? kernels.knownNames(conversationId) : [],
+      )}`
     : memory.systemPrompt;
   const chatMessages: LlmMessage[] = rawMsgs
     .filter((m) => m.role !== "system")
@@ -905,6 +913,16 @@ export async function runLLMStream(params: {
         console.error("[code-mode] kernel unavailable", safeError(error));
         return "[error]\nThe Python workstation is unavailable right now. Tell the user their workstation could not be reached; tools will work directly in the next message.";
       }
+      // The cell's line in the chat: shown as it starts, updated when it ends.
+      const cellEvent: CodeCellEvent = {
+        type: "code_cell",
+        call_id: call.id,
+        code: capText(code, MAX_CELL_EVENT_CHARS),
+        status: "running",
+      };
+      flushText();
+      events.push(cellEvent);
+      write(`data: ${JSON.stringify(cellEvent)}\n\n`);
       let seq = 0;
       let stopTurn: unknown = null;
       const onHostRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
@@ -950,8 +968,16 @@ export async function runLLMStream(params: {
         kernel_lost: outcome.kernelLost,
       });
       if (!outcome.kernelLost) void kernels.afterCell(key, kernelLauncher);
+      const content = cellResultContent(outcome);
+      Object.assign(cellEvent, {
+        status: outcome.status === "ok" ? "ok" : "failed",
+        output: capText(content, MAX_CELL_EVENT_CHARS),
+        tool_calls: outcome.hostRequests,
+        duration_ms: outcome.durationMs,
+      } satisfies Partial<CodeCellEvent>);
+      write(`data: ${JSON.stringify(cellEvent)}\n\n`);
       if (stopTurn) throw stopTurn;
-      return cellResultContent(outcome);
+      return content;
     };
     const runTurnToolsNow = async (
       calls: NormalizedToolCall[],

@@ -19,6 +19,7 @@ import type {
 import { BranchNavigator } from "./BranchNavigator";
 import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
+import { CodeCellBlock } from "./message/CodeCellBlock";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
 import { eventErrorMessage, toolCallLabel } from "./message/eventUtils";
 import { preprocessCitations, internalCaseHref } from "./message/citationUtils";
@@ -622,6 +623,15 @@ export function AssistantMessage({
                                   })
                             : undefined
                     }
+                />
+            );
+        }
+        if (event.type === "code_cell") {
+            return (
+                <CodeCellBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
                 />
             );
         }

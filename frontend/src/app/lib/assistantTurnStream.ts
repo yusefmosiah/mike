@@ -102,6 +102,28 @@ function isConnectorApprovalItem(
   );
 }
 
+const CODE_CELL_STATUSES = new Set(["running", "ok", "failed"]);
+
+/** A `code_cell` frame, or null when its call id, code or status is missing. */
+function codeCellEventFrom(
+  data: Record<string, unknown>,
+): Extract<AssistantEvent, { type: "code_cell" }> | null {
+  const callId = typeof data.call_id === "string" ? data.call_id : "";
+  const status = typeof data.status === "string" ? data.status : "";
+  if (!callId || typeof data.code !== "string" || !CODE_CELL_STATUSES.has(status)) {
+    return null;
+  }
+  return {
+    type: "code_cell",
+    call_id: callId,
+    code: data.code,
+    status: status as Extract<AssistantEvent, { type: "code_cell" }>["status"],
+    ...(typeof data.output === "string" ? { output: data.output } : {}),
+    ...(typeof data.tool_calls === "number" ? { tool_calls: data.tool_calls } : {}),
+    ...(typeof data.duration_ms === "number" ? { duration_ms: data.duration_ms } : {}),
+  };
+}
+
 const SUBAGENT_STATUSES = new Set([
   "running",
   "done",
@@ -706,6 +728,18 @@ export async function consumeAssistantTurnStream(
             output: data.output,
             cost: data.cost,
           });
+          continue;
+        }
+
+        if (data.type === "code_cell") {
+          const event = codeCellEventFrom(data);
+          if (!event) continue;
+          // Sent when the cell starts and again when it ends: one line.
+          const updated = updateMatchingEvent(
+            (e) => e.type === "code_cell" && e.call_id === event.call_id,
+            () => event,
+          );
+          if (!updated) pushEvent(event);
           continue;
         }
 

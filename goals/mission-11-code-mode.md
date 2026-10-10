@@ -99,9 +99,27 @@ until they review this.
 - **Development without a VM:** `CODE_MODE_LOCAL_KERNEL_DIR` runs kernels as
   local python3 processes (ignored in production); the tests use it.
 
-Not yet: dill and data packages in the guest image (`infra/workstation/guest.nix`),
-a UI that shows a cell's code and output, `llm()` / `llm_batch()` for the RLM
+- **Prompt:** `CODE_MODE_GUIDE` (in `python.ts`) follows the base prompt
+  and says how its rules map onto run_python: a tool call becomes `await
+  tools.<name>(...)`, one cell is one tool-use round, only printed output is
+  seen, variables persist (so "read once" means keep it in a variable),
+  ToolError and tracebacks, `ask_inputs` ends the turn, time limits, printing
+  passages verbatim before citing them, a User-Agent for websites, and plain
+  language to the user. Each turn also lists the names the conversation's
+  kernel already holds.
+- **Chat UI:** each cell is a `code_cell` event (`packages/contracts`),
+  streamed when it starts and when it ends. The line reads "Computing", then
+  "Computed · N steps · T s" (or "Computation stopped"); the steps it took are
+  their own lines below it; opening it shows the code and the result. The
+  owner asked for computing verbs over "Ran Python".
+
+Not yet: dill and data packages on node-a (built and verified, see
+`goals/STATUS.md`, queued request 5), `llm()` / `llm_batch()` for the RLM
 path, an outbox for email, and the scenario eval the deep research describes.
+Staging has no account linked to `ws-owner` (`/var/lib/mike-staging/workstation.env`
+is absent; the one account, created 2026-10-10 by sign-up, is not the owner's
+known email), so no staging user gets code mode until `mike-staging
+owner-link` or an equivalent links the owner's account.
 
 Receipts, 2026-10-10 (run from `backend/` unless noted):
 
@@ -127,6 +145,19 @@ Live, the Mac dev VM (QEMU in Docker, Python 3.14.7, no dill) through
 | `subprocess.run(['uname','-a'])` | 113 ms | `Linux workstation 6.18.55 ... aarch64` |
 | `urllib.request.urlopen('https://www.sec.gov')` | 1,654 ms | `HTTP Error 403`: SEC requires a User-Agent |
 | snapshot | | `No module named 'dill'`, logged once, then snapshots off |
+
+Live on staging, 2026-10-10, from inside `mike-backend-1` (deployed
+`a7e0a4be`) to `ws-owner` over vsock, with the ssh settings `staging.nix`
+writes:
+
+| step | time | result |
+|---|---|---|
+| kernel start (install + ssh over vsock) | 675 ms | Python 3.13.13 |
+| `sys.version`, `platform.machine()`, `os.getcwd()` | 2 ms | `3.13.13 x86_64 /home/agent` |
+| 50 tool calls with `tools.gather` | 7 ms | `50 6 ms for 50 calls` |
+| `import pandas` and a sum | 798 ms | `6` |
+| sec.gov `company_tickers.json` with a User-Agent | 509 ms | 799,583 bytes |
+| snapshot | | `No module named 'dill'` (node-a is back on the image without it) |
 
 ### Receipts of the retired QuickJS slice, 2026-10-09
 

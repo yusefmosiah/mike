@@ -4,7 +4,7 @@ import { toolCallLabel } from "./eventUtils";
 
 describe("toolCallLabel", () => {
     it("names scripts, workstation commands and web tools in plain words", () => {
-        expect(toolCallLabel("run_python")).toBe("Working in Python...");
+        expect(toolCallLabel("run_python")).toBe("Computing...");
         expect(toolCallLabel("run_command")).toBe(
             "Running command in workstation...",
         );

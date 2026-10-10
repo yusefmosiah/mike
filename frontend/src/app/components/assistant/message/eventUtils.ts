@@ -34,7 +34,7 @@ export function toolCallLabel(name: string): string {
         return "Verifying citations...";
     if (name === "web_search") return "Searching the web...";
     if (name === "fetch_web_page") return "Reading web page...";
-    if (name === "run_python") return "Working in Python...";
+    if (name === "run_python") return "Computing...";
     if (name === "run_command") return "Running command in workstation...";
     if (name.startsWith("mcp_")) return "Using connector...";
     return name ? `Running ${name}...` : "Working...";

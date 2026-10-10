@@ -1888,3 +1888,26 @@ describe("turn usage frames", () => {
     expect(events?.some((event) => event.type === "turn_usage")).toBe(false);
   });
 });
+
+describe("code_cell frames", () => {
+  const started = { type: "code_cell", call_id: "p1", code: "1 + 1", status: "running" };
+
+  it("keeps one line per cell, updated when it ends, with the steps between", async () => {
+    const events = await eventsOf([
+      started,
+      { type: "workflow_applied", workflow_id: "w1", title: "NDA review" },
+      { ...started, status: "ok", output: "[result]\n2", tool_calls: 1, duration_ms: 40 },
+    ]);
+    expect(events?.map((event) => event.type)).toEqual(["code_cell", "workflow_applied"]);
+    expect(events?.[0]).toEqual({ ...started, status: "ok", output: "[result]\n2", tool_calls: 1, duration_ms: 40 });
+  });
+
+  it("drops a frame without a call id, code or known status", async () => {
+    const events = await eventsOf([
+      { ...started, call_id: "" },
+      { ...started, code: 5 },
+      { ...started, status: "exploded" },
+    ]);
+    expect(events?.filter((event) => event.type === "code_cell")).toEqual([]);
+  });
+});

@@ -389,9 +389,28 @@ export type AssistantEvent =
       code?: AssistantErrorCode;
     }
   | SubagentEvent
+  | CodeCellEvent
   | TurnUsageEvent;
 
 export type AssistantErrorCode = "invalid_api_key";
+
+/**
+ * One run_python cell (code mode, Mission 11). Streamed when it starts and
+ * again when it ends; the stored copy is the last one. The tool calls the
+ * cell made appear as their own events between the two.
+ */
+export type CodeCellEvent = {
+  type: "code_cell";
+  /** The run_python tool call. */
+  call_id: string;
+  /** The model's code, cut at 20,000 characters. */
+  code: string;
+  status: "running" | "ok" | "failed";
+  /** What the model read back, cut at 20,000 characters, once it ends. */
+  output?: string;
+  tool_calls?: number;
+  duration_ms?: number;
+};
 
 /**
  * A subagent the turn delegated to (the `delegate` tool). Streamed when it

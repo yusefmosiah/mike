@@ -347,6 +347,7 @@ export type AssistantEvent =
       document?: PanelDocument;
     })
   | WireActivity<"subagent">
+  | WireActivity<"code_cell">
   | WireActivity<"turn_usage">
   | (Omit<WireActivity<"content">, "isStreaming"> & { isStreaming?: boolean });
 

@@ -617,6 +617,8 @@ const COMPLETES_TEXTLESS_TURN = {
   word_edit_block: false,
   // Intermediate work: what matters is the answer written from its report.
   subagent: false,
+  // Intermediate work, like the tool calls it made.
+  code_cell: false,
   turn_usage: false,
   error: true,
 } satisfies Record<AssistantEvent["type"], boolean>;

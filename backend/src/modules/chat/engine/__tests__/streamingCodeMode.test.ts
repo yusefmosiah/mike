@@ -129,6 +129,19 @@ print("read", len(docs))
     expect(dispatched).toEqual(["read_document", "read_document"]);
   });
 
+  it("streams the cell as a code_cell line, started and then finished", async () => {
+    const write = vi.fn();
+    await turn([cell("await tools.read_document(doc_id='a')\nprint('done')")], { write });
+    const cells = write.mock.calls
+      .map(([chunk]) => String(chunk))
+      .filter((chunk) => chunk.includes('"type":"code_cell"'))
+      .map((chunk) => JSON.parse(chunk.slice(6)));
+    expect(cells).toHaveLength(2);
+    expect(cells[0]).toEqual({ type: "code_cell", call_id: "p1", code: "await tools.read_document(doc_id='a')\nprint('done')", status: "running" });
+    expect(cells[1]).toMatchObject({ call_id: "p1", status: "ok", output: "done", tool_calls: 1 });
+    expect(typeof cells[1].duration_ms).toBe("number");
+  });
+
   it("raises ToolError for a tool that reports an error", async () => {
     const [result] = await turn([
       cell(`try:
@@ -169,6 +182,14 @@ except ToolError as e:
       conversationId: "conv-vars",
     });
     expect(reset.content).toBe("[result]\nFalse");
+  });
+
+  it("tells the next turn which names the session already holds", async () => {
+    await turn([cell("import json\nrates = {'a': 1}\ndef helper(): pass")], { conversationId: "conv-names" });
+    await vi.waitFor(() => expect(kernels.knownNames("conv-names")).toContain("rates"));
+    await runLLMStream({ ...baseParams(), conversationId: "conv-names" } as never);
+    const prompt = streamChatWithTools.mock.calls.at(-1)![0].systemPrompt;
+    expect(prompt).toMatch(/already defines, from earlier in this conversation: helper, json, rates\.$/);
   });
 
   it("pauses the turn when a cell asks the user, keeping the cell's variables", async () => {

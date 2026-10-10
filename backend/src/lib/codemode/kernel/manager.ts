@@ -91,6 +91,8 @@ export class KernelManager {
   private downUntil = new Map<string, number>();
   /** Conversations reset since their last snapshot: their next kernel starts empty. */
   private fresh = new Set<string>();
+  /** The names each conversation's kernel held after its last cell, for the next turn's prompt. */
+  private names = new Map<string, string[]>();
   private reaper: NodeJS.Timeout | null = null;
   private readonly idleMs: number;
   private readonly downMs: number;
@@ -149,6 +151,7 @@ export class KernelManager {
         const restored = await session.restore(launcher.snapshotPath(key));
         if (restored.status !== "ok") entry.snapshots = !/dill/i.test(String(restored.reason ?? ""));
         else if (Array.isArray(restored.restored) && restored.restored.length) {
+          this.names.set(key, restored.restored.map(String));
           console.info("[code-mode] kernel restored", {
             restored: restored.restored.length,
             failed: Array.isArray(restored.failed) ? restored.failed.length : 0,
@@ -165,11 +168,22 @@ export class KernelManager {
     return starting.finally(() => this.starting.delete(key));
   }
 
-  /** After a cell: snapshot the conversation's variables. Not awaited by the turn. */
+  /** Names the conversation's kernel held after its last cell, as far as this process knows. */
+  knownNames(rawKey: string): string[] {
+    return this.names.get(kernelKey(rawKey)) ?? [];
+  }
+
+  /** After a cell: note the kernel's names and snapshot its variables. Not awaited by the turn. */
   async afterCell(rawKey: string, launcher: KernelLauncher): Promise<void> {
     const key = kernelKey(rawKey);
     const entry = this.entries.get(key);
-    if (!entry || !entry.snapshots || !entry.session.alive) return;
+    if (!entry || !entry.session.alive) return;
+    try {
+      this.names.set(key, await entry.session.listNames());
+    } catch (error) {
+      console.warn("[code-mode] kernel names unavailable", safeError(error));
+    }
+    if (!entry.snapshots) return;
     try {
       const done = await entry.session.snapshot(launcher.snapshotPath(key));
       if (done.status !== "ok") {
@@ -190,6 +204,7 @@ export class KernelManager {
     const entry = this.entries.get(key);
     this.entries.delete(key);
     this.fresh.add(key);
+    this.names.delete(key);
     entry?.session.kill();
   }
 
