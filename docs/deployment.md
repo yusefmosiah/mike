@@ -600,3 +600,8 @@ half is the `STAGING_DEPLOY_KEY` Actions secret; replace it by generating a
 new pair, putting the public key in `deployKey` in `staging.nix`, and setting
 the secret. New migrations reach staging through the `db-init` service, so
 add them to `docker-compose.yml` as for any Compose install.
+
+Signup is open without email confirmation (`GOTRUE_DISABLE_SIGNUP=false`,
+`GOTRUE_MAILER_AUTOCONFIRM=true` in `/var/lib/mike-staging/secrets.env`):
+staging has no outgoing mail (Mailpit catches it). Change either key there and
+run `mike-staging compose up -d auth` to apply it.

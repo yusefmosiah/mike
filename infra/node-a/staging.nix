@@ -60,8 +60,10 @@ let
             echo "BACKEND_PORT=127.0.0.1:3001"
             echo "FRONTEND_PORT=127.0.0.1:3000"
             echo "AUTH_PORT=127.0.0.1:54321"
-            echo "GOTRUE_DISABLE_SIGNUP=true"
-            echo "GOTRUE_MAILER_AUTOCONFIRM=false"
+            # Open signup without email confirmation: staging is for the owner
+            # and their partner to try, and it has no outgoing mail (Mailpit).
+            echo "GOTRUE_DISABLE_SIGNUP=false"
+            echo "GOTRUE_MAILER_AUTOCONFIRM=true"
             echo "GOTRUE_EXTERNAL_GOOGLE_ENABLED=false"
             echo "SENTRY_DISABLED=true"
           } > ${root}/secrets.env
