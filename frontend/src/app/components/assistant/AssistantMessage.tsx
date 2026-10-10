@@ -50,6 +50,12 @@ import {
 interface Props {
     events?: AssistantEvent[];
     isStreaming?: boolean;
+    /**
+     * The response has paused to ask the user for input or approval and is
+     * still waiting. Nothing has been delivered yet, so the status icon holds
+     * a neutral state and the copy button stays hidden.
+     */
+    awaitingInput?: boolean;
     isError?: boolean;
     /** Human-readable error text rendered alongside the red Mike icon. */
     errorMessage?: string;
@@ -144,6 +150,7 @@ interface Props {
 export function AssistantMessage({
     events,
     isStreaming = false,
+    awaitingInput = false,
     isError = false,
     errorMessage,
     citations = [],
@@ -222,7 +229,9 @@ export function AssistantMessage({
         ? "error"
         : isStreaming
           ? "active"
-          : null;
+          : awaitingInput
+            ? "waiting"
+            : null;
 
     const isRenderableEvent = (event: AssistantEvent) =>
         event.type !== "error" &&
@@ -472,7 +481,7 @@ export function AssistantMessage({
                     key={globalIdx}
                     showConnector={showConnector}
                     isStreaming={event.isStreaming}
-                    dotColor={isError ? "red" : "gray"}
+                    dotColor={isError ? "red" : "green"}
                 >
                     <span className="font-medium">
                         {event.isStreaming ? "Using connector..." : label}
@@ -1196,7 +1205,7 @@ export function AssistantMessage({
 
                 {/* Copy button */}
                 <div className="flex items-center gap-2 py-2 font-sans justify-start">
-                    {!isStreaming && (
+                    {!isStreaming && !awaitingInput && (
                         <button
                             type="button"
                             aria-label={
