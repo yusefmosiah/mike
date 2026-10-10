@@ -110,3 +110,11 @@ Already compatible: the background queue runs on Postgres without Redis by
 default, GoTrue is the same version (v2.189.0), and the schema needs only
 `pgcrypto` and `pg_trgm`. Expect one to two weeks of work and a 250 to 350 MB
 download.
+
+## Later: the desktop node
+
+Beyond the wrapper, the app can act as a node the server drives: a browser on
+the user's machine (their IP and logins), full computer use, a live view on
+the phone, and a folder synced with the workstation VM. The server keeps the
+harness and policy; the app only carries out typed capabilities. See
+[the desktop node scope](reports/desktop-node-scope-2026-10-10.md).
