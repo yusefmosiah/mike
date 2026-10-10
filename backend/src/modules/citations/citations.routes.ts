@@ -1,6 +1,6 @@
 // Citation checks over HTTP (goals/mission-6-citation-verification-subagents.md).
-// Anyone who can read the chat can ask for a check, read its verdicts and
-// re-check a verdict from its stored snapshot.
+// Anyone who can read a document can ask for a check of its citations, read
+// the verdicts and re-check a verdict from its stored snapshot.
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
@@ -23,26 +23,28 @@ function actor(res: { locals: Record<string, unknown> }) {
     };
 }
 
-// POST /citation-checks { chat_id, message_id }: queue a check of one answer.
-citationsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
-    const chatId = req.body?.chat_id;
-    const messageId = req.body?.message_id;
-    if (!isMessageId(chatId) || !isMessageId(messageId)) {
-        return void res.status(400).json({ detail: "chat_id and message_id must be ids" });
+// POST /citation-checks/documents/:documentId { version_id?, model? }: queue a
+// check of a document version (the current one unless named).
+citationsRouter.post("/documents/:documentId", requireAuth, asyncRoute(async (req, res) => {
+    const documentId = req.params.documentId;
+    const versionId = req.body?.version_id ?? null;
+    const model = typeof req.body?.model === "string" ? req.body.model : null;
+    if (!isMessageId(documentId) || (versionId !== null && !isMessageId(versionId))) {
+        return void res.status(400).json({ detail: "documentId and version_id must be ids" });
     }
-    const result = await startCitationCheck(createDb(), { ...actor(res), chatId, messageId });
+    const result = await startCitationCheck(createDb(), { ...actor(res), documentId, versionId, model });
     if (!result.ok) return void sendServiceFailure(res, result);
     res.status(202).json({ task: result.data });
 }));
 
-// GET /citation-checks?chat_id=&message_id=: the latest check and its verdicts.
-citationsRouter.get("/", requireAuth, asyncRoute(async (req, res) => {
-    const chatId = req.query.chat_id;
-    const messageId = req.query.message_id;
-    if (!isMessageId(chatId) || !isMessageId(messageId)) {
-        return void res.status(400).json({ detail: "chat_id and message_id must be ids" });
+// GET /citation-checks/documents/:documentId?version_id=: the latest check and its verdicts.
+citationsRouter.get("/documents/:documentId", requireAuth, asyncRoute(async (req, res) => {
+    const documentId = req.params.documentId;
+    const versionId = typeof req.query.version_id === "string" ? req.query.version_id : null;
+    if (!isMessageId(documentId) || (versionId !== null && !isMessageId(versionId))) {
+        return void res.status(400).json({ detail: "documentId and version_id must be ids" });
     }
-    const result = await getCitationChecks(createDb(), { ...actor(res), chatId, messageId });
+    const result = await getCitationChecks(createDb(), { ...actor(res), documentId, versionId });
     if (!result.ok) return void sendServiceFailure(res, result);
     res.json(result.data);
 }));

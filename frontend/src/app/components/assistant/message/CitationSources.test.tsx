@@ -19,34 +19,23 @@ function documentCitation(ref: number, verified?: boolean): DocumentCitation {
 }
 
 describe("CitationsBlock verification states", () => {
-  it("marks unverified document citation buttons with the error colors", () => {
+  it("styles a reply's citations alike whether or not the quote was located", () => {
     render(
       <CitationsBlock
         citations={[documentCitation(1, false), documentCitation(2)]}
       />,
     );
 
-    expect(
-      screen.getByRole("button", {
-        name: "Citation 1. Could not verify quote",
-      }),
-    ).toHaveClass(
-      "!bg-red-100/85",
-      "!text-red-800",
-      "dark:!bg-red-950",
-      "dark:!text-white",
-    );
-    const verifiedButton = screen.getByRole("button", {
-      name: "Citation 2",
-    });
-    expect(verifiedButton).toHaveClass("bg-gray-200/80", "text-gray-800");
+    for (const name of ["Citation 1", "Citation 2"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass(
+        "bg-gray-200/80",
+        "text-gray-800",
+      );
+    }
   });
 
-  it("includes only unverified warnings in citation tooltips", () => {
-    expect(citationTooltip(documentCitation(3, false))).toContain(
-      "Quote could not be matched to the source text.",
-    );
-    expect(citationTooltip(documentCitation(3, true))).not.toContain("matched");
+  it("carries no verification warning in citation tooltips", () => {
+    expect(citationTooltip(documentCitation(3, false))).not.toContain("matched");
   });
 
   it("leaves case citations outside document verification styling", () => {

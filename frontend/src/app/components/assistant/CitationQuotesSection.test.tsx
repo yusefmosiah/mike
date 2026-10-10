@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CitationQuotesSection } from "./CitationQuotesSection";
 
 describe("CitationQuotesSection", () => {
-    it("uses verification from normalized document quotes", () => {
+    it("cannot open a quote that was not located, and shows no warning badge", () => {
         render(
             <CitationQuotesSection
                 document={{
@@ -26,7 +26,12 @@ describe("CitationQuotesSection", () => {
         expect(
             screen.getByText(/Unmatched model quote/).closest("button"),
         ).toBeNull();
-        expect(screen.getByText("Could not verify quote")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "View" })).toHaveAttribute(
+            "title",
+            "This passage was not located in the source",
+        );
+        expect(screen.queryByText("Could not verify quote")).toBeNull();
+        expect(screen.getByRole("button", { name: "Cite" })).toBeInTheDocument();
     });
 
     it("uses the View button to select a verified quote", () => {

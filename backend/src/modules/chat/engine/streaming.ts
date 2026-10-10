@@ -1124,6 +1124,7 @@ export async function runLLMStream(params: {
           connectorApprovals:
             scope === "parent" && connectorApprovals && includeAskInputs,
           userEmail,
+          model,
         },
       );
       throwIfAborted(signal);

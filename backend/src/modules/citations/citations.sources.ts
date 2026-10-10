@@ -1,130 +1,169 @@
-// Reading what a citation cites, for the verifier (citations.tasks.ts).
+// Finding and reading what a citation cites, for the verifier (citations.tasks.ts).
 //
-// Every read is done with the authority of the person who asked for the check,
-// re-checked here; the verifier never reads more than they could. Web reads
-// honour the project's egress policy and write an audit row before any byte
-// leaves: a fetch whose audit row cannot be written does not happen.
+// Every outbound request (a page, a case lookup, a web search) honours the
+// project's egress policy and writes an audit row before any byte leaves: a
+// request whose audit row cannot be written does not happen. Reading the
+// checked document itself re-checks the asking person's authority.
 import type { Db } from "../../lib/db";
 import { downloadFile, extractedTextKey } from "../../lib/storage";
 import { extractPdfText } from "../../lib/pdfText";
-import { requiresLibreOfficeTextExtraction, documentSuffix } from "../../lib/documentTypes";
+import { requiresLibreOfficeTextExtraction } from "../../lib/documentTypes";
 import { docxReadingText } from "../../lib/docx/readingText";
 import { insertAuditEvent } from "../../lib/audit";
 import { assertSafeEgressUrl, EgressSecurityError } from "../../lib/search/egress";
-import { stripHtmlToText } from "../../lib/search/engine";
-import { docxViewForVersion, getDocument } from "../documents/documents.service";
-import type { BlockOffset, CitationQuote, ResolvedSource } from "./citations.verifier";
+import { search, stripHtmlToText } from "../../lib/search/engine";
+import { getCourtlistenerCaseOpinions, verifyCourtlistenerCitations } from "../../lib/courtlistener";
+import { docxViewForVersion } from "../documents/documents.service";
+import type { ExtractedCitation } from "./citations.extract";
+import type { BlockOffset, SnapshotInput } from "./citations.verifier";
 
 const MAX_WEB_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const WEB_TIMEOUT_MS = 15_000;
+const CASE_TEXT_CHARS = 50_000;
+const SEARCH_CANDIDATES = 2;
 const TEXT_TYPES = new Set(["txt", "md", "markdown", "csv", "json", "html", "htm", "xml", "rtf"]);
 
 /** A web response, reduced to what grading needs. */
 export type WebResponse = { status: number; text: string; finalUrl: string };
 export type WebFetch = (url: string) => Promise<WebResponse>;
+export type WebSearch = (query: string) => Promise<Array<{ url: string; title: string }>>;
+export type CaseLookup = (
+    citation: string,
+) => Promise<
+    | { status: "found"; url: string; caseName: string | null; text: string }
+    | { status: "not-found" }
+    | { status: "error"; reason: string }
+>;
 
 export type SourceContext = {
     db: Db;
     actor: { userId: string; email: string | null };
     taskId: string;
-    chatId: string;
     projectId: string | null;
-    /** The project's egress policy; 'deny' means no outbound fetch at all. */
+    documentId: string;
+    /** The project's egress policy; 'deny' means no outbound request at all. */
     egress: "allow" | "deny";
+    courtlistenerToken?: string | null;
     fetchWeb?: WebFetch;
+    searchWeb?: WebSearch;
+    lookupCase?: CaseLookup;
 };
 
+/** A source text worth judging, and how to label it. */
+export type Candidate = { snapshot: SnapshotInput; label: string };
+
+/** Where a citation's source was looked for, and what was found. */
+export type Located =
+    | { ok: true; candidates: Candidate[]; searched: boolean }
+    | { ok: false; verdict: "not-found" | "unverifiable"; reason: string };
+
 /**
- * One reader per task: each document version and URL is read once, however
- * many passages cite it.
+ * Find the source a citation names: its URL if it gives one; a case through
+ * CourtListener, falling back to a web search (CourtListener is mostly US
+ * law); anything else through a web search, whose top results are only
+ * candidates the judge must recognise as the cited authority.
  */
-export function createSourceReader(ctx: SourceContext) {
-    const cache = new Map<string, Promise<ResolvedSource>>();
-    return (quote: CitationQuote): Promise<ResolvedSource> => {
-        const key =
-            quote.sourceKind === "web"
-                ? `web:${quote.url}`
-                : quote.sourceKind === "document"
-                  ? `doc:${quote.documentId}:${quote.versionId}`
-                  : `${quote.sourceKind}:${quote.citationRef}`;
-        let pending = cache.get(key);
-        if (!pending) {
-            pending = readSource(ctx, quote).catch(
-                (): ResolvedSource => ({
-                    ok: false,
-                    verdict: "unverifiable",
-                    reason: "The source could not be read.",
-                }),
-            );
-            cache.set(key, pending);
+export async function locateSource(ctx: SourceContext, citation: ExtractedCitation): Promise<Located> {
+    if (ctx.egress === "deny") {
+        return { ok: false, verdict: "unverifiable", reason: "This project does not allow the web to be contacted." };
+    }
+    if (citation.url) {
+        const read = await readWeb(ctx, citation.url, "citation_check");
+        return read.ok ? { ok: true, candidates: [read.candidate], searched: false } : read;
+    }
+    if (citation.kind === "case") {
+        const found = await lookupCase(ctx, citation.citation);
+        if (found.status === "found") {
+            return {
+                ok: true,
+                searched: false,
+                candidates: [
+                    {
+                        label: `court opinion${found.caseName ? `, ${found.caseName}` : ""}, ${found.url}`,
+                        snapshot: { sourceKind: "case", url: found.url, content: found.text },
+                    },
+                ],
+            };
         }
-        return pending;
+    }
+    const candidates = await searchCandidates(ctx, citation.citation);
+    if (candidates.length) return { ok: true, candidates, searched: true };
+    return citation.kind === "case"
+        ? { ok: false, verdict: "not-found", reason: "No such case was found in CourtListener or by a web search." }
+        : { ok: false, verdict: "unverifiable", reason: "The source could not be located." };
+}
+
+async function audited(ctx: SourceContext, detail: Record<string, unknown>): Promise<boolean> {
+    try {
+        await insertAuditEvent(ctx.db, {
+            userId: ctx.actor.userId,
+            userEmail: ctx.actor.email,
+            action: "egress.fetch",
+            surface: "citation_check",
+            projectId: ctx.projectId,
+            documentId: ctx.documentId,
+            detail: { ...detail, purpose: "citation_check", task_id: ctx.taskId },
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function lookupCase(ctx: SourceContext, citation: string): ReturnType<CaseLookup> {
+    if (!(await audited(ctx, { url: "https://www.courtlistener.com/", citation }))) {
+        return { status: "error", reason: "not audited" };
+    }
+    try {
+        return await (ctx.lookupCase ?? courtlistenerLookup(ctx))(citation);
+    } catch {
+        return { status: "error", reason: "lookup failed" };
+    }
+}
+
+function courtlistenerLookup(ctx: SourceContext): CaseLookup {
+    return async (citation) => {
+        const lookup = (await verifyCourtlistenerCitations({
+            citations: [citation],
+            db: ctx.db,
+            apiToken: ctx.courtlistenerToken,
+        })) as { results?: Array<{ status: string; clusters: Array<{ id: number | null; caseName: string | null }> }> };
+        const cluster = (lookup.results ?? []).flatMap((row) => row.clusters).find((c) => c.id);
+        if (!cluster?.id) return { status: "not-found" };
+        const opinions = (await getCourtlistenerCaseOpinions({
+            clusterId: cluster.id,
+            includeFullText: true,
+            maxChars: CASE_TEXT_CHARS,
+            db: ctx.db,
+            apiToken: ctx.courtlistenerToken,
+        })) as { url?: string | null; opinions?: Array<{ text?: string | null }>; error?: string };
+        const text = (opinions.opinions ?? []).map((o) => o.text ?? "").join("\n\n").trim();
+        if (!text) return { status: "error", reason: "no opinion text" };
+        return {
+            status: "found",
+            url: opinions.url ?? `https://www.courtlistener.com/opinion/${cluster.id}/`,
+            caseName: cluster.caseName,
+            text,
+        };
     };
 }
 
-async function readSource(ctx: SourceContext, quote: CitationQuote): Promise<ResolvedSource> {
-    if (quote.sourceKind === "document") return readDocument(ctx, quote);
-    if (quote.sourceKind === "web") return readWeb(ctx, quote.url);
-    return {
-        ok: false,
-        verdict: "unverifiable",
-        reason:
-            quote.sourceKind === "case"
-                ? "Case-law citations are not yet re-read by the verifier."
-                : "Connector citations are not yet re-read by the verifier.",
-    };
-}
-
-async function readDocument(ctx: SourceContext, quote: CitationQuote): Promise<ResolvedSource> {
-    if (!quote.documentId || !quote.versionId) {
-        return {
-            ok: false,
-            verdict: "not-found",
-            reason: "The citation names no document of this conversation.",
-        };
+async function searchCandidates(ctx: SourceContext, query: string): Promise<Candidate[]> {
+    if (!(await audited(ctx, { url: "web-search", query }))) return [];
+    let results: Array<{ url: string; title: string }>;
+    try {
+        results = await (ctx.searchWeb ?? ((q: string) => search(q, { limit: 5 })))(query);
+    } catch {
+        return [];
     }
-    const { data: version } = await ctx.db
-        .from("document_versions")
-        .select("id, document_id, storage_path, pdf_storage_path, file_type, filename, deleted_at")
-        .eq("id", quote.versionId)
-        .eq("document_id", quote.documentId)
-        .maybeSingle();
-    if (!version || version.deleted_at) {
-        return { ok: false, verdict: "not-found", reason: "The cited document version does not exist." };
+    const candidates: Candidate[] = [];
+    for (const result of results) {
+        if (candidates.length >= SEARCH_CANDIDATES) break;
+        const read = await readWeb(ctx, result.url, "citation_check_search");
+        if (read.ok) candidates.push({ ...read.candidate, label: `web search result "${result.title}", ${result.url}` });
     }
-    const access = await getDocument(quote.documentId, ctx.actor.userId, ctx.actor.email ?? undefined, ctx.db);
-    if (!access.ok) {
-        return {
-            ok: false,
-            verdict: "unverifiable",
-            reason: "The person who asked for this check cannot read the cited document.",
-        };
-    }
-
-    const fileType = ((version.file_type as string | null) ?? documentSuffix((version.filename as string | null) ?? ""))
-        .toLowerCase()
-        .replace(/^\./, "");
-    const read = await documentText(ctx.db, {
-        documentId: quote.documentId,
-        versionId: quote.versionId,
-        storagePath: version.storage_path as string | null,
-        pdfStoragePath: version.pdf_storage_path as string | null,
-        fileType,
-    });
-    if (!read) {
-        return { ok: false, verdict: "unverifiable", reason: "The cited document's text could not be extracted." };
-    }
-    return {
-        ok: true,
-        snapshot: {
-            sourceKind: "document",
-            documentId: quote.documentId,
-            versionId: quote.versionId,
-            content: read.content,
-            blockOffsets: read.blockOffsets,
-        },
-    };
+    return candidates;
 }
 
 /** A version's text; a .docx also yields its block ids and their offsets. */
@@ -164,29 +203,14 @@ export async function documentText(
     return null;
 }
 
-async function readWeb(ctx: SourceContext, url: string | null): Promise<ResolvedSource> {
-    if (!url) return { ok: false, verdict: "not-found", reason: "The citation has no URL." };
-    if (ctx.egress === "deny") {
-        return {
-            ok: false,
-            verdict: "unverifiable",
-            reason: "This project does not allow the web to be contacted.",
-        };
-    }
-    try {
-        await insertAuditEvent(ctx.db, {
-            userId: ctx.actor.userId,
-            userEmail: ctx.actor.email,
-            action: "egress.fetch",
-            surface: "citation_check",
-            projectId: ctx.projectId,
-            chatId: ctx.chatId,
-            detail: { url, purpose: "citation_check", task_id: ctx.taskId },
-        });
-    } catch {
+async function readWeb(
+    ctx: SourceContext,
+    url: string,
+    purpose: string,
+): Promise<{ ok: true; candidate: Candidate } | { ok: false; verdict: "not-found" | "unverifiable"; reason: string }> {
+    if (!(await audited(ctx, { url, step: purpose }))) {
         return { ok: false, verdict: "unverifiable", reason: "The fetch could not be audited, so it was not made." };
     }
-
     let response: WebResponse;
     try {
         response = await (ctx.fetchWeb ?? fetchWebPage)(url);
@@ -203,12 +227,12 @@ async function readWeb(ctx: SourceContext, url: string | null): Promise<Resolved
     if (response.status === 404 || response.status === 410) {
         return { ok: false, verdict: "not-found", reason: `The page does not exist (HTTP ${response.status}).` };
     }
-    if (response.status < 200 || response.status >= 300) {
+    if (response.status < 200 || response.status >= 300 || !response.text.trim()) {
         return { ok: false, verdict: "unverifiable", reason: `The page answered HTTP ${response.status}.` };
     }
     return {
         ok: true,
-        snapshot: { sourceKind: "web", url: response.finalUrl, content: response.text },
+        candidate: { label: `web page ${response.finalUrl}`, snapshot: { sourceKind: "web", url: response.finalUrl, content: response.text } },
     };
 }
 

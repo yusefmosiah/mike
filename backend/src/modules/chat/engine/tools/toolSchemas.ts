@@ -198,6 +198,24 @@ export const TOOLS = [
   {
     type: "function",
     function: {
+      name: "check_citations",
+      description:
+        "Check every citation in a document against its source: each case, statute, article or web page it cites is looked up (CourtListener, the web), stored as evidence, and judged by a separate checker on whether it exists, whether any quoted words are really in it, and whether it supports what the document uses it for. Slow and costs model calls for each citation, so use it when it matters: after drafting a document with citations, when its citations or substance change, and before the user sends it out; not after every small edit. Reads the document only. Tell the user about every citation it flags, above all any whose source contradicts what the document says, and fix those before calling the document done.",
+      parameters: {
+        type: "object",
+        properties: {
+          doc_id: {
+            type: "string",
+            description: "Chat-local ID of the document to check (e.g. 'doc-0').",
+          },
+        },
+        required: ["doc_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "replicate_document",
       description:
         "Copy an available document, Library Template, or workflow asset without changing the source. In a project chat, copies are saved to Project Documents; otherwise they are saved to Library Files. Always use this before editing or drafting from a Library Template or workflow asset. For an ordinary document, use it only when the user specifically asks for a copy/duplicate or a new document based on that file. Returns new doc_id slugs for read_document and edit_document.",

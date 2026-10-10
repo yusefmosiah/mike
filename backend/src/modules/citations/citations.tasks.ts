@@ -1,44 +1,60 @@
-// Citation checks as verifier tasks (goals/mission-6-citation-verification-subagents.md).
+// Citation checks of documents as verifier tasks
+// (goals/mission-6-citation-verification-subagents.md).
 //
-// A check is a verification_tasks row and a queued job, not part of the turn
-// that wrote the citations: the task names the producing invocation (the
-// assistant message) and refuses to run inside it. Each passage is one step;
-// after each step the verdict, its snapshot and the task's checkpoint are
-// stored, so a worker that dies mid-run resumes where it stopped, a step limit
-// bounds the run, and a cancellation is honoured between steps. Reads re-check
-// the asking person's authority at run time (citations.sources.ts).
+// A check protects a document before it goes out: a memo the assistant
+// drafted, or an uploaded brief it then edited. It is a verification_tasks
+// row naming one document version, run by a worker job (or inline, when the
+// assistant asks for it in a turn), by model calls that share nothing with the
+// conversation that wrote the document.
+//
+// Two phases, both durable. First a model lists the document's citations;
+// the list is stored on the task's checkpoint, so a restarted worker does not
+// list them again. Then each citation is checked in parallel: its source is
+// located and stored as a hashed snapshot, any quote is matched against it,
+// and a judge decides whether the source supports what the document says.
+// Each verdict is a row; a restarted worker checks only those without one.
+// Cancellation is honoured between citations; the step limit bounds a run.
 import type { Db } from "../../lib/db";
 import type { DbJob } from "../../lib/dbq/types";
 import { enqueueDbJob } from "../../lib/dbq/enqueue";
-import { currentTurnHolder } from "../../lib/turnClaims";
+import { completeText } from "../../lib/llm";
+import { loadActiveVersion } from "../../lib/documentVersions";
+import { documentSuffix } from "../../lib/documentTypes";
+import { resolveEffectiveChatModel } from "../../lib/modelSelection";
 import { failure, internalFailure, ok, type ServiceResult } from "../../lib/serviceResult";
-import { getAccessibleChat } from "../chat/chat.service";
-import { createSourceReader, type WebFetch } from "./citations.sources";
+import { getDocument } from "../documents/documents.service";
+import { getUserModelSettings } from "../user/user.service";
+import { extractCitations, mapPool, type Complete, type ExtractedCitation } from "./citations.extract";
+import { judgeSupport, verdictFor, type Judgement, type Support } from "./citations.judge";
 import {
-    citationQuotes,
-    gradeQuote,
-    sha256,
-    type BlockOffset,
-    type CitationQuote,
-    type SnapshotInput,
-    type Verdict,
-} from "./citations.verifier";
+    documentText,
+    locateSource,
+    type CaseLookup,
+    type Candidate,
+    type SourceContext,
+    type WebFetch,
+    type WebSearch,
+} from "./citations.sources";
+import { matchQuote, sha256, type SnapshotInput, type Verdict } from "./citations.verifier";
 
 export const CITATION_CHECK_JOB = "citations.verify";
-/** verification_tasks.step_limit's default: one step per quoted passage. */
-const DEFAULT_STEP_LIMIT = 100;
+/** One step per citation; verification_tasks allows at most 500. */
+const DEFAULT_STEP_LIMIT = 300;
+const DEFAULT_CONCURRENCY = 6;
 
 export type VerificationTask = {
     id: string;
-    chat_id: string;
-    message_id: string;
-    producer_invocation_id: string;
+    kind: "document_citation_check" | "citation_check";
+    document_id: string | null;
+    document_version_id: string | null;
+    invoked_by: string | null;
+    model: string | null;
     actor_user_id: string | null;
     project_id: string | null;
     status: "queued" | "running" | "completed" | "failed" | "cancelled";
     step_limit: number;
     steps_used: number;
-    checkpoint: { next?: number };
+    checkpoint: { citations?: ExtractedCitation[] };
     cancel_requested: boolean;
     error: string | null;
     created_at: string;
@@ -50,11 +66,16 @@ export type CitationCheck = {
     id: string;
     task_id: string;
     citation_ref: number;
-    quote_index: number;
     source_kind: string;
-    quote: string;
+    citation_text: string | null;
+    cited_block_id: string | null;
+    proposition: string | null;
+    quote: string | null;
+    quote_found: boolean | null;
     verdict: Verdict;
+    support: Support | null;
     reason: string | null;
+    support_reason: string | null;
     snapshot_id: string | null;
     block_id: string | null;
     start_char: number | null;
@@ -72,62 +93,84 @@ async function egressFor(db: Db, projectId: string | null): Promise<"allow" | "d
 }
 
 /**
- * Queue a check of one assistant message's citations. `invokedBy` is the
- * invocation asking (a turn calling this as a tool passes its own message
- * id): an invocation may not grade what it produced, and neither may anyone
- * while the producing turn is still running.
+ * The checker's model: CITATION_CHECK_MODEL when the deployment sets one,
+ * else the model asked for (the turn's own model, when the assistant asks),
+ * else the person's last selected model, provided they hold a key for it.
+ */
+async function checkerModel(
+    db: Db,
+    userId: string,
+    requested: string | null | undefined,
+): Promise<ServiceResult<string>> {
+    const settings = await getUserModelSettings(userId, db);
+    const resolved = await resolveEffectiveChatModel({
+        requested: process.env.CITATION_CHECK_MODEL?.trim() || requested,
+        lastSelectedModel: settings.last_selected_chat_model,
+        apiKeys: settings.api_keys,
+        userId,
+        db,
+    });
+    if (!resolved.ok) return failure("validation", resolved.detail, resolved.code);
+    return ok(resolved.model);
+}
+
+/**
+ * Create a check of one document version (the current one unless named) for
+ * anyone who can read the document. `enqueue: false` leaves running it to
+ * the caller (the assistant's tool runs it inside its turn).
  */
 export async function startCitationCheck(
     db: Db,
-    args: Actor & { chatId: string; messageId: string; invokedBy?: string | null; stepLimit?: number },
+    args: Actor & {
+        documentId: string;
+        versionId?: string | null;
+        model?: string | null;
+        invokedBy?: string | null;
+        stepLimit?: number;
+        enqueue?: boolean;
+    },
 ): Promise<ServiceResult<VerificationTask>> {
-    const access = await getAccessibleChat(db, { chatId: args.chatId, userId: args.userId, userEmail: args.userEmail });
-    if (!access.ok) return failure("not_found", "Chat not found");
+    const access = await getDocument(args.documentId, args.userId, args.userEmail ?? undefined, db);
+    if (!access.ok) return failure("not_found", "Document not found");
+    const version = await loadActiveVersion(args.documentId, db, args.versionId ?? null);
+    if (!version) return failure("not_found", "Document version not found");
+    const model = await checkerModel(db, args.userId, args.model);
+    if (!model.ok) return model;
 
-    const { data: message } = await db
-        .from("chat_messages")
-        .select("id, chat_id, role, citations")
-        .eq("id", args.messageId)
-        .eq("chat_id", args.chatId)
-        .maybeSingle();
-    if (!message || message.role !== "assistant") return failure("not_found", "Message not found");
-
-    if (args.invokedBy && args.invokedBy === args.messageId) {
-        return failure("conflict", "A response cannot check its own citations.", "self_grading");
-    }
-    const holder = await currentTurnHolder(db, "chat", args.chatId);
-    if (holder?.turnId === args.messageId) {
-        return failure("conflict", "The response is still being written; check it once it finishes.", "producer_running");
-    }
-    if (citationQuotes(message.citations).length === 0) {
-        return failure("validation", "This response has no quoted citations to check.", "no_citations");
-    }
-
-    const projectId = (access.chat.project_id as string | null | undefined) ?? null;
     const { data: task, error } = await db
         .from("verification_tasks")
         .insert({
-            kind: "citation_check",
-            chat_id: args.chatId,
-            message_id: args.messageId,
-            producer_invocation_id: args.messageId,
+            kind: "document_citation_check",
+            document_id: args.documentId,
+            document_version_id: version.id,
+            invoked_by: args.invokedBy ?? null,
+            model: model.data,
             actor_user_id: args.userId,
-            project_id: projectId,
+            project_id: (access.doc.project_id as string | null | undefined) ?? null,
             step_limit: args.stepLimit ?? DEFAULT_STEP_LIMIT,
+            status: "queued",
+            steps_used: 0,
+            checkpoint: {},
+            cancel_requested: false,
         })
         .select("*")
         .single();
     if (error || !task) return internalFailure(error ?? new Error("task not created"));
 
-    try {
-        await enqueueDbJob(db, {
-            kind: CITATION_CHECK_JOB,
-            payload: { taskId: task.id },
-            dedupeKey: `${CITATION_CHECK_JOB}:${task.id}`,
-        });
-    } catch (queueError) {
-        await db.from("verification_tasks").update({ status: "failed", error: "not_queued", finished_at: new Date().toISOString() }).eq("id", task.id);
-        return internalFailure(queueError);
+    if (args.enqueue !== false) {
+        try {
+            await enqueueDbJob(db, {
+                kind: CITATION_CHECK_JOB,
+                payload: { taskId: task.id },
+                dedupeKey: `${CITATION_CHECK_JOB}:${task.id}`,
+            });
+        } catch (queueError) {
+            await db
+                .from("verification_tasks")
+                .update({ status: "failed", error: "not_queued", finished_at: new Date().toISOString() })
+                .eq("id", task.id);
+            return internalFailure(queueError);
+        }
     }
     return ok(task as VerificationTask);
 }
@@ -154,6 +197,7 @@ async function storeSnapshot(db: Db, snapshot: SnapshotInput): Promise<string> {
             content: snapshot.content,
             content_sha256: digest,
             block_offsets: snapshot.blockOffsets ?? null,
+            retrieved_at: new Date().toISOString(),
         })
         .select("id")
         .single();
@@ -162,18 +206,88 @@ async function storeSnapshot(db: Db, snapshot: SnapshotInput): Promise<string> {
 }
 
 async function finish(db: Db, taskId: string, status: VerificationTask["status"], error: string | null = null) {
+    const { data: rows } = await db.from("citation_checks").select("id").eq("task_id", taskId);
     await db
         .from("verification_tasks")
-        .update({ status, error, finished_at: new Date().toISOString() })
+        .update({
+            status,
+            error,
+            finished_at: new Date().toISOString(),
+            steps_used: ((rows as unknown[] | null) ?? []).length,
+        })
         .eq("id", taskId);
     return { outcome: status, ...(error ? { error } : {}) };
 }
 
 export type RunDeps = {
+    complete?: Complete;
     fetchWeb?: WebFetch;
-    /** Called before each step; a test uses it to stand in for a process dying. */
-    beforeStep?: (index: number, quote: CitationQuote) => void | Promise<void>;
+    searchWeb?: WebSearch;
+    lookupCase?: CaseLookup;
+    concurrency?: number;
+    /** Called before each citation; a test uses it to stand in for a process dying. */
+    beforeStep?: (citation: ExtractedCitation) => void | Promise<void>;
+    /** Called after each verdict is stored (the assistant's tool streams progress). */
+    onChecked?: (done: number, total: number) => void;
 };
+
+type Outcome = {
+    verdict: Verdict;
+    reason: string;
+    sourceKind: string;
+    snapshotId: string | null;
+    judgement: Judgement | null;
+    quote: ReturnType<typeof matchQuote> | null;
+};
+
+/** Locate, snapshot, quote-match and judge one citation. */
+async function checkOne(db: Db, ctx: SourceContext, complete: Complete, citation: ExtractedCitation): Promise<Outcome> {
+    const fallbackKind = citation.kind === "case" ? "case" : "web";
+    const located = await locateSource(ctx, citation);
+    if (!located.ok) {
+        return { verdict: located.verdict, reason: located.reason, sourceKind: fallbackKind, snapshotId: null, judgement: null, quote: null };
+    }
+    let chosen: { candidate: Candidate; judgement: Judgement } | null = null;
+    for (const candidate of located.candidates) {
+        const judgement = await judgeSupport(complete, {
+            citation,
+            source: candidate.snapshot.content,
+            sourceLabel: candidate.label,
+        });
+        if (!located.searched || judgement.identified) {
+            chosen = { candidate, judgement };
+            break;
+        }
+    }
+    if (!chosen) {
+        return {
+            verdict: citation.kind === "case" ? "not-found" : "unverifiable",
+            reason:
+                citation.kind === "case"
+                    ? "No such case was found in CourtListener, and no web search result was this case."
+                    : "A web search did not find this source.",
+            sourceKind: fallbackKind,
+            snapshotId: null,
+            judgement: null,
+            quote: null,
+        };
+    }
+    const { candidate, judgement } = chosen;
+    const quote = citation.quote ? matchQuote(candidate.snapshot.content, citation.quote) : null;
+    const verdict = verdictFor({ quoteFound: quote ? quote.found : null, judgement });
+    const reason =
+        quote && !quote.found && verdict !== "contradicted"
+            ? `The quoted words are not in the source. ${judgement.reason}`
+            : judgement.reason;
+    return {
+        verdict,
+        reason,
+        sourceKind: candidate.snapshot.sourceKind,
+        snapshotId: await storeSnapshot(db, candidate.snapshot),
+        judgement,
+        quote,
+    };
+}
 
 /** Run (or resume) one task to its end. Safe to call again after a crash. */
 export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {}): Promise<Record<string, unknown>> {
@@ -185,6 +299,9 @@ export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {
     }
     if (task.cancel_requested) return finish(db, task.id, "cancelled");
     if (!task.actor_user_id) return finish(db, task.id, "failed", "actor_gone");
+    if (task.kind !== "document_citation_check" || !task.document_id || !task.document_version_id) {
+        return finish(db, task.id, "failed", "unsupported_task");
+    }
 
     await db
         .from("verification_tasks")
@@ -193,61 +310,102 @@ export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {
 
     const { data: profile } = await db.from("user_profiles").select("email").eq("user_id", task.actor_user_id).maybeSingle();
     const actor = { userId: task.actor_user_id, email: (profile?.email as string | null | undefined) ?? null };
-    const access = await getAccessibleChat(db, { chatId: task.chat_id, userId: actor.userId, userEmail: actor.email });
+    const access = await getDocument(task.document_id, actor.userId, actor.email ?? undefined, db);
     if (!access.ok) return finish(db, task.id, "failed", "access_revoked");
 
-    const { data: message } = await db.from("chat_messages").select("citations").eq("id", task.message_id).maybeSingle();
-    const quotes = citationQuotes(message?.citations);
-    const read = createSourceReader({
+    const settings = deps.complete ? null : await getUserModelSettings(actor.userId, db);
+    const complete: Complete =
+        deps.complete ??
+        ((args) => completeText({ model: task.model ?? "", ...args, apiKeys: settings?.api_keys }));
+
+    let citations = task.checkpoint?.citations;
+    if (!citations) {
+        const { data: version } = await db
+            .from("document_versions")
+            .select("id, storage_path, pdf_storage_path, file_type, filename, deleted_at")
+            .eq("id", task.document_version_id)
+            .maybeSingle();
+        if (!version || version.deleted_at) return finish(db, task.id, "failed", "version_gone");
+        const fileType = ((version.file_type as string | null) ?? documentSuffix((version.filename as string | null) ?? ""))
+            .toLowerCase()
+            .replace(/^\./, "");
+        const read = await documentText(db, {
+            documentId: task.document_id,
+            versionId: task.document_version_id,
+            storagePath: version.storage_path as string | null,
+            pdfStoragePath: version.pdf_storage_path as string | null,
+            fileType,
+        });
+        if (!read) return finish(db, task.id, "failed", "unreadable_document");
+        citations = await extractCitations({ content: read.content, blocks: read.blockOffsets }, complete, {
+            concurrency: deps.concurrency,
+        });
+        await db.from("verification_tasks").update({ checkpoint: { citations } }).eq("id", task.id);
+    }
+
+    const { data: doneRows } = await db.from("citation_checks").select("citation_ref").eq("task_id", task.id);
+    const done = new Set(((doneRows as Array<{ citation_ref: number }> | null) ?? []).map((r) => r.citation_ref));
+    const limit = task.step_limit ?? DEFAULT_STEP_LIMIT;
+    const inLimit = citations.slice(0, limit);
+    const pending = inLimit.filter((c) => !done.has(c.index));
+
+    const ctx: SourceContext = {
         db,
         actor,
         taskId: task.id,
-        chatId: task.chat_id,
         projectId: task.project_id,
+        documentId: task.document_id,
         egress: await egressFor(db, task.project_id),
+        courtlistenerToken: settings?.api_keys?.courtlistener ?? null,
         fetchWeb: deps.fetchWeb,
-    });
-
-    let steps = task.steps_used ?? 0;
-    const stepLimit = task.step_limit ?? DEFAULT_STEP_LIMIT;
-    for (let index = task.checkpoint?.next ?? 0; index < quotes.length; index += 1) {
+        searchWeb: deps.searchWeb,
+        lookupCase: deps.lookupCase,
+    };
+    const envConcurrency = Number(process.env.CITATION_CHECK_CONCURRENCY);
+    const concurrency = deps.concurrency ?? (envConcurrency > 0 ? envConcurrency : DEFAULT_CONCURRENCY);
+    let cancelled = false;
+    let checked = done.size;
+    await mapPool(pending, concurrency, async (citation) => {
+        if (cancelled) return;
         const { data: flags } = await db.from("verification_tasks").select("cancel_requested").eq("id", task.id).maybeSingle();
-        if (flags?.cancel_requested) return finish(db, task.id, "cancelled");
-        if (steps >= stepLimit) return finish(db, task.id, "failed", "step_limit");
-
-        const quote = quotes[index];
-        await deps.beforeStep?.(index, quote);
-        const source = await read(quote);
-        const grade = gradeQuote(quote.quote, source);
-        const snapshotId = source.ok ? await storeSnapshot(db, source.snapshot) : null;
+        if (flags?.cancel_requested) {
+            cancelled = true;
+            return;
+        }
+        await deps.beforeStep?.(citation);
+        const outcome = await checkOne(db, ctx, complete, citation);
         const { error } = await db.from("citation_checks").upsert(
             {
                 task_id: task.id,
-                chat_id: task.chat_id,
-                message_id: task.message_id,
-                citation_ref: quote.citationRef,
-                quote_index: quote.quoteIndex,
-                source_kind: quote.sourceKind,
-                quote: quote.quote,
-                verdict: grade.verdict,
-                reason: grade.reason,
-                snapshot_id: snapshotId,
-                block_id: grade.blockId,
-                start_char: grade.startChar,
-                end_char: grade.endChar,
-                excerpt: grade.excerpt,
+                document_id: task.document_id,
+                document_version_id: task.document_version_id,
+                citation_ref: citation.index,
+                quote_index: 0,
+                source_kind: outcome.sourceKind,
+                citation_text: citation.citation,
+                cited_block_id: citation.blockId,
+                proposition: citation.proposition,
+                quote: citation.quote,
+                quote_found: outcome.quote ? outcome.quote.found : null,
+                verdict: outcome.verdict,
+                support: outcome.judgement?.support ?? null,
+                reason: outcome.reason,
+                support_reason: outcome.judgement?.reason ?? null,
+                snapshot_id: outcome.snapshotId,
+                block_id: null,
+                start_char: outcome.quote?.startChar ?? null,
+                end_char: outcome.quote?.endChar ?? null,
+                excerpt: outcome.judgement?.evidence ?? outcome.quote?.excerpt ?? null,
                 checked_at: new Date().toISOString(),
             },
             { onConflict: "task_id,citation_ref,quote_index" },
         );
         if (error) throw error;
-        steps += 1;
-        await db
-            .from("verification_tasks")
-            .update({ steps_used: steps, checkpoint: { next: index + 1 } })
-            .eq("id", task.id);
-    }
-    return finish(db, task.id, "completed");
+        checked += 1;
+        deps.onChecked?.(checked, inLimit.length);
+    });
+    if (cancelled) return finish(db, task.id, "cancelled");
+    return finish(db, task.id, "completed", citations.length > limit ? "step_limit" : null);
 }
 
 /** The queue's entry point (jobs/registry.ts). */
@@ -257,85 +415,118 @@ export async function handleCitationCheckJob(db: Db, job: DbJob): Promise<Record
     return runCitationCheck(db, taskId);
 }
 
-/** The latest check of a message and its verdicts, for anyone who can read the chat. */
+/**
+ * The latest check of a document (of one version, when named) and its
+ * verdicts, for anyone who can read the document. `current_version_id` lets a
+ * reader see that the document has changed since it was checked.
+ */
 export async function getCitationChecks(
     db: Db,
-    args: Actor & { chatId: string; messageId: string },
-): Promise<ServiceResult<{ task: VerificationTask | null; checks: CitationCheck[] }>> {
-    const access = await getAccessibleChat(db, { chatId: args.chatId, userId: args.userId, userEmail: args.userEmail });
-    if (!access.ok) return failure("not_found", "Chat not found");
-    const { data: tasks } = await db
+    args: Actor & { documentId: string; versionId?: string | null },
+): Promise<
+    ServiceResult<{ task: VerificationTask | null; checks: CitationCheck[]; current_version_id: string | null }>
+> {
+    const access = await getDocument(args.documentId, args.userId, args.userEmail ?? undefined, db);
+    if (!access.ok) return failure("not_found", "Document not found");
+    const currentVersionId = (access.doc.current_version_id as string | null | undefined) ?? null;
+    let query = db
         .from("verification_tasks")
         .select("*")
-        .eq("chat_id", args.chatId)
-        .eq("message_id", args.messageId)
-        .order("created_at", { ascending: false })
-        .limit(1);
+        .eq("kind", "document_citation_check")
+        .eq("document_id", args.documentId);
+    if (args.versionId) query = query.eq("document_version_id", args.versionId);
+    const { data: tasks } = await query.order("created_at", { ascending: false }).limit(1);
     const task = ((tasks as VerificationTask[] | null) ?? [])[0] ?? null;
-    if (!task) return ok({ task: null, checks: [] });
+    if (!task) return ok({ task: null, checks: [], current_version_id: currentVersionId });
     const { data: checks } = await db
         .from("citation_checks")
         .select("*")
         .eq("task_id", task.id)
-        .order("citation_ref", { ascending: true })
-        .order("quote_index", { ascending: true });
-    return ok({ task, checks: (checks as CitationCheck[] | null) ?? [] });
+        .order("citation_ref", { ascending: true });
+    return ok({ task, checks: (checks as CitationCheck[] | null) ?? [], current_version_id: currentVersionId });
 }
 
 export type Recheck = {
     check_id: string;
-    stored_verdict: Verdict;
-    /** The verdict regraded from the stored snapshot; null when there is none. */
-    verdict: Verdict | null;
     /** The stored text still hashes to the stored digest. */
     hash_ok: boolean | null;
+    /** The quote matched against the stored text again; null when nothing is quoted. */
+    quote_found: boolean | null;
     same: boolean;
     content_sha256: string | null;
 };
 
 /**
- * Re-grade a stored verdict from its snapshot alone: no source is read again.
- * The snapshot's text must still hash to its stored digest; a third person
- * who gets the same verdict from the same text has re-checked the citation.
+ * Re-check a stored verdict from its snapshot alone: no source is read again.
+ * The snapshot's text must still hash to its stored digest, and a quoted
+ * passage must match it as it did. The judge's reading stays on the row with
+ * its excerpt, which is checked to be in the same text.
  */
 export async function recheckCitation(db: Db, args: Actor & { checkId: string }): Promise<ServiceResult<Recheck>> {
     const { data: check } = await db.from("citation_checks").select("*").eq("id", args.checkId).maybeSingle();
-    if (!check) return failure("not_found", "Check not found");
-    const access = await getAccessibleChat(db, { chatId: check.chat_id as string, userId: args.userId, userEmail: args.userEmail });
+    if (!check?.document_id) return failure("not_found", "Check not found");
+    const access = await getDocument(check.document_id as string, args.userId, args.userEmail ?? undefined, db);
     if (!access.ok) return failure("not_found", "Check not found");
     const stored = check as CitationCheck;
     if (!stored.snapshot_id) {
-        return ok({ check_id: stored.id, stored_verdict: stored.verdict, verdict: null, hash_ok: null, same: false, content_sha256: null });
+        return ok({ check_id: stored.id, hash_ok: null, quote_found: null, same: false, content_sha256: null });
     }
     const { data: snapshot } = await db.from("citation_snapshots").select("*").eq("id", stored.snapshot_id).maybeSingle();
     if (!snapshot) return failure("not_found", "Snapshot not found");
     const content = snapshot.content as string;
     const hashOk = sha256(content) === snapshot.content_sha256;
-    const grade = gradeQuote(stored.quote, {
-        ok: true,
-        snapshot: {
-            sourceKind: snapshot.source_kind as SnapshotInput["sourceKind"],
-            content,
-            blockOffsets: (snapshot.block_offsets as BlockOffset[] | null) ?? null,
-        },
-    });
+    const quoteFound = stored.quote ? matchQuote(content, stored.quote).found : null;
+    const excerptOk = stored.excerpt ? matchQuote(content, stored.excerpt).found : true;
     return ok({
         check_id: stored.id,
-        stored_verdict: stored.verdict,
-        verdict: grade.verdict,
         hash_ok: hashOk,
-        same: hashOk && grade.verdict === stored.verdict && grade.blockId === stored.block_id,
+        quote_found: quoteFound,
+        same: hashOk && quoteFound === stored.quote_found && excerptOk,
         content_sha256: snapshot.content_sha256 as string,
     });
 }
 
-/** Ask a queued or running task to stop; it stops before its next step. */
+/** Ask a queued or running task to stop; it stops before its next citation. */
 export async function cancelCitationCheck(db: Db, args: Actor & { taskId: string }): Promise<ServiceResult<{ cancelled: boolean }>> {
-    const { data: task } = await db.from("verification_tasks").select("id, chat_id, status").eq("id", args.taskId).maybeSingle();
-    if (!task) return failure("not_found", "Task not found");
-    const access = await getAccessibleChat(db, { chatId: task.chat_id as string, userId: args.userId, userEmail: args.userEmail });
+    const { data: task } = await db
+        .from("verification_tasks")
+        .select("id, document_id, status")
+        .eq("id", args.taskId)
+        .maybeSingle();
+    if (!task?.document_id) return failure("not_found", "Task not found");
+    const access = await getDocument(task.document_id as string, args.userId, args.userEmail ?? undefined, db);
     if (!access.ok) return failure("not_found", "Task not found");
     if (task.status !== "queued" && task.status !== "running") return ok({ cancelled: false });
     await db.from("verification_tasks").update({ cancel_requested: true }).eq("id", task.id);
     return ok({ cancelled: true });
+}
+
+/** A short account of a finished check for the assistant to relay. */
+export async function summarizeCitationCheck(db: Db, taskId: string) {
+    const { data: task } = await db.from("verification_tasks").select("status, error").eq("id", taskId).maybeSingle();
+    const { data: rows } = await db
+        .from("citation_checks")
+        .select("citation_ref, citation_text, verdict, reason, proposition, excerpt, cited_block_id")
+        .eq("task_id", taskId)
+        .order("citation_ref", { ascending: true });
+    const checks = (rows as Array<Record<string, unknown>> | null) ?? [];
+    const counts: Record<string, number> = {};
+    for (const row of checks) counts[row.verdict as string] = (counts[row.verdict as string] ?? 0) + 1;
+    return {
+        task_id: taskId,
+        status: (task?.status as string | undefined) ?? "missing",
+        error: (task?.error as string | null | undefined) ?? null,
+        citations_checked: checks.length,
+        counts,
+        flagged: checks
+            .filter((row) => row.verdict !== "exists-and-matches")
+            .map((row) => ({
+                citation: row.citation_text,
+                verdict: row.verdict,
+                reason: row.reason,
+                document_says: row.proposition,
+                source_excerpt: row.excerpt,
+                block_id: row.cited_block_id,
+            })),
+    };
 }

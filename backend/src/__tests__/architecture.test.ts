@@ -66,7 +66,9 @@ function importsOf(file: string): string[] {
     const spec = match[1] ?? match[2];
     if (!spec) continue;
     if (spec.startsWith(".")) {
-      const abs = resolve(SRC, dirname(file), spec);
+      // A dynamic import() names the emitted file (`x.service.js`); it is
+      // the same module as the extensionless static form.
+      const abs = resolve(SRC, dirname(file), spec.replace(/\.js$/, ""));
       specs.push(relative(SRC, abs).split(sep).join("/"));
     } else {
       specs.push(spec);

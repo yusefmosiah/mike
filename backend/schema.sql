@@ -7085,10 +7085,11 @@ alter table public.projects
 
 create table if not exists public.verification_tasks (
   id uuid primary key default gen_random_uuid(),
-  kind text not null default 'citation_check' check (kind in ('citation_check')),
-  chat_id uuid not null references public.chats(id) on delete cascade,
-  message_id uuid not null references public.chat_messages(id) on delete cascade,
-  producer_invocation_id uuid not null,
+  kind text not null default 'citation_check'
+    check (kind in ('citation_check', 'document_citation_check')),
+  chat_id uuid references public.chats(id) on delete cascade,
+  message_id uuid references public.chat_messages(id) on delete cascade,
+  producer_invocation_id uuid,
   actor_user_id uuid references auth.users(id) on delete set null,
   project_id uuid references public.projects(id) on delete set null,
   status text not null default 'queued'
@@ -7101,16 +7102,28 @@ create table if not exists public.verification_tasks (
   created_at timestamptz not null default now(),
   started_at timestamptz,
   finished_at timestamptz,
+  -- The checked document version (document_citation_check).
+  document_id uuid references public.documents(id) on delete cascade,
+  document_version_id uuid references public.document_versions(id) on delete cascade,
+  -- The assistant turn that asked for the check, when one did.
+  invoked_by uuid,
+  model text,
   -- The checker is never the producer.
-  constraint verification_tasks_not_self_graded check (id <> producer_invocation_id)
+  constraint verification_tasks_not_self_graded check (id <> producer_invocation_id),
+  constraint verification_tasks_target_check check (
+    (kind = 'citation_check' and message_id is not null and producer_invocation_id is not null)
+    or (kind = 'document_citation_check' and document_id is not null and document_version_id is not null)
+  )
 );
 
 create index if not exists verification_tasks_message_idx
   on public.verification_tasks(message_id, created_at desc);
+create index if not exists verification_tasks_document_idx
+  on public.verification_tasks(document_id, created_at desc);
 
 create table if not exists public.citation_snapshots (
   id uuid primary key default gen_random_uuid(),
-  source_kind text not null check (source_kind in ('document', 'web', 'connector')),
+  source_kind text not null check (source_kind in ('document', 'web', 'case', 'connector')),
   document_id uuid references public.documents(id) on delete set null,
   document_version_id uuid references public.document_versions(id) on delete set null,
   url text,
@@ -7129,14 +7142,17 @@ create index if not exists citation_snapshots_sha_idx
 create table if not exists public.citation_checks (
   id uuid primary key default gen_random_uuid(),
   task_id uuid not null references public.verification_tasks(id) on delete cascade,
-  chat_id uuid not null references public.chats(id) on delete cascade,
-  message_id uuid not null references public.chat_messages(id) on delete cascade,
+  chat_id uuid references public.chats(id) on delete cascade,
+  message_id uuid references public.chat_messages(id) on delete cascade,
   citation_ref integer not null,
   quote_index integer not null,
   source_kind text not null check (source_kind in ('document', 'web', 'case', 'connector')),
-  quote text not null,
+  quote text,
   verdict text not null
-    check (verdict in ('exists-and-matches', 'not-found', 'quote-mismatch', 'unverifiable')),
+    check (verdict in (
+      'exists-and-matches', 'not-found', 'quote-mismatch', 'unverifiable',
+      'unsupported', 'contradicted'
+    )),
   reason text,
   snapshot_id uuid references public.citation_snapshots(id) on delete restrict,
   block_id text,
@@ -7144,11 +7160,26 @@ create table if not exists public.citation_checks (
   end_char integer,
   excerpt text,
   checked_at timestamptz not null default now(),
+  -- Document checks: the checked version, where the citation sits in it (a
+  -- stable block id), the citation as written, what the document says the
+  -- authority stands for, and whether the source supports that.
+  document_id uuid references public.documents(id) on delete cascade,
+  document_version_id uuid references public.document_versions(id) on delete cascade,
+  cited_block_id text,
+  citation_text text,
+  proposition text,
+  support text
+    check (support is null or support in ('supports', 'partial', 'does-not-support', 'contradicts', 'unclear')),
+  support_reason text,
+  -- Whether the source contains the words the document quotes (null: no quote).
+  quote_found boolean,
   unique (task_id, citation_ref, quote_index)
 );
 
 create index if not exists citation_checks_message_idx
   on public.citation_checks(message_id, checked_at desc);
+create index if not exists citation_checks_document_idx
+  on public.citation_checks(document_id, checked_at desc);
 
 alter table public.verification_tasks enable row level security;
 alter table public.citation_snapshots enable row level security;

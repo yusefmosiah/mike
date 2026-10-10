@@ -8,8 +8,8 @@ import { TextButtonUI } from "@/shared/ui/TextButtonUI";
 import { TextSlabUI } from "@/shared/ui/TextSlabUI";
 import type { PanelDocument, PanelDocumentQuote } from "../shared/types";
 import {
-    CitationVerificationBadge,
     quoteVerificationState,
+    UNLOCATED_QUOTE_TITLE,
     type CitationVerificationDisplayState,
 } from "./message/citationVerification";
 import { ContextNumberBadge } from "./ContextNumberBadge";
@@ -132,6 +132,11 @@ export function CitationQuotesSection({
                                             key={quote.id}
                                             type="button"
                                             disabled={isUnverified}
+                                            title={
+                                                isUnverified
+                                                    ? UNLOCATED_QUOTE_TITLE
+                                                    : undefined
+                                            }
                                             onClick={() =>
                                                 !isUnverified &&
                                                 onIndexChange?.(index)
@@ -141,7 +146,7 @@ export function CitationQuotesSection({
                                                 !isUnverified
                                                     ? "!bg-blue-100 !text-blue-900 font-medium dark:!bg-blue-950 dark:!text-white"
                                                     : isUnverified
-                                                      ? "cursor-not-allowed !bg-red-100/85 !text-red-800 dark:!bg-red-950 dark:!text-white"
+                                                      ? "cursor-not-allowed bg-gray-100 text-gray-400"
                                                       : "bg-gray-200/80 text-gray-800 hover:bg-gray-200 hover:text-gray-950"
                                             }`}
                                         >
@@ -266,14 +271,10 @@ function QuoteItem({
                 </div>
             </TextSlabUI>
             <div className="mt-2 flex items-center justify-between gap-2">
-                {isUnverified ? (
-                    <CitationVerificationBadge state="unverified" />
-                ) : (
-                    <CiteQuoteButton
-                        quoteText={quote.quote}
-                        quoteLabel={quoteLabel}
-                    />
-                )}
+                <CiteQuoteButton
+                    quoteText={quote.quote}
+                    quoteLabel={quoteLabel}
+                />
                 {onClose && (
                     <TextButtonUI size="xs" title="Close citation" onClick={onClose} className="ml-auto">
                         Close
@@ -283,6 +284,7 @@ function QuoteItem({
                     tone="black"
                     size="xs"
                     disabled={isUnverified}
+                    title={isUnverified ? UNLOCATED_QUOTE_TITLE : undefined}
                     onClick={onView}
                 >
                     View

@@ -13,8 +13,7 @@ import { CitationPillUI } from "@/shared/ui/CitationPillUI";
 import { withoutMarkdownNode } from "./messageStyles";
 import { citationTooltip } from "./CitationSources";
 import {
-    citationVerificationAriaLabel,
-    citationVerificationPillClassName,
+    citationAriaLabel,
 } from "./citationVerification";
 import { internalCaseHref } from "./citationUtils";
 
@@ -199,10 +198,8 @@ export function MarkdownContent({
                                             onCitationClick?.(annotation)
                                         }
                                         data-citation-ref={annotation.ref}
-                                        className={`${citationVerificationPillClassName(annotation)} mx-0.5 align-super`}
-                                        aria-label={citationVerificationAriaLabel(
-                                            annotation,
-                                        )}
+                                        className="mx-0.5 align-super"
+                                        aria-label={citationAriaLabel(annotation)}
                                         title={tooltipText}
                                     >
                                         {annotation.ref}

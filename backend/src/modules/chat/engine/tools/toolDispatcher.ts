@@ -306,6 +306,8 @@ export async function runToolCalls(
      * edit_document runs (direct grants are keyed by email).
      */
     userEmail?: string | null;
+    /** The turn's model, which check_citations' checker uses by default. */
+    model?: string | null;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -1463,6 +1465,40 @@ export async function runToolCalls(
           }),
         });
       }
+    } else if (tc.function.name === "check_citations" && docIndex) {
+      const rawDocId = args.doc_id as string;
+      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const indexed = docIndex[docId];
+      let content: Record<string, unknown>;
+      if (!indexed) {
+        content = { error: `Document '${docId}' not found in this chat's attachments.` };
+      } else {
+        // Loaded on use: the citations module reads quote matching from the
+        // chat facade, so a static import here would be a load-order cycle.
+        const citations = await import("../../../citations/citations.service.js");
+        const started = await citations.startCitationCheck(db, {
+          userId,
+          userEmail: options.userEmail ?? null,
+          documentId: indexed.document_id,
+          versionId: indexed.version_id ?? null,
+          model: options.model ?? null,
+          enqueue: false,
+        });
+        if (!started.ok) {
+          content = { error: "detail" in started ? started.detail : "The citation check could not be started." };
+        } else {
+          // A long check streams comments so the connection stays open.
+          await citations.runCitationCheck(db, started.data.id, {
+            onChecked: (done, total) => write(`: citation-check ${done}/${total}\n\n`),
+          });
+          content = await citations.summarizeCitationCheck(db, started.data.id);
+        }
+      }
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(content),
+      });
     } else if (tc.function.name === "edit_document" && docIndex) {
       const rawDocId = args.doc_id as string;
       const editsRaw = args.edits as unknown[] | undefined;

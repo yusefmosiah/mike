@@ -6,9 +6,7 @@ import type { Citation } from "../../shared/types";
 import { CitationPillUI } from "@/shared/ui/CitationPillUI";
 import { RESPONSE_GLASS_SURFACE } from "./messageStyles";
 import {
-    citationVerificationAriaLabel,
-    citationVerificationDescription,
-    citationVerificationPillClassName,
+    citationAriaLabel,
 } from "./citationVerification";
 
 type CitationSourceRow = {
@@ -38,9 +36,7 @@ function citationSourceLabel(annotation: Citation): string {
 export function citationTooltip(annotation: Citation): string {
     const locator = formatCitationPage(annotation);
     const quote = displayCitationQuote(annotation);
-    const source = locator ? `${locator}: "${quote}"` : `"${quote}"`;
-    const verification = citationVerificationDescription(annotation);
-    return verification ? `${source} — ${verification}` : source;
+    return locator ? `${locator}: "${quote}"` : `"${quote}"`;
 }
 
 function CitationSourceIcon({ annotation }: { annotation: Citation }) {
@@ -208,10 +204,7 @@ export function CitationsBlock({
                                                         annotation,
                                                     )
                                                 }
-                                                className={citationVerificationPillClassName(
-                                                    annotation,
-                                                )}
-                                                aria-label={citationVerificationAriaLabel(
+                                                aria-label={citationAriaLabel(
                                                     annotation,
                                                 )}
                                                 title={citationTooltip(
