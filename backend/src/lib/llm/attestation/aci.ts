@@ -373,20 +373,46 @@ export function aciFetch(
     const receiptId = response.headers.get("x-receipt-id");
     if (!sentText || !receiptId || !response.body) return response;
 
-    // Hash the body exactly as it streams to the caller, then check the receipt.
+    // Hash the body exactly as it streams to the caller, then check the
+    // receipt. A client may stop reading at the stream's sentinel and cancel;
+    // the rest is then drained here so the hash covers every byte.
     const chunks: Buffer[] = [];
-    const tap = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        chunks.push(Buffer.from(chunk));
-        controller.enqueue(chunk);
+    const reader = response.body.getReader();
+    let checked = false;
+    const check = () => {
+      if (checked) return;
+      checked = true;
+      void fetchReceipt(origin, receiptId, headers.get("authorization"), agent)
+        .then((receipt) => onReceipt(verifyAciReceipt(receipt, identity, Buffer.from(sentText), Buffer.concat(chunks))))
+        .catch(() => onReceipt({ ok: false, reason: "receipt could not be fetched" }));
+    };
+    const drain = async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return check();
+        chunks.push(Buffer.from(value));
+      }
+    };
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            check();
+            return;
+          }
+          chunks.push(Buffer.from(value));
+          controller.enqueue(value);
+        } catch (error) {
+          controller.error(error);
+        }
       },
-      flush() {
-        void fetchReceipt(origin, receiptId, headers.get("authorization"), agent)
-          .then((receipt) => onReceipt(verifyAciReceipt(receipt, identity, Buffer.from(sentText), Buffer.concat(chunks))))
-          .catch(() => onReceipt({ ok: false, reason: "receipt could not be fetched" }));
+      cancel() {
+        void drain().catch(() => onReceipt({ ok: false, reason: "response could not be read to the end" }));
       },
     });
-    return new Response(response.body.pipeThrough(tap), {
+    return new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers: response.headers,

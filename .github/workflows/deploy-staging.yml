@@ -55,7 +55,9 @@ jobs:
       - name: Check the public site
         run: |
           set -euo pipefail
-          for path in / /api/health /gotrue/health; do
+          # The site is behind a shared password (infra/node-a/gate.nix);
+          # these paths answer without it.
+          for path in /__gate /api/health /gotrue/health; do
             code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://choir-ip.com$path")
             echo "$path $code"
             test "$code" = 200
