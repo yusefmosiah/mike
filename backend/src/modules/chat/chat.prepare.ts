@@ -25,6 +25,7 @@ import { beginMemoryConversationTurn, releaseMemoryConversationTurn, type Memory
 import { getAccessibleChat, validateAccessibleProjectId } from "./chat.access";
 import { createTurnAdmission, type TurnClaim } from "../../lib/turnClaims";
 import { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
+import { workstationHostOf } from "./chat.codeApprovals";
 
 // ---------------------------------------------------------------------------
 // Pre-stream preparation for POST /chat (streaming)
@@ -93,6 +94,8 @@ export type PreparedChatStream = {
     turnClaim: TurnClaim | null;
     /** The standing the sender held when the turn was admitted. */
     actorRole: string | null;
+    /** Whose workstation runs this thread's code: the person who started it. */
+    workstationUserId: string | null;
 };
 
 type PrepareChatStreamArgs = {
@@ -195,6 +198,8 @@ async function prepareAdmittedChatStream(
     // note in modules/project-chat/projectChat.service.ts — this is the same
     // partition on the route that serves standalone and project chats alike.
     let allowDocumentMutation = true;
+    // A new chat is the sender's; an existing one runs in its starter's VM.
+    let workstationUserId: string | null = userId;
 
     if (chatId) {
         const access = await getAccessibleChat(db, {
@@ -229,6 +234,7 @@ async function prepareAdmittedChatStream(
             };
         }
         resolvedProjectId = existingProjectId;
+        workstationUserId = workstationHostOf(existing);
         // A database error in the audience check must not escape as a
         // rejected promise: memory bookkeeping never decides whether the
         // user gets an answer, and an unhandled rejection here used to
@@ -576,6 +582,7 @@ async function prepareAdmittedChatStream(
                 selectedModel,
                 selectedReasoningLevel,
                 nonce,
+                workstationUserId,
             },
         };
     } catch (error) {

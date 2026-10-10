@@ -323,6 +323,11 @@ export async function runToolCalls(
     model?: string | null;
     /** The user's workstation VM, resolved once per turn (lib/workstation); run_command needs it. */
     workstation?: WorkstationTarget | null;
+    /**
+     * Runs before a command in someone else's workstation (a guest in a
+     * shared thread): resolves with why it may not run, or null when it may.
+     */
+    workstationGate?: (callId: string, summary: string) => Promise<string | null>;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -1739,6 +1744,13 @@ export async function runToolCalls(
           content: JSON.stringify({ error: "No workstation is configured for this user." }),
         });
       } else {
+        const refusal = options.workstationGate
+          ? await options.workstationGate(tc.id, String(args.command ?? ""))
+          : null;
+        if (refusal) {
+          toolResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: refusal }) });
+          continue;
+        }
         const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
         await snapshotOncePerTurn(turnEditState, target.snapshot);
         const result = await runInWorkstation(target, {

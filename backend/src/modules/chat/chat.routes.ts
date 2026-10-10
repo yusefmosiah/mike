@@ -70,6 +70,10 @@ import {
     getAccessibleChat,
     getChatMessages,
     threadPresence,
+    codeApprovalsForViewer,
+    decideCodeApproval,
+    revokeThreadCodeApproval,
+    type CodeApprovalDecision,
     getChatSubagentTranscript,
     grantChatAccess,
     listChatGrants,
@@ -190,7 +194,72 @@ chatRouter.get("/:chatId", requireAuth, asyncRoute(async (req, res) => {
         // more than one person carries.
         authors: presence.authors,
         generating: presence.generating,
+        // For the thread's starter only: other members' requests to run code
+        // in their workstation, and the members allowed for the whole thread.
+        code_approvals: await codeApprovalsForViewer(db, chatId, userId),
     });
+}));
+
+const CODE_APPROVAL_DECISIONS = new Set<CodeApprovalDecision>(["once", "thread", "denied"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// GET /chat/:chatId/code-approvals
+// What the chat read's code_approvals carries, polled on its own while a
+// member's turn runs: empty for anyone but the thread's starter.
+chatRouter.get("/:chatId/code-approvals", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId } = req.params;
+    const db = createDb();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+    res.json({ approvals: await codeApprovalsForViewer(db, chatId, userId) });
+}));
+
+// POST /chat/:chatId/code-approvals/:requestId  { decision }
+// The thread's starter answers a member's request to run code in their
+// workstation: allow it once, allow that member for the rest of the thread,
+// or refuse. Only the starter named on the request can answer it.
+chatRouter.post("/:chatId/code-approvals/:requestId", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId, requestId } = req.params;
+    if (!UUID.test(requestId))
+        return void res.status(404).json({ detail: "Request not found" });
+    const decision = (req.body as { decision?: unknown } | undefined)?.decision;
+    if (typeof decision !== "string" || !CODE_APPROVAL_DECISIONS.has(decision as CodeApprovalDecision))
+        return void res.status(400).json({ detail: "decision must be once, thread or denied" });
+    const db = createDb();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+    const result = await decideCodeApproval(db, {
+        chatId,
+        requestId,
+        hostUserId: userId,
+        decision: decision as CodeApprovalDecision,
+    });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// DELETE /chat/:chatId/code-approvals/guests/:guestUserId
+// The thread's starter withdraws a member's approval for the rest of the
+// thread; that member's next command asks again.
+chatRouter.delete("/:chatId/code-approvals/guests/:guestUserId", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId, guestUserId } = req.params;
+    if (!UUID.test(guestUserId))
+        return void res.status(404).json({ detail: "Person not found" });
+    const db = createDb();
+    const access = await getAccessibleChat(db, { chatId, userId, userEmail });
+    if (!access.ok)
+        return void res.status(404).json({ detail: "Chat not found" });
+    const result = await revokeThreadCodeApproval(db, { chatId, hostUserId: userId, guestUserId });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
 }));
 
 // GET /chat/:chatId/subagents/:childId

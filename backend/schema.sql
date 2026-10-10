@@ -7972,6 +7972,28 @@ alter table public.workstation_assignments enable row level security;
 revoke all on table public.workstation_assignments from public, anon, authenticated;
 grant select, insert, update, delete on public.workstation_assignments to service_role;
 
+-- Guests running code in the host's workstation (20261010_09): a thread's
+-- code runs in its starter's VM, and another member's command waits for the
+-- starter to allow it once or for the rest of the thread.
+create table if not exists public.chat_code_approvals (
+  id uuid primary key default gen_random_uuid(),
+  chat_id uuid not null references public.chats(id) on delete cascade,
+  host_user_id uuid not null references auth.users(id) on delete cascade,
+  guest_user_id uuid not null references auth.users(id) on delete cascade,
+  summary text not null default '' check (char_length(summary) <= 2000),
+  status text not null default 'pending'
+    check (status in ('pending', 'once', 'thread', 'denied', 'expired', 'revoked')),
+  created_at timestamptz not null default now(),
+  decided_at timestamptz
+);
+
+create index if not exists chat_code_approvals_chat_idx
+  on public.chat_code_approvals (chat_id, status);
+
+alter table public.chat_code_approvals enable row level security;
+revoke all on table public.chat_code_approvals from public, anon, authenticated;
+grant select, insert, update, delete on public.chat_code_approvals to service_role;
+
 -- ---------------------------------------------------------------------------
 -- Migration ledger (backend/migrations/20261010_06_schema_migrations.sql)
 -- ---------------------------------------------------------------------------
@@ -8110,5 +8132,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_05_document_citation_checks.sql'),
   ('20261010_06_schema_migrations.sql'),
   ('20261010_07_workstation_assignments.sql'),
-  ('20261010_08_temporary_workstations.sql')
+  ('20261010_08_temporary_workstations.sql'),
+  ('20261010_09_chat_code_approvals.sql')
 on conflict (filename) do nothing;

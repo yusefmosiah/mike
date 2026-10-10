@@ -43,6 +43,7 @@ import {
     type AssistantEvent,
     type ChatDocumentReference,
     type ChatWriteResult,
+    guestCodeApprovalFor,
 } from "../chat/chat.service";
 import type { PreparedProjectChatStream } from "./projectChat.service";
 
@@ -187,6 +188,7 @@ export async function driveProjectChatTurn(
         nonce,
         approvalEvents,
         autoMode: turnAutoMode,
+        workstationUserId,
     } = prepared;
     // Mutable: the title-generation flow below reassigns it once a title
     // has been persisted.
@@ -312,6 +314,12 @@ export async function driveProjectChatTurn(
                 includeSubagents: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
+                workstationUserId,
+                guestCode: await guestCodeApprovalFor(db, {
+                    chatId,
+                    hostUserId: workstationUserId,
+                    guestUserId: userId,
+                }),
                 memoryProjectId: projectId,
                 memorySharedAudience,
                 nonce,

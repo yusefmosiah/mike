@@ -390,9 +390,25 @@ export type AssistantEvent =
     }
   | SubagentEvent
   | CodeCellEvent
+  | CodeApprovalEvent
   | TurnUsageEvent;
 
 export type AssistantErrorCode = "invalid_api_key";
+
+/**
+ * A guest's command waiting for the thread's host (the person who started
+ * it, whose workstation runs the thread's code). Streamed while it waits and
+ * again with the answer; the stored copy is the last one.
+ */
+export type CodeApprovalEvent = {
+  type: "code_approval";
+  /** The run_command tool call that is waiting. */
+  call_id: string;
+  status: "waiting" | "allowed" | "denied" | "expired";
+  host_name: string | null;
+  /** The command, cut at 2,000 characters. */
+  summary: string;
+};
 
 /**
  * One run_python cell (code mode, Mission 11). Streamed when it starts and

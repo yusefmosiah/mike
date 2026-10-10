@@ -102,6 +102,24 @@ function isConnectorApprovalItem(
   );
 }
 
+const CODE_APPROVAL_STATUSES = new Set(["waiting", "allowed", "denied", "expired"]);
+
+/** A `code_approval` frame, or null when its call id or status is missing. */
+function codeApprovalEventFrom(
+  data: Record<string, unknown>,
+): Extract<AssistantEvent, { type: "code_approval" }> | null {
+  const callId = typeof data.call_id === "string" ? data.call_id : "";
+  const status = typeof data.status === "string" ? data.status : "";
+  if (!callId || !CODE_APPROVAL_STATUSES.has(status)) return null;
+  return {
+    type: "code_approval",
+    call_id: callId,
+    status: status as Extract<AssistantEvent, { type: "code_approval" }>["status"],
+    host_name: typeof data.host_name === "string" ? data.host_name : null,
+    summary: typeof data.summary === "string" ? data.summary : "",
+  };
+}
+
 const CODE_CELL_STATUSES = new Set(["running", "ok", "failed"]);
 
 /** A `code_cell` frame, or null when its call id, code or status is missing. */
@@ -737,6 +755,18 @@ export async function consumeAssistantTurnStream(
           // Sent when the cell starts and again when it ends: one line.
           const updated = updateMatchingEvent(
             (e) => e.type === "code_cell" && e.call_id === event.call_id,
+            () => event,
+          );
+          if (!updated) pushEvent(event);
+          continue;
+        }
+
+        if (data.type === "code_approval") {
+          const event = codeApprovalEventFrom(data);
+          if (!event) continue;
+          // Sent while it waits and again with the answer: one line.
+          const updated = updateMatchingEvent(
+            (e) => e.type === "code_approval" && e.call_id === event.call_id,
             () => event,
           );
           if (!updated) pushEvent(event);

@@ -42,3 +42,26 @@ it("runs the command in the user's workstation and returns its output", async ()
   );
   expect(content(result)).toEqual({ exit_code: 0, stdout: "4\n", stderr: "", timed_out: false, truncated: false, duration_ms: 12 });
 });
+
+it("runs a guest's command only once the host's gate lets it", async () => {
+  vi.stubEnv("WORKSTATION_USER_IDS", "u1");
+  vi.stubEnv("WORKSTATION_SSH_HOST", "127.0.0.1");
+  vi.stubEnv("WORKSTATION_SSH_PORT", "2222");
+  vi.stubEnv("WORKSTATION_SSH_IDENTITY_FILE", "/keys/dev");
+  run.mockResolvedValue({ ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false, timedOut: false, durationMs: 1 });
+  const guarded = (gate: (callId: string, summary: string) => Promise<string | null>) =>
+    runToolCalls(call({ command: "rm -rf build" }), new Map(), "guest", {} as never, vi.fn(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      workstation: workstationFor("u1"),
+      workstationGate: gate,
+    });
+
+  const refusing = vi.fn(async () => "The host did not allow running this command.");
+  const refused = await guarded(refusing);
+  expect(refusing).toHaveBeenCalledWith("c1", "rm -rf build");
+  expect(content(refused)).toEqual({ error: "The host did not allow running this command." });
+  expect(run).not.toHaveBeenCalled();
+
+  const allowed = await guarded(async () => null);
+  expect(content(allowed)).toMatchObject({ exit_code: 0 });
+  expect(run).toHaveBeenCalledTimes(1);
+});

@@ -8,6 +8,15 @@ export {
 export { getChatMessages } from "./chat.messages";
 export { verifyQuoteAgainstSource } from "./engine/verifyCitations";
 export { threadPresence, type ThreadPresence } from "./chat.presence";
+export {
+    codeApprovalsForViewer,
+    decideCodeApproval,
+    guestCodeApprovalFor,
+    revokeThreadCodeApproval,
+    workstationHostOf,
+    type CodeApprovalDecision,
+    type CodeApprovalView,
+} from "./chat.codeApprovals";
 export { linkedPrompt, resolveLeaf, setLeaf, walkActivePath } from "./chat.tree";
 export { isMessageId } from "./chat.branches";
 export {

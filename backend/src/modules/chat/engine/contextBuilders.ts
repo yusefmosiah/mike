@@ -619,6 +619,7 @@ const COMPLETES_TEXTLESS_TURN = {
   subagent: false,
   // Intermediate work, like the tool calls it made.
   code_cell: false,
+  code_approval: false,
   turn_usage: false,
   error: true,
 } satisfies Record<AssistantEvent["type"], boolean>;

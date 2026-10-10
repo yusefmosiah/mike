@@ -117,6 +117,34 @@ describe("code mode", () => {
     expect(direct.systemPrompt).not.toContain("TOOLS IN PYTHON:");
   });
 
+  it("runs a guest's turn in the host's workstation, with direct tools until the host allows the thread", async () => {
+    vi.stubEnv("WORKSTATION_USER_IDS", "host");
+    vi.stubEnv("WORKSTATION_SSH_HOST", "127.0.0.1");
+    vi.stubEnv("WORKSTATION_SSH_PORT", "2222");
+    vi.stubEnv("WORKSTATION_SSH_IDENTITY_FILE", "/keys/dev");
+    const guest = (standing: boolean | null) => ({
+      ...baseParams(),
+      userId: "guest",
+      workstationUserId: "host",
+      guestCode: standing === null ? null : { hostName: "Pat", standing, request: vi.fn() },
+    });
+    const names = (n: number) => streamChatWithTools.mock.calls[n][0].tools.map((t) => t.function.name);
+
+    await runLLMStream(guest(false) as never);
+    expect(names(0)).toContain("run_command");
+    expect(names(0)).not.toContain("run_python");
+    expect(streamChatWithTools.mock.calls[0][0].systemPrompt).toContain("Each run_command asks Pat for permission first");
+
+    await runLLMStream(guest(true) as never);
+    expect(names(1)).toEqual(["run_python"]);
+    expect(streamChatWithTools.mock.calls[1][0].systemPrompt).toContain("Pat has allowed this user's messages to use it");
+
+    // A surface that cannot ask the host gives a guest no workstation at all.
+    await runLLMStream(guest(null) as never);
+    expect(names(2)).not.toContain("run_command");
+    expect(names(2)).not.toContain("run_python");
+  });
+
   it("routes the cell's tool calls through the dispatcher", async () => {
     const [result] = await turn([
       cell(`docs = await tools.gather(*[tools.read_document(doc_id=i) for i in ["a", "b"]])

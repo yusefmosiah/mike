@@ -28,6 +28,7 @@ import {
     logChatTitleFailure,
 } from "./chat.title";
 import { updateChatTitle } from "./chat.titles";
+import { guestCodeApprovalFor } from "./chat.codeApprovals";
 import { prepareChatStream, type PreparedChatStream } from "./chat.prepare";
 import { linkedPrompt, walkActivePath, type TreeRow } from "./chat.tree";
 import {
@@ -120,6 +121,7 @@ export async function driveChatTurn(
         nonce,
         approvalEvents,
         autoMode: turnAutoMode,
+        workstationUserId,
     } = prepared;
     let chatTitle = prepared.chatTitle;
     let completedTurnPersisted = prepared.completedTurnPersisted;
@@ -259,6 +261,11 @@ export async function driveChatTurn(
                       })
                 : Promise.resolve();
 
+            const guestCode = await guestCodeApprovalFor(db, {
+                chatId,
+                hostUserId: workstationUserId,
+                guestUserId: userId,
+            });
             const { fullText, events, citations } = await runLLMStream({
                 apiMessages,
                 docStore,
@@ -287,6 +294,8 @@ export async function driveChatTurn(
                 includeSubagents: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
+                workstationUserId,
+                guestCode,
                 memoryProjectId: canReadProjectMemory
                     ? resolvedProjectId
                     : null,

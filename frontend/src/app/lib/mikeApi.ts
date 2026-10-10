@@ -3836,3 +3836,51 @@ export async function autoCheckDocumentCitations(
         { method: "POST" },
     );
 }
+
+/** A thread member's request to run code in its starter's workstation, as the starter sees it. */
+export type CodeApproval = {
+    id: string;
+    guest_user_id: string;
+    guest_name: string | null;
+    guest_email: string | null;
+    /** The command the assistant wants to run. */
+    summary: string;
+    /** `pending` waits for an answer; `thread` means allowed for the rest of the thread. */
+    status: "pending" | "thread";
+    created_at: string;
+};
+
+export type CodeApprovalDecision = "once" | "thread" | "denied";
+
+/** Requests waiting for the viewer and members they allowed; empty unless the viewer started the thread. */
+export async function getCodeApprovals(
+    chatId: string,
+    signal?: AbortSignal,
+): Promise<CodeApproval[]> {
+    const { approvals } = await apiRequest<{ approvals: CodeApproval[] }>(
+        `/chat/${chatId}/code-approvals`,
+        { signal },
+    );
+    return approvals;
+}
+
+export async function decideCodeApproval(
+    chatId: string,
+    requestId: string,
+    decision: CodeApprovalDecision,
+): Promise<void> {
+    await apiRequest(`/chat/${chatId}/code-approvals/${requestId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+    });
+}
+
+export async function revokeCodeApproval(
+    chatId: string,
+    guestUserId: string,
+): Promise<void> {
+    await apiRequest(`/chat/${chatId}/code-approvals/guests/${guestUserId}`, {
+        method: "DELETE",
+    });
+}

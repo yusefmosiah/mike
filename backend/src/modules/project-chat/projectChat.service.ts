@@ -34,6 +34,7 @@ import {
     type AskInputsResponseRequest,
     type ChatDocumentReference,
     type ChatMessage,
+    workstationHostOf,
 } from "../chat/chat.service";
 import { getUserModelSettings, resolveUserChatSelection } from "../user/user.service";
 import {
@@ -120,6 +121,8 @@ export type PreparedProjectChatStream = {
     turnClaim: TurnClaim | null;
     /** The standing the sender held when the turn was admitted. */
     actorRole: string | null;
+    /** Whose workstation runs this thread's code: the person who started it. */
+    workstationUserId: string | null;
 };
 
 type PrepareProjectChatStreamArgs = {
@@ -253,6 +256,8 @@ async function prepareAdmittedProjectChatStream(
     // an EXISTING one is judged against that chat, because a chat carries
     // standing of its own.
     let writeRole: ProjectRole | null = projectAccess.projectRole;
+    // A new chat is the sender's; an existing one runs in its starter's VM.
+    let workstationUserId: string | null = userId;
 
     if (chatId) {
         const { data: existing } = await db
@@ -266,6 +271,7 @@ async function prepareAdmittedProjectChatStream(
         if (!canUse) chatId = null;
         else {
             chatTitle = existing!.title;
+            workstationUserId = workstationHostOf(existing as { user_id: string | null });
             chatModel = (existing!.model as string | null) ?? null;
             chatReasoningLevel =
                 (existing!.reasoning_level as string | null) ?? null;
@@ -625,6 +631,7 @@ async function prepareAdmittedProjectChatStream(
                 selectedModel,
                 selectedReasoningLevel,
                 nonce,
+                workstationUserId,
             },
         };
     } catch (error) {

@@ -156,3 +156,34 @@ Follow-up (2026-10-10, assistant-run; not accepted):
 - Stop: only the person generating can stop a turn. The composer dims and disables
   Stop for a colleague's turn, and the stop endpoint answers 403 `turn_not_yours`.
   Test: `chat.routes.test.ts` "refuses a stop from anyone but the person generating".
+
+## Shared threads and the starter's workstation (owner direction, 2026-10-10)
+
+The owner decided: a thread's code runs in the VM of whoever started it. When
+another member's message makes the assistant run code, the starter is asked
+first. They can allow it once or for the rest of the thread, and an approval
+never carries over to another thread. This lets someone hand a thread they
+started to an assistant, with the work still running on their own VM. Nothing
+more elaborate until the owner's partner has given feedback.
+
+What it replaces: the kernel was keyed by thread but the VM by sender. When
+two people took turns, each message killed the live Python session and
+restarted it in the other person's VM, from that VM's old snapshot. Files in
+one person's VM were also invisible during the other's turns.
+
+How it works (assistant-built; not accepted):
+- `chat.prepare.ts` and `projectChat.service.ts` set `workstationUserId` to
+  the chat's `user_id`. `runLLMStream` resolves the VM and kernel there. A
+  thread whose starter's account is gone has no workstation.
+- **A guest not yet allowed for the thread** gets the direct tools rather than
+  code mode. Their first `run_command` in a turn waits up to 10 minutes for
+  the starter (`chat_code_approvals`, migration `20261010_09`). Meanwhile the
+  transcript shows "Waiting for <starter> to allow running code in their
+  workstation…" (`code_approval` event).
+- **The starter sees the request above the composer.** It shows the command,
+  with Allow once / Allow for this thread / Don't allow buttons. Members
+  allowed for the thread are listed with Withdraw. Only the starter named on
+  a request can answer it.
+- **A guest allowed for the thread** gets code mode in the starter's kernel.
+- Tabular review chats and Word chats are only ever used by their creator, so
+  they need no approval.

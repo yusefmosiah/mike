@@ -71,6 +71,7 @@ import {
     threadPersonLabel,
 } from "@/app/components/assistant/threadAuthors";
 import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
+import { CodeApprovalRequests } from "@/app/components/assistant/CodeApprovalRequests";
 import { ChatInput } from "@/app/components/assistant/ChatInput";
 import { ChatInputPrompt } from "@/app/components/assistant/ChatInputPrompt";
 import type { ChatInputHandle } from "@/app/components/assistant/ChatInput";
@@ -319,6 +320,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         activeChatIdRef.current = activeChatId;
     }, [activeChatId]);
     const [projectChats, setProjectChats] = useState<Chat[] | null>(null);
+    // Who started the open thread: its code runs in their workstation, and
+    // only they answer other members' requests to run code there.
+    const [chatHostId, setChatHostId] = useState<{ chatId: string; userId: string | null } | null>(null);
     const [chatTitle, setChatTitle] = useState<string | null>(null);
     const [chatTitleEdit, setChatTitleEdit] = useState<{
         chatId: string;
@@ -793,6 +797,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             .then(({ chat, messages: loaded, generating: holder }) => {
                 if (cancelled) return;
                 setGenerating(activeChatId, holder);
+                setChatHostId({ chatId: activeChatId, userId: chat.user_id ?? null });
                 setChatTitle(chat.title);
                 setChatModel(chat.model ?? null);
                 setChatReasoningLevel(chat.reasoning_level ?? null);
@@ -2528,6 +2533,15 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     <div className="absolute bottom-3 left-3 right-3 z-30">
                         <div className="pointer-events-none absolute -bottom-3 inset-x-0 z-0 h-7 bg-app-surface" />
                         <div className="relative z-20 w-full">
+                            <CodeApprovalRequests
+                                chatId={activeChatId ?? null}
+                                isHost={
+                                    !!user?.id &&
+                                    chatHostId?.chatId === activeChatId &&
+                                    chatHostId.userId === user.id
+                                }
+                                watching={!!generating && generating.id !== user?.id}
+                            />
                             {generating &&
                                 !(isResponseLoading && generating.id === user?.id) && (
                                 <p

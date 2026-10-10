@@ -91,10 +91,29 @@ import {
 } from "../../../lib/guardrails";
 
 export type { AssistantEvent } from "@mike/contracts";
-import type { AssistantEvent, AssistantErrorCode, CodeCellEvent } from "@mike/contracts";
+import type { AssistantEvent, AssistantErrorCode, CodeApprovalEvent, CodeCellEvent } from "@mike/contracts";
 
 /** How much of a cell's code and output the chat keeps (CodeCellEvent). */
 const MAX_CELL_EVENT_CHARS = 20_000;
+const MAX_APPROVAL_SUMMARY_CHARS = 2_000;
+
+/** A guest asking a thread's host to run commands in the host's workstation. */
+export type GuestCodeApproval = {
+  /** The host's display name, for the waiting line and the model's note. */
+  hostName: string | null;
+  /** The host already allowed this guest for the rest of the thread. */
+  standing: boolean;
+  /** Ask the host and wait: allowed once, for the thread, refused, or no answer. */
+  request: (summary: string, signal?: AbortSignal) => Promise<"once" | "thread" | "denied" | "expired">;
+};
+
+/** What the model is told when a guest's message runs in the host's workstation. */
+export function guestWorkstationPrompt(hostName: string | null, allowed: boolean): string {
+  const host = hostName ?? "the person who started this thread";
+  return allowed
+    ? `# Workstation\nThis thread's code runs in ${host}'s workstation, and ${host} has allowed this user's messages to use it. Its files and Python state belong to ${host}.`
+    : `# Workstation\nThis thread's code runs in ${host}'s workstation, not this user's. Each run_command asks ${host} for permission first and waits for their answer, so use it only when the request needs it.`;
+}
 const capText = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}\n[... cut at ${max.toLocaleString("en-US")} characters ...]` : text;
 
@@ -504,6 +523,19 @@ export async function runLLMStream(params: {
    * tasks to subagents (./subagents). Defaults to false.
    */
   includeSubagents?: boolean;
+  /**
+   * Whose workstation this turn's code runs in. A shared thread's code runs
+   * in the VM of the person who started it, so its Python state and files
+   * stay in one place whoever sends the message. Defaults to the sender;
+   * null means no workstation.
+   */
+  workstationUserId?: string | null;
+  /**
+   * For a sender who does not own that workstation: asks its owner to allow
+   * the sender's commands (modules/chat/chat.codeApprovals.ts). Without it,
+   * such a sender gets no workstation.
+   */
+  guestCode?: GuestCodeApproval | null;
 }): Promise<{
   fullText: string;
   events: AssistantEvent[];
@@ -549,7 +581,15 @@ export async function runLLMStream(params: {
     includeAskInputs && !autoMode
       ? TOOLS
       : TOOLS.filter((tool) => tool.function.name !== "ask_inputs");
-  const workstation = await resolveWorkstation(db, userId);
+  const workstationOwner = params.workstationUserId === undefined ? userId : params.workstationUserId;
+  const guestCode = workstationOwner && workstationOwner !== userId ? params.guestCode ?? null : null;
+  const isGuest = !!workstationOwner && workstationOwner !== userId;
+  const workstation = !workstationOwner || (isGuest && !guestCode)
+    ? null
+    : await resolveWorkstation(db, workstationOwner);
+  // A guest the host has not allowed for the whole thread works with the
+  // direct tools; each run_command waits for the host (workstationGate).
+  let guestAllowed = !isGuest || !!guestCode?.standing;
   const workstationTools = workstation ? WORKSTATION_TOOLS : [];
   const baseTools = [
     ...conversationTools,
@@ -577,7 +617,7 @@ export async function runLLMStream(params: {
   // and pass every gate a direct call does. Where the user's kernel cannot
   // start, turns fall back to the direct tools for a minute (see
   // KernelManager.available).
-  const kernelLauncher = kernelLauncherFor(workstation);
+  const kernelLauncher = guestAllowed && !(isGuest && !workstation) ? kernelLauncherFor(workstation) : null;
   const codeMode = !!kernelLauncher && kernels.available(kernelLauncher);
   const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
   const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
@@ -602,12 +642,15 @@ export async function runLLMStream(params: {
     projectId: memoryProjectId,
     sharedAudience: memorySharedAudience,
   });
-  const systemPrompt = codeMode
+  const promptWithCode = codeMode
     ? `${memory.systemPrompt}\n\n${pythonToolsPromptSection(
         pythonSpecs,
         conversationId ? kernels.knownNames(conversationId) : [],
       )}`
     : memory.systemPrompt;
+  const systemPrompt = isGuest && workstation
+    ? `${promptWithCode}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
+    : promptWithCode;
   const chatMessages: LlmMessage[] = rawMsgs
     .filter((m) => m.role !== "system")
     .map(
@@ -896,6 +939,45 @@ export async function runLLMStream(params: {
      * turn as a direct call would; the kernel keeps its variables for the
      * answer in the next message.
      */
+    /**
+     * A guest's command in the host's workstation: the first one in a turn
+     * waits for the host to allow it, unless the host already allowed this
+     * guest for the thread. Returns why it may not run, or null when it may.
+     */
+    const workstationGate = isGuest && guestCode
+      ? async (callId: string, summary: string): Promise<string | null> => {
+          if (guestAllowed) return null;
+          const approval: CodeApprovalEvent = {
+            type: "code_approval",
+            call_id: callId,
+            status: "waiting",
+            host_name: guestCode.hostName,
+            summary: capText(summary, MAX_APPROVAL_SUMMARY_CHARS),
+          };
+          flushText();
+          events.push(approval);
+          write(`data: ${JSON.stringify(approval)}\n\n`);
+          let outcome: Awaited<ReturnType<GuestCodeApproval["request"]>>;
+          try {
+            outcome = await guestCode.request(summary, signal);
+          } catch (error) {
+            if (isAbortError(error) || signal?.aborted) throw error;
+            console.error("[workstation] approval request failed", safeError(error));
+            outcome = "expired";
+          }
+          const allowed = outcome === "once" || outcome === "thread";
+          approval.status = allowed ? "allowed" : outcome === "denied" ? "denied" : "expired";
+          write(`data: ${JSON.stringify(approval)}\n\n`);
+          if (allowed) {
+            guestAllowed = true;
+            return null;
+          }
+          const host = guestCode.hostName ?? "The person who started this thread";
+          return outcome === "denied"
+            ? `${host} did not allow running this command in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`
+            : `${host} did not answer the request to run this command in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`;
+        }
+      : undefined;
     const runPythonCall = async (
       call: NormalizedToolCall,
       scope: "parent" | "child",
@@ -1201,6 +1283,7 @@ export async function runLLMStream(params: {
           userEmail,
           model,
           workstation,
+          workstationGate,
         },
       );
       throwIfAborted(signal);

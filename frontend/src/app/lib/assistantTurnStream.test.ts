@@ -1911,3 +1911,17 @@ describe("code_cell frames", () => {
     expect(events?.filter((event) => event.type === "code_cell")).toEqual([]);
   });
 });
+
+describe("code_approval frames", () => {
+  const waiting = { type: "code_approval", call_id: "c1", status: "waiting", host_name: "Pat Partner", summary: "ls" };
+
+  it("keeps one line per request, updated with the starter's answer", async () => {
+    const events = await eventsOf([waiting, { ...waiting, status: "allowed" }]);
+    expect(events?.filter((event) => event.type === "code_approval")).toEqual([{ ...waiting, status: "allowed" }]);
+  });
+
+  it("drops a frame without a call id or known status", async () => {
+    const events = await eventsOf([{ ...waiting, call_id: "" }, { ...waiting, status: "maybe" }]);
+    expect(events?.filter((event) => event.type === "code_approval")).toEqual([]);
+  });
+});

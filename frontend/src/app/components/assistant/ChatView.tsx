@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
+import { CodeApprovalRequests } from "./CodeApprovalRequests";
 import { ChatInput } from "./ChatInput";
 import { InitialView } from "./InitialView";
 import { QuickActionsModal } from "./QuickActionsModal";
@@ -1590,6 +1591,11 @@ export function ChatView({
                                     className="relative z-20 w-full max-w-4xl mx-auto px-4 md:px-6"
                                 >
                                     <div className="w-full rounded-t-[20px] bg-transparent">
+                                        <CodeApprovalRequests
+                                            chatId={chatId ?? null}
+                                            isHost={!!chat && !!viewerId && chat.user_id === viewerId}
+                                            watching={!!generatingBy && generatingBy.id !== viewerId}
+                                        />
                                         {generatingBy &&
                                             !(isResponseLoading && generatingBy.id === viewerId) && (
                                             <p

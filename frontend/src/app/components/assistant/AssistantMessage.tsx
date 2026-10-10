@@ -19,6 +19,7 @@ import type {
 import { BranchNavigator } from "./BranchNavigator";
 import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
+import { CodeApprovalBlock } from "./message/CodeApprovalBlock";
 import { CodeCellBlock } from "./message/CodeCellBlock";
 import { CitationCheckStatus } from "./message/CitationCheckStatus";
 import { openWebCitation } from "../shared/types";
@@ -646,6 +647,15 @@ export function AssistantMessage({
         if (event.type === "code_cell") {
             return (
                 <CodeCellBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
+                />
+            );
+        }
+        if (event.type === "code_approval") {
+            return (
+                <CodeApprovalBlock
                     key={globalIdx}
                     event={event}
                     showConnector={showConnector}

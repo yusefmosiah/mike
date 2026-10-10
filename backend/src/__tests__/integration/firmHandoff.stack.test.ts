@@ -214,4 +214,55 @@ maybeDescribe("firm thread handoff against Postgres", () => {
             await db.from("documents").delete().eq("id", doc.id);
         }
     });
+
+    it("runs a guest's turn in the starter's workstation, and asks the starter before a guest's command", async () => {
+        const turn = await send(replicaA, "associate", "Run the numbers in Python.");
+        expect(turn.ok).toBe(true);
+        if (!turn.ok) return;
+        await turn.prepared.turnClaim?.release();
+        // The thread's code runs in the partner's VM whoever sends.
+        expect(turn.prepared.workstationUserId).toBe(people.partner.id);
+
+        const guest = await replicaA.guestCodeApprovalFor(db, { chatId, hostUserId: people.partner.id, guestUserId: people.associate.id });
+        expect(guest).toMatchObject({ hostName: "The partner", standing: false });
+        expect(await replicaA.guestCodeApprovalFor(db, { chatId, hostUserId: people.partner.id, guestUserId: people.partner.id })).toBeNull();
+
+        // A command waits; only the partner sees the request.
+        const waiting = guest!.request("python3 totals.py");
+        let pending: Awaited<ReturnType<ChatModule["codeApprovalsForViewer"]>> = [];
+        for (let i = 0; i < 20 && !pending.length; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            pending = await replicaB.codeApprovalsForViewer(db, chatId, people.partner.id);
+        }
+        expect(pending).toMatchObject([{ guest_user_id: people.associate.id, guest_name: "The associate", summary: "python3 totals.py", status: "pending" }]);
+        expect(await replicaB.codeApprovalsForViewer(db, chatId, people.associate.id)).toEqual([]);
+
+        // The guest cannot answer their own request; the partner can, once.
+        const selfApproved = await replicaB.decideCodeApproval(db, { chatId, requestId: pending[0].id, hostUserId: people.associate.id, decision: "thread" });
+        expect(selfApproved).toMatchObject({ ok: false, kind: "conflict" });
+        expect(await replicaB.decideCodeApproval(db, { chatId, requestId: pending[0].id, hostUserId: people.partner.id, decision: "thread" })).toEqual({ ok: true, data: { status: "thread" } });
+        expect(await waiting).toBe("thread");
+        expect(await replicaB.decideCodeApproval(db, { chatId, requestId: pending[0].id, hostUserId: people.partner.id, decision: "denied" })).toMatchObject({ ok: false, kind: "conflict" });
+
+        // Allowed for this thread: the next turn starts allowed, and the
+        // partner sees whom they allowed.
+        expect((await replicaA.guestCodeApprovalFor(db, { chatId, hostUserId: people.partner.id, guestUserId: people.associate.id }))?.standing).toBe(true);
+        expect(await replicaB.codeApprovalsForViewer(db, chatId, people.partner.id)).toMatchObject([{ guest_user_id: people.associate.id, status: "thread" }]);
+
+        // It does not reach another thread the partner starts.
+        const { data: other, error } = await db.from("chats").insert({ user_id: people.partner.id, title: "Matter 2292" }).select("id").single();
+        if (error) throw error;
+        try {
+            expect((await replicaA.guestCodeApprovalFor(db, { chatId: other.id as string, hostUserId: people.partner.id, guestUserId: people.associate.id }))?.standing).toBe(false);
+        } finally {
+            await db.from("chats").delete().eq("id", other.id);
+        }
+
+        // Withdrawn, the guest is asked again; an unanswered request expires.
+        expect(await replicaB.revokeThreadCodeApproval(db, { chatId, hostUserId: people.partner.id, guestUserId: people.associate.id })).toEqual({ ok: true, data: { revoked: 1 } });
+        expect((await replicaA.guestCodeApprovalFor(db, { chatId, hostUserId: people.partner.id, guestUserId: people.associate.id }))?.standing).toBe(false);
+        const { requestCodeApproval } = await import("../../modules/chat/chat.codeApprovals.js");
+        expect(await requestCodeApproval(db, { chatId, hostUserId: people.partner.id, guestUserId: people.associate.id, summary: "ls", timeoutMs: 300, pollMs: 50 })).toBe("expired");
+        expect(await replicaB.codeApprovalsForViewer(db, chatId, people.partner.id)).toEqual([]);
+    });
 });
