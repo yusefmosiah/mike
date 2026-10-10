@@ -6,6 +6,7 @@ export {
   getAccessibleChat,
 } from "./chat.access";
 export { getChatMessages } from "./chat.messages";
+export { verifyQuoteAgainstSource } from "./engine/verifyCitations";
 export { threadPresence, type ThreadPresence } from "./chat.presence";
 export { linkedPrompt, resolveLeaf, setLeaf, walkActivePath } from "./chat.tree";
 export { isMessageId } from "./chat.branches";

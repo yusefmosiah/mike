@@ -92,7 +92,7 @@ export function clearWebSnapshots(): void {
  * Lightweight deterministic HTML-to-text converter that strips scripts/styles
  * and preserves readable prose and structural linebreaks.
  */
-function stripHtmlToText(html: string): string {
+export function stripHtmlToText(html: string): string {
   return html
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")

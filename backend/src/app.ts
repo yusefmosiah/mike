@@ -23,6 +23,7 @@ import { auditRouter } from "./modules/audit/audit.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { uploadSessionsRouter } from "./modules/uploads/uploads.routes";
 import { audioRouter } from "./modules/audio/audio.routes";
+import { citationsRouter } from "./modules/citations/citations.routes";
 import {
   projectMemoryRouter,
   userMemoryRouter,
@@ -310,6 +311,7 @@ app.post("/auth/login", authLoginAccountLimiter);
 
 app.use("/auth", authRouter);
 app.use("/chat", chatRouter);
+app.use("/citation-checks", citationsRouter);
 app.use("/word-chat", wordChatRouter);
 app.use("/models", modelsRouter);
 app.use("/projects/:projectId/memory", projectMemoryRouter);
