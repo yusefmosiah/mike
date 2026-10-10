@@ -26,11 +26,15 @@ import { startUploadProcessingWorkers } from "./modules/uploads/uploads.service"
 import { uploadProcessingConfiguration } from "./lib/runtimeConfig";
 import { createDb } from "./lib/db";
 import { reportError } from "./lib/observability/sentry";
+import { releaseIdleTemporaryWorkstations } from "./lib/workstation/assignments";
 
 const SWEEP_INTERVAL_MS = (() => {
     const raw = Number(process.env.STALE_SWEEP_INTERVAL_MS);
     return Number.isFinite(raw) && raw > 0 ? raw : 10 * 60 * 1000;
 })();
+
+/** How often to wipe and return test accounts' idle workstation VMs. */
+const WORKSTATION_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 /** How often to look for MCP OAuth tokens about to expire. */
 const MCP_REFRESH_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
@@ -47,6 +51,8 @@ const MCP_REFRESH_MAX_EXPIRED_AGE_MS = 24 * 60 * 60 * 1000;
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let initialSweep: ReturnType<typeof setTimeout> | null = null;
 let mcpRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let workstationTimer: ReturnType<typeof setInterval> | null = null;
+let workstationSweepRunning = false;
 let stopUploadWorker: (() => void) | null = null;
 
 /**
@@ -134,6 +140,27 @@ export function startAllWorkers(): void {
         });
     mcpRefreshTimer = setInterval(runMcpRefresh, MCP_REFRESH_SWEEP_INTERVAL_MS);
     mcpRefreshTimer.unref();
+
+    // Test accounts' temporary workstation VMs: wiped and returned to the
+    // pool once idle (lib/workstation/assignments.ts). A wipe waits for the
+    // VM to restart, so a sweep can outlast the interval; never overlap.
+    const runWorkstationSweep = () => {
+        if (workstationSweepRunning) return;
+        workstationSweepRunning = true;
+        void releaseIdleTemporaryWorkstations(createDb())
+            .then((released) => {
+                if (released) console.info("[workstation-sweep] returned", { released });
+            })
+            .catch((err) => {
+                reportError(err, { tags: { component: "workstation-sweep" } });
+                console.error("[workstation-sweep] failed", err);
+            })
+            .finally(() => {
+                workstationSweepRunning = false;
+            });
+    };
+    workstationTimer = setInterval(runWorkstationSweep, WORKSTATION_SWEEP_INTERVAL_MS);
+    workstationTimer.unref();
 }
 
 /** Stop everything gracefully; safe to call more than once. */
@@ -141,6 +168,8 @@ export async function stopAllWorkers(): Promise<void> {
     if (initialSweep) clearTimeout(initialSweep);
     if (sweepTimer) clearInterval(sweepTimer);
     if (mcpRefreshTimer) clearInterval(mcpRefreshTimer);
+    if (workstationTimer) clearInterval(workstationTimer);
+    workstationTimer = null;
     initialSweep = null;
     sweepTimer = null;
     mcpRefreshTimer = null;

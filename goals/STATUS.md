@@ -168,8 +168,33 @@ collide. In the owner's words where quoted.
      `health: 200`, `login: 303 https://choir-ip.com/assistant`,
      `after: 200`. On node-a: `system-53-link`, 0 failed units,
      `mike-gate`, `fail2ban` and `caddy` active, `Currently banned: 0`.
-   - Temporary, wiped VMs for test accounts: next.
+   - **Temporary VMs for test accounts: built, not accepted.** An account
+     whose email has `+test` in it or a reserved domain (example.com,
+     `.test`, `.local`, …; `WORKSTATION_TEMPORARY_EMAILS` overrides) gets a
+     pool VM marked temporary (migration `20261010_08`). Each turn records
+     `last_used_at`. The worker runtime sweeps every 10 minutes: a temporary
+     VM unused for 2 hours is wiped by the host (`wipe <vm>` on the control
+     socket: stop, delete `home.img` and the VM's snapshots, start, wait for
+     ssh) and returned to the pool. Test accounts hold at most all but one
+     of the pool, and when the pool is short an idle (15 min) temporary VM
+     is wiped and handed over early. The owner's `ws-owner` cannot be wiped
+     this way. Receipt on node-a (generation 54), after writing a marker
+     file and a snapshot into `ws-04`: `owner via socket: error not a pool
+     vm`, `wipe ws-04 via socket: ok ws-04 in 21s`, `snaps after: 0`, home
+     listing empty, `/dev/vdb 32G 36K`; `ws-owner` still lists `data.xlsx`
+     and `repo`. Backend: `npx vitest run src/lib/workstation
+     src/__tests__/architecture.test.ts
+     src/__tests__/migrationLedger.test.ts` printed `64 passed (64)`.
    - Phala attestation, the automatic citation check, Mission 5: queued.
+   - **Docket, owner's request (2026-10-10):** a web citation should expand
+     in place to show the cited passage from the page (transcluded), with a
+     link inside the expanded section to open the page, instead of jumping
+     straight to another site. This may pull the in-app viewer forward
+     (request 6): one citation viewer for web pages, Markdown, code, diffs
+     and HTML. Iframing the live site fails on many sites
+     (`X-Frame-Options` / CSP `frame-ancestors`); the approach to evaluate is
+     rendering our own stored snapshot of the page (fetched server-side,
+     sanitized, served from a sandboxed origin) with the quote highlighted.
 
 ## Where things stood (2026-10-09)
 

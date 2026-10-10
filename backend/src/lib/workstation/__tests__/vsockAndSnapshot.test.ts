@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { requestSnapshot, snapshotOncePerTurn } from "../snapshot";
+import { requestSnapshot, requestWipe, snapshotOncePerTurn } from "../snapshot";
 import { connectVsockMux } from "../vsockMux";
 
 const cleanups: Array<() => void> = [];
@@ -68,7 +68,19 @@ describe("requestSnapshot", () => {
   it("reports the host's refusal and an absent service", async () => {
     const path = await serve((socket) => socket.once("data", () => socket.end("error rate limited\n")));
     expect(await requestSnapshot(path, "ws-owner", "turn")).toEqual({ ok: false, error: "rate limited" });
-    expect(await requestSnapshot("/nonexistent/control.sock", "ws-owner", "turn")).toEqual({ ok: false, error: "snapshot service unavailable" });
+    expect(await requestSnapshot("/nonexistent/control.sock", "ws-owner", "turn")).toEqual({ ok: false, error: "workstation control service unavailable" });
+  });
+});
+
+describe("requestWipe", () => {
+  it("asks the host to wipe one VM", async () => {
+    const seen: string[] = [];
+    const path = await serve((socket) => socket.once("data", (d) => {
+      seen.push(d.toString());
+      socket.end("ok ws-02\n");
+    }));
+    expect(await requestWipe(path, "ws-02")).toEqual({ ok: true, snapshot: "ws-02" });
+    expect(seen).toEqual(["wipe ws-02\n"]);
   });
 });
 

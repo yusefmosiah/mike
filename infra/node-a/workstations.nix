@@ -101,8 +101,9 @@ let
       # ws snapshot <vm> [label]     flush the guest, then snapshot its disk
       # ws snapshots <vm>            list snapshots
       # ws restore <vm> <snapshot>   stop the VM, roll its disk back, start it
+      # ws wipe <vm>                 erase a pool VM's home disk and snapshots
       cmd=''${1:-}; vm=''${2:-}
-      [ -n "$cmd" ] && [ -n "$vm" ] || { sed -n '2,6p' "$0"; exit 2; }
+      [ -n "$cmd" ] && [ -n "$vm" ] || { sed -n '2,7p' "$0"; exit 2; }
       case "$vm" in ${lib.concatStringsSep "|" (lib.attrNames workstations)}) ;; *) echo "unknown vm: $vm" >&2; exit 2;; esac
       ssh_vm() {
         case "$vm" in
@@ -137,24 +138,52 @@ let
           mv "${stateDir}/$vm/home.img.restore" "${stateDir}/$vm/home.img"
           systemctl start "microvm@$vm.service"
           echo "restored $vm to $snap" ;;
+        wipe)
+          # Only pool VMs, which hold a test account's files at most; the
+          # owner's VM is never wiped this way.
+          case "$vm" in ${lib.concatStringsSep "|" poolNames}) ;; *) echo "not a pool vm: $vm" >&2; exit 2 ;; esac
+          systemctl stop "microvm@$vm.service"
+          # The next start creates and formats a fresh, empty home disk.
+          rm -f "${stateDir}/$vm/home.img" "${stateDir}/$vm/home.img.restore"
+          shopt -s nullglob
+          for snap in "${snapshotDir}/$vm"/*; do btrfs subvolume delete "$snap" >/dev/null; done
+          systemctl start "microvm@$vm.service"
+          # Back only once the guest answers, so the next turn can use it.
+          for _ in $(seq 60); do ssh_vm true 2>/dev/null && break; sleep 2; done
+          ssh_vm test -d /home/agent || { echo "wiped $vm but the guest is not up" >&2; exit 1; }
+          echo "wiped $vm" ;;
         *) echo "unknown command: $cmd" >&2; exit 2 ;;
       esac
     '';
   };
   relayDir = "/run/mike-workstations";
   vmNames = lib.attrNames workstations;
+  poolNames = lib.attrNames poolVms;
 
-  # One request per connection on stdin: `snapshot <vm> <turn|daily>`.
-  # Answers `ok <vm>/<snapshot>` or `error <reason>`. A turn snapshot taken in
-  # the last two minutes is reused; retention is the newest 48 turn and 14
-  # daily snapshots per VM (manual ones are never pruned).
+  # One request per connection on stdin:
+  #   snapshot <vm> <turn|daily>  answers `ok <vm>/<snapshot>`. A turn
+  #                               snapshot taken in the last two minutes is
+  #                               reused; retention is the newest 48 turn and
+  #                               14 daily snapshots per VM (manual ones are
+  #                               never pruned).
+  #   wipe <vm>                   erases a pool VM's home disk and snapshots
+  #                               (a test account's temporary VM), answers
+  #                               `ok <vm>` once the guest is back up.
+  # Failures answer `error <reason>`.
   wsControl = pkgs.writeShellApplication {
     name = "ws-control";
     runtimeInputs = [ wsTools pkgs.btrfs-progs pkgs.coreutils pkgs.util-linux ];
     text = ''
       read -r -t 10 verb vm label || { echo "error bad request"; exit 0; }
-      [ "$verb" = snapshot ] || { echo "error unknown request"; exit 0; }
+      case "$verb" in snapshot|wipe) ;; *) echo "error unknown request"; exit 0 ;; esac
       case "$vm" in ${lib.concatStringsSep "|" vmNames}) ;; *) echo "error unknown vm"; exit 0 ;; esac
+      if [ "$verb" = wipe ]; then
+        case "$vm" in ${lib.concatStringsSep "|" poolNames}) ;; *) echo "error not a pool vm"; exit 0 ;; esac
+        exec 9>"/run/lock/ws-control-$vm.lock"
+        flock 9
+        if ws wipe "$vm" >/dev/null 2>&1; then echo "ok $vm"; else echo "error wipe failed"; fi
+        exit 0
+      fi
       case "$label" in turn) keep=48 ;; daily) keep=14 ;; *) echo "error bad label"; exit 0 ;; esac
       dir="${snapshotDir}/$vm"
       exec 9>"/run/lock/ws-control-$vm.lock"
@@ -269,7 +298,7 @@ in
 
   systemd.services = {
     "ws-control@" = {
-      description = "Workstation snapshot request";
+      description = "Workstation snapshot or wipe request";
       serviceConfig = {
         ExecStart = "${wsControl}/bin/ws-control";
         StandardInput = "socket";

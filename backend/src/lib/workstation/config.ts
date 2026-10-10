@@ -9,6 +9,9 @@
  *    own VM while the pool lasts.
  * There is deliberately no default that hands every user the same VM.
  *
+ * Test accounts (email matching WORKSTATION_TEMPORARY_EMAILS) get pool VMs
+ * marked temporary: wiped and returned once idle, see ./assignments.ts.
+ *
  * The connection settings are shared; `{vm}` in WORKSTATION_SSH_PROXY_COMMAND
  * or WORKSTATION_SSH_HOST stands for the VM's name.
  */
@@ -34,6 +37,47 @@ export function staticWorkstationVm(userId: string, env: Env = process.env): str
 /** The pool's VM names, in the order they are given out. */
 export function workstationPool(env: Env = process.env): string[] {
   return list(env.WORKSTATION_POOL).filter((vm) => VM_NAME.test(vm));
+}
+
+/**
+ * Emails of test accounts, whose pool VMs are temporary: `+test` in the
+ * local part, or a reserved domain (example.com/.org/.net, .test, .local,
+ * .invalid, .localhost). WORKSTATION_TEMPORARY_EMAILS replaces this with a
+ * case-insensitive regular expression; "off" turns it off.
+ */
+export const DEFAULT_TEMPORARY_EMAILS =
+  "^[^@]*\\+test[^@]*@|@(example\\.(com|org|net)|([^@]+\\.)?(test|local|invalid|localhost))$";
+
+export function isTemporaryEmail(email: string | null | undefined, env: Env = process.env): boolean {
+  if (!email) return false;
+  const raw = env.WORKSTATION_TEMPORARY_EMAILS?.trim();
+  if (raw === "off") return false;
+  try {
+    return new RegExp(raw || DEFAULT_TEMPORARY_EMAILS, "i").test(email.trim());
+  } catch {
+    console.warn("[workstation] WORKSTATION_TEMPORARY_EMAILS is not a valid pattern");
+    return false;
+  }
+}
+
+const minutes = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return (Number.isFinite(parsed) && parsed > 0 ? parsed : fallback) * 60_000;
+};
+
+/** How temporary VMs are handed out and taken back. */
+export function temporaryPolicy(poolSize: number, env: Env = process.env) {
+  const limit = Number(env.WORKSTATION_TEMPORARY_LIMIT);
+  return {
+    // Unused this long, a temporary VM is wiped and returned (default 2 h).
+    idleMs: minutes(env.WORKSTATION_TEMPORARY_IDLE_MINUTES, 120),
+    // When the pool is short, a temporary VM unused this long is taken back
+    // early for whoever needs one (default 15 min).
+    reclaimMs: minutes(env.WORKSTATION_TEMPORARY_RECLAIM_MINUTES, 15),
+    // Test accounts hold at most this many VMs at once, so real accounts
+    // always find one (default: all but one of the pool).
+    limit: Number.isInteger(limit) && limit >= 0 ? limit : Math.max(poolSize - 1, 0),
+  };
 }
 
 /** How to reach one VM, or null when the connection settings are incomplete. */

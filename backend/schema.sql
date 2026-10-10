@@ -7957,8 +7957,16 @@ grant execute on function public.complete_google_workspace_oauth(text,text,jsonb
 create table if not exists public.workstation_assignments (
   vm text primary key check (vm ~ '^[a-z0-9-]{1,32}$'),
   user_id uuid not null unique,
-  assigned_at timestamptz not null default now()
+  assigned_at timestamptz not null default now(),
+  -- Test accounts' VMs (20261010_08): wiped and returned to the pool once idle.
+  temporary boolean not null default false,
+  last_used_at timestamptz not null default now(),
+  wiping boolean not null default false
 );
+
+create index if not exists workstation_assignments_temporary_idx
+  on public.workstation_assignments (last_used_at)
+  where temporary;
 
 alter table public.workstation_assignments enable row level security;
 revoke all on table public.workstation_assignments from public, anon, authenticated;
@@ -8101,5 +8109,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_04_email_change_moves_grants.sql'),
   ('20261010_05_document_citation_checks.sql'),
   ('20261010_06_schema_migrations.sql'),
-  ('20261010_07_workstation_assignments.sql')
+  ('20261010_07_workstation_assignments.sql'),
+  ('20261010_08_temporary_workstations.sql')
 on conflict (filename) do nothing;
