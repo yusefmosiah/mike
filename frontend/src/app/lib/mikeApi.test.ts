@@ -1624,6 +1624,9 @@ describe("shared thread requests", () => {
         fetchMock.mockResolvedValueOnce(jsonResponse({ approvals: [{ id: "r1" }] }));
         expect(await getCodeApprovals("c1")).toEqual([{ id: "r1" }]);
         expect(lastFetchCall().url).toBe("/api/chat/c1/code-approvals");
+        // A body of the wrong shape (a proxy, a stub) reads as no requests.
+        fetchMock.mockResolvedValueOnce(jsonResponse([]));
+        expect(await getCodeApprovals("c1")).toEqual([]);
 
         fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
         await decideCodeApproval("c1", "r1", "thread");

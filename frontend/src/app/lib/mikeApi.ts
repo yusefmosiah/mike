@@ -3869,11 +3869,13 @@ export async function getCodeApprovals(
     chatId: string,
     signal?: AbortSignal,
 ): Promise<CodeApproval[]> {
-    const { approvals } = await apiRequest<{ approvals: CodeApproval[] }>(
+    const body = await apiRequest<{ approvals?: unknown } | null>(
         `/chat/${chatId}/code-approvals`,
         { signal },
     );
-    return approvals;
+    // A banner that cannot read its list shows nothing; it never takes the
+    // thread down with it.
+    return Array.isArray(body?.approvals) ? (body.approvals as CodeApproval[]) : [];
 }
 
 export async function decideCodeApproval(
