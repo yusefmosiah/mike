@@ -25,7 +25,7 @@ import { applyEdits, type EditOp } from "../../../../lib/docx/edit";
 import { checkEditedDocx } from "../../../../lib/docx/gate";
 import { lintDocx } from "../../../../lib/docxLinter";
 import { DocxDocument } from "../../../../lib/docx/view";
-import { findInDocument as findInDocx } from "../../../../lib/docx/render";
+import { DEFAULT_WINDOW_CHARS, findInDocument as findInDocx } from "../../../../lib/docx/render";
 import { renderDocxRead, type DocxReadRequest } from "../../../../lib/docx/read";
 import { docxReadingText } from "../../../../lib/docx/readingText";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
@@ -1853,7 +1853,7 @@ const MAX_READ_LINES = 5_000;
  */
 function paginateDocumentText(
   text: string,
-  opts?: { offset?: number; limit?: number; fullText?: boolean },
+  opts?: { offset?: number; limit?: number; fullText?: boolean; maxChars?: number },
 ): string {
   if (opts?.fullText) return text;
   const requestedOffset = Math.floor(opts?.offset ?? 1);
@@ -1869,7 +1869,18 @@ function paginateDocumentText(
   // An offset past the end clamps to the final line rather than returning an
   // empty body, which a model would read as "document is empty".
   const startIndex = Math.min(startLine - 1, totalLines - 1);
-  const endIndex = Math.min(startIndex + maxLines, totalLines);
+  let endIndex = Math.min(startIndex + maxLines, totalLines);
+  // Lines are not a size: a PDF's extracted lines can run long, so the
+  // window also stops at its character budget (always at least one line).
+  const maxChars = opts?.maxChars ?? DEFAULT_WINDOW_CHARS;
+  let chars = 0;
+  for (let i = startIndex; i < endIndex; i++) {
+    chars += lines[i].length + 1;
+    if (chars > maxChars && i > startIndex) {
+      endIndex = i;
+      break;
+    }
+  }
   if (startIndex === 0 && endIndex >= totalLines) return text;
   const windowText = lines.slice(startIndex, endIndex).join("\n");
   if (endIndex >= totalLines) return windowText;
@@ -1947,6 +1958,11 @@ export async function readDocumentContent(
     docx?: DocxReadRequest;
     /** Told whether the whole document was returned (so a repeat can be deduplicated). */
     onComplete?: (complete: boolean) => void;
+    /**
+     * Character budget for this window (default DEFAULT_WINDOW_CHARS). A
+     * read of several documents at once splits one budget between them.
+     */
+    maxChars?: number;
   },
 ): Promise<string> {
   const emitEvents = opts?.emitEvents ?? true;
@@ -2043,7 +2059,10 @@ export async function readDocumentContent(
         // Model-facing read: the addressable document view, segmented.
         try {
           const view = await docxView(Buffer.from(raw), documentId, db, loaded.versionId);
-          const result = renderDocxRead(view, opts?.docx ?? {});
+          const result = renderDocxRead(
+            view,
+            opts?.docx ?? (opts?.maxChars ? { maxChars: opts.maxChars } : {}),
+          );
           devLog(
             `[read_document] docx view read complete=${result.complete} length=${result.text.length} for filename="${docInfo.filename}"`,
           );

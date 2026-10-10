@@ -15,6 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
+import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import {
   APPROVAL_UNAVAILABLE_MESSAGE,
@@ -291,6 +292,19 @@ function scheduleCitationCheck(db: Db, userId: string, documentId: string | unde
   void import("../../../citations/citations.service.js")
     .then((citations) => citations.scheduleAutoCitationCheck(db, { userId, documentId, model: model ?? null }))
     .catch(() => console.warn("[citations] could not schedule an automatic check", { documentId }));
+}
+
+/** Documents one find_in_documents call searches at most. */
+const MAX_FIND_DOCUMENTS = 50;
+
+/** Characters fetch_documents returns across all the documents of one call. */
+export const FETCH_DOCUMENTS_BUDGET_CHARS = 60_000;
+const MIN_FETCH_WINDOW_CHARS = 8_000;
+
+/** Each document's window when one call reads `count` of them. */
+export function fetchWindowChars(count: number): number {
+  const share = Math.floor(FETCH_DOCUMENTS_BUDGET_CHARS / Math.max(1, count));
+  return Math.max(MIN_FETCH_WINDOW_CHARS, Math.min(DEFAULT_WINDOW_CHARS, share));
 }
 
 export async function runToolCalls(
@@ -735,6 +749,82 @@ export async function runToolCalls(
         });
       }
       toolResults.push({ role: "tool", tool_call_id: tc.id, content });
+    } else if (tc.function.name === "find_in_documents") {
+      const query = typeof args.query === "string" ? args.query : "";
+      const requested = Array.isArray(args.doc_ids)
+        ? (args.doc_ids as unknown[]).filter((id): id is string => typeof id === "string")
+        : [];
+      const labels = (requested.length ? requested : Array.from(docStore.keys()))
+        .map((id) => resolveDocLabel(id, docStore, docIndex) ?? id)
+        .slice(0, MAX_FIND_DOCUMENTS);
+      const perDocument =
+        typeof args.max_results_per_document === "number"
+          ? Math.max(1, Math.min(20, Math.floor(args.max_results_per_document)))
+          : 5;
+      const contextChars =
+        typeof args.context_chars === "number" ? args.context_chars : undefined;
+      const documents: Record<string, unknown>[] = [];
+      const skipped: { doc_id: string; reason: string }[] = [];
+      let totalMatches = 0;
+      if (!query.trim()) {
+        toolResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ ok: false, error: "Empty query." }) });
+        continue;
+      }
+      for (const docId of labels) {
+        const docInfo = docStore.get(docId);
+        if (!docInfo) {
+          skipped.push({ doc_id: docId, reason: "not found" });
+          continue;
+        }
+        // Same rule as find_in_document: request-scoped text is read first.
+        if (docInfo.inline_text !== undefined) {
+          skipped.push({ doc_id: docId, reason: "open it with read_document first" });
+          continue;
+        }
+        const readIdentity = await getTurnReadIdentity({ docLabel: docId, docStore, docIndex, db });
+        const found = JSON.parse(
+          await findInDocumentContent({
+            docLabel: docId,
+            query,
+            maxResults: perDocument,
+            contextChars,
+            docStore,
+            write,
+            docIndex,
+            db,
+            readIdentity,
+          }),
+        ) as { ok?: boolean; total_matches?: number; hits?: unknown[]; error?: string };
+        if (found.ok === false) {
+          skipped.push({ doc_id: docId, reason: found.error ?? "could not be searched" });
+          continue;
+        }
+        const matches = found.total_matches ?? 0;
+        docsFound.push({
+          filename: docInfo.filename,
+          document_id: readIdentity?.documentId ?? docIndex?.[docId]?.document_id,
+          version_id: readIdentity?.versionId ?? null,
+          version_number: readIdentity?.versionNumber ?? null,
+          query,
+          total_matches: matches,
+        });
+        if (!matches) continue;
+        totalMatches += matches;
+        documents.push({ doc_id: docId, filename: docInfo.filename, total_matches: matches, hits: found.hits ?? [] });
+      }
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify({
+          ok: true,
+          query,
+          searched: labels.length - skipped.length,
+          total_matches: totalMatches,
+          documents,
+          ...(skipped.length ? { skipped } : {}),
+          next: "Read around a hit with read_document (doc_id, from: \"<block_id>\"), or find_in_document for more hits in one document.",
+        }),
+      });
     } else if (tc.function.name === "list_documents") {
       const list = Array.from(docStore.entries()).map(([doc_id, info]) => ({
         doc_id,
@@ -752,6 +842,10 @@ export async function runToolCalls(
         (id) => resolveDocLabel(id, docStore, docIndex) ?? id,
       );
       const parts: string[] = [];
+      // One budget for the whole call: five long documents must not arrive
+      // as five full windows at once. Each gets a share, and its
+      // continuation notice says where to read on.
+      const windowChars = fetchWindowChars(docIds.length);
       for (const docId of docIds) {
         const readIdentity = await getTurnReadIdentity({
           docLabel: docId,
@@ -781,6 +875,7 @@ export async function runToolCalls(
           db,
           {
             readIdentity,
+            maxChars: windowChars,
             onComplete: (c) => {
               complete = c;
             },

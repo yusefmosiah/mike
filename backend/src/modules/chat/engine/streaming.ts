@@ -96,6 +96,8 @@ import type { AssistantEvent, AssistantErrorCode, CodeApprovalEvent, CodeCellEve
 /** How much of a cell's code and output the chat keeps (CodeCellEvent). */
 const MAX_CELL_EVENT_CHARS = 20_000;
 const MAX_APPROVAL_SUMMARY_CHARS = 2_000;
+/** How often a turn that is working without output says it is still alive. */
+export const KEEP_ALIVE_MS = 30_000;
 
 /** A guest asking a thread's host to run commands in the host's workstation. */
 export type GuestCodeApproval = {
@@ -808,6 +810,15 @@ export async function runLLMStream(params: {
       iterReasoning = "";
     }
   };
+  // A turn that failed or was stopped leaves no work running: the stored
+  // transcript must not show a subagent or a cell spinning forever.
+  const settleUnfinished = () => {
+    for (const event of events) {
+      if (event.type === "subagent" && event.status === "running") event.status = "stopped";
+      else if (event.type === "code_cell" && event.status === "running") event.status = "failed";
+      else if (event.type === "code_approval" && event.status === "waiting") event.status = "expired";
+    }
+  };
 
   // Auto Mode bookkeeping for the whole turn: the intent every classifier
   // call is judged against, and the tool names already attempted — allowed or
@@ -826,6 +837,26 @@ export async function runLLMStream(params: {
       conversationId: conversationId ?? null,
     });
   }
+
+  // Work in progress is not a hang. The run's idle deadline (lib/streamRuns)
+  // stops a turn that sends nothing for five minutes, but a tool, a Python
+  // cell, a subagent or a wait for the thread's starter can run far longer
+  // without a frame. While any of those is under way, a keep-alive comment
+  // goes out every 30 s; each has its own time limit, and the run's lifetime
+  // remains the backstop.
+  let toolsInFlight = 0;
+  const working = () =>
+    toolsInFlight > 0 ||
+    events.some(
+      (event) =>
+        (event.type === "subagent" && event.status === "running") ||
+        (event.type === "code_cell" && event.status === "running") ||
+        (event.type === "code_approval" && event.status === "waiting"),
+    );
+  const keepAlive = setInterval(() => {
+    if (working()) unsafeWrite(": working\n\n");
+  }, KEEP_ALIVE_MS);
+  keepAlive.unref?.();
 
   let turnUsage: StreamChatResult["usage"];
   try {
@@ -893,7 +924,13 @@ export async function runLLMStream(params: {
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
     ): Promise<{ tool_use_id: string; content: string }[]> => {
-      const results = await runTurnToolsInOrder(calls, scope);
+      toolsInFlight += 1;
+      let results: { tool_use_id: string; content: string }[];
+      try {
+        results = await runTurnToolsInOrder(calls, scope);
+      } finally {
+        toolsInFlight -= 1;
+      }
       const nameOf = new Map(calls.map((call) => [call.id, call.name]));
       return results.map((result) => {
         const name = nameOf.get(result.tool_use_id);
@@ -1489,14 +1526,19 @@ export async function runLLMStream(params: {
       // The ask_inputs event has already been emitted and persisted in `events`.
       // Stop this assistant turn here so the model does not add redundant
       // prose telling the user to answer the picker or attach documents.
-    } else if (isAbortError(err)) {
+    } else if (isAbortError(err) || signal?.aborted) {
+      // The run was stopped (Stop, or one of its deadlines): the durable
+      // runtime reports that as "could not be completed (aborted)", which
+      // is a stop, not a failure. The route says which kind it was.
       flushPartialTurn({ emit: false });
+      settleUnfinished();
       throw new AssistantStreamAbortError(
         fullText,
         events.map(sanitizeAssistantEvent),
       );
     } else {
       flushPartialTurn();
+      settleUnfinished();
       const safeToDisplay = err instanceof UserFacingError;
       // The response already started, so the HTTP 500 path never sees this:
       // it is the one report of the turn's failure. Reporting it HERE, before
@@ -1531,6 +1573,8 @@ export async function runLLMStream(params: {
         { cause: err },
       );
     }
+  } finally {
+    clearInterval(keepAlive);
   }
 
   flushText();

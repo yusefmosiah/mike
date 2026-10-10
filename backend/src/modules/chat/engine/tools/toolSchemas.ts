@@ -56,7 +56,7 @@ export const PROJECT_EXTRA_TOOLS = [
     function: {
       name: "fetch_documents",
       description:
-        "Read the text content of multiple documents in a single call. Use this instead of calling read_document repeatedly when you need to read several documents at once. Long documents return one bounded window at a time (default first 2000 lines); when a document's text ends with a continuation notice, call read_document with that doc_id and the offset it names to read further. In one response, fetch each document/version at most once; after it has been fetched, use the prior tool result or find_in_document for targeted checks.",
+        "Read the text content of multiple documents in a single call. Use this instead of calling read_document repeatedly when you need to read several documents at once. One call returns about 60,000 characters in all, shared between the documents, so each long document comes back as an opening window; when a document's text ends with a continuation notice, call read_document with that doc_id and the position it names to read further. To find where documents discuss something without reading them, use find_in_documents first. In one response, fetch each document/version at most once; after it has been fetched, use the prior tool result or find_in_document for targeted checks.",
       parameters: {
         type: "object",
         properties: {
@@ -379,6 +379,37 @@ export const TOOLS = [
           },
         },
         required: ["doc_id", "query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_in_documents",
+      description:
+        "Search several documents at once for a string — find_in_document across the project. Returns, for each document with matches, how many there are and the first few with surrounding context (block ids and clause numbers for .docx). Use it to find which documents mention a party, term, figure or clause, and where, before reading anything; then read only the parts that matter. Matching is case-insensitive and whitespace-tolerant.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The string to search for.",
+          },
+          doc_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Documents to search (e.g. ['doc-0', 'doc-3']). Omit to search every document available here.",
+          },
+          max_results_per_document: {
+            type: "integer",
+            description: "Matches to return from each document (default 5). The total count is always reported.",
+          },
+          context_chars: {
+            type: "integer",
+            description: "Characters of context on each side of a match (default 80).",
+          },
+        },
+        required: ["query"],
       },
     },
   },

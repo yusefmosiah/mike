@@ -114,6 +114,11 @@ class _NotAwaited:
 _unawaited: set[int] = set()
 
 
+def _py_name(name: str) -> str:
+    """A parameter as Python spells it: a keyword gets a trailing underscore (``from`` → ``from_``)."""
+    return f"{name}_" if keyword.iskeyword(name) else name
+
+
 class Tool:
     """One callable tool. ``help(tools.name)`` shows its parameters."""
 
@@ -134,7 +139,7 @@ class Tool:
         parts = []
         for name in self.order:
             schema = self.parameters.get(name) or {}
-            parts.append(f"{name}: {_type_name(schema)}" + ("" if name in self.required else " = ..."))
+            parts.append(f"{_py_name(name)}: {_type_name(schema)}" + ("" if name in self.required else " = ..."))
         return f"{self.name}({', '.join(parts)})"
 
     def _doc(self) -> str:
@@ -145,7 +150,7 @@ class Tool:
             schema = self.parameters.get(name) or {}
             text = str(schema.get("description") or "").strip()
             flag = "required" if name in self.required else "optional"
-            lines.append(f"  {name} ({_type_name(schema)}, {flag}){': ' + text if text else ''}")
+            lines.append(f"  {_py_name(name)} ({_type_name(schema)}, {flag}){': ' + text if text else ''}")
         return "\n".join(lines).rstrip()
 
     def __repr__(self) -> str:
@@ -161,6 +166,9 @@ class Tool:
             raise TypeError(f"{self.signature()} takes at most {len(self.order)} positional arguments")
         merged = dict(zip(self.order, args))
         for key, value in kwargs.items():
+            # from_=... is how Python passes a parameter named with a keyword.
+            if key.endswith("_") and keyword.iskeyword(key[:-1]) and key[:-1] in self.parameters:
+                key = key[:-1]
             if key in merged:
                 raise TypeError(f"tools.{self.name}() got multiple values for {key!r}")
             merged[key] = value

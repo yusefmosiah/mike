@@ -30,6 +30,7 @@ const T1_NAMES = [
     "read_document",
     "fetch_documents",
     "find_in_document",
+    "find_in_documents",
     "list_documents",
     "read_table_cells",
     "get_diff",

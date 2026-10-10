@@ -66,6 +66,22 @@ describe("kernel session", () => {
     expect(second).toMatchObject({ status: "ok", result: "(40, 'hi')", hostRequests: 1 });
   });
 
+  it("takes a parameter named after a Python keyword with a trailing underscore", async () => {
+    const session = await startSession([
+      { name: "read", parameters: { type: "object", properties: { doc: { type: "string" }, from: { type: "string" } }, required: ["doc"] } },
+    ]);
+    const seen: unknown[] = [];
+    const outcome = await session.execute("await tools.read('doc-1', from_='t8')\nprint(tools.read.signature())", {
+      timeoutMs: 10_000,
+      onHostRequest: async (data) => {
+        seen.push(data.args);
+        return { ok: true, content: "text" };
+      },
+    });
+    expect(outcome).toMatchObject({ status: "ok", stdout: "read(doc: str, from_: str = ...)\n" });
+    expect(seen).toEqual([{ doc: "doc-1", from: "t8" }]);
+  });
+
   it("does not count time spent in tool calls against the cell's limit", async () => {
     const session = await startSession();
     const slowTool = async (): Promise<HostReply> => {
@@ -213,6 +229,13 @@ describe("python tool docs", () => {
       },
       { type: "function", function: { name: "run_command", parameters: {} } },
     ]);
+    const [read] = pythonToolSpecs([
+      {
+        type: "function",
+        function: { name: "read_document", parameters: { type: "object", properties: { from: { type: "string" } } } },
+      },
+    ]);
+    expect(pythonToolDoc(read)).toBe("await tools.read_document(from_: str = ...)\n    from_ (optional)");
     expect(pythonToolDoc(spec)).toBe(
       "await tools.find(query: str, limit: int = ...)\n    Find text.\n    query: What to find.\n    limit (optional)",
     );

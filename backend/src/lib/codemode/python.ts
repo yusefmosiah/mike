@@ -71,6 +71,16 @@ function typeName(schema: JsonSchema): string {
   return typeof schema.type === "string" ? (JSON_TYPES[schema.type] ?? "Any") : "Any";
 }
 
+/** Python keywords a tool parameter may be named after. */
+const PYTHON_KEYWORDS = new Set([
+  "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+  "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
+  "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield",
+]);
+
+/** A parameter as Python spells it: a keyword gets a trailing underscore (`from` → `from_`). */
+export const pythonParamName = (name: string) => (PYTHON_KEYWORDS.has(name) ? `${name}_` : name);
+
 /** One tool as Python documentation; the kernel's help(tools.x) says the same. */
 export function pythonToolDoc(spec: KernelToolSpec): string {
   const params = (spec.parameters ?? {}) as { properties?: Record<string, JsonSchema>; required?: unknown };
@@ -80,13 +90,13 @@ export function pythonToolDoc(spec: KernelToolSpec): string {
   );
   const order = [...required, ...Object.keys(props).filter((name) => !required.includes(name))];
   const signature = order
-    .map((name) => `${name}: ${typeName(props[name] ?? {})}${required.includes(name) ? "" : " = ..."}`)
+    .map((name) => `${pythonParamName(name)}: ${typeName(props[name] ?? {})}${required.includes(name) ? "" : " = ..."}`)
     .join(", ");
   const lines = [`await tools.${spec.name}(${signature})`];
   if (spec.description) lines.push(indent(spec.description.trim()));
   for (const name of order) {
     const text = typeof props[name]?.description === "string" ? (props[name].description as string).trim() : "";
-    lines.push(`    ${name}${required.includes(name) ? "" : " (optional)"}${text ? `: ${text}` : ""}`);
+    lines.push(`    ${pythonParamName(name)}${required.includes(name) ? "" : " (optional)"}${text ? `: ${text}` : ""}`);
   }
   return lines.join("\n");
 }
@@ -109,7 +119,7 @@ How these instructions apply:
 - Wherever these instructions say to call a tool (read_document, find_in_document, edit_document, get_diff, ask_inputs, web_search, read_workflow and the rest), call it inside run_python as \`await tools.<name>(...)\` with the same arguments. One run_python call is one tool-use round: do as much as makes sense in one cell, and run independent calls together with \`await tools.gather(tools.a(...), tools.b(...))\`.
 - You see only what a cell prints and the value of its last line. Print what you need to read: counts, summaries, the passages that matter. Keep full results in variables rather than printing them.
 - Variables, imports and functions stay defined across cells and across the messages of this conversation. Reuse them instead of fetching again; "read each document at most once" means keep its text in a variable. Files you write under the home directory persist too; use them for large data.
-- Results that are JSON come back as dicts and lists, others as strings. Common shapes: web_search returns {"results": [{"title", "url", "snippet"}], "count"}; fetch_web_page returns {"url", "content", "sha256"}. When you do not know a result's shape, print its type and keys before using it. A tool that fails raises ToolError; catch it to recover, or fix the call in the next cell. After a Python error, fix the cause and rerun only what failed.
+- Results that are JSON come back as dicts and lists, others as strings. Common shapes: web_search returns {"results": [{"title", "url", "snippet"}], "count"}; fetch_web_page returns {"url", "content", "sha256"}; fetch_documents returns one string with a "--- doc-N ---" header before each document, so to keep documents apart read them together with \`texts = await tools.gather(*[tools.read_document(doc_id=d) for d in ids])\`. A long document comes back in windows ending with a continuation notice; pass the id it names as \`from_=\` to read_document for the next window (\`from\` is a Python keyword, so parameters named after keywords take a trailing underscore). When you do not know a result's shape, print its type and keys before using it. A tool that fails raises ToolError; catch it to recover, or fix the call in the next cell. After a Python error, fix the cause and rerun only what failed.
 - ask_inputs, and any call that needs the user's approval, ends the turn at that point. Do not wrap it in try/except. The answer arrives in the next message, and your variables are still there.
 - A cell may compute for 300 seconds (pass timeout_seconds for up to 3600); time spent waiting on tools does not count. Split long work into steps that each print their progress.
 - Citations quote text verbatim, so print the exact passages you will cite before citing them: for documents with their [Page N] markers (the chat-local labels such as "doc-0" are the doc_id values the tools take and the citation block uses), and for web pages with the url and title the search or fetch returned.
