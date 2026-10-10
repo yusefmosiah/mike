@@ -114,7 +114,9 @@ let
       # Public endpoints through Caddy and TLS, then the disk.
       check_health() {
         local failed=0 code path used
-        for path in / /api/health /gotrue/health; do
+        # /__gate is Caddy and the password gate; /api/health goes through the
+        # frontend to the backend. Neither needs the password.
+        for path in /__gate /api/health /gotrue/health; do
           code=$(curl -s -o /dev/null -m 15 -w '%{http_code}' "https://${domain}$path" || true)
           if [ "$code" != 200 ]; then echo "unhealthy: $path returned $code" >&2; failed=1; fi
         done
@@ -307,6 +309,15 @@ in
     email = "staging@${domain}";
     virtualHosts.${domain}.extraConfig = ''
       encode zstd gzip
+      # The whole site sits behind the shared password (./gate.nix); only
+      # the gate itself, robots.txt and the health endpoints answer without it.
+      @gated not path /__gate /__gate/* /robots.txt /api/health /gotrue/health
+      forward_auth @gated 127.0.0.1:9180 {
+        uri /verify
+      }
+      handle /__gate {
+        reverse_proxy 127.0.0.1:9180
+      }
       # A private staging site: nothing here is for search engines.
       handle /robots.txt {
         respond "User-agent: *

@@ -11,6 +11,7 @@
     ./choir-builder.nix
     ./workstations.nix
     ./staging.nix
+    ./gate.nix
   ];
 
   boot.loader.efi.canTouchEfiVariables = true;

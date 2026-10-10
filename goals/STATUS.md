@@ -147,6 +147,30 @@ collide. In the owner's words where quoted.
    node-a to the previous generation. Making it permanent needs the owner's
    go-ahead.
 
+7. **Owner's direction before the partner demo (2026-10-10), in order.**
+   "Make the whole app go behind a password … and fail2ban people who guess
+   wrong (5x?). Once you're logged in, no password needed. Accounts for
+   testing should get temp VMs that get wiped. Do phala next. Don't do
+   email. Do your best citation check ui…it should be automatic 'checking
+   citations…' when substantive changes to docs relevant to citations are
+   made … Then finish mission 5."
+   - **Password gate: built and live on node-a (generation 53), not
+     accepted.** Caddy asks `infra/node-a/gate/gate.py` (127.0.0.1:9180)
+     before every request except `/__gate`, `/robots.txt`, `/api/health` and
+     `/gotrue/health`. The right password sets a signed, HttpOnly cookie for a
+     year, so each browser is asked once. Each wrong guess logs
+     `gate: wrong password from <ip>`; fail2ban bans an address from ports 80
+     and 443 for a day after five within an hour. The password lives only in
+     node-a's root-only `/var/lib/mike-gate-secret/password`. Only loopback
+     skips the gate; `mike-staging health` now probes `/__gate` in place of
+     `/`. Receipt, from the Mac after the switch:
+     `root: 302 https://choir-ip.com/__gate?next=%2F`, `api: 401`,
+     `health: 200`, `login: 303 https://choir-ip.com/assistant`,
+     `after: 200`. On node-a: `system-53-link`, 0 failed units,
+     `mike-gate`, `fail2ban` and `caddy` active, `Currently banned: 0`.
+   - Temporary, wiped VMs for test accounts: next.
+   - Phala attestation, the automatic citation check, Mission 5: queued.
+
 ## Where things stood (2026-10-09)
 
 Recorded from this session's own runs; receipts are in the commit messages and
