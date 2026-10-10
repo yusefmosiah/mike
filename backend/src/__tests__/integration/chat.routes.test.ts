@@ -685,7 +685,7 @@ describe("POST /chat — streaming endpoint", () => {
     });
 
     it("refuses an image for a model that cannot see, before writing anything", async () => {
-        const llm = await import("../../lib/llm");
+        const llm = await import("../../lib/llm/index.js");
         vi.mocked(llm.modelSeesImages).mockResolvedValueOnce(false);
         const res = await request(app)
             .post("/chat")
