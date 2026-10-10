@@ -52,25 +52,39 @@ export function useCodeApprovals({
         }
     }, [chatId]);
 
+    // Read once when the thread opens, then poll only while something can
+    // change. Kept apart so a request arriving (which starts the polling)
+    // does not trigger an extra read of its own.
+    const polling = watching || waiting;
     useEffect(() => {
         if (!enabled || !chatId) return;
         const controller = new AbortController();
-        const load = async () => {
-            try {
-                const next = await getCodeApprovals(chatId, controller.signal);
+        getCodeApprovals(chatId, controller.signal)
+            .then((next) => {
                 if (!controller.signal.aborted) setLoaded({ chatId, approvals: next });
-            } catch {
-                // A failed read is retried on the next tick.
-            }
-        };
-        void load();
-        if (!watching && !waiting) return () => controller.abort();
-        const timer = setInterval(() => void load(), intervalMs);
+            })
+            .catch(() => {
+                // The next poll or answer reads again.
+            });
+        return () => controller.abort();
+    }, [enabled, chatId]);
+    useEffect(() => {
+        if (!enabled || !chatId || !polling) return;
+        const controller = new AbortController();
+        const timer = setInterval(() => {
+            getCodeApprovals(chatId, controller.signal)
+                .then((next) => {
+                    if (!controller.signal.aborted) setLoaded({ chatId, approvals: next });
+                })
+                .catch(() => {
+                    // A failed read is retried on the next tick.
+                });
+        }, intervalMs);
         return () => {
             controller.abort();
             clearInterval(timer);
         };
-    }, [enabled, chatId, watching, waiting, intervalMs]);
+    }, [enabled, chatId, polling, intervalMs]);
 
     const decide = useCallback(
         async (requestId: string, decision: CodeApprovalDecision) => {

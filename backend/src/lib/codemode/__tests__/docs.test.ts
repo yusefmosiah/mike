@@ -112,8 +112,12 @@ describe("docs in Python", () => {
     expect(grep).toContain("doc-1 [p2.1] p.2 § MARKET REPORT: Liability caps");
     const ranked = await run("hits = docs.search('liability cap fees', k=3)\nprint(hits[0].doc.id, hits[0].block.id)");
     expect(["doc-0 m9", "doc-1 p2.1"]).toContain(ranked.trim());
-    const fees = await run("print(docs['doc-0'].tables[0].df.to_csv(index=False).strip())");
-    if (!fees.includes("ModuleNotFoundError")) expect(fees.trim()).toBe("Item,Fee\nSetup,\"$2,000\"\nMonthly,$500");
+    expect(await run("print(docs['doc-0'].tables[0].rows)")).toContain("[['Item', 'Fee'], ['Setup', '$2,000'], ['Monthly', '$500']]");
+    // The workstation has pandas; a CI runner may not.
+    const fees = await run(`import importlib.util
+t = docs['doc-0'].tables[0]
+print(t.df.to_csv(index=False).strip() if importlib.util.find_spec("pandas") else "no pandas")`);
+    if (fees.trim() !== "no pandas") expect(fees.trim()).toBe("Item,Fee\nSetup,\"$2,000\"\nMonthly,$500");
   });
 
   it("checks a quote is verbatim before it is cited", async () => {

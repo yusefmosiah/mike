@@ -29,10 +29,14 @@ beforeEach(() => vi.resetAllMocks());
 afterEach(() => vi.useRealTimers());
 
 it("asks the thread's starter, and sends their answer", async () => {
-    vi.mocked(getCodeApprovals)
-        .mockResolvedValueOnce([request()])
-        .mockResolvedValue([request({ id: "r1", status: "thread" })]);
-    vi.mocked(decideCodeApproval).mockResolvedValue();
+    // Pending until the starter answers, however often it is read.
+    let answered = false;
+    vi.mocked(getCodeApprovals).mockImplementation(async () =>
+        answered ? [request({ id: "r1", status: "thread" })] : [request()],
+    );
+    vi.mocked(decideCodeApproval).mockImplementation(async () => {
+        answered = true;
+    });
     render(<CodeApprovalRequests chatId="c1" isHost watching />);
 
     expect(await screen.findByText(/Alex Associate.s message wants to run a command in your workstation/)).toBeTruthy();
