@@ -139,10 +139,49 @@ Staging, for acceptance 4 (2026-10-10, owner's permission):
   not go through an upload and a chat turn in the web app, because that
   needs a signed-in staging account.
 
+End to end on staging (2026-10-10, owner's permission to sign in):
+
+- A one-off script on node-a signed in as the owner's existing staging
+  account through GoTrue's admin API on loopback (a magic link verified
+  there; no password, no new account). The token lived in a 0700 temp
+  directory that was deleted on exit. It then called the backend on
+  `127.0.0.1:3001` and sent the storage upload to RustFS on
+  `127.0.0.1:9000` with the signed host, both behind the site's gate.
+- The first run found a bug that I0 shipped: `create_upload_session` and
+  the `upload_session_files` check still held the office-and-PDF list, so
+  every image upload failed as "Invalid upload manifest". Unit tests mock
+  the database. Fixed in `20261010_10_image_upload_types.sql`
+  (commit `6e791df2`), with `uploadTypes.schema.test.ts` holding schema.sql's
+  lists to `ALLOWED_DOCUMENT_TYPES`. CI, including schema drift and the
+  staging deploy, passed. The migration is in staging's ledger.
+- The run after the deploy, with `docs/assets/link-image.jpg` (a Monet
+  cliff walk with "Mike" across the sky) and
+  `phala/gemma-4-26b-a4b-uncensored`:
+
+  ```text
+  signed in: 1 session
+  upload session: pending_upload, storage host: https://choir-ip.com
+  storage PUT: 200
+  file: completed
+  document: {"id":"386257e3-1d15-4a3b-b409-bd1e86478a3e","filename":"cliff-walk.jpg","file_type":"jpg","versions":0}
+  chat: fcc3b415-8150-405a-830c-1d72cbe8c839
+  event types: 1 chat_id 1 chat_title 1 citations 8 content_delta 1 stream_incarnation 1 turn_usage
+  ```
+
+  The saved answer, read back with `GET /chat/fcc3b415-…`:
+
+  > This image is an impressionistic painting depicting a coastal scene
+  > with a bright, textured sky and shimmering water. In the foreground,
+  > figures stand on a grassy cliff overlooking the sea, one of whom holds
+  > a red parasol. The word "Mike" is written in large, white serif letters
+  > across the upper portion of the image.
+
+  Usage: 11,495 input tokens, 66 output.
+
 Not yet done:
 
-- Acceptance 4 end to end: upload a real photo in the staging web app and
-  ask Gemma 4 about it.
+- The same turn seen in a browser: the image in the document panel and the
+  "Sees images" label in the picker on staging.
 - Ollama vision (probe `/api/show`).
 - OpenRouter models outside pi's catalog stay text-only.
 - Image parts are stored base64 in Pi Durable's transcript, about 1 to 3 MB
