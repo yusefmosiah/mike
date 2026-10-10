@@ -504,7 +504,10 @@ export function ProjectsOverview() {
     const toolbarActions =
         selectedIds.length > 0 ? (
             <div ref={actionsRef} className="relative">
-                <TabPillButtonUI onClick={() => setActionsOpen((v) => !v)}>
+                <TabPillButtonUI
+                    aria-expanded={actionsOpen}
+                    onClick={() => setActionsOpen((v) => !v)}
+                >
                     Actions
                     <ChevronDown className="h-3.5 w-3.5" />
                 </TabPillButtonUI>
