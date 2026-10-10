@@ -8,6 +8,8 @@ import { createDb } from "../../lib/db";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import { isMessageId } from "../chat/chat.service";
 import {
+    autoCheckCitations,
+    autoCheckPending,
     cancelCitationCheck,
     getCitationChecks,
     recheckCitation,
@@ -44,9 +46,19 @@ citationsRouter.get("/documents/:documentId", requireAuth, asyncRoute(async (req
     if (!isMessageId(documentId) || (versionId !== null && !isMessageId(versionId))) {
         return void res.status(400).json({ detail: "documentId and version_id must be ids" });
     }
-    const result = await getCitationChecks(createDb(), { ...actor(res), documentId, versionId });
+    const db = createDb();
+    const result = await getCitationChecks(db, { ...actor(res), documentId, versionId });
     if (!result.ok) return void sendServiceFailure(res, result);
-    res.json(result.data);
+    res.json({ ...result.data, auto_pending: await autoCheckPending(db, documentId) });
+}));
+
+// Opening a document: check it if its citations changed since the last check.
+citationsRouter.post("/documents/:documentId/auto", requireAuth, asyncRoute(async (req, res) => {
+    const documentId = req.params.documentId;
+    if (!isMessageId(documentId)) return void res.status(400).json({ detail: "documentId must be an id" });
+    const result = await autoCheckCitations(createDb(), { ...actor(res), documentId });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json({ started: result.data.started, reason: result.data.reason, task: result.data.task });
 }));
 
 // POST /citation-checks/:checkId/recheck: regrade from the stored snapshot.

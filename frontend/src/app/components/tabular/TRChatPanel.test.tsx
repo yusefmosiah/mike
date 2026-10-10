@@ -13,6 +13,11 @@ import {
 } from "@/app/lib/mikeApi";
 import { TRChatPanel } from "./TRChatPanel";
 
+// The document panel's citation-check line makes its own requests; these
+// tests count the panel's document requests.
+vi.mock("@/app/hooks/useDocumentCitationChecks", () => ({
+    useDocumentCitationChecks: () => ({ status: "idle" }),
+}));
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn() }),
 }));

@@ -12,6 +12,11 @@ import {
 
 const localExport = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/app/lib/authEvents", () => ({ authenticatedFetch: vi.fn() }));
+// The document panel's citation-check line makes its own requests; these
+// tests count the panel's document requests.
+vi.mock("@/app/hooks/useDocumentCitationChecks", () => ({
+    useDocumentCitationChecks: () => ({ status: "idle" }),
+}));
 vi.mock("./ProjectWorkspaceTips", () => ({
     ProjectWorkspaceTips: () => <p>Open a document</p>,
 }));

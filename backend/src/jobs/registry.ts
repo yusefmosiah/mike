@@ -5,7 +5,7 @@ import { handleDocumentCleanup, handleDocumentPrecomputeText, handleConversionCo
 import { handleExtractionExtract, markExtractionJobFailed } from "../modules/tabular/tabular.service";
 import { handleMemoryConsolidation, markMemoryConsolidationFailed } from "../modules/memory/memory.service";
 import { handleRlmDeepRun } from "../modules/diligence/diligence.service";
-import { handleCitationCheckJob } from "../modules/citations/citations.service";
+import { handleAutoCitationCheckJob, handleCitationCheckJob } from "../modules/citations/citations.service";
 import { handleStorageCleanup } from "../lib/dbq/storageCleanup";
 import { type DbJobHandlers } from "../lib/dbq/types";
 import { type DbJobFailureHook } from "../lib/dbq/runner";
@@ -23,6 +23,7 @@ export const DB_JOB_HANDLERS: DbJobHandlers = {
   "memory.consolidate": handleMemoryConsolidation,
   "rlm.deep_run": handleRlmDeepRun,
   "citations.verify": handleCitationCheckJob,
+  "citations.auto_check": handleAutoCitationCheckJob,
 };
 export const DB_JOB_FAILURE_HOOKS: Record<string, DbJobFailureHook> = {
   "conversion.convert": markConversionFailed,

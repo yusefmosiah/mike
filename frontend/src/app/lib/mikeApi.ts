@@ -3770,3 +3770,64 @@ export interface VoiceOptions {
 export async function getVoiceOptions(): Promise<VoiceOptions> {
     return apiRequest<VoiceOptions>("/audio/options");
 }
+
+// Document citation checks (backend/src/modules/citations).
+
+export type CitationCheckVerdict =
+    | "not-found"
+    | "contradicted"
+    | "quote-mismatch"
+    | "unsupported"
+    | "exists-and-matches"
+    | "unverifiable";
+
+export interface DocumentCitationCheck {
+    id: string;
+    citation_ref: number;
+    citation_text: string | null;
+    cited_block_id: string | null;
+    proposition: string | null;
+    quote: string | null;
+    verdict: CitationCheckVerdict;
+    reason: string | null;
+    support_reason: string | null;
+    excerpt: string | null;
+}
+
+export interface DocumentCitationTask {
+    id: string;
+    document_version_id: string | null;
+    status: "queued" | "running" | "completed" | "failed" | "cancelled";
+    checkpoint?: { citations?: unknown[] };
+    created_at: string;
+    finished_at: string | null;
+}
+
+export interface DocumentCitationChecks {
+    task: DocumentCitationTask | null;
+    checks: DocumentCitationCheck[];
+    current_version_id: string | null;
+    /** An automatic check is scheduled and has not started yet. */
+    auto_pending?: boolean;
+}
+
+/** The document's latest citation check and its results. */
+export async function getDocumentCitationChecks(
+    documentId: string,
+    signal?: AbortSignal,
+): Promise<DocumentCitationChecks> {
+    return apiRequest<DocumentCitationChecks>(
+        `/citation-checks/documents/${encodeURIComponent(documentId)}`,
+        { signal },
+    );
+}
+
+/** Check the document now if its citations changed since the last check. */
+export async function autoCheckDocumentCitations(
+    documentId: string,
+): Promise<{ started: boolean; reason: string }> {
+    return apiRequest(
+        `/citation-checks/documents/${encodeURIComponent(documentId)}/auto`,
+        { method: "POST" },
+    );
+}

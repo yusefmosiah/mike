@@ -20,6 +20,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
 import { CodeCellBlock } from "./message/CodeCellBlock";
+import { CitationCheckStatus } from "./message/CitationCheckStatus";
 import { openWebCitation } from "../shared/types";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
 import { eventErrorMessage, toolCallLabel } from "./message/eventUtils";
@@ -1156,6 +1157,10 @@ export function AssistantMessage({
                                         isDocReloading?.(e.document_id) ?? false
                                     }
                                 />
+                                <CitationCheckStatus
+                                    documentId={e.document_id}
+                                    versionId={e.version_id ?? null}
+                                />
                             </div>
                         ));
                     })()}
@@ -1185,24 +1190,35 @@ export function AssistantMessage({
                                 const canOpen =
                                     !!onOpenDocument && !!documentId;
                                 return (
-                                    <DocDownloadBlock
+                                    <div
                                         key={i}
-                                        filename={e.filename}
-                                        download_url={e.download_url}
-                                        versionNumber={versionNumber}
-                                        onOpen={
-                                            canOpen
-                                                ? () =>
-                                                      onOpenDocument!({
-                                                          documentId:
-                                                              documentId!,
-                                                          filename: e.filename,
-                                                          versionId,
-                                                          versionNumber,
-                                                      })
-                                                : undefined
-                                        }
-                                    />
+                                        className="flex flex-col gap-2"
+                                    >
+                                        <DocDownloadBlock
+                                            filename={e.filename}
+                                            download_url={e.download_url}
+                                            versionNumber={versionNumber}
+                                            onOpen={
+                                                canOpen
+                                                    ? () =>
+                                                          onOpenDocument!({
+                                                              documentId:
+                                                                  documentId!,
+                                                              filename:
+                                                                  e.filename,
+                                                              versionId,
+                                                              versionNumber,
+                                                          })
+                                                    : undefined
+                                            }
+                                        />
+                                        {documentId && (
+                                            <CitationCheckStatus
+                                                documentId={documentId}
+                                                versionId={versionId}
+                                            />
+                                        )}
+                                    </div>
                                 );
                             })}
                         </div>

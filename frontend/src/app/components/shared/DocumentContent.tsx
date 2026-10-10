@@ -13,6 +13,7 @@ import { EditCard } from "../assistant/EditCard";
 import { expandDocumentQuoteEntry } from "./types";
 import type { Citation, EditAnnotation, PanelDocument } from "./types";
 import { quoteVerificationState } from "../assistant/message/citationVerification";
+import { CitationCheckStatus } from "../assistant/message/CitationCheckStatus";
 import { CaseView } from "../assistant/CaseView";
 import { useResolvedPanelDocument } from "../assistant/useResolvedPanelDocument";
 import type { DocumentVersion } from "@/app/lib/mikeApi";
@@ -238,20 +239,37 @@ export function DocumentContent({
         <div ref={contentRef} className="flex h-full min-h-0 flex-col">
             <DocumentAnnotationLayer
                 title={
-                    <DocumentTitleRow
-                        document={resolvedDocument}
-                        isReloading={isReloading}
-                        compactActions={compactActions ?? narrow}
-                        saveState={saveState}
-                        onVersionChange={onVersionChange}
-                        onDownload={() => localDownload.current?.()}
-                        toolbarVisible={toolbarVisible}
-                        onToggleToolbar={
-                            viewType === "docx" && canEdit
-                                ? () => setToolbarVisible((visible) => !visible)
-                                : undefined
-                        }
-                    />
+                    <>
+                        <DocumentTitleRow
+                            document={resolvedDocument}
+                            isReloading={isReloading}
+                            compactActions={compactActions ?? narrow}
+                            saveState={saveState}
+                            onVersionChange={onVersionChange}
+                            onDownload={() => localDownload.current?.()}
+                            toolbarVisible={toolbarVisible}
+                            onToggleToolbar={
+                                viewType === "docx" && canEdit
+                                    ? () =>
+                                          setToolbarVisible(
+                                              (visible) => !visible,
+                                          )
+                                    : undefined
+                            }
+                        />
+                        {/* Opening a document checks its citations if they
+                            changed since the last check (backend
+                            citations.auto.ts). */}
+                        {!isCase && active && documentId && (
+                            <div className="px-3 pb-1">
+                                <CitationCheckStatus
+                                    documentId={documentId}
+                                    versionId={versionId ?? null}
+                                    requestAuto
+                                />
+                            </div>
+                        )}
+                    </>
                 }
                 annotation={
                     mode.kind === "citation" ||

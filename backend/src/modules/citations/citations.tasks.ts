@@ -320,6 +320,30 @@ function fallingOver(models: string[], apiKeys: Parameters<typeof completeText>[
 }
 
 /** Run (or resume) one task to its end. Safe to call again after a crash. */
+/** One document version's reading text and block offsets; "gone" when the version was deleted. */
+export async function readVersionText(
+    db: Db,
+    documentId: string,
+    versionId: string,
+): Promise<Awaited<ReturnType<typeof documentText>> | "gone"> {
+    const { data: version } = await db
+        .from("document_versions")
+        .select("id, storage_path, pdf_storage_path, file_type, filename, deleted_at")
+        .eq("id", versionId)
+        .maybeSingle();
+    if (!version || version.deleted_at) return "gone";
+    const fileType = ((version.file_type as string | null) ?? documentSuffix((version.filename as string | null) ?? ""))
+        .toLowerCase()
+        .replace(/^\./, "");
+    return documentText(db, {
+        documentId,
+        versionId,
+        storagePath: version.storage_path as string | null,
+        pdfStoragePath: version.pdf_storage_path as string | null,
+        fileType,
+    });
+}
+
 export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {}): Promise<Record<string, unknown>> {
     const { data: row } = await db.from("verification_tasks").select("*").eq("id", taskId).maybeSingle();
     if (!row) return { outcome: "missing_task" };
@@ -348,22 +372,8 @@ export async function runCitationCheck(db: Db, taskId: string, deps: RunDeps = {
 
     let citations = task.checkpoint?.citations;
     if (!citations) {
-        const { data: version } = await db
-            .from("document_versions")
-            .select("id, storage_path, pdf_storage_path, file_type, filename, deleted_at")
-            .eq("id", task.document_version_id)
-            .maybeSingle();
-        if (!version || version.deleted_at) return finish(db, task.id, "failed", "version_gone");
-        const fileType = ((version.file_type as string | null) ?? documentSuffix((version.filename as string | null) ?? ""))
-            .toLowerCase()
-            .replace(/^\./, "");
-        const read = await documentText(db, {
-            documentId: task.document_id,
-            versionId: task.document_version_id,
-            storagePath: version.storage_path as string | null,
-            pdfStoragePath: version.pdf_storage_path as string | null,
-            fileType,
-        });
+        const read = await readVersionText(db, task.document_id, task.document_version_id);
+        if (read === "gone") return finish(db, task.id, "failed", "version_gone");
         if (!read) return finish(db, task.id, "failed", "unreadable_document");
         citations = await extractCitations({ content: read.content, blocks: read.blockOffsets }, complete, {
             concurrency: deps.concurrency,

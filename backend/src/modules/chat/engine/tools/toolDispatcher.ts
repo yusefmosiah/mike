@@ -280,6 +280,19 @@ function cachedCaseNotFetchedResult(clusterId: number | null) {
   };
 }
 
+/**
+ * A document the assistant made or changed gets an automatic citation check
+ * once the turn's edits settle (citations.auto.ts decides whether its
+ * citations changed). Never holds up the turn.
+ */
+function scheduleCitationCheck(db: Db, userId: string, documentId: string | undefined, model: string | null | undefined) {
+  if (!documentId) return;
+  // Loaded on use, like check_citations below: a static import would be a load-order cycle.
+  void import("../../../citations/citations.service.js")
+    .then((citations) => citations.scheduleAutoCitationCheck(db, { userId, documentId, model: model ?? null }))
+    .catch(() => console.warn("[citations] could not schedule an automatic check", { documentId }));
+}
+
 export async function runToolCalls(
   toolCalls: ToolCall[],
   docStore: DocStore,
@@ -437,6 +450,7 @@ export async function runToolCalls(
         version_id: versionId,
         version_number: versionNumber,
       });
+      scheduleCitationCheck(db, userId, documentId, options.model);
     } else {
       write(
         `data: ${JSON.stringify({ type: "doc_created", filename: previewFilename, download_url: "" })}\n\n`,
@@ -1625,6 +1639,7 @@ export async function runToolCalls(
             annotations: result.annotations,
           };
           docsEdited.push(payload);
+          scheduleCitationCheck(db, userId, indexed.document_id, options.model);
           write(
             `data: ${JSON.stringify({
               type: "doc_edited",
