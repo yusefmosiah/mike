@@ -118,6 +118,13 @@ function makeQuery(table: string) {
 function mockDb() {
   return {
     from: vi.fn((table: string) => makeQuery(table)),
+    // The cloud turn's database claim (lib/turnClaims.ts): always granted
+    // here; the in-process run is what refuses a second turn in these tests.
+    rpc: vi.fn(async (name: string) =>
+      name === "claim_chat_turn"
+        ? { data: [{ granted: true }], error: null }
+        : { data: null, error: null },
+    ),
     auth: {
       getUser: () =>
         Promise.resolve({ data: { user: { id: "u1" } }, error: null }),

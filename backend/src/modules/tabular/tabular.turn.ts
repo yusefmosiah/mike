@@ -17,6 +17,7 @@ import {
     scheduleMemoryConsolidation,
 } from "../../lib/memory/schedule";
 import { safeError } from "../../lib/safeError";
+import { claimTurn, type TurnClaim } from "../../lib/turnClaims";
 import { stopOutcomeFrame } from "../../lib/streamRuns";
 import type { Db } from "../../lib/db";
 import {
@@ -131,6 +132,38 @@ export async function driveTabularChatTurn(
         }
     };
 
+    // One generating turn per review chat across every replica: the same
+    // database claim chat and project chat take (lib/turnClaims.ts). A
+    // restarted turn claims again under its own id. If the claim cannot be
+    // read the turn goes ahead; the in-process run below still refuses a
+    // second turn on this replica.
+    let turnClaim: TurnClaim | null = null;
+    if (chatId) {
+        const claimed = await claimTurn(db, {
+            surface: "tabular",
+            chatId,
+            turnId: assistantMessageId,
+            actorUserId: userId,
+            actorRole: null,
+        });
+        if (claimed.ok) {
+            turnClaim = claimed.claim;
+        } else if (claimed.reason === "held") {
+            await releaseMemoryFence();
+            return {
+                ok: false,
+                status: 409,
+                body: {
+                    code: "turn_in_progress",
+                    detail: "A response is already being generated for this chat.",
+                    generating: { user_id: claimed.holder.actorUserId, since: claimed.holder.claimedAt },
+                },
+            };
+        } else {
+            console.warn("[tabular/chat] turn claim unavailable", safeError(claimed.error));
+        }
+    }
+
     // The answer is a server-owned run from here on: it survives the caller's
     // socket (a refresh, a closed panel, a second tab taking over) and only
     // POST .../turn/:turnId/stop aborts it. A chat may have one at a time.
@@ -147,6 +180,7 @@ export async function driveTabularChatTurn(
         // Refused before the first SSE byte, so the caller gets a status code
         // rather than an error frame — but the user turn is already stored,
         // so the fence this request opened has to be handed back here.
+        await turnClaim?.release();
         await releaseMemoryFence();
         return {
             ok: false,
@@ -351,6 +385,7 @@ export async function driveTabularChatTurn(
         // second tab — and starts its retention window, so a client
         // reconnecting a moment later still gets the last frames.
         stream.finish();
+        await turnClaim?.release();
         // Whatever ended the stream, the fence must not outlive it: released
         // here unless this turn already handed it to the curator, which owns
         // it from that point on.

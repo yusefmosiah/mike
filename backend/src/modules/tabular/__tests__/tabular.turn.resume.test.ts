@@ -25,6 +25,7 @@ vi.mock("../../chat/chat.service", async (importOriginal) => ({
 
 import { getAssistantTurnRun } from "../../../lib/assistantTurnRuns";
 import {
+    driveTabularChatTurn,
     resumeInterruptedTabularChatTurn,
     type TabularChatTurnResumeContext,
 } from "../tabular.turn";
@@ -81,8 +82,11 @@ describe("resumeInterruptedTabularChatTurn", () => {
         });
         const script = scriptedDb([
             { table: "tabular_review_chat_messages", data: ROWS },
+            // The resumed turn claims its review chat again under its own id.
+            { rpc: "claim_chat_turn", data: [{ granted: true }] },
             { table: "tabular_review_chat_messages", op: "insert" },
             { table: "tabular_review_chats", op: "update" },
+            { rpc: "release_chat_turn" },
         ]);
 
         await resumeInterruptedTabularChatTurn(script.db, {
@@ -116,7 +120,7 @@ describe("resumeInterruptedTabularChatTurn", () => {
                 durableTurn: { context: CONTEXT, resume: true },
             }),
         );
-        expect(script.calls[1].payload).toMatchObject({
+        expect(script.calls[2].payload).toMatchObject({
             id: "answer-1",
             chat_id: "chat-1",
             role: "assistant",
@@ -125,6 +129,11 @@ describe("resumeInterruptedTabularChatTurn", () => {
         expect(finishTurn).toHaveBeenCalledWith("answer-1");
         expect(abandonTurn).not.toHaveBeenCalled();
         expect(getAssistantTurnRun("answer-1", "tabular")?.finished).toBe(true);
+        expect(script.calls.find((call) => call.table === "claim_chat_turn")?.args).toMatchObject({
+            p_surface: "tabular",
+            p_chat_id: "chat-1",
+            p_turn_id: "answer-1",
+        });
     });
 
     it("gives up a turn whose answer was stored before the process died", async () => {
@@ -181,5 +190,39 @@ describe("resumeInterruptedTabularChatTurn", () => {
         script.done();
         expect(abandonTurn).toHaveBeenCalledWith("answer-1");
         expect(prepareTabularChat).not.toHaveBeenCalled();
+    });
+});
+
+describe("driveTabularChatTurn", () => {
+    it("refuses a second turn while a colleague's turn holds the review chat", async () => {
+        const script = scriptedDb([
+            {
+                rpc: "claim_chat_turn",
+                data: [{ granted: false, holder_turn_id: "their-turn", holder_actor_user_id: "colleague", holder_actor_role: null, holder_claimed_at: "2026-10-10T10:00:00Z" }],
+            },
+        ]);
+        const open = vi.fn();
+        const outcome = await driveTabularChatTurn(script.db, {
+            prepared: PREPARED as never,
+            userId: "user-1",
+            lastUserContent: "second",
+            clientReviewTitle: null,
+            clientProjectName: null,
+            assistantMessageId: "my-turn",
+            durableContext: null,
+            open,
+        });
+        script.done();
+        expect(outcome).toEqual({
+            ok: false,
+            status: 409,
+            body: {
+                code: "turn_in_progress",
+                detail: "A response is already being generated for this chat.",
+                generating: { user_id: "colleague", since: "2026-10-10T10:00:00Z" },
+            },
+        });
+        expect(open).not.toHaveBeenCalled();
+        expect(runLLMStream).not.toHaveBeenCalled();
     });
 });

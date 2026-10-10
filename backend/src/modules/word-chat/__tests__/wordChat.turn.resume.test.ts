@@ -27,6 +27,7 @@ vi.mock("../../chat/chat.service", async (importOriginal) => ({
 
 import { getAssistantTurnRun } from "../../../lib/assistantTurnRuns";
 import {
+  driveWordChatTurn,
   resumeInterruptedWordChatTurn,
   type WordChatTurnResumeContext,
 } from "../wordChat.turn";
@@ -94,8 +95,11 @@ describe("resumeInterruptedWordChatTurn", () => {
     });
     const script = scriptedDb([
       { table: "word_chat_messages", data: ROWS },
+      // The resumed turn claims its chat again under its own id.
+      { rpc: "claim_chat_turn", data: [{ granted: true }] },
       // The reserved row gets the answer; nothing is reserved again.
       { table: "word_chat_messages", op: "update" },
+      { rpc: "release_chat_turn" },
     ]);
 
     await resumeInterruptedWordChatTurn(script.db, {
@@ -130,7 +134,7 @@ describe("resumeInterruptedWordChatTurn", () => {
         durableTurn: { context: CONTEXT, resume: true },
       }),
     );
-    expect(script.calls[1].payload).toEqual({
+    expect(script.calls[2].payload).toEqual({
       content: [{ type: "content", text: "done" }],
       citations: null,
     });
@@ -207,5 +211,37 @@ describe("resumeInterruptedWordChatTurn", () => {
     });
     script.done();
     expect(abandonTurn).toHaveBeenCalledWith("answer-1");
+  });
+});
+
+describe("driveWordChatTurn", () => {
+  it("refuses a second turn while a colleague's turn holds the cloud chat", async () => {
+    const script = scriptedDb([
+      {
+        rpc: "claim_chat_turn",
+        data: [{ granted: false, holder_turn_id: "their-turn", holder_actor_user_id: "colleague", holder_actor_role: null, holder_claimed_at: "2026-10-10T10:00:00Z" }],
+      },
+    ]);
+    const open = vi.fn();
+    const outcome = await driveWordChatTurn(script.db, {
+      prepared: PREPARED as never,
+      userId: "user-1",
+      userEmail: undefined,
+      clientDocumentId: "word-doc-1",
+      activeDocumentName: "Lease.docx",
+      persistChat: true,
+      clientToolsEnabled: false,
+      editApplyMode: "manual" as never,
+      assistantMessageId: "my-turn",
+      durableContext: null,
+      open,
+    });
+    script.done();
+    expect(outcome).toMatchObject({
+      ok: false,
+      status: 409,
+      body: { code: "turn_in_progress", generating: { user_id: "colleague" } },
+    });
+    expect(open).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,7 @@ import {
   scheduleMemoryConsolidation,
 } from "../../lib/memory/schedule";
 import { safeError } from "../../lib/safeError";
+import { claimTurn, type TurnClaim } from "../../lib/turnClaims";
 import { stopOutcomeFrame } from "../../lib/streamRuns";
 import type { Db } from "../../lib/db";
 import {
@@ -156,7 +157,38 @@ export async function driveWordChatTurn(
   let memoryTurnScheduled = false;
   // Only a cloud turn has rows a later process can rebuild it from.
   const durable = persistChat && !!inputMessageId ? args.durableContext : null;
+  let turnClaim: TurnClaim | null = null;
   try {
+    // One generating turn per cloud Word chat across every replica: the same
+    // database claim the web chats take (lib/turnClaims.ts). A local chat
+    // lives in one pane and has no one to share it with. If the claim cannot
+    // be read the turn goes ahead; the in-process run still refuses a second
+    // turn on this replica.
+    if (persistChat) {
+      const claimed = await claimTurn(db, {
+        surface: "word",
+        chatId,
+        turnId: assistantMessageId,
+        actorUserId: userId,
+        actorRole: null,
+      });
+      if (claimed.ok) {
+        turnClaim = claimed.claim;
+      } else if (claimed.reason === "held") {
+        return {
+          ok: false,
+          status: 409,
+          body: {
+            code: "turn_in_progress",
+            detail: "A response is already being generated for this chat.",
+            generating: { user_id: claimed.holder.actorUserId, since: claimed.holder.claimedAt },
+          },
+        };
+      } else {
+        console.warn("[word-chat] turn claim unavailable", safeError(claimed.error));
+      }
+    }
+
     // The answer is a server-owned run from here on: it survives the pane's
     // socket (the task pane closing, Word reloading it, a dropped connection)
     // and only POST /word-chat/:chatId/turn/:turnId/stop aborts it. `chatId`
@@ -462,6 +494,7 @@ export async function driveWordChatTurn(
       stream.finish();
     }
   } finally {
+    await turnClaim?.release();
     if (memoryTurn && !memoryTurnScheduled) {
       try {
         await releaseMemoryConversationTurn({

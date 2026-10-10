@@ -134,7 +134,20 @@ they live in the gated stack suite as
 - `npm run test:coverage --prefix frontend`: `Tests  2283 passed`, statements, functions
   and lines 100%, branches 99.94%. Lint: 0 errors (33 pre-existing warnings). Typecheck: 0.
 
-Still open: the tabular and Word surfaces keep the in-process registry only (the claim
-table admits `tabular` and `word` but nothing claims them yet). An editor whose tab
+Follow-up (2026-10-10, assistant-run): tabular review chats and cloud Word chats now
+take the same database claim (`surface` `tabular` / `word`) before their in-process run,
+release it when the turn ends, and answer a colleague's held claim with 409
+`turn_in_progress` plus who is generating. A restarted turn claims again under its own
+id. Local Word chats are not claimed, because they live in one pane. If the claim cannot
+be read, the turn goes ahead, as before. Tests:
+- `npx vitest run src/modules/word-chat src/__tests__/integration/wordChat.routes.test.ts src/modules/tabular`
+  printed `Tests  163 passed (163)`;
+- refusal tests: `tabular.turn.resume.test.ts` and `wordChat.turn.resume.test.ts`;
+- backend `npm test`: 4478 passed.
+
+Not done: presence (the "someone is generating" notice) is not shown on the tabular and
+Word UIs.
+
+Still open from before: an editor whose tab
 attaches to a colleague's live turn sees the Stop control for it, as before this
 change.
