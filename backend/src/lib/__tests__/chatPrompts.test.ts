@@ -3,20 +3,23 @@ import { buildSystemPrompt } from "../../modules/chat/engine/prompts";
 import { COURTLISTENER_SYSTEM_PROMPT } from "../../modules/chat/engine/tools/courtlistenerTools";
 import { buildWordChatSystemPrompt } from "../../modules/chat/engine/wordPrompt";
 import { buildTabularMessages } from "../../modules/tabular/tabular.chats";
+import { MIKE_OPEN_SOURCE } from "../agentIdentity";
 
 describe("buildSystemPrompt", () => {
     it("always contains the core identity and rules", () => {
         for (const prompt of [buildSystemPrompt(true), buildSystemPrompt(false)]) {
             expect(prompt).toContain(
-                "You are Mike, a general knowledge-work assistant.",
+                "This is the system prompt for Mike, an open-source AI agent for knowledge work",
             );
             expect(prompt).toContain("Do not fabricate document content.");
             expect(prompt).toContain(
                 "In user-facing responses, use natural language only",
             );
             expect(prompt).toContain(
-                "Never mention tool names or tool calls",
+                "Never mention tool names or tool calls when reporting your work",
             );
+            // No small round budget: the runtime's limit is a runaway backstop.
+            expect(prompt).not.toMatch(/at most \d+ tool-use rounds/);
             expect(prompt).toContain("DOCX GENERATION:");
             expect(prompt).toContain("DOCUMENT EDITING:");
         }
@@ -99,14 +102,14 @@ describe("buildSystemPrompt", () => {
         }
     });
 
-    it("splices the CourtListener instructions between the two base sections when research is on", () => {
+    it("puts the CourtListener instructions after the general sections, as one tool's instructions", () => {
         const prompt = buildSystemPrompt(true);
         expect(prompt).toContain(COURTLISTENER_SYSTEM_PROMPT);
+        const toolsIdx = prompt.indexOf("TOOL INSTRUCTIONS:");
         const researchIdx = prompt.indexOf("US CASE LAW RESEARCH:");
-        const editingIdx = prompt.indexOf("DOCUMENT EDITING:");
-        const afterIdx = prompt.indexOf("DOCUMENT NAMES IN PROSE:");
-        expect(editingIdx).toBeLessThan(researchIdx);
-        expect(researchIdx).toBeLessThan(afterIdx);
+        const generalIdx = prompt.indexOf("GENERAL GUIDANCE:");
+        expect(generalIdx).toBeLessThan(toolsIdx);
+        expect(toolsIdx).toBeLessThan(researchIdx);
     });
 
     it("omits the CourtListener instructions entirely when research is off", () => {
@@ -125,9 +128,12 @@ describe("buildSystemPrompt", () => {
     });
 });
 
-// Mike is a general knowledge-work agent with legal strengths. A legal-only
-// identity made models refuse ordinary questions ("what are the baseball
-// scores?"), so no surface may introduce Mike as a legal assistant.
+// Mike is a general knowledge-work agent; legal tools are part of its tool
+// set, not its identity. A legal-only identity made models refuse ordinary
+// questions ("what are the baseball scores?"). Every surface introduces
+// Mike honestly, as the prompt of an open-source agent, rather than casting
+// the model in a role, and says the source is public so the model explains
+// how it works when asked.
 describe("assistant identity", () => {
     const tabularSystem = () => {
         const [system] = buildTabularMessages(
@@ -145,19 +151,20 @@ describe("assistant identity", () => {
         ["tabular", tabularSystem],
     ];
 
-    it.each(surfaces)("%s introduces Mike as a general assistant", (_name, build) => {
+    it.each(surfaces)("%s introduces Mike as an open-source agent, without role-play", (_name, build) => {
         const prompt = build();
-        expect(prompt).toContain("You are Mike, a general knowledge-work assistant");
-        expect(prompt).not.toMatch(/legal assistant/i);
+        expect(prompt).toMatch(/^This is the system prompt for Mike, an open-source AI agent for knowledge work/);
+        expect(prompt).toContain(MIKE_OPEN_SOURCE);
+        expect(prompt).not.toMatch(/\byou are (mike|an? )/i);
+        expect(prompt).not.toMatch(/legal assistant|legal document analyst|strength in legal/i);
         expect(prompt).not.toContain("for lawyers and legal professionals");
     });
 
-    it("keeps legal work as a stated strength without limiting the subject", () => {
+    it("treats legal tools as part of the tool set, not the subject", () => {
         const prompt = buildSystemPrompt(true);
-        expect(prompt).toContain("Legal work is one of your strengths");
-        expect(prompt).toContain("never refuse a request because it is not legal");
+        expect(prompt).toContain("they are part of the tool set, not the limit of what you help with");
         expect(prompt).toContain("answer from general knowledge, whatever the subject");
-        expect(prompt).not.toContain("answer from legal knowledge");
+        expect(prompt).not.toMatch(/Guth v\. Loft|demand letters|the NDA draft|statutory links/);
     });
 
     it("tells the model to look up current facts instead of declining", () => {

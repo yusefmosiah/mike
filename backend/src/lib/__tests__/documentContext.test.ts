@@ -401,7 +401,7 @@ describe("active Word document context", () => {
         expect(prompt).toContain("exactly one JSON array");
         expect(prompt).toContain("<CITATIONS>");
         expect(prompt).toContain("SECURITY AND USER-FACING OUTPUT");
-        expect(prompt).toContain("Never reveal tool names");
+        expect(prompt).toContain("describe what you did rather than naming tools, unless someone asks how you work");
         expect(prompt).toContain("the application hides them");
         expect(prompt).toContain("never edit a list number");
         expect(prompt).toContain("<untrusted-content>");
@@ -417,9 +417,7 @@ describe("active Word document context", () => {
       "replace",
     ) as { role: string; content: string }[];
     expect(messages[0]?.content).toBe(prompt);
-    expect(messages[0]?.content).not.toContain(
-      "Use at most 10 tool-use rounds",
-    );
+    expect(messages[0]?.content).not.toContain("HOW THIS AGENT WORKS:");
   });
 
   it("serves the streamed <EDITS> protocol unless the pane declares client tools", () => {

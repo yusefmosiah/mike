@@ -1152,7 +1152,7 @@ describe("POST /chat — streaming endpoint", () => {
                 }
             >;
         };
-        expect(systemPromptExtra).toContain("running inside Microsoft Word");
+        expect(systemPromptExtra).toContain("running here inside Microsoft Word");
         expect(systemPromptExtra).toContain("USER PERSONALISATION");
         expect(systemPromptExtra).toContain('"jurisdiction": "Singapore"');
         expect(systemPromptExtra).toContain(
@@ -1893,7 +1893,7 @@ describe("POST /chat — streaming endpoint", () => {
             filename: string;
         }[];
         const systemPromptExtra = call[2] as string;
-        expect(systemPromptExtra).toContain("running inside Microsoft Word");
+        expect(systemPromptExtra).toContain("running here inside Microsoft Word");
         expect(systemPromptExtra).toContain("read_document");
         expect(systemPromptExtra).not.toContain("GOVERNED BY DELAWARE LAW");
         expect(docAvailability).toContainEqual({
