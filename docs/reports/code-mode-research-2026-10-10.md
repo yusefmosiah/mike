@@ -24,6 +24,56 @@ Nothing here is built yet. Sources are listed at the end; figures marked
 - User data must survive a corrupted VM. Open: whether btrfs rollback is
   enough, or recovery needs an app or middleware layer too.
 
+## Revised design after OMP and Prime Agent (2026-10-10)
+
+Two MIT-licensed agents that run models in a persistent CPython process both
+dropped Jupyter in favour of a small JSON-lines runner:
+
+- **OMP (oh-my-pi, can1357/oh-my-pi).** Shipped an IPython tool on the Jupyter
+  kernel gateway over WebSocket in January 2026 (`1d414c13`). In May it replaced
+  it with `python -u runner.py` speaking NDJSON over stdin/stdout, deleting the
+  gateway, its coordinator and the `jupyter` commands (`8d144e17`).
+  - `runner.py` is about 2,500 lines and the prelude about 1,100.
+  - Cells get top-level `await`; magics are rewritten to plain Python.
+  - An interrupt is SIGINT, and the kernel survives it; a kill follows if the
+    cell is stuck in C for 5 s.
+  - The cell timeout pauses while waiting on subagents or `%pip`.
+  - Tools come back to the agent over a loopback HTTP bridge with a per-session
+    token.
+- **Prime Agent (PrimeIntellect-ai/prime-agent, rewritten in Rust,
+  announced 2026-10-09).** "A persistent Python REPL is the built-in model
+  tool": files, shell, tools and subagents all go through code (their RLM:
+  context as variables, tools and subagents as function calls).
+  - The kernel is `python -m rlm.repl`, protocol version 3 (`repl.md`): JSON-lines
+    requests on stdin and events on a private copy of stdout.
+  - Each cell is attributed its own output, raw file-descriptor output is fenced
+    before `done`, and interrupt delivery is task-aware.
+  - **Tool calls ride the same channel:** the cell awaits `host_request(...)`,
+    and the host answers with `host_reply`.
+  - **`snapshot`/`restore`** serialise the user namespace with `dill`, name by
+    name, with size caps.
+  - Its README says the kernel "is not a security sandbox" and should run inside
+    one.
+
+What changes in our design:
+
+- **Kernel:** adopt Prime Agent's protocol and adapt its runtime (or OMP's)
+  instead of IPython, crediting it in CREDITS.md. It needs no server, ports,
+  ZeroMQ or token in the VM.
+- **Tool bridge:** `host_request`/`host_reply` on the kernel's own channel
+  replaces the separate vsock capability port. The VM gets no URL or token; the
+  only way to Mike's tools is the session the harness holds, and each request
+  goes through the one dispatcher.
+- **Keeping the kernel alive:** the kernel runs under a small supervisor in the
+  VM that the harness reaches over vsock. A backend restart then does not kill
+  the kernel, and pending host requests are re-delivered when the harness
+  reconnects.
+- **Kernel state:** `dill` snapshots sit next to the per-turn btrfs snapshot, so
+  a restored VM or a shadow run starts with the same variables.
+- **`ask_inputs` and the Word tools:** host requests like any other. The cell
+  timeout pauses while a request waits on the user. A Word call round-trips to
+  the add-in, so code should batch.
+
 ## Where we are
 
 - **Mission 11's first slice** runs `run_script` in QuickJS inside the backend
@@ -233,6 +283,8 @@ a pooled VM is open below.
 - [Executable Code Actions Elicit Better LLM Agents (CodeAct, ICLR 2024)](https://www.iclr.cc/virtual/2024/22224)
 - [SkillCraft (arXiv 2603.00718)](https://arxiv.org/abs/2603.00718)
 - [Pi code mode docs](https://pi.dev/docs/latest/codemode)
+- [oh-my-pi (OMP)](https://github.com/can1357/oh-my-pi): `docs/python-repl.md`, `packages/coding-agent/src/eval/py/runner.py`
+- [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent): `prime-agent-runtime/src/rlm/repl.md`; [Rewriting Prime Agent in Rust](https://www.primeintellect.ai/blog/prime-agent-rust)
 - [Pydantic Monty](https://pydantic.dev/articles/pydantic-monty)
 - [OpenHands runtime architecture](https://docs.openhands.dev/usage/architecture/runtime)
 - [Multi-LCB (multilingual LiveCodeBench)](https://www.emergentmind.com/papers/2606.20517); [SWE-PolyBench](https://alphaxiv.org/benchmarks/aws-ai-labs/swe-polybench)
