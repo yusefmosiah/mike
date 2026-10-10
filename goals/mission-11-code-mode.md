@@ -159,6 +159,19 @@ writes:
 | sec.gov `company_tickers.json` with a User-Agent | 509 ms | 799,583 bytes |
 | snapshot | | `No module named 'dill'` (node-a is back on the image without it) |
 
+Live model turns, 2026-10-10: isolated local backend (`scripts/e2e-local-stack.sh
+--serve-backend`, port 3201, `CODE_MODE_LOCAL_KERNEL_DIR` set), a fresh
+generated account, model `opencode-go/deepseek-v4.1-flash`, after the CODE
+MODE guide landed. The model saw only `run_python`.
+
+| prompt | cells | what the cells did | answer |
+|---|---|---|---|
+| table of every workflow's title and its column or step count | run_python | `list_workflows`, then each workflow read in Python | a sorted four-row table with a basis column (Proofread 5, Extract Key Terms 4, Compare Documents 3, Draft from Template 0) |
+| 2025 populations of five cities, ranked, with a total | 2 cells, 393 ms and 1 ms | two `web_search` calls in one `tools.gather`, then the ranking and sums in Python | ranked table, total 129,877,827 (UN 2025 agglomerations), and a second table for metro-area definitions |
+
+Neither answer mentioned Python or showed code. Web sources appeared as
+Markdown links: see `goals/STATUS.md`, queued request 2.
+
 ### Receipts of the retired QuickJS slice, 2026-10-09
 
 Receipt (run from `backend/`):

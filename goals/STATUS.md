@@ -84,7 +84,13 @@ None of it is accepted until the owner says so.
 Taken after code mode (Mission 11), or alongside it where they do not
 collide. In the owner's words where quoted.
 
-1. **Keys to staging.** `PHALA_API_KEY` and `COURTLISTENER_API_KEY` are set in
+1. **Keys to staging.** CourtListener done 2026-10-10: the backend reads
+   `COURTLISTENER_API_TOKEN`, so the local `COURTLISTENER_API_KEY` value went
+   into node-a's `backend.env` under that name (never printed). The local
+   `backend/.env` should use the same name for development. Receipt: after
+   the deploy of `676abad4`, an authenticated v4 search from inside
+   `mike-backend-1` printed `status 200 count 2391`.
+   `PHALA_API_KEY` and `COURTLISTENER_API_KEY` are set in
    the local `backend/.env` "so we can send them to node-a and use them".
    Copy them into node-a's `/var/lib/mike-staging/backend.env` without printing
    them, then redeploy. CourtListener is a plain key. "Phala gets special care
@@ -92,14 +98,24 @@ collide. In the owner's words where quoted.
    (`backend/src/lib/llm/attestation/`, `attest()` in
    `backend/src/lib/llm/pi/providers.mts`, Station 8 in
    `station-8-private-hardening-and-phala.md`). An attested model must verify
-   before every request and fail closed. Check that the verification works
-   against Phala's live endpoint before the models are offered on staging.
+   before every request and fail closed. The verifier today is generic: it
+   reads `{endpoint}/attestation` and compares one measurement. Phala's
+   evidence (an Intel TDX quote and NVIDIA GPU attestation per model) needs a
+   real verifier before Phala models are offered on staging. No Phala
+   provider is configured yet, so the key is not copied until that exists.
 2. **Citations render as Markdown on staging.** A web answer on choir-ip.com
    (owner's iPhone screenshot, 2026-10-10) shows `[1]`…`[9]` in the text and
-   a "Sources:" list of links, not Mike's clickable citation pills. Find out why
-   the answer skipped the `<CITATIONS>` block or why it was not parsed (model,
-   prompt, web-source citations, or code mode), fix it, and add a regression
-   test.
+   a "Sources:" list of links, not Mike's clickable citation pills. Cause,
+   found 2026-10-10: the integrated system has only two citation kinds,
+   `document` and `case` (`backend/src/modules/chat/engine/citations.ts`),
+   and the prompt limits `<CITATIONS>` to document evidence. A web answer has
+   no clickable path, so the model writes Markdown. This is Station 3's open
+   "search and citation closure", not a regression, and the answer was not in
+   code mode (staging has no account linked to a VM). Fix: a `web` citation
+   kind (URL and title from a web_search or fetch_web_page result in this
+   turn, an optional verbatim quote checked against the fetched text), the
+   prompt rule, the citation pill and source card in the web app, and
+   regression tests.
 3. **Code mode system prompts.** "make sure the system prompts are updated so
    the models understand their code/tools interface and how to manage it":
    the base prompt and the code-mode section have to agree on how tools are
