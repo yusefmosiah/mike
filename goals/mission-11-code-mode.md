@@ -21,6 +21,16 @@ goes through the same dispatcher and Auto Mode checks as a direct call, and
 `delegate` becomes `agents.delegate()`, enabling parallel and pipelined
 subagent workflows.
 
+## Direction under review, 2026-10-10
+
+The owner ruled out a no-network sandbox as the main path: code mode is for
+more power. The research pass
+([`docs/reports/code-mode-research-2026-10-10.md`](../docs/reports/code-mode-research-2026-10-10.md))
+recommends Python, a stateful IPython kernel per conversation in the employee's
+VM (Mission 13), Mike's tools as a generated async `mike` package calling back
+over a per-run vsock capability, and a with/without eval on the flash models.
+Nothing of it is built; the QuickJS slice below stays until it is replaced.
+
 ## First slice, 2026-10-09 (not accepted)
 
 Built on the owner's overnight go-ahead ("make code mode work with
