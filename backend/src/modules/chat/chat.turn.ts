@@ -264,6 +264,7 @@ export async function driveChatTurn(
                 docStore,
                 docIndex,
                 userId,
+                userEmail,
                 db,
                 write,
                 allowDocumentMutation,

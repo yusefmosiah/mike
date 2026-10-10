@@ -142,6 +142,7 @@ services:
       - ./backend/migrations/20261010_01_firm_thread_handoff.sql:/firm-thread-handoff-migration.sql:ro
       - ./backend/migrations/20261010_02_chat_turn_claims_grants.sql:/chat-turn-claims-grants-migration.sql:ro
       - ./backend/migrations/20261010_03_citation_checks.sql:/citation-checks-migration.sql:ro
+      - ./backend/migrations/20261010_04_email_change_moves_grants.sql:/email-change-moves-grants-migration.sql:ro
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -199,6 +200,7 @@ services:
         psql "$$DB" -v ON_ERROR_STOP=1 -f /firm-thread-handoff-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /chat-turn-claims-grants-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /citation-checks-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /email-change-moves-grants-migration.sql || exit 1;
     restart: "no"
 
   # --- Local SMTP catcher. Auth emails land in its web inbox (no real sending).

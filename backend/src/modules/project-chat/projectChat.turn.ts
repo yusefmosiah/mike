@@ -285,6 +285,7 @@ export async function driveProjectChatTurn(
                 docStore,
                 docIndex,
                 userId,
+                userEmail,
                 db,
                 write,
                 extraTools: PROJECT_EXTRA_TOOLS,

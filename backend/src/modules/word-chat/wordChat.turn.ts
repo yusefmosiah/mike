@@ -268,6 +268,7 @@ export async function driveWordChatTurn(
         docStore,
         docIndex,
         userId,
+        userEmail,
         db,
         write,
         workflowStore,
