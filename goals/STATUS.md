@@ -1,6 +1,6 @@
 # Status and Agenda
 
-Updated 2026-10-09 with the owner's direction for the next missions. First
+Updated 2026-10-10 (Missions 5 and 6 built, staging, upstream picks, model costs); 2026-10-09 with the owner's direction for the next missions. First
 written 2026-10-07, after an unattended overnight run that marked every
 station of `goals/private-firm-deployment-spine.md` complete. It wasn't; the
 rules at the end of this file exist so that cannot happen again.
@@ -33,7 +33,41 @@ Word → handoff → citations → Pi priority ladder is withdrawn.
   1/2 goals have been removed. Their surviving requirements and claim corrections
   are consolidated in `TRIAGE.md`; the parent spine is now a non-executable index.
 
-## Where things stand (2026-10-09)
+## Where things stand (2026-10-10)
+
+Built 2026-10-10 and on `main`; receipts are in the mission files, the commit
+messages and [`docs/reports/day-2026-10-10.md`](../docs/reports/day-2026-10-10.md).
+None of it is accepted until the owner says so.
+
+- **Mission 5, firm thread handoff:** DB turn claims, presence and a "someone is
+  generating" notice, colleagues' branches followed. Three-browser e2e passes
+  locally.
+- **Mission 6, citation checks of documents** (re-scoped by the owner to documents
+  the assistant drafts or edits):
+  - parallel checks, CourtListener and web sources, and a judge that must quote its
+    evidence, with verdicts not-found / contradicted / quote-mismatch / unsupported /
+    verified;
+  - a `check_citations` tool;
+  - a live probe graded five of five real citations correctly, including the
+    fabricated *Varghese* case.
+  - Replies lost the red "Could not verify quote" pill.
+- **Staging:**
+  - deploys from CI;
+  - signup works without email confirmation;
+  - server keys stand in for users' own;
+  - the onboarding steps are removed;
+  - `main` is protected by rulesets.
+- **Upstream picks (open-legal-products/mike):**
+  - access-control gaps: edit_document checks each document's role, and only
+    confirmed emails match grants;
+  - MCP trailing-dot SSRF;
+  - upload outcomes;
+  - paused-ask status;
+  - storage URL signing, autosave flush and three small UI fixes.
+- **Model costs:** volume work defaults to OpenCode Go flash models; OpenRouter is
+  kept for decision models ([`docs/model-costs.md`](../docs/model-costs.md)).
+
+## Where things stood (2026-10-09)
 
 Recorded from this session's own runs; receipts are in the commit messages and
 in the overnight report (`docs/reports/overnight-2026-10-09.md`) once written.
@@ -164,8 +198,8 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 | 10 | Voice: local, OpenRouter and self-hosted | first slice built, awaiting review | [`mission-10-voice.md`](mission-10-voice.md) |
 | 3 | Branching, prompt editing and branch threads, end to end | real-app Playwright runs pass locally (6/6), awaiting the owner's look | [`station-5-pi-tree-branching.md`](station-5-pi-tree-branching.md) |
 | 11 | Code mode | first slice built, awaiting review | [`mission-11-code-mode.md`](mission-11-code-mode.md) |
-| 6 | Citation verification subagents | later, on top of 9 | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
-| 5 | Firm thread handoff | later | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
+| 6 | Citation checks of documents (owner re-scope 2026-10-10) | built, awaiting review; no UI beyond the tool | [`mission-6-citation-verification-subagents.md`](mission-6-citation-verification-subagents.md) |
+| 5 | Firm thread handoff | built, awaiting review; tabular and Word surfaces not yet on the DB claim | [`mission-5-firm-thread-handoff.md`](mission-5-firm-thread-handoff.md) |
 | 1, 2 | Word editing (1a–1c), compaction | built, awaiting review | mission and station files |
 
 Still open from the earlier agenda, not scheduled tonight: Station 3 search and
