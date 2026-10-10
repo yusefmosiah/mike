@@ -30,9 +30,8 @@ function documentTypeToken(
   if (normalized === "application/pdf") return "pdf";
 
   const withoutQuery = normalized.split(/[?#]/, 1)[0];
-  const token = withoutQuery.includes(".")
-    ? (withoutQuery.split(".").pop() ?? "")
-    : withoutQuery;
+  // The extension, or the whole value when it has no dot.
+  const token = withoutQuery.slice(withoutQuery.lastIndexOf(".") + 1);
 
   if (token === "xlsx" || token === "xlsm" || token === "xls") {
     return "spreadsheet";

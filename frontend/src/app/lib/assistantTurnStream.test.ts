@@ -103,6 +103,72 @@ describe("consumeAssistantTurnStream", () => {
 });
 
 describe("readAssistantTurn", () => {
+  it("ignores an incarnation frame without a string", async () => {
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const cursor = createTurnCursor("chat-a");
+    await readAssistantTurn({
+      open: async () =>
+        sseResponse(['data: {"type":"stream_incarnation","incarnation":42}\n\n', "data: [DONE]\n\n"]),
+      turn,
+      sink,
+      cursor,
+    });
+    expect(cursor.incarnation).toBeUndefined();
+    turn.finish();
+  });
+
+  it("keeps retrying when a re-attached stream drops before any new frame", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const cursor = createTurnCursor("chat-a");
+    streamChatTurnMock
+      .mockResolvedValueOnce(sseResponse([], { fail: true }))
+      .mockResolvedValueOnce(sseResponse([frame(2, { type: "content_delta", text: "late" }), "id: 3\ndata: [DONE]\n\n"]));
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], { fail: true }),
+      turn,
+      sink,
+      cursor,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await read;
+    expect(streamChatTurnMock).toHaveBeenCalledTimes(2);
+    expect(text(turn.turn.assistant)).toBe("late");
+    turn.finish();
+  });
+
+  it("gives up with the stream's failure when Stop lands during a re-attach", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const opened = () =>
+      sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], { fail: true });
+
+    const stopped = new AbortController();
+    streamChatTurnMock.mockImplementationOnce(async () => {
+      stopped.abort();
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    const first = readAssistantTurn({ open: async () => opened(), turn, sink, cursor: createTurnCursor("chat-a"), signal: stopped.signal });
+    const firstOutcome = first.then(() => "resolved", (error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await firstOutcome).toBe("network error");
+
+    const stoppedAgain = new AbortController();
+    streamChatTurnMock.mockImplementationOnce(async () => {
+      stoppedAgain.abort();
+      throw new TypeError("Failed to fetch");
+    });
+    const second = readAssistantTurn({ open: async () => opened(), turn, sink, cursor: createTurnCursor("chat-a"), signal: stoppedAgain.signal });
+    const secondOutcome = second.then(() => "resolved", (error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await secondOutcome).toBe("network error");
+    turn.finish();
+  });
+
   it("resumes from the frame after the last one seen when the connection drops", async () => {
     vi.useFakeTimers();
     const turn = begin();
@@ -1777,6 +1843,7 @@ describe("subagent frames", () => {
     expect(
       await eventsOf([
         { ...started, child_id: "" },
+        { ...started, child_id: 7 },
         { ...started, status: "exploded" },
         { ...started, status: "done", usage: { input: "many" } },
       ]),

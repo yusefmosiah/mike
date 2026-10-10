@@ -89,10 +89,11 @@ export async function* readSseFrames(
                 buffer += decoder.decode(value, { stream: true });
             }
 
+            // The last piece is a partial line until the stream ends.
             const lines = buffer.split("\n");
-            buffer = done ? "" : (lines.pop() ?? "");
+            buffer = done ? "" : lines[lines.length - 1];
 
-            for (const line of lines) {
+            for (const line of done ? lines : lines.slice(0, -1)) {
                 // trim() also strips the \r of CRLF-delimited streams.
                 const trimmed = line.trim();
                 if (trimmed.startsWith("id:")) {

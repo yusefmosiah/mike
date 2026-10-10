@@ -45,3 +45,15 @@ describe("setup estimate", () => {
         expect(await measureDownloadSpeed("https://example.test/f", { fetch: fetchMock, now: () => t })).toBe(2_000_000);
     });
 });
+
+describe("measureDownloadSpeed defaults and failures", () => {
+    it("uses the global fetch and clock, and fails on a bad response", async () => {
+        const fetchMock = vi.fn(async () => new Response(new Uint8Array(500)));
+        vi.stubGlobal("fetch", fetchMock);
+        expect(await measureDownloadSpeed("https://example.test/f")).toBeGreaterThan(0);
+        expect(fetchMock).toHaveBeenCalledWith("https://example.test/f", { cache: "no-store" });
+        vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+        await expect(measureDownloadSpeed("https://example.test/f")).rejects.toThrow("speed test failed");
+        vi.unstubAllGlobals();
+    });
+});

@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     DEFAULT_VOICE_PREFERENCES,
@@ -7,6 +10,7 @@ import {
     parseVoicePreferences,
     resolveVoiceEngine,
     saveVoicePreferences,
+    useVoicePreferences,
     type VoiceAvailability,
 } from "./preferences";
 
@@ -61,5 +65,60 @@ describe("resolveVoiceEngine", () => {
         const prefs = { transcription: { engine: "operator" as const }, speech: { engine: "operator" as const } };
         expect(resolveVoiceEngine("transcription", prefs, { ...everything, operatorTranscription: false })).toBe("browser");
         expect(resolveVoiceEngine("transcription", prefs, { ...everything, operatorTranscription: false, browserRecognition: false })).toBe("webgpu");
+    });
+});
+
+describe("stored languages, voices, blocked storage and the hook", () => {
+    it("keeps a stored language and voice", () => {
+        expect(parseVoicePreferences({
+            transcription: { engine: "browser", language: "fr-FR" },
+            speech: { engine: "browser", voice: "Amelie" },
+        })).toMatchObject({ transcription: { language: "fr-FR" }, speech: { voice: "Amelie" } });
+        expect(parseVoicePreferences({ speech: { engine: "openrouter", model: "m", voice: "  " } }).speech)
+            .toEqual({ engine: "openrouter", model: "m" });
+    });
+
+    it("keeps an unsaved change in this tab when storage refuses writes", () => {
+        const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+            throw new Error("blocked");
+        });
+        const next = { ...DEFAULT_VOICE_PREFERENCES, speech: { engine: "browser" as const, voice: "Daniel" } };
+        saveVoicePreferences(next);
+        setItem.mockRestore();
+        // getItem still reads the unsaved key, so the cache answers.
+        window.localStorage.removeItem(VOICE_PREFERENCES_KEY);
+        expect(loadVoicePreferences()).toEqual(DEFAULT_VOICE_PREFERENCES);
+    });
+
+    it("follows saves in this tab and storage events for its key from others", () => {
+        const { result, unmount } = renderHook(() => useVoicePreferences());
+        expect(result.current[0]).toEqual(DEFAULT_VOICE_PREFERENCES);
+        act(() => result.current[1]({ ...DEFAULT_VOICE_PREFERENCES, speech: { engine: "browser" } }));
+        expect(result.current[0].speech.engine).toBe("browser");
+
+        act(() => {
+            window.localStorage.setItem(VOICE_PREFERENCES_KEY, JSON.stringify({ speech: { engine: "webgpu" } }));
+            window.dispatchEvent(new StorageEvent("storage", { key: "unrelated" }));
+        });
+        act(() => {
+            window.dispatchEvent(new StorageEvent("storage", { key: VOICE_PREFERENCES_KEY }));
+        });
+        expect(result.current[0].speech.engine).toBe("webgpu");
+        act(() => {
+            window.localStorage.setItem(VOICE_PREFERENCES_KEY, JSON.stringify({ speech: { engine: "operator" } }));
+            window.dispatchEvent(new StorageEvent("storage", { key: null }));
+        });
+        expect(result.current[0].speech.engine).toBe("operator");
+        unmount();
+    });
+});
+
+describe("server rendering", () => {
+    it("renders the defaults on the server", () => {
+        window.localStorage.setItem(VOICE_PREFERENCES_KEY, JSON.stringify({ speech: { engine: "browser" } }));
+        function Probe() {
+            return createElement("span", null, useVoicePreferences()[0].speech.engine);
+        }
+        expect(renderToString(createElement(Probe))).toContain("operator");
     });
 });

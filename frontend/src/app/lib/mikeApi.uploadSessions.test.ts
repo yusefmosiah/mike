@@ -1144,4 +1144,38 @@ describe("upload session polling", () => {
             vi.useRealTimers();
         }
     });
+
+    it("retries a status poll that fails before reaching the server", async () => {
+        vi.stubGlobal("fetch", fetchMock);
+        vi.useFakeTimers();
+        try {
+            const server = installSuccessfulSessionServer({
+                processingPollsBeforeComplete: 1,
+            });
+            const serve = fetchMock.getMockImplementation()!;
+            let dropped = false;
+            fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+                if (!dropped && /\/upload-sessions\/[^/]+$/.test(url) && !init?.method) {
+                    dropped = true;
+                    return Promise.reject(new TypeError("Failed to fetch"));
+                }
+                return serve(url, init);
+            });
+            const upload = uploadFilesWithSession({
+                purpose: "document_create",
+                destination: { scope: "standalone" },
+                files: [{ file: new File(["pdf"], "contract.pdf") }],
+            });
+
+            await vi.runAllTimersAsync();
+
+            await expect(upload).resolves.toMatchObject([
+                { filename: "contract.pdf", status: "completed" },
+            ]);
+            expect(dropped).toBe(true);
+            expect(server.statusRequestCount()).toBe(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

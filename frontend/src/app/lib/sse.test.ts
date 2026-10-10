@@ -101,6 +101,19 @@ describe("readSseFrames", () => {
         expect(ids).toEqual(["7", "9", "10"]);
     });
 
+    it("treats an empty id line as no id", async () => {
+        const ids: string[] = [];
+        const frames: unknown[] = [];
+        for await (const frame of readSseFrames(sseResponse(['id:\ndata: {"a":1}\n\n', 'id: 3\ndata: {"b":2}']), {
+            onEventId: (id) => ids.push(id),
+        })) {
+            frames.push(frame);
+        }
+        // The last record has no trailing newline: it still counts at EOF.
+        expect(frames).toEqual([{ a: 1 }, { b: 2 }]);
+        expect(ids).toEqual(["3"]);
+    });
+
     it("drains to EOF, not cancel, when the stream ends with [DONE]", async () => {
         const response = sseResponse(['data: {"n":1}\n\n', "data: [DONE]\n\n"]);
         const reader = response.body!.getReader();
