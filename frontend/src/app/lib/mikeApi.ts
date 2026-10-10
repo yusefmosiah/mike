@@ -3852,15 +3852,16 @@ export type CodeApproval = {
 
 export type CodeApprovalDecision = "once" | "thread" | "denied";
 
-/** Adds a message to the thread without asking for a reply (`/nr`). */
+/** Adds a message, and any attached documents, to the thread without asking for a reply (`/nr`). */
 export async function postChatNote(
     chatId: string,
     content: string,
+    files?: MessageFile[],
 ): Promise<{ id: string; parent_message_id: string | null }> {
     return apiRequest(`/chat/${chatId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(files?.length ? { content, files } : { content }),
     });
 }
 

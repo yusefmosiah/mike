@@ -46,13 +46,26 @@ describe("/nr notes", () => {
             expect(await result.current.handleChat(note("Client wants it Friday"))).toBe("c1");
         });
 
-        expect(postChatNote).toHaveBeenCalledWith("c1", "Client wants it Friday");
+        expect(postChatNote).toHaveBeenCalledWith("c1", "Client wants it Friday", undefined);
         expect(streamChat).not.toHaveBeenCalled();
         expect(result.current.messages).toEqual([
             { id: "m8", role: "assistant", content: "Done." },
             { id: "m9", role: "user", content: "Client wants it Friday", noResponse: true, error: undefined },
         ]);
         expect(result.current.isResponseLoading).toBe(false);
+    });
+
+    it("stores the note's attachments with it", async () => {
+        vi.mocked(postChatNote).mockResolvedValue({ id: "m2", parent_message_id: null });
+        const files = [{ filename: "lease.pdf", document_id: "d1" }];
+        const { result } = renderHook(() => useAssistantChat({ chatId: "c1" }));
+
+        await act(async () => {
+            await result.current.handleChat({ ...note("The signed lease"), files });
+        });
+
+        expect(postChatNote).toHaveBeenCalledWith("c1", "The signed lease", files);
+        expect(result.current.messages[0]).toMatchObject({ id: "m2", files });
     });
 
     it("creates the chat first when the note is its first message", async () => {
@@ -66,7 +79,7 @@ describe("/nr notes", () => {
         });
 
         expect(createChat).toHaveBeenCalledWith({ project_id: "p1" });
-        expect(postChatNote).toHaveBeenCalledWith("new-chat", "Kickoff notes");
+        expect(postChatNote).toHaveBeenCalledWith("new-chat", "Kickoff notes", undefined);
         expect(onChatCreated).toHaveBeenCalledWith("new-chat");
         expect(result.current.messages.map((m) => m.id)).toEqual(["m1"]);
     });

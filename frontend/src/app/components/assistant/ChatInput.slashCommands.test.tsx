@@ -337,6 +337,41 @@ describe("ChatInput workflow slash commands", () => {
         });
     });
 
+    it("sends a /nr message with its attachments and clears them", async () => {
+        const ref = createRef<ChatInputHandle>();
+        const onSubmit = vi.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatInput
+                ref={ref}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+                isLoading={false}
+            />,
+        );
+
+        act(() =>
+            ref.current?.addDoc({
+                id: "document-1",
+                filename: "lease.pdf",
+                file_type: "pdf",
+                current_version_id: "version-2",
+            } as Document),
+        );
+        await user.type(screen.getByRole("combobox"), "/nr The signed lease");
+        await user.keyboard("{Enter}");
+
+        expect(onSubmit).toHaveBeenCalledWith({
+            role: "user",
+            content: "The signed lease",
+            noResponse: true,
+            files: [{ filename: "lease.pdf", document_id: "document-1", version_id: "version-2" }],
+        });
+        expect(
+            screen.queryByRole("button", { name: "Remove lease.pdf" }),
+        ).not.toBeInTheDocument();
+    });
+
     it("does not offer /nr in the middle of a message", async () => {
         const user = userEvent.setup();
         render(

@@ -223,6 +223,7 @@ export function useAssistantChat({
       role: "user",
       content,
       noResponse: true,
+      ...(message.files?.length ? { files: message.files } : {}),
       ...(message.author ? { author: message.author } : {}),
     };
     setRawMessages((prev) => {
@@ -254,7 +255,7 @@ export function useAssistantChat({
           onChatCreated(targetChatId);
         }
       }
-      const stored = await postChatNote(targetChatId, content);
+      const stored = await postChatNote(targetChatId, content, message.files);
       if (!mountedRef.current) return targetChatId;
       setRawMessages((prev) =>
         prev.map((item) =>

@@ -613,8 +613,21 @@ function ChatInputForChatImpl(
         updateInput(el);
     };
 
-    // `/nr`: the message joins the thread and no reply is asked for, so no
-    // model is needed. Attachments and a selected workflow stay in the
+    /** The attached documents as a message carries them, at their current versions. */
+    const attachedFiles = () =>
+        attachedDocs.map((d) => ({
+            filename: d.filename,
+            document_id: d.id,
+            ...(d.current_version_id
+                ? { version_id: d.current_version_id }
+                : {}),
+            ...(d.active_version_number != null
+                ? { version_number: d.active_version_number }
+                : {}),
+        }));
+
+    // `/nr`: the message and its attachments join the thread and no reply
+    // is asked for, so no model is needed. A selected workflow stays in the
     // composer for the next message that does ask.
     const submitNote = (content: string) => {
         if (!content || isLoading) return;
@@ -622,7 +635,14 @@ function ChatInputForChatImpl(
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
         }
-        onSubmit?.({ role: "user", content, noResponse: true });
+        const files = attachedFiles();
+        setAttachedDocs([]);
+        onSubmit?.({
+            role: "user",
+            content,
+            noResponse: true,
+            ...(files.length > 0 ? { files } : {}),
+        });
     };
 
     const submitMessage = (
@@ -646,16 +666,7 @@ function ChatInputForChatImpl(
             textareaRef.current.style.height = "auto";
         }
 
-        const files = attachedDocs.map((d) => ({
-            filename: d.filename,
-            document_id: d.id,
-            ...(d.current_version_id
-                ? { version_id: d.current_version_id }
-                : {}),
-            ...(d.active_version_number != null
-                ? { version_number: d.active_version_number }
-                : {}),
-        }));
+        const files = attachedFiles();
         setAttachedDocs([]);
         setSelectedWorkflow(null);
 

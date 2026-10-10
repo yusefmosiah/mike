@@ -1650,6 +1650,10 @@ describe("shared thread requests", () => {
             url: "/api/chat/c1/notes",
             init: { method: "POST", body: JSON.stringify({ content: "Noted" }) },
         });
+        const files = [{ filename: "lease.pdf", document_id: "d1" }];
+        fetchMock.mockResolvedValueOnce(jsonResponse({ id: "m3", parent_message_id: "m2" }, { status: 201 }));
+        await postChatNote("c1", "For later", files);
+        expect(lastFetchCall().init.body).toBe(JSON.stringify({ content: "For later", files }));
     });
 });
 

@@ -3619,5 +3619,13 @@ describe("POST /chat/:chatId/notes", () => {
             .send({ content: 42 });
         expect(noContent.status).toBe(400);
         expect(noContent.body.detail).toBe("content must be a string");
+
+        // Attachments are validated as a sent message's are.
+        const badFiles = await request(app)
+            .post("/chat/00000000-0000-4000-8000-000000000001/notes")
+            .set("Authorization", "Bearer test")
+            .send({ content: "See attached", files: [{ filename: "" }] });
+        expect(badFiles.status).toBe(400);
+        expect(badFiles.body.detail).toMatch(/files\[0\]\.filename/);
     });
 });

@@ -1,11 +1,12 @@
-// A message added to a thread without asking the assistant for a reply: the
-// composer's `/nr` (no response). It joins the thread like any prompt, with
-// its author, and the next prompt that does ask for a reply sees it in the
-// history. Back-to-back user messages reach the model merged into one turn
-// (lib/llm/pi/providers.mts), because some local chat templates refuse two
-// user turns in a row.
+// A message, with any attached documents, added to a thread without asking
+// the assistant for a reply: the composer's `/nr` (no response). It joins
+// the thread like any prompt, with its author, and the next prompt that does
+// ask for a reply sees it in the history. Back-to-back user messages reach
+// the model merged into one turn (lib/llm/userTurns.ts), because some local
+// chat templates refuse two user turns in a row.
 import { randomUUID } from "node:crypto";
 import type { Db } from "../../lib/db";
+import type { ChatMessage } from "./engine/index";
 import { can } from "../../lib/permissions";
 import { failure, internalFailure, ok, type ServiceResult } from "../../lib/serviceResult";
 import { currentTurnHolder } from "../../lib/turnClaims";
@@ -16,7 +17,13 @@ export const MAX_NOTE_CHARS = 100_000;
 
 export async function postChatNote(
     db: Db,
-    args: { chatId: string; userId: string; userEmail: string | null | undefined; content: string },
+    args: {
+        chatId: string;
+        userId: string;
+        userEmail: string | null | undefined;
+        content: string;
+        files?: ChatMessage["files"];
+    },
 ): Promise<ServiceResult<{ id: string; parent_message_id: string | null }>> {
     const content = args.content.trim();
     if (!content) return failure("validation", "The message is empty.");
@@ -41,6 +48,7 @@ export async function postChatNote(
         chat_id: args.chatId,
         role: "user",
         content,
+        files: args.files?.length ? args.files : null,
         author_user_id: args.userId,
         parent_message_id: parent,
     });
