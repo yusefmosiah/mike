@@ -76,3 +76,21 @@ describe("CitationsBlock verification states", () => {
     ).not.toHaveAttribute("data-active");
   });
 });
+
+describe("web citations", () => {
+  const web: Citation = {
+    type: "citation_data",
+    kind: "web",
+    ref: 1,
+    url: "https://www.rocketswire.com/game",
+    title: "Rockets rout Mavs in Macao",
+    site: "rocketswire.com",
+    quotes: [{ quote: "Houston won 135-117" }],
+  };
+
+  it("lists the page by title and site, with its quote in the tooltip", () => {
+    render(<CitationsBlock citations={[web]} />);
+    expect(screen.getByText("Rockets rout Mavs in Macao (rocketswire.com)")).toBeInTheDocument();
+    expect(citationTooltip(web)).toBe('rocketswire.com: "Houston won 135-117"');
+  });
+});

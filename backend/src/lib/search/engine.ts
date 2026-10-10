@@ -3,18 +3,59 @@ import type { FetchedPage, SearchOptions, SearchResult } from "./types";
 import { getProviderAdapter } from "./providers";
 import { assertSafeEgressUrl } from "./egress";
 
-// In-memory turn snapshot cache: url -> FetchedPage
+// In-memory snapshot cache for citation verification: url -> FetchedPage.
+// Bounded: the oldest entries go first once it holds MAX_SNAPSHOTS.
 const snapshotStore = new Map<string, FetchedPage>();
+const MAX_SNAPSHOTS = 2_000;
+
+function remember(key: string, snapshot: FetchedPage): void {
+  snapshotStore.delete(key);
+  snapshotStore.set(key, snapshot);
+  while (snapshotStore.size > MAX_SNAPSHOTS) {
+    const oldest = snapshotStore.keys().next().value;
+    if (oldest === undefined) break;
+    snapshotStore.delete(oldest);
+  }
+}
+
+/** The URL forms a snapshot is found under: as given, and without query or trailing slash. */
+function snapshotKeys(rawUrl: string): string[] {
+  try {
+    const url = new URL(rawUrl);
+    return [...new Set([url.toString(), url.origin + url.pathname, url.origin + url.pathname.replace(/\/+$/, "")])];
+  } catch {
+    return [rawUrl];
+  }
+}
 
 /**
  * Searches the web using the configured modular search adapter (Keenable, Tavily, Exa, Parallel).
+ * Each result's text (the provider's page content, else its snippet) is kept
+ * as a snapshot so a web citation of it can be checked, unless the page
+ * itself was fetched, which is the better source.
  */
 export async function search(
   query: string,
   options: SearchOptions = {},
 ): Promise<SearchResult[]> {
   const adapter = getProviderAdapter(options.provider);
-  return adapter.search(query, options);
+  const results = await adapter.search(query, options);
+  for (const result of results) {
+    const content = (result.rawContent || result.snippet || "").trim();
+    if (!result.url || !content) continue;
+    const keys = snapshotKeys(result.url);
+    if (keys.some((key) => snapshotStore.get(key)?.source === "fetch")) continue;
+    const snapshot: FetchedPage = {
+      url: result.url,
+      title: result.title,
+      content,
+      contentSha256: crypto.createHash("sha256").update(content).digest("hex"),
+      fetchedAt: new Date().toISOString(),
+      source: "search",
+    };
+    for (const key of keys) remember(key, snapshot);
+  }
+  return results;
 }
 
 /**
@@ -55,11 +96,10 @@ export async function fetchPage(
       content: cleanContent,
       contentSha256,
       fetchedAt: new Date().toISOString(),
+      source: "fetch",
     };
 
-    snapshotStore.set(safeUrl.toString(), snapshot);
-    // Also index by normalized URL without trailing slash or query
-    snapshotStore.set(safeUrl.origin + safeUrl.pathname, snapshot);
+    for (const key of snapshotKeys(safeUrl.toString())) remember(key, snapshot);
 
     return snapshot;
   } finally {
@@ -71,14 +111,18 @@ export async function fetchPage(
  * Retrieves a retained web snapshot for citation verification.
  */
 export function getWebSnapshot(url: string): FetchedPage | undefined {
-  return snapshotStore.get(url);
+  for (const key of snapshotKeys(url)) {
+    const snapshot = snapshotStore.get(key);
+    if (snapshot) return snapshot;
+  }
+  return undefined;
 }
 
 /**
  * Manually stores a web snapshot (used in test fixtures or mock streams).
  */
 export function storeWebSnapshot(snapshot: FetchedPage): void {
-  snapshotStore.set(snapshot.url, snapshot);
+  remember(snapshot.url, snapshot);
 }
 
 /**

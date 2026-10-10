@@ -41,7 +41,26 @@ type ParsedCaseCitation = {
   }[];
 };
 
-type ParsedCitation = ParsedDocumentCitation | ParsedCaseCitation;
+type ParsedWebCitation = {
+  kind: "web";
+  ref: number;
+  url: string;
+  title: string | null;
+  quotes: { quote: string }[];
+};
+
+type ParsedCitation = ParsedDocumentCitation | ParsedCaseCitation | ParsedWebCitation;
+
+/** An http(s) URL, or null. */
+function webUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeCitation(raw: unknown): ParsedCitation | null {
   if (!raw || typeof raw !== "object") return null;
@@ -76,6 +95,20 @@ function normalizeCitation(raw: unknown): ParsedCitation | null {
       quotes.push({ opinionId: null, type: null, author: null, quote });
     }
     return { kind: "case", ref, cluster_id: Math.floor(rawClusterId), quotes };
+  }
+
+  const url = typeof c.doc_id === "string" ? null : webUrl(c.url);
+  if (url) {
+    const quotes = Array.isArray(c.quotes)
+      ? c.quotes
+          .slice(0, 3)
+          .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>).quote : null))
+          .filter((text): text is string => typeof text === "string" && !!text.trim())
+          .map((text) => ({ quote: text }))
+      : [];
+    if (!quotes.length && typeof quote === "string" && quote.trim()) quotes.push({ quote });
+    const title = typeof c.title === "string" && c.title.trim() ? c.title.trim().slice(0, 300) : null;
+    return { kind: "web", ref, url, title, quotes };
   }
 
   if (typeof c.doc_id !== "string") return null;
@@ -280,7 +313,25 @@ export function createCitation(
   docIndex: DocIndex,
   casesByClusterId?: CasesByClusterId,
   docStore?: DocStore,
+  webTitle?: (url: string) => string | null,
 ) {
+  if (citation.kind === "web") {
+    let site = "";
+    try {
+      site = new URL(citation.url).hostname.replace(/^www\./, "");
+    } catch {
+      // webUrl() already accepted it.
+    }
+    return {
+      type: "citation_data",
+      kind: "web",
+      ref: citation.ref,
+      url: citation.url,
+      title: citation.title ?? webTitle?.(citation.url) ?? site,
+      site,
+      quotes: citation.quotes,
+    };
+  }
   if (citation.kind === "case") {
     const caseRecord = casesByClusterId?.get(citation.cluster_id);
     const document = normalizeCaseDocument({

@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { Loader2 } from "lucide-react";
+import { Globe, Loader2 } from "lucide-react";
 import { FileTypeIcon } from "../../shared/FileTypeIcon";
 import { displayCitationQuote, formatCitationPage } from "../../shared/types";
 import type { Citation } from "../../shared/types";
@@ -20,6 +20,7 @@ function citationSourceKey(annotation: Citation): string {
     if (annotation.kind === "case") {
         return `case:${annotation.cluster_id}`;
     }
+    if (annotation.kind === "web") return `web:${annotation.url}`;
     return `document:${annotation.document_id}`;
 }
 
@@ -29,6 +30,11 @@ function citationSourceLabel(annotation: Citation): string {
         const citation = annotation.citation?.trim();
         if (caseName && citation) return `${caseName}, ${citation}`;
         return caseName || citation || `Case ${annotation.cluster_id}`;
+    }
+    if (annotation.kind === "web") {
+        return annotation.title && annotation.title !== annotation.site
+            ? `${annotation.title} (${annotation.site})`
+            : annotation.site || annotation.url;
     }
     return annotation.filename;
 }
@@ -51,6 +57,9 @@ function CitationSourceIcon({ annotation }: { annotation: Citation }) {
                 className="h-3.5 w-3.5 shrink-0"
             />
         );
+    }
+    if (annotation.kind === "web") {
+        return <Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />;
     }
     return (
         <FileTypeIcon fileType={annotation.filename} className="h-3.5 w-3.5" />

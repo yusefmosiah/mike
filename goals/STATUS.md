@@ -110,19 +110,35 @@ collide. In the owner's words where quoted.
    `document` and `case` (`backend/src/modules/chat/engine/citations.ts`),
    and the prompt limits `<CITATIONS>` to document evidence. A web answer has
    no clickable path, so the model writes Markdown. This is Station 3's open
-   "search and citation closure", not a regression, and the answer was not in
-   code mode (staging has no account linked to a VM). Fix: a `web` citation
-   kind (URL and title from a web_search or fetch_web_page result in this
-   turn, an optional verbatim quote checked against the fetched text), the
-   prompt rule, the citation pill and source card in the web app, and
-   regression tests.
+   "search and citation closure", not a regression. Built 2026-10-10 (not
+   accepted): a `web` citation kind (`url`, `title`, verbatim quotes) parsed
+   and recorded by the backend; quotes checked against the fetched page, or
+   against the search result's text when the page was only searched; the
+   prompt tells the model to cite pages through `<CITATIONS>` and not as
+   Markdown links or a "Sources" list; in the web app the pill opens the page
+   in a new tab and the source list shows title, site and a globe icon.
+   Receipt: on the isolated local stack in code mode
+   (`opencode-go/deepseek-v4.1-flash`), "most recent Rockets vs Mavericks
+   game, and who led the scoring?" came back with three web citations
+   (talkbasket.net, nba.com, global.chinadaily.com.cn), each `verified=True`.
+   Later: artifacts made in code (files, charts) as citable sources, and
+   in-app viewers (Markdown, code, diff, an HTML browser), see request 6.
 3. **Code mode system prompts.** "make sure the system prompts are updated so
    the models understand their code/tools interface and how to manage it":
    the base prompt and the code-mode section have to agree on how tools are
    called, what comes back, and how to manage the session.
 4. **Code mode UI wording.** "'ran python' isn't valuable. 'Computing' verbs
    are better."
-5. **Guest packages on node-a.** `infra/workstation/guest.nix` now adds dill and
+6. **Later, owner's direction (2026-10-10).** Extend citations to artifacts
+   made in code; in-app viewers for Markdown, code, diffs and HTML (a
+   browser, then browser automation); eventually computer use, first in a VM
+   with a GUI, then on the user's own Mac through the Mac app, which would
+   give computer use a residential or office IP address. VM snapshot forking,
+   hibernation and on-demand waking also wait. All of these come after the
+   non-functional pass that follows the partner demo.
+5. **Guest packages on node-a.** Done: the owner approved, and node-a
+   switched to generation 51 on 2026-10-10 (then 52 with the VM pool).
+   `infra/workstation/guest.nix` now adds dill and
    data libraries. They were built and activated on node-a with
    `switch-to-configuration test` under the 10-minute rollback timer and passed
    every check (fresh login, no failed units, site 200, `dill 0.4.1`, `duckdb

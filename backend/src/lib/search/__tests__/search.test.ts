@@ -128,3 +128,31 @@ describe("fetchPage & Web Snapshot Store", () => {
     expect(retrieved?.contentSha256).toBe(page.contentSha256);
   });
 });
+
+describe("search results as citation snapshots", () => {
+  beforeEach(() => {
+    clearWebSnapshots();
+    vi.unstubAllEnvs();
+  });
+
+  const keenable = (results: unknown[]) =>
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results }) }));
+
+  it("keeps each result's snippet so a citation of it can be checked", async () => {
+    vi.stubEnv("KEENABLE_API_KEY", "k");
+    keenable([{ title: "Rockets rout Mavs", url: "https://example.com/game/?ref=x", snippet: "Houston won 135-117 in Macao." }]);
+    await search("rockets", { provider: "keenable" });
+    const snapshot = getWebSnapshot("https://example.com/game/");
+    expect(snapshot).toMatchObject({ title: "Rockets rout Mavs", content: "Houston won 135-117 in Macao.", source: "search" });
+  });
+
+  it("never replaces a fetched page with a search snippet", async () => {
+    vi.stubEnv("KEENABLE_API_KEY", "k");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, text: async () => "<p>The full article text.</p>" }));
+    await fetchPage("https://example.com/article");
+    keenable([{ title: "Article", url: "https://example.com/article", snippet: "A snippet." }]);
+    await search("article", { provider: "keenable" });
+    expect(getWebSnapshot("https://example.com/article")).toMatchObject({ source: "fetch" });
+    expect(getWebSnapshot("https://example.com/article")?.content).toContain("The full article text.");
+  });
+});

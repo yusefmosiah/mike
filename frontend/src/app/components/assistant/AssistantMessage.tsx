@@ -20,6 +20,7 @@ import { BranchNavigator } from "./BranchNavigator";
 import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
 import { CodeCellBlock } from "./message/CodeCellBlock";
+import { openWebCitation } from "../shared/types";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
 import { eventErrorMessage, toolCallLabel } from "./message/eventUtils";
 import { preprocessCitations, internalCaseHref } from "./message/citationUtils";
@@ -308,6 +309,10 @@ export function AssistantMessage({
         }
     }
     const handleOpenCitationSource = (citation: Citation) => {
+        if (citation.kind === "web") {
+            openWebCitation(citation);
+            return;
+        }
         if (onOpenCitationSource) {
             onOpenCitationSource(citation);
             return;
@@ -321,8 +326,16 @@ export function AssistantMessage({
         });
     };
     const canOpenCitationSource = (citation: Citation) =>
+        citation.kind === "web" ||
         !!onOpenCitationSource ||
-        (citation.kind !== "case" && !!onOpenDocument);
+        (citation.kind === "document" || citation.kind === undefined) && !!onOpenDocument;
+    // A web citation opens its page in a new tab; the others open in the panel.
+    const handleCitationClick = onCitationClick
+        ? (citation: Citation) =>
+              citation.kind === "web"
+                  ? openWebCitation(citation)
+                  : onCitationClick(citation)
+        : undefined;
     const showCitationBlock =
         !!citationStatus || (!isStreaming && citations.length > 0);
     const handleCopy = async () => {
@@ -497,7 +510,10 @@ export function AssistantMessage({
         }
         if (event.type === "doc_read") {
             const ann = citations.find(
-                (a) => a.kind !== "case" && a.filename === event.filename,
+                (a) =>
+                    a.kind !== "case" &&
+                    a.kind !== "web" &&
+                    a.filename === event.filename,
             );
             return (
                 <DocReadBlock
@@ -913,7 +929,7 @@ export function AssistantMessage({
                                             caseCitations={caseCitations}
                                             caseDocuments={caseDocuments}
                                             activeCitation={activeCitation}
-                                            onCitationClick={onCitationClick}
+                                            onCitationClick={handleCitationClick}
                                             onCaseClick={onCaseClick}
                                             divRef={
                                                 isLastContent
@@ -1196,7 +1212,7 @@ export function AssistantMessage({
                     <CitationsBlock
                         citations={citations}
                         activeCitation={activeCitation}
-                        onCitationClick={onCitationClick}
+                        onCitationClick={handleCitationClick}
                         onOpenSource={handleOpenCitationSource}
                         canOpenSource={canOpenCitationSource}
                         showWhenEmpty={!!citationStatus}

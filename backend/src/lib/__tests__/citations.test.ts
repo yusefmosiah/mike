@@ -436,3 +436,48 @@ describe("createCitation", () => {
         });
     });
 });
+
+describe("web citations", () => {
+    it("parses a url entry as a web citation with its quotes and title", () => {
+        const [citation] = parseCitations(
+            citationsBlock(
+                '[{"ref": 1, "url": "https://www.rocketswire.com/game", "title": "Rockets rout Mavs", "quotes": [{"quote": "Houston won 135-117"}]}]',
+            ),
+        );
+        expect(citation).toEqual({
+            kind: "web",
+            ref: 1,
+            url: "https://www.rocketswire.com/game",
+            title: "Rockets rout Mavs",
+            quotes: [{ quote: "Houston won 135-117" }],
+        });
+    });
+
+    it("accepts a single top-level quote and refuses non-web urls", () => {
+        expect(parseCitations(citationsBlock('[{"ref": 1, "url": "https://a.example/x", "quote": "text"}]'))[0]).toMatchObject({
+            kind: "web",
+            quotes: [{ quote: "text" }],
+        });
+        expect(parseCitations(citationsBlock('[{"ref": 1, "url": "javascript:alert(1)", "quote": "x"}]'))).toEqual([]);
+        expect(parseCitations(citationsBlock('[{"ref": 1, "url": "file:///etc/passwd", "quote": "x"}]'))).toEqual([]);
+    });
+
+    it("keeps a document citation a document citation even if it carries a url", () => {
+        const [citation] = parseCitations(citationsBlock('[{"ref": 1, "doc_id": "doc-0", "url": "https://a.example", "quote": "q"}]'));
+        expect(citation.kind).toBe("document");
+    });
+
+    it("builds the record the app shows, with the site and a title from the fetched page", () => {
+        const [parsed] = parseCitations(citationsBlock('[{"ref": 2, "url": "https://www.example.com/a?b=1", "quote": "q"}]'));
+        expect(createCitation(parsed, {}, undefined, undefined, () => "Fetched title")).toEqual({
+            type: "citation_data",
+            kind: "web",
+            ref: 2,
+            url: "https://www.example.com/a?b=1",
+            title: "Fetched title",
+            site: "example.com",
+            quotes: [{ quote: "q" }],
+        });
+        expect(createCitation(parsed, {})).toMatchObject({ title: "example.com" });
+    });
+});

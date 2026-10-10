@@ -62,6 +62,7 @@ import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
+import { getWebSnapshot } from "../../../lib/search/engine";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import {
   cellResultContent,
@@ -682,6 +683,7 @@ export async function runLLMStream(params: {
         docIndex,
         courtlistenerTurnState.casesByClusterId,
         docStore,
+        (url) => getWebSnapshot(url)?.title?.trim() || null,
       ),
     );
     emitCitationStreamSnapshot("partial", citations);
@@ -1470,6 +1472,7 @@ export async function runLLMStream(params: {
         docIndex,
         courtlistenerTurnState.casesByClusterId,
         docStore,
+        (url) => getWebSnapshot(url)?.title?.trim() || null,
       ),
     );
     // Server-side quote verification. Fetch each document's extracted source

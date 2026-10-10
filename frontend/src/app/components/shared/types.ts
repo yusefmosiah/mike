@@ -466,12 +466,39 @@ export type CaseCitation = {
   document?: PanelDocument;
 };
 
+/** A web page the answer cites: one found with web_search or read with fetch_web_page. */
+export type WebCitation = {
+  type: "citation_data";
+  kind: "web";
+  ref: number;
+  url: string;
+  title: string;
+  /** The host without "www.", e.g. "rocketswire.com". */
+  site: string;
+  quotes: { quote: string; verification?: QuoteVerification }[];
+  /** True only when every quote was found in the page or its search result. */
+  verified?: boolean;
+  /** Web citations open the page itself, never the document panel. */
+  document?: undefined;
+};
+
 /**
  * A citation emitted by the assistant. Document citations have doc/page
  * anchors. Case citations anchor to a CourtListener cluster and include a
- * quoted opinion passage.
+ * quoted opinion passage. Web citations point at a page on the web.
  */
-export type Citation = DocumentCitation | CaseCitation;
+export type Citation = DocumentCitation | CaseCitation | WebCitation;
+
+export function isWebCitation(citation: Citation): citation is WebCitation {
+  return citation.kind === "web";
+}
+
+/** Opens a cited web page in a new browser tab, with no access back to Mike. */
+export function openWebCitation(citation: WebCitation): void {
+  // The server accepts only http(s) URLs; a stored citation is checked again.
+  if (!/^https?:\/\//i.test(citation.url)) return;
+  window.open(citation.url, "_blank", "noopener,noreferrer");
+}
 
 export function panelDocumentType(filename: string): PanelDocumentType {
   const extension = filename.split(".").pop()?.toLowerCase();
@@ -490,6 +517,24 @@ export function panelDocumentFromCitation(
   citation: Citation,
   includeQuotes = true,
 ): PanelDocument {
+  if (citation.kind === "web") {
+    // Callers open web citations in a browser tab (openWebCitation); this
+    // describes one for any panel that receives it anyway.
+    return {
+      document_id: `web:${citation.url}`,
+      title: citation.title,
+      type: "legislation",
+      metadata: citation.site ? [{ label: "Site", value: citation.site }] : [],
+      actions: [{ type: "link", url: citation.url, label: "Open page", title: "Open page" }],
+      quotes: includeQuotes
+        ? citation.quotes.map((quote) => ({
+            quote: quote.quote,
+            ...(quote.verification ? { verification: quote.verification } : {}),
+            target: {},
+          }))
+        : [],
+    };
+  }
   if (citation.document) {
     if (!includeQuotes) return { ...citation.document, quotes: [] };
     const citationQuotes =
@@ -650,7 +695,7 @@ export function expandDocumentQuoteEntry(entry: {
 }
 
 function getDocumentCitationQuotes(a: Citation): DocumentCitationQuote[] {
-  if (a.kind === "case") return [];
+  if (a.kind === "case" || a.kind === "web") return [];
   if (Array.isArray(a.quotes) && a.quotes.length) {
     return a.quotes.filter((entry) => entry.quote.trim().length > 0);
   }
@@ -666,6 +711,7 @@ export function formatCitationPage(a: Citation): string {
   if (a.kind === "case") {
     return a.citation || a.case_name || `Case ${a.cluster_id}`;
   }
+  if (a.kind === "web") return a.site;
   const quotes = getDocumentCitationQuotes(a);
   // Spreadsheets are located by cell, e.g. "Sheet1!B7" (or several).
   if (isSpreadsheetFilename(a.filename)) {
@@ -694,6 +740,9 @@ function cleanCitationQuoteText(rawQuote: string): string {
 
 /** Produce a reader-friendly version of the quote (replaces [[PAGE_BREAK]] with "..."). */
 export function displayCitationQuote(a: Citation): string {
+  if (a.kind === "web") {
+    return a.quotes.map((q) => q.quote.trim()).filter(Boolean).join(" / ");
+  }
   if (a.kind === "case") {
     return a.quotes
       .map((q) => q.quote.replaceAll(PAGE_BREAK_SENTINEL, "..."))

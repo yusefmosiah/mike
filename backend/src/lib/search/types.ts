@@ -22,4 +22,6 @@ export interface FetchedPage {
   content: string;
   contentSha256: string;
   fetchedAt: string;
+  /** "search" when the text is a search result's snippet or content, not the fetched page. */
+  source?: "fetch" | "search";
 }
