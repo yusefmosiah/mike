@@ -180,10 +180,31 @@ Receipts:
   in changed files).
 - Local schema-drift reproduction: `NO DRIFT`.
 
+- Live probe (assistant-run, `npx tsx --env-file=.env scratchpad/probe/probe.mts`):
+  - Setup: real model `openrouter/google/gemini-2.5-flash`, real web search and
+    fetches, no CourtListener token locally (so cases fell back to search). The input
+    was a `.docx` memo with five real citations, read through `docxReadingText`.
+  - First run: Miranda came back `unverifiable`. The search hit was the Library of
+    Congress PDF of U.S. Reports, read as bytes; the judge's excerpt was not in that
+    text, so the evidence rule refused the call. `fetchWebPage` now extracts PDF text,
+    with a test.
+  - Second run printed `model calls 7, outbound audited 19, total 8110ms`:
+    - `[exists-and-matches] Marbury v. Madison`, quote found;
+    - `[contradicted] Miranda v. Arizona`, evidence from the syllabus: "The person in
+      custody must, prior to interrogation, be clearly informed that he has the right
+      to remain silent";
+    - `[not-found] Varghese v. China Southern Airlines Co., 925 F.3d 1339`, the
+      fabricated case from *Mata v. Avianca*;
+    - `[exists-and-matches] 17 U.S.C. § 107`, quote found;
+    - `[contradicted] Brown v. Board of Education`, for the misquote "inherently equal",
+      with evidence "Separate educational facilities are inherently unequal."
+  - Not covered: snapshots were not stored in this probe (audit inserts went to a
+    stub). Durable storage and re-checks are covered by the stack test.
+
 Open items:
 
-- No live-model probe yet on a real document with real citations; that acceptance
-  item is not met.
+- The acceptance probe's "third person re-runs months later" part is covered by the
+  stack test's re-check, not by a live run on staging.
 - No UI beyond the assistant's tool; the partner decides the UI.
 - Automatic triggers (citations changed, substantive change, before export) are left
   to the model and the person for now.

@@ -262,9 +262,16 @@ export async function fetchWebPage(rawUrl: string): Promise<WebResponse> {
                 current = new URL(location, safe).toString();
                 continue;
             }
-            const bytes = Buffer.from(await res.arrayBuffer());
-            const body = bytes.subarray(0, MAX_WEB_BYTES).toString("utf8");
-            const html = (res.headers.get("content-type") ?? "").includes("html") || /<html[\s>]/i.test(body);
+            const bytes = Buffer.from(await res.arrayBuffer()).subarray(0, MAX_WEB_BYTES);
+            const type = res.headers.get("content-type") ?? "";
+            if (type.includes("pdf") || bytes.subarray(0, 5).toString("latin1") === "%PDF-") {
+                // Court opinions and statutes are often PDFs; their bytes read
+                // as text are noise a judge cannot quote.
+                const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+                return { status: res.status, text: await extractPdfText(buffer), finalUrl: safe.toString() };
+            }
+            const body = bytes.toString("utf8");
+            const html = type.includes("html") || /<html[\s>]/i.test(body);
             return { status: res.status, text: html ? stripHtmlToText(body) : body, finalUrl: safe.toString() };
         } finally {
             clearTimeout(timer);
