@@ -201,18 +201,45 @@ collide. In the owner's words where quoted.
      identity established in 995 ms (`compose 0637b3d5…`, commit
      `8d0a666a…`), a pinned streaming request answered `status 200`, and
      the receipt check printed `ok: true` with an upstream `sessionId`.
-     Tests: `npx vitest run src/lib/llm/attestation` printed `37 passed`,
+     Tests: `npx vitest run src/lib/llm/attestation` printed `28 passed`,
      on a real captured report and receipt, with tampering cases (edited
      measurement, nonce, keyset, compose, event log, repository, TLS key,
      receipt bytes, receipt field) each failing closed. Staging:
      `PHALA_API_KEY` (never printed) and `MIKE_MODEL_CONFIG_JSON` with three
      models that made proper tool calls in a probe (GLM 5.3, DeepSeek V4
      Flash, gpt-oss-120b; Kimi K3 answered tool calls as text and Qwen 3.8
-     returned an unparseable body, so they are left out). Not yet checked:
+     returned an unparseable body, so they are left out). On staging after
+     the deploy of `84a4d76d`, `completeText` inside `mike-backend-1`
+     printed `phala/glm-5.3 reply: "attested ok" 6150 ms` and
+     `phala/gpt-oss-120b reply: "attested ok" 957 ms`, with an
+     `inference.attested` receipt (`mike-aci/1`, keyset `sha256:ef8a03c0…`).
+     The response receipt was not being checked there: the OpenAI client
+     cancels the stream at `[DONE]`, so the hashing never finished. Fixed in
+     `c74f7b4f` (the rest is drained on cancel); locally the same call then
+     logged `[attestation] ACI receipt verified`. Not yet checked:
      the platform's TCB level (Intel's signed TCB info and revocation lists),
      the dstack KMS key-custody chain, and our own deep audit of upstream
      sessions.
-   - The automatic citation check, Mission 5: queued.
+   - **Automatic citation check: built, not accepted.** No button: when
+     the assistant creates or edits a document, a check is scheduled 15 s
+     later (one per document however many edits land meanwhile, a
+     deduplicated `citations.auto_check` job). It runs only when the
+     document's citing paragraphs changed since the last checked version:
+     paragraphs with a case, reporter, statute, neutral citation, URL,
+     "Id."/"supra" or a long quotation, compared without a model. Opening a
+     document asks for the same thing, which covers uploads. A check of an
+     older version still running is cancelled. The web app shows
+     "Checking citations…" under the document's card in the chat and under
+     the document's title in the panel, then "Citations checked · N
+     citations verified", or "2 of 7 need attention" with a list, most
+     serious first ("Says the opposite", "Source not found", "Quote not in
+     source", "Source does not say this"), each with the judge's reason and
+     the source excerpt; "Citations unchanged since the last check" when an
+     edit left them alone. Tests: backend `npx vitest run
+     src/modules/citations src/lib/__tests__/toolDispatcherCheckCitations.test.ts
+     src/__tests__/architecture.test.ts` printed `30 passed`; frontend
+     `npm test` printed `2331 passed`. Not yet seen live on staging.
+   - Mission 5: next.
    - **Docket, owner's request (2026-10-10):** a web citation should expand
      in place to show the cited passage from the page (transcluded), with a
      link inside the expanded section to open the page, instead of jumping
