@@ -9,11 +9,25 @@
 
 let
   cfg = config.workstation;
+  # Code mode (Mission 11) runs the agent's Python here: dill keeps a
+  # conversation's variables across kernel restarts; the rest is for web
+  # data, documents and analysis larger than memory.
   python = pkgs.python3.withPackages (ps: with ps; [
+    beautifulsoup4
+    dill
+    duckdb
+    httpx
+    lxml
+    matplotlib
     openpyxl
     pandas
+    pdfplumber
+    polars
+    pyarrow
+    pypdf
     python-docx
     requests
+    xlsxwriter
   ]);
 in
 {

@@ -79,6 +79,42 @@ None of it is accepted until the owner says so.
 - **Model costs:** volume work defaults to OpenCode Go flash models; OpenRouter is
   kept for decision models ([`docs/model-costs.md`](../docs/model-costs.md)).
 
+## Queued owner requests (2026-10-10)
+
+Taken after code mode (Mission 11), or alongside it where they do not
+collide. In the owner's words where quoted.
+
+1. **Keys to staging.** `PHALA_API_KEY` and `COURTLISTENER_API_KEY` are set in
+   the local `backend/.env` "so we can send them to node-a and use them".
+   Copy them into node-a's `/var/lib/mike-staging/backend.env` without printing
+   them, then redeploy. CourtListener is a plain key. "Phala gets special care
+   wrt the attestations": Phala models go through the attested lane
+   (`backend/src/lib/llm/attestation/`, `attest()` in
+   `backend/src/lib/llm/pi/providers.mts`, Station 8 in
+   `station-8-private-hardening-and-phala.md`). An attested model must verify
+   before every request and fail closed. Check that the verification works
+   against Phala's live endpoint before the models are offered on staging.
+2. **Citations render as Markdown on staging.** A web answer on choir-ip.com
+   (owner's iPhone screenshot, 2026-10-10) shows `[1]`…`[9]` in the text and
+   a "Sources:" list of links, not Mike's clickable citation pills. Find out why
+   the answer skipped the `<CITATIONS>` block or why it was not parsed (model,
+   prompt, web-source citations, or code mode), fix it, and add a regression
+   test.
+3. **Code mode system prompts.** "make sure the system prompts are updated so
+   the models understand their code/tools interface and how to manage it":
+   the base prompt and the code-mode section have to agree on how tools are
+   called, what comes back, and how to manage the session.
+4. **Code mode UI wording.** "'ran python' isn't valuable. 'Computing' verbs
+   are better."
+5. **Guest packages on node-a.** `infra/workstation/guest.nix` now adds dill and
+   data libraries. They were built and activated on node-a with
+   `switch-to-configuration test` under the 10-minute rollback timer and passed
+   every check (fresh login, no failed units, site 200, `dill 0.4.1`, `duckdb
+   1.5.2`, `polars 1.40.1` in `ws-owner`, home files intact). The permanent
+   switch was refused by the auto mode classifier, so the timer returned
+   node-a to the previous generation. Making it permanent needs the owner's
+   go-ahead.
+
 ## Where things stood (2026-10-09)
 
 Recorded from this session's own runs; receipts are in the commit messages and
@@ -138,9 +174,12 @@ receipts in `docs/reports/overnight-2026-10-09.md`:
   command, restore after `rm -rf ~/*` verified by hash; a logging egress proxy
   as the VMs' only way out; prompt-injection flags on tool results. Phase 5
   (dogfooding) is the owner's.
-- **Mission 11**, first slice: `run_script` runs model-written JavaScript in
-  QuickJS with tools as `tools.*`, through the same gate and dispatcher; on
-  in staging behind `CODE_MODE_ENABLED`.
+- **Mission 11**, Python code mode (not accepted): users with a workstation
+  VM see one tool, `run_python`, a persistent Python kernel per conversation
+  in their VM; every other tool is `await tools.<name>(...)` there, through
+  the same gates and dispatcher; asking the user pauses the turn with the
+  variables kept. The QuickJS `run_script` slice is retired. Receipts in
+  `goals/mission-11-code-mode.md`.
 - **Mission 10**, first slice: Settings → Voice with four engines (operator,
   OpenRouter, browser on-device, browser open models), prices in each model's
   unit, consent-gated browser model setup, and a test bench. No browser model
