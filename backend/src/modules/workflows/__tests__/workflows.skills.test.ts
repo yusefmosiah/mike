@@ -168,7 +168,7 @@ describe("versions", () => {
 
 describe("the workstation's skills", () => {
   it("renders SKILL.md from the row", () => {
-    const row = { id: "w", title: "Contract Review", description: null, prompt_md: "Steps.", frontmatter: { license: "MIT" } };
+    const row = { id: "w", user_id: null, title: "Contract Review", description: null, prompt_md: "Steps.", frontmatter: { license: "MIT" } };
     expect(skillNameOf(row)).toBe("contract-review");
     expect(skillMdOf(row)).toBe("---\nname: contract-review\ndescription: Contract Review\nlicense: MIT\n---\n\nSteps.\n");
     expect(skillNameOf({ title: "!!!" })).toBe("skill");

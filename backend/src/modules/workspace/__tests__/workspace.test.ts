@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../../../lib/db";
 import type { WorkstationTarget } from "../../../lib/workstation";
 import { scriptedDb } from "../../../__tests__/helpers/scriptedDb";
+import { packSkillFiles } from "../../../lib/skillFormat";
 
 const access = vi.hoisted(() => ({
   listAccessibleProjectIds: vi.fn(),
@@ -387,7 +388,6 @@ describe("saveToMike", () => {
 
 describe("syncSkills", () => {
   it("writes each skill's SKILL.md and files under its name, numbering a clash", async () => {
-    const { packSkillFiles } = await import("../../../lib/skillFormat");
     const packed = await packSkillFiles([{ path: "scripts/fill.py", bytes: Buffer.from("print('fill')") }]);
     const writeBatch = vi.fn().mockResolvedValue({ ok: true });
     const download = vi.fn(async () => packed!.zip.buffer.slice(packed!.zip.byteOffset, packed!.zip.byteOffset + packed!.zip.byteLength) as ArrayBuffer);
