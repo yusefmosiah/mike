@@ -25,10 +25,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  appPage,
   completeOnboardingIfRequired,
   dismissFirstRunOverlay,
   packagedAppBinary,
   signUpThroughUi,
+  waitForAppTarget,
 } from "./helpers.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -100,12 +102,12 @@ const app = spawn(
 
 try {
   await waitForCdp();
+  await waitForAppTarget(CDP_PORT);
   const browser = await chromium.connectOverCDP(
     `http://127.0.0.1:${CDP_PORT}`,
   );
   const context = browser.contexts()[0];
-  const page = context.pages().find((p) => !p.url().startsWith("devtools"));
-  if (!page) throw new Error("no app page found over CDP");
+  const page = await appPage(context);
 
   // 1. The shell must have connected to the real server (not the offline
   //    screen). The shell persists sessions across launches (that's a
@@ -163,10 +165,11 @@ try {
   await createBtn.click();
   await page.getByPlaceholder("Add project name").fill(PROJECT_NAME);
   await page.getByRole("button", { name: "Next", exact: true }).click();
-  // Step 2 of the wizard is "Add Documents" — create without any, scoped to
-  // the wizard overlay so the toolbar's own "Create" (behind the backdrop)
-  // can't be matched.
+  // Step 2 is "Access" (share with people): skip it. Step 3 is "Add
+  // Documents": create without any. Both scoped to the wizard overlay so the
+  // toolbar's own buttons (behind the backdrop) can't be matched.
   const wizard = page.locator("div.fixed.inset-0").last();
+  await wizard.getByRole("button", { name: "Skip", exact: true }).click({ timeout: 15_000 });
   await wizard
     .getByRole("button", { name: "Create project", exact: true })
     .click({ timeout: 15_000 });

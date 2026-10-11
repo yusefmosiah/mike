@@ -95,12 +95,48 @@ Still by hand: the native title bar itself (CDP screenshots leave it out,
 and this terminal has no Screen Recording permission), dragging the window
 by the strip, and the full-screen toggle.
 
+## The e2e suites, against current code (2026-10-11)
+
+Local e2e stack: the backend from this tree on :3101
+(`scripts/e2e-local-stack.sh --serve-backend`) and `next dev` on :3100,
+which the storage CORS allows. Fixes to the suites themselves: Playwright
+attaches only once `/json` shows the app's page (it misses a page that is
+blank when it connects), the project wizard's new Access step is skipped,
+sign-up waits for the redirect to `/login` first, and the row menu's
+Download item is a button, not a menuitem.
+
+```text
+$ MIKE_E2E_URL=http://localhost:3100 MIKE_E2E_API=http://localhost:3101 npm run e2e:flows
+✓ signed up + onboarded + signed in
+✓ oauth popup: about:blank window.open allowed in-shell
+✓ oauth popup: survives cross-origin navigation
+✓ oauth popup: live opener back-channel, no mikeDesktop bridge
+✓ external link: no in-shell window, URL captured
+✓ renderer file: navigation of the main window does not land
+✓ popup cannot drive its opener into a silent download
+✓ failing iframe does not trigger the connect screen
+✓ blob download is saved by the shell download handler
+✓ library upload + row-menu Download stays in-shell
+✓ presigned-URL anchor click resolves to an in-shell download
+FLOWS E2E PASSED
+
+$ MIKE_E2E_URL=http://localhost:3100 MIKE_E2E_API=http://localhost:3101 npm run e2e
+✓ shell connected; anonymous user routed to /login
+✓ signed up + onboarded + auto-signed-in as desktop-e2e-…@example.com
+✓ project "Desktop E2E …" created and visible
+✓ page title: Mike - Legal AI Platform
+E2E PASSED
+```
+
+The first `npm run e2e` after starting `next dev` failed with
+"page.evaluate: Execution context was destroyed, most likely because of a
+navigation" while the dev server compiled its first pages; the rerun above
+passed unchanged.
+
 ## Not done
 
 - **By hand:** the menu shortcuts (CDP cannot press native menu items) and
   the title bar checks above.
-- **The e2e suites** (`npm run e2e`, `npm run e2e:flows`) need the local e2e
-  stack; not run yet.
 - **A connector sign-in in the app** against staging (needs a connector
   configured there).
 - **Signing and notarization** need the owner's Apple Developer ID.

@@ -43,10 +43,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  appPage,
   completeOnboardingIfRequired,
   dismissFirstRunOverlay,
   packagedAppBinary,
   signUpThroughUi,
+  waitForAppTarget,
 } from "./helpers.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -198,10 +200,10 @@ const app = spawn(
 let browser;
 try {
   await waitForCdp();
+  await waitForAppTarget(CDP_PORT);
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
   const context = browser.contexts()[0];
-  const page = context.pages().find((p) => !p.url().startsWith("devtools"));
-  if (!page) throw new Error("no app page found over CDP");
+  const page = await appPage(context);
 
   // ── Sign in: fresh signup through the product UI (same approach as
   //    app.e2e.mjs; the local stack autoconfirms). The shell persists sessions
@@ -210,13 +212,17 @@ try {
     await page.waitForURL((url) => url.href.startsWith(SERVER_URL), {
       timeout: 15_000,
     });
+    // A fresh window starts at / and the app redirects an anonymous user
+    // to /login on the client; let that land before deciding to reset (a
+    // goto in the middle of it is aborted).
+    await page.waitForURL(/\/login/, { timeout: 10_000 }).catch(() => {});
     if (!/\/login/.test(page.url())) {
       await context.clearCookies();
       await page.evaluate(() => {
         localStorage.clear();
         sessionStorage.clear();
       });
-      await page.goto(`${SERVER_URL}/`);
+      await page.goto(`${SERVER_URL}/login`);
     }
     await page.waitForURL(/\/login/, { timeout: 15_000 });
     await signUpThroughUi(page, { email: EMAIL, password: PASSWORD });
@@ -546,9 +552,10 @@ try {
 
     const before = readDownloadLog().length;
     await menuBtn.click();
+    // The row menu's items are buttons (RowActions), not menuitems.
     await page
-      .getByRole("menuitem", { name: "Download", exact: true })
-      .first()
+      .getByRole("button", { name: "Download", exact: true })
+      .last()
       .click({ timeout: 10_000 });
     const entry = await waitForDownloadLogged(before, 20_000);
     assert(entry, "shell will-download handler never logged a completed download");

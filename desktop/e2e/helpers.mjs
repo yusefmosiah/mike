@@ -151,3 +151,38 @@ export async function dismissFirstRunOverlay(page) {
     await page.waitForTimeout(700);
   }
 }
+
+/**
+ * The app window's page. Right after launch the window's target exists but
+ * has not navigated yet, and Playwright lists no page for it, so wait for it
+ * rather than reading context.pages() once.
+ */
+export async function appPage(context, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const page = context.pages().find((p) => p.url() && !p.url().startsWith("devtools"));
+    if (page) return page;
+    if (Date.now() > deadline) throw new Error("no app page found over CDP");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/**
+ * Waits until the app window's CDP target has a real URL. Playwright's
+ * connectOverCDP does not track a page whose target is still blank when it
+ * connects (the shell checks the server before loading it), and that page
+ * never shows up in context.pages() afterwards.
+ */
+export async function waitForAppTarget(port, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      if (targets.some((t) => t.type === "page" && /^(https?|file):/.test(t.url))) return;
+    } catch {
+      // Not listening yet.
+    }
+    if (Date.now() > deadline) throw new Error("the app window never loaded a page");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
