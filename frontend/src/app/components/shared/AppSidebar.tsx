@@ -17,6 +17,7 @@ import {
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
+import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { MikeIcon } from "@/app/components/chat/mike-icon";
@@ -76,6 +77,11 @@ interface AppSidebarProps {
     onToggle: () => void;
 }
 
+/** Below this width (Tailwind's md) the sidebar opens over the page. */
+const MOBILE_BREAKPOINT_PX = 768;
+/** How long the sidebar takes to slide away on a phone. */
+const DISMISS_MS = 250;
+
 export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     const { user, signOut } = useAuth();
     const { profile } = useUserProfile();
@@ -103,6 +109,39 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
         clearStatus: clearAssistantHistoryStatus,
     } = useAssistantHistoryStatuses({ activeChatId: routeChatId, chatIds });
     const [shouldAnimate, setShouldAnimate] = useState(false);
+    const { setSidebarOpen } = useSidebar();
+    // On a phone the open sidebar lies over the page, so once a destination
+    // is chosen it slides away: `dismissing` moves it off-screen, then it
+    // closes. Desktop keeps it where the user put it.
+    const [dismissing, setDismissing] = useState(false);
+    const dismissTimer = useRef<number | null>(null);
+    useEffect(
+        () => () => {
+            if (dismissTimer.current !== null) window.clearTimeout(dismissTimer.current);
+        },
+        [],
+    );
+    const dismissOnPhone = useCallback(() => {
+        if (!isOpen || window.innerWidth >= MOBILE_BREAKPOINT_PX) return;
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+            setSidebarOpen(false);
+            return;
+        }
+        setDismissing(true);
+        if (dismissTimer.current !== null) window.clearTimeout(dismissTimer.current);
+        dismissTimer.current = window.setTimeout(() => {
+            dismissTimer.current = null;
+            setDismissing(false);
+            setSidebarOpen(false);
+        }, DISMISS_MS);
+    }, [isOpen, setSidebarOpen]);
+    const go = useCallback(
+        (href: string) => {
+            router.push(href);
+            dismissOnPhone();
+        },
+        [router, dismissOnPhone],
+    );
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [projectsCollapsed, setProjectsCollapsed] = useState(false);
     const [historyCollapsed, setHistoryCollapsed] = useState(false);
@@ -265,7 +304,10 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 unaffected since the sidebar is part of the layout there. */}
             {isOpen && (
                 <div
-                    className="fixed inset-0 z-[98] bg-gray-300/20 md:hidden"
+                    className={cn(
+                        "fixed inset-0 z-[98] bg-gray-300/20 transition-opacity duration-300 motion-reduce:transition-none md:hidden",
+                        dismissing && "opacity-0",
+                    )}
                     onClick={handleToggle}
                     aria-hidden="true"
                 />
@@ -278,7 +320,9 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                     "my-2 ml-2 mr-0 md:my-3 md:ml-3 md:mr-0 rounded-2xl backdrop-blur-2xl overflow-visible",
                     LIQUID_GLASS_FLOAT_CLASS,
                     "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 md:relative",
+                    dismissing && "max-md:pointer-events-none max-md:-translate-x-[calc(100%+1rem)]",
                 )}
+                data-dismissing={dismissing || undefined}
             >
                 {/* Room for the Mac app's inset traffic lights, and a
                     handle to drag its window by: desktop/src/main.js sets
@@ -300,6 +344,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                         <div className="px-1.5">
                             <Link
                                 href="/assistant"
+                                onClick={dismissOnPhone}
                                 className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
                             >
                                 <MikeIcon size={20} />
@@ -341,7 +386,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                         return (
                             <div key={href} className="px-1.5 py-0.5">
                                 <button
-                                    onClick={() => router.push(href)}
+                                    onClick={() => go(href)}
                                     title={!isOpen ? label : ""}
                                     className={cn(
                                         "w-full h-8 flex items-center gap-3 px-2 py-2 rounded-md transition-colors text-left",
@@ -446,7 +491,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                                         <button
                                                             key={project.id}
                                                             onClick={() =>
-                                                                router.push(
+                                                                go(
                                                                     `/projects/${project.id}`,
                                                                 )
                                                             }
@@ -564,7 +609,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                                         setCurrentChatId(
                                                             chat.id,
                                                         );
-                                                        router.push(
+                                                        go(
                                                             chat.project_id
                                                                 ? `/projects/${chat.project_id}/assistant/chat/${chat.id}`
                                                                 : `/assistant/chat/${chat.id}`,
@@ -644,7 +689,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            router.push("/history");
+                                            go("/history");
                                             setIsDropdownOpen(false);
                                         }}
                                         className={cn(
@@ -660,7 +705,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            router.push("/settings");
+                                            go("/settings");
                                             setIsDropdownOpen(false);
                                         }}
                                         className={cn(
@@ -674,7 +719,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                     <button
                                         type="button"
                                         onClick={() => {
-                                            router.push("/organizations");
+                                            go("/organizations");
                                             setIsDropdownOpen(false);
                                         }}
                                         className={cn(

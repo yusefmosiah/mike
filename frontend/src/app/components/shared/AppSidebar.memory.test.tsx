@@ -1,12 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listProjectSummaries } from "@/app/lib/mikeApi";
 import { beginAssistantTurn } from "@/app/lib/assistantTurns";
+import { SidebarContext } from "@/app/contexts/SidebarContext";
 import { AppSidebar } from "./AppSidebar";
 
 const state = vi.hoisted(() => ({
   signOut: vi.fn(),
+  push: vi.fn(),
   pathname: "/assistant",
   chats: [] as Array<{
     id: string;
@@ -18,7 +20,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: state.push }),
   usePathname: () => state.pathname,
 }));
 
@@ -235,4 +237,91 @@ describe("AppSidebar account dropdown", () => {
       );
     },
   );
+});
+
+describe("AppSidebar on a phone", () => {
+  const setSidebarOpen = vi.fn();
+  const renderOpen = () =>
+    render(
+      <SidebarContext.Provider value={{ setSidebarOpen }}>
+        <AppSidebar isOpen onToggle={vi.fn()} />
+      </SidebarContext.Provider>,
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(listProjectSummaries).mockResolvedValue([]);
+    state.pathname = "/assistant";
+    state.chats = [];
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    window.innerWidth = 1024;
+  });
+
+  it("slides away after a destination is chosen", () => {
+    window.innerWidth = 390;
+    renderOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: "IDE" }));
+
+    expect(state.push).toHaveBeenCalledWith("/ide");
+    expect(document.querySelector("[data-dismissing]")).toHaveClass("max-md:-translate-x-[calc(100%+1rem)]");
+    expect(setSidebarOpen).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(250));
+    expect(setSidebarOpen).toHaveBeenCalledWith(false);
+    expect(document.querySelector("[data-dismissing]")).toBeNull();
+  });
+
+  it("closes from the account menu and the logo too", () => {
+    window.innerWidth = 390;
+    renderOpen();
+
+    fireEvent.click(screen.getByText("Alice").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(state.push).toHaveBeenCalledWith("/settings");
+    act(() => vi.advanceTimersByTime(250));
+    expect(setSidebarOpen).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("link", { name: /mike/i }));
+    act(() => vi.advanceTimersByTime(250));
+    expect(setSidebarOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes at once when motion is reduced", () => {
+    window.innerWidth = 390;
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
+    renderOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+
+    expect(setSidebarOpen).toHaveBeenCalledWith(false);
+    expect(document.querySelector("[data-dismissing]")).toBeNull();
+  });
+
+  it("stays open on a wider screen", () => {
+    window.innerWidth = 1024;
+    renderOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: "IDE" }));
+    act(() => vi.advanceTimersByTime(1000));
+
+    expect(state.push).toHaveBeenCalledWith("/ide");
+    expect(setSidebarOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not close after it has unmounted", () => {
+    window.innerWidth = 390;
+    const view = renderOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: "IDE" }));
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    view.unmount();
+    act(() => vi.advanceTimersByTime(250));
+
+    expect(setSidebarOpen).not.toHaveBeenCalled();
+  });
 });
