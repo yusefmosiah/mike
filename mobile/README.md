@@ -373,6 +373,10 @@ the backend speech proxy:
   `SFSpeechRecognizer`) and Android `RECORD_AUDIO`; scanner: iOS
   `NSCameraUsageDescription` and Android `CAMERA`. `@capacitor/camera` is
   declared for scanner input.
+- Read-aloud plays one audio file in the WebView, with lock-screen controls
+  through the Media Session API. iOS keeps it playing in the background and
+  with the screen locked because `scripts/configure-ios.mjs` adds `audio` to
+  `UIBackgroundModes`.
 
 ## Plugin inventory
 

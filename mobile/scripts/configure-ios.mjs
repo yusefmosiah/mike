@@ -4,7 +4,8 @@
 //
 //   - Info.plist: the mike:// URL scheme and the permission prompts for
 //     dictation (microphone; speech recognition, asked only on iOS before 26)
-//     and the scanner (camera, photos).
+//     and the scanner (camera, photos), and audio in the background for
+//     read-aloud.
 //   - SceneDelegate: a native cover over the window whenever the app leaves
 //     the foreground, so the app switcher's snapshot never shows matter
 //     content (CSS alone can lose that race).
@@ -40,6 +41,10 @@ for (const [key, value] of Object.entries(strings)) {
   if (has(key)) buddy(`Set :${key} ${value}`);
   else buddy(`Add :${key} string ${value}`);
 }
+// Read-aloud keeps playing when the app goes to the background or the phone
+// locks: one audio element in the web view, with lock-screen controls.
+if (!has("UIBackgroundModes")) buddy("Add :UIBackgroundModes array");
+if (!/^\s*audio$/m.test(buddy("Print :UIBackgroundModes", true))) buddy("Add :UIBackgroundModes: string audio");
 if (!has("CFBundleURLTypes")) {
   buddy("Add :CFBundleURLTypes array");
   buddy("Add :CFBundleURLTypes:0 dict");

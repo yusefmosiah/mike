@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { synthesizeSpeech } from "@/app/lib/mikeApi";
@@ -17,6 +17,13 @@ class MockAudio {
     src = "";
     preload = "";
     playbackRate = 1;
+    currentTime = 0;
+    duration = Number.NaN;
+    ended = false;
+    onplay: (() => void) | null = null;
+    onpause: (() => void) | null = null;
+    ontimeupdate: (() => void) | null = null;
+    ondurationchange: (() => void) | null = null;
     onended: (() => void) | null = null;
     onerror: (() => void) | null = null;
     play = vi.fn(() => Promise.resolve());
@@ -52,6 +59,14 @@ describe("AssistantMessage read aloud", () => {
         });
         vi.stubGlobal("Audio", MockAudio);
         vi.stubGlobal(
+            "OfflineAudioContext",
+            class {
+                decodeAudioData(_bytes: ArrayBuffer, ok: (buffer: AudioBuffer) => void) {
+                    ok({ numberOfChannels: 1, length: 10, getChannelData: () => new Float32Array(10) } as unknown as AudioBuffer);
+                }
+            },
+        );
+        vi.stubGlobal(
             "ResizeObserver",
             class {
                 observe() {}
@@ -65,7 +80,7 @@ describe("AssistantMessage read aloud", () => {
         vi.unstubAllGlobals();
     });
 
-    it("reads the response aloud and advances sentence by sentence", async () => {
+    it("prepares one audio file, then plays it with a seekable player", async () => {
         const user = userEvent.setup();
         render(<AssistantMessage events={events} />);
 
@@ -73,33 +88,72 @@ describe("AssistantMessage read aloud", () => {
             screen.getByRole("button", { name: "Read response aloud" }),
         );
 
-        await waitFor(() =>
-            expect(synthesizeMock).toHaveBeenCalledWith("First sentence."),
-        );
         expect(
-            await screen.findByRole("button", { name: "Stop reading" }),
+            await screen.findByRole("button", { name: "Pause reading" }),
         ).toBeInTheDocument();
-        expect(screen.getByText("1/2")).toBeInTheDocument();
+        expect(synthesizeMock).toHaveBeenCalledTimes(1);
+        expect(synthesizeMock).toHaveBeenCalledWith("First sentence. Second sentence.");
+        expect(screen.queryByText(/\d+\/\d+$/)).not.toBeInTheDocument();
         expect(
             screen.getByRole("combobox", { name: "Reading speed" }),
         ).toBeInTheDocument();
 
-        await act(async () => {
-            audioInstances[0]?.onended?.();
+        const element = audioInstances[0]!;
+        element.duration = 75;
+        element.currentTime = 12;
+        act(() => {
+            element.ondurationchange?.();
+            element.ontimeupdate?.();
         });
-        expect(await screen.findByText("2/2")).toBeInTheDocument();
+        const bar = screen.getByRole("slider", { name: "Reading position" });
+        expect(bar).toHaveAttribute("aria-valuetext", "0:12 of 1:15");
+        expect(screen.getByText("0:12 / 1:15")).toBeInTheDocument();
 
-        await act(async () => {
-            audioInstances[0]?.onended?.();
-        });
+        fireEvent.change(bar, { target: { value: "40" } });
+        expect(element.currentTime).toBe(40);
 
+        await user.click(screen.getByRole("button", { name: "Pause reading" }));
+        expect(element.pause).toHaveBeenCalled();
+        await user.click(
+            await screen.findByRole("button", { name: "Resume reading" }),
+        );
+        expect(
+            await screen.findByRole("button", { name: "Pause reading" }),
+        ).toBeInTheDocument();
+
+        element.ended = true;
+        act(() => element.onended?.());
         expect(
             await screen.findByRole("button", { name: "Read response aloud" }),
         ).toBeInTheDocument();
-        expect(screen.queryByText("2/2")).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("slider", { name: "Reading position" }),
+        ).not.toBeInTheDocument();
     });
 
-    it("stops reading on demand and revokes the object URL", async () => {
+    it("shows how far preparation has got, and can be stopped", async () => {
+        let finish: (blob: Blob) => void = () => {};
+        synthesizeMock.mockImplementation(
+            () => new Promise<Blob>((resolve) => (finish = resolve)),
+        );
+        const user = userEvent.setup();
+        render(<AssistantMessage events={events} />);
+
+        await user.click(
+            screen.getByRole("button", { name: "Read response aloud" }),
+        );
+        expect(await screen.findByRole("status")).toHaveTextContent(
+            "Preparing audio… 0%",
+        );
+        await user.click(screen.getByRole("button", { name: "Stop reading" }));
+        await act(async () => finish(new Blob(["x"])));
+
+        expect(
+            screen.getByRole("button", { name: "Read response aloud" }),
+        ).toBeInTheDocument();
+    });
+
+    it("stops reading on demand and revokes the audio's URL", async () => {
         const user = userEvent.setup();
         render(<AssistantMessage events={events} />);
 
@@ -107,7 +161,7 @@ describe("AssistantMessage read aloud", () => {
             screen.getByRole("button", { name: "Read response aloud" }),
         );
         await waitFor(() =>
-            expect(audioInstances[0]?.src).toBe("blob:read-1"),
+            expect(audioInstances[0]?.src).toBe("blob:read-2"),
         );
         await user.click(
             await screen.findByRole("button", { name: "Stop reading" }),
@@ -116,7 +170,7 @@ describe("AssistantMessage read aloud", () => {
         expect(
             screen.getByRole("button", { name: "Read response aloud" }),
         ).toBeInTheDocument();
-        expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:read-1");
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:read-2");
     });
 
     it("hides the read-aloud control while the response streams", () => {

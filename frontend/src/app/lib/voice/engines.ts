@@ -31,6 +31,18 @@ export async function transcribeRecording(
     return text;
 }
 
+/**
+ * How read-aloud renders a response with this engine: the longest text sent
+ * in one synthesis call (the server takes up to 4,000 characters; Kokoro
+ * reads a few sentences well at a time) and how many calls run at once (the
+ * model in the browser runs one at a time).
+ */
+export function speechRenderPlan(
+    preferences: VoicePreferences["speech"] = loadVoicePreferences().speech,
+): { maxChars: number; concurrency: number } {
+    return preferences.engine === "webgpu" ? { maxChars: 300, concurrency: 1 } : { maxChars: 1200, concurrency: 3 };
+}
+
 export async function synthesizeSentence(
     text: string,
     preferences: VoicePreferences["speech"] = loadVoicePreferences().speech,

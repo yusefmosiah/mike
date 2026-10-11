@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { synthesizeSentence } from "@/app/lib/voice/engines";
-import { useVoicePreferences } from "@/app/lib/voice/preferences";
+import { userFacingApiError } from "@/app/lib/userFacingError";
+import { BrowserModelError } from "@/app/lib/voice/browserModels";
+import { speechRenderPlan, synthesizeSentence } from "@/app/lib/voice/engines";
+import { useVoicePreferences, type VoicePreferences } from "@/app/lib/voice/preferences";
+import {
+    chunkSentences,
+    renderSpeech,
+    silentWav,
+    SpeechRenderCancelled,
+} from "@/app/lib/voice/speechAudio";
 import { useBrowserReadAloud } from "./useBrowserReadAloud";
 import {
+    readAloudTitle,
     splitIntoReadAloudSentences,
+    type ReadAloudStatus,
     type UseReadAloud,
 } from "./readAloudShared";
 
@@ -13,19 +23,23 @@ export {
     splitIntoReadAloudSentences,
 } from "./readAloudShared";
 export type {
+    ReadAloudStatus,
     UseReadAloud,
     UseReadAloudControls,
     UseReadAloudState,
 } from "./readAloudShared";
 
-const DEFAULT_SPEED = 1;
-
+const READ_ALOUD_FAILED_MESSAGE = "Could not read this response aloud.";
+const PLAYBACK_BLOCKED_MESSAGE = "The browser did not allow playback. Tap play again.";
 const PLAYBACK_FAILED_MESSAGE = "Playback failed.";
+/** Lock-screen skip, in seconds. */
+const SKIP_SECONDS = 10;
 
 function readAloudErrorMessage(cause: unknown): string {
-    if (typeof cause === "string" && cause) return cause;
-    if (cause instanceof Error && cause.message) return cause.message;
-    return "Could not read this response aloud.";
+    if (typeof cause === "string") return cause;
+    if (cause instanceof BrowserModelError) return cause.message;
+    if (cause instanceof DOMException && cause.name === "NotAllowedError") return PLAYBACK_BLOCKED_MESSAGE;
+    return userFacingApiError(cause, READ_ALOUD_FAILED_MESSAGE);
 }
 
 /**
@@ -37,276 +51,273 @@ function readAloudErrorMessage(cause: unknown): string {
 export function useReadAloud(text: string): UseReadAloud {
     const [preferences] = useVoicePreferences();
     const browser = preferences.speech.engine === "browser";
-    const audio = useAudioReadAloud(browser ? "" : text);
+    const audio = useAudioReadAloud(browser ? "" : text, preferences.speech);
     const spoken = useBrowserReadAloud(browser ? text : "", preferences.speech.voice);
     return browser ? spoken : audio;
 }
 
+type MediaAction = "play" | "pause" | "stop" | "seekto" | "seekbackward" | "seekforward";
+
+function mediaSession(): MediaSession | null {
+    return typeof navigator !== "undefined" && "mediaSession" in navigator ? navigator.mediaSession : null;
+}
+
+function setMediaSession(title: string | null, handlers: Partial<Record<MediaAction, MediaSessionActionHandler>>): void {
+    const session = mediaSession();
+    if (!session) return;
+    try {
+        session.metadata =
+            title !== null && typeof MediaMetadata !== "undefined" ? new MediaMetadata({ title, artist: "Mike" }) : null;
+        const actions: MediaAction[] = ["play", "pause", "stop", "seekto", "seekbackward", "seekforward"];
+        for (const action of actions) session.setActionHandler(action, handlers[action] ?? null);
+    } catch {
+        // An action this browser does not know; the in-page controls still work.
+    }
+}
+
 /**
- * Reads a response aloud sentence by sentence from synthesized audio.
+ * Reads a response aloud as one audio file. The first play synthesizes the
+ * whole response (in chunks, a few at a time for server engines), joins it
+ * into one WAV and plays it in a single audio element: it can be sought,
+ * paused, sped up, and keeps playing in the background, with lock-screen
+ * controls through the Media Session API. The file is kept, so playing
+ * again does not synthesize (or bill) again.
  *
- * The caller hands over plain prose. Sentences are synthesized lazily — when
- * playback reaches sentence i, and one sentence ahead while it plays — and
- * cached per index, so backtracking replays without re-billing the engine.
- * A single HTMLAudioElement plays one object URL at a time; URLs are revoked
- * as playback advances and on stop, so nothing leaks.
+ * iOS lets an element play only from a tap, and synthesis outlasts the tap,
+ * so the tap first plays a moment of silence on the element; after that the
+ * element may start the real audio when it is ready.
  */
-function useAudioReadAloud(text: string): UseReadAloud {
+function useAudioReadAloud(text: string, speech: VoicePreferences["speech"]): UseReadAloud {
     const sentences = useMemo(() => splitIntoReadAloudSentences(text), [text]);
-
-    const [playing, setPlaying] = useState(false);
-    const [paused, setPausedState] = useState(false);
-    const [sentenceIndex, setSentenceIndex] = useState(0);
-    const [speed, setSpeedState] = useState<number>(DEFAULT_SPEED);
-    const [error, setError] = useState<string | null>(null);
-
-    const sentencesRef = useRef(sentences);
-    const audioRef = useRef<HTMLAudioElement | null>(null);
-    const blobCacheRef = useRef(new Map<number, Blob>());
-    const urlRef = useRef(new Map<number, string>());
-    const speedRef = useRef<number>(DEFAULT_SPEED);
-    // Session token: bumped on every start/stop. Async continuations compare
-    // it before touching the audio element or state, so a stale fetch from an
-    // aborted session can never play (or cache) against the current one.
-    const generationRef = useRef(0);
-    const sessionRef = useRef({ active: false, paused: false });
-    // Mirrors `error`, so the prose-change reset can tell whether there is
-    // anything to reset without depending on (and re-running for) the state.
-    const errorRef = useRef<string | null>(null);
-    // playAt schedules the next sentence from the audio's `ended` handler;
-    // a callback cannot name itself, so the handler goes through this ref.
-    const playAtRef = useRef<(index: number, generation: number) => Promise<void>>(
-        async () => undefined,
+    const key = useMemo(
+        () => JSON.stringify([speech.engine, speech.model ?? "", speech.voice ?? "", text]),
+        [speech.engine, speech.model, speech.voice, text],
     );
 
-    useEffect(() => {
-        sentencesRef.current = sentences;
-    }, [sentences]);
+    const [status, setStatus] = useState<ReadAloudStatus>("idle");
+    const [prepared, setPrepared] = useState(0);
+    const [position, setPosition] = useState(0);
+    const [length, setLength] = useState(0);
+    const [speed, setSpeedState] = useState(1);
+    const [error, setError] = useState<string | null>(null);
 
-    const releaseUrls = useCallback(() => {
-        for (const url of urlRef.current.values()) URL.revokeObjectURL(url);
-        urlRef.current.clear();
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const urlRef = useRef<string | null>(null);
+    const silentUrlRef = useRef<string | null>(null);
+    const renderedRef = useRef<{ key: string; blob: Blob } | null>(null);
+    const speedRef = useRef(1);
+    // Bumped by every play and stop: async work from an older session
+    // compares it before touching the element or state.
+    const generationRef = useRef(0);
+    const activeRef = useRef(false);
+    const errorRef = useRef<string | null>(null);
+    const latest = useRef({ sentences, key, speech, title: readAloudTitle(text) });
+    useEffect(() => {
+        latest.current = { sentences, key, speech, title: readAloudTitle(text) };
+    }, [sentences, key, speech, text]);
+
+    const ensureAudio = useCallback(() => {
+        if (!audioRef.current) {
+            const audio = new Audio();
+            audio.preload = "auto";
+            audioRef.current = audio;
+        }
+        return audioRef.current;
     }, []);
 
-    const stopInternal = useCallback(() => {
+    const releaseUrl = useCallback(() => {
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+    }, []);
+
+    const halt = useCallback(() => {
         generationRef.current += 1;
-        sessionRef.current.active = false;
-        sessionRef.current.paused = false;
+        activeRef.current = false;
         const audio = audioRef.current;
         if (audio) {
-            audio.onended = null;
-            audio.onerror = null;
-            audio.removeAttribute("src");
+            audio.onplay = audio.onpause = audio.ontimeupdate = null;
+            audio.ondurationchange = audio.onended = audio.onerror = null;
             try {
                 audio.pause();
             } catch {
-                // A never-started element cannot be paused; the session
-                // flags above are the source of truth either way.
+                // Never started; nothing to pause.
             }
+            audio.removeAttribute("src");
         }
-        releaseUrls();
-        setPlaying(false);
-        setPausedState(false);
-        setSentenceIndex(0);
-        errorRef.current = null;
-        setError(null);
-    }, [releaseUrls]);
+        releaseUrl();
+        setMediaSession(null, {});
+        setStatus("idle");
+        setPrepared(0);
+        setPosition(0);
+    }, [releaseUrl]);
 
     const fail = useCallback(
         (cause: unknown) => {
-            if (!sessionRef.current.active) return;
-            stopInternal();
+            halt();
             const message = readAloudErrorMessage(cause);
             errorRef.current = message;
             setError(message);
         },
-        [stopInternal],
+        [halt],
     );
 
-    // New prose invalidates every cached blob and kills any session: text
-    // from a previous body must never be spoken underneath the new one. A
-    // streaming answer changes its prose on every chunk, so reset only when
-    // there is a session or an error to clear: dispatching even unchanged
-    // state from this effect on each chunk exceeds React's nested
-    // passive-update limit ("Maximum update depth exceeded").
+    // New prose or another engine: drop the file and silence this message.
+    // A streaming answer changes its prose on every chunk, so only reset
+    // when there is something to reset.
     useEffect(() => {
-        blobCacheRef.current.clear();
-        if (sessionRef.current.active || errorRef.current !== null) {
-            // Stopping pauses audio and revokes object URLs, which are effects;
-            // the state it resets goes with them.
+        renderedRef.current = null;
+        if (activeRef.current || errorRef.current !== null) {
+            // Stopping pauses audio and revokes its URL, which are effects.
             // eslint-disable-next-line react-hooks/set-state-in-effect
-            stopInternal();
+            halt();
+            errorRef.current = null;
+            setError(null);
         }
-    }, [sentences, stopInternal]);
+    }, [key, halt]);
 
-    // Silence whatever is playing when the message unmounts.
-    useEffect(() => () => stopInternal(), [stopInternal]);
-
-    const ensureAudio = useCallback(() => {
-        if (audioRef.current) return audioRef.current;
-        const audio = new Audio();
-        audio.preload = "auto";
-        audio.playbackRate = speedRef.current;
-        audioRef.current = audio;
-        return audio;
-    }, []);
-
-    const loadSentence = useCallback(
-        async (index: number, generation: number): Promise<Blob> => {
-            const cached = blobCacheRef.current.get(index);
-            if (cached) return cached;
-            const blob = await synthesizeSentence(sentencesRef.current[index]);
-            if (generation === generationRef.current) {
-                blobCacheRef.current.set(index, blob);
-            }
-            return blob;
+    useEffect(
+        () => () => {
+            halt();
+            if (silentUrlRef.current) URL.revokeObjectURL(silentUrlRef.current);
         },
-        [],
+        [halt],
     );
 
-    const prefetch = useCallback((index: number, generation: number) => {
-        if (index >= sentencesRef.current.length) return;
-        if (blobCacheRef.current.has(index)) return;
-        synthesizeSentence(sentencesRef.current[index])
-            .then((blob) => {
-                if (generation === generationRef.current) {
-                    blobCacheRef.current.set(index, blob);
-                }
-            })
-            .catch(() => {
-                // Prefetch is best-effort: if it fails, playAt retries the
-                // sentence (and surfaces the error) when playback reaches it.
-            });
-    }, []);
+    const controls = useRef<{ pause: () => void; resume: () => void; seek: (to: number) => void; stop: () => void }>({
+        pause: () => {},
+        resume: () => {},
+        seek: () => {},
+        stop: () => {},
+    });
 
-    const playAt = useCallback(
-        async (index: number, generation: number) => {
-            if (generation !== generationRef.current) return;
-            if (index >= sentencesRef.current.length) {
-                // Ran off the end of the response: clean up like stop().
-                stopInternal();
-                return;
-            }
-
-            let blob: Blob;
-            try {
-                blob = await loadSentence(index, generation);
-            } catch (cause) {
-                if (generation !== generationRef.current) return;
-                fail(cause);
-                return;
-            }
-            if (generation !== generationRef.current) return;
-
+    const start = useCallback(
+        (blob: Blob, generation: number) => {
             const audio = ensureAudio();
-            releaseUrls();
+            releaseUrl();
             const url = URL.createObjectURL(blob);
-            urlRef.current.set(index, url);
-
-            setSentenceIndex(index);
-            audio.onended = () => {
-                if (generation === generationRef.current) {
-                    void playAtRef.current(index + 1, generation);
-                }
+            urlRef.current = url;
+            const current = () => generation === generationRef.current;
+            audio.onplay = () => current() && setStatus("playing");
+            audio.onpause = () => current() && !audio.ended && setStatus("paused");
+            audio.ontimeupdate = () => current() && setPosition(audio.currentTime);
+            audio.ondurationchange = () => {
+                if (current() && Number.isFinite(audio.duration)) setLength(audio.duration);
             };
-            audio.onerror = () => {
-                if (generation === generationRef.current) {
-                    fail(PLAYBACK_FAILED_MESSAGE);
-                }
-            };
+            audio.onended = () => current() && halt();
+            audio.onerror = () => current() && fail(PLAYBACK_FAILED_MESSAGE);
             audio.src = url;
             audio.playbackRate = speedRef.current;
+            setStatus("playing");
+            const { pause, resume, seek, stop } = controls.current;
+            setMediaSession(latest.current.title, {
+                play: resume,
+                pause,
+                stop,
+                seekto: (details) => seek(details.seekTime ?? 0),
+                seekbackward: () => seek(audio.currentTime - SKIP_SECONDS),
+                seekforward: () => seek(audio.currentTime + SKIP_SECONDS),
+            });
+            Promise.resolve(audio.play()).catch((cause: unknown) => {
+                if (current()) fail(cause);
+            });
+        },
+        [ensureAudio, fail, halt, releaseUrl],
+    );
 
-            if (sessionRef.current.paused) {
-                // Paused while the sentence was still being synthesized:
-                // hold it at the start; resume() plays it.
-                return;
-            }
-            try {
-                await audio.play();
-            } catch (cause) {
-                if (generation !== generationRef.current) return;
+    const play = useCallback(() => {
+        const { sentences, key, speech } = latest.current;
+        if (sentences.length === 0) return;
+        const generation = generationRef.current + 1;
+        generationRef.current = generation;
+        activeRef.current = true;
+        errorRef.current = null;
+        setError(null);
+        setPosition(0);
+        const audio = ensureAudio();
+        const rendered = renderedRef.current;
+        if (rendered && rendered.key === key) {
+            start(rendered.blob, generation);
+            return;
+        }
+        // Inside the tap: a moment of silence, so iOS lets this element play
+        // the real audio once synthesis is done.
+        if (!silentUrlRef.current) silentUrlRef.current = URL.createObjectURL(silentWav());
+        audio.src = silentUrlRef.current;
+        Promise.resolve(audio.play()).catch(() => undefined);
+
+        setStatus("preparing");
+        setPrepared(0);
+        setLength(0);
+        const current = () => generation === generationRef.current;
+        const plan = speechRenderPlan(speech);
+        renderSpeech(chunkSentences(sentences, plan.maxChars), (chunk) => synthesizeSentence(chunk, speech), {
+            concurrency: plan.concurrency,
+            onProgress: (done, total) => current() && setPrepared(done / total),
+            cancelled: () => !current(),
+        })
+            .then((blob) => {
+                if (!current()) return;
+                renderedRef.current = { key, blob };
+                start(blob, generation);
+            })
+            .catch((cause: unknown) => {
+                if (!current() || cause instanceof SpeechRenderCancelled) return;
                 fail(cause);
-                return;
-            }
-            if (generation !== generationRef.current) return;
-            prefetch(index + 1, generation);
-        },
-        [ensureAudio, fail, loadSentence, prefetch, releaseUrls, stopInternal],
-    );
-
-    useEffect(() => {
-        playAtRef.current = playAt;
-    }, [playAt]);
-
-    const playFrom = useCallback(
-        (index: number) => {
-            const count = sentencesRef.current.length;
-            if (count === 0) return;
-            const start = Math.min(Math.max(index, 0), count - 1);
-            const generation = generationRef.current + 1;
-            generationRef.current = generation;
-            sessionRef.current.active = true;
-            sessionRef.current.paused = false;
-            setError(null);
-            setPlaying(true);
-            setPausedState(false);
-            setSentenceIndex(start);
-            void playAt(start, generation);
-        },
-        [playAt],
-    );
-
-    const play = useCallback(() => playFrom(0), [playFrom]);
+            });
+    }, [ensureAudio, fail, start]);
 
     const pause = useCallback(() => {
-        if (!sessionRef.current.active) return;
-        sessionRef.current.paused = true;
-        setPausedState(true);
         const audio = audioRef.current;
-        if (audio) {
-            try {
-                audio.pause();
-            } catch {
-                // Nothing to pause yet; the paused flag above still holds
-                // playAt back from starting the sentence.
-            }
-        }
+        if (!activeRef.current || !audio || !urlRef.current) return;
+        audio.pause();
+        setStatus("paused");
     }, []);
 
     const resume = useCallback(() => {
-        if (!sessionRef.current.active) return;
-        sessionRef.current.paused = false;
-        setPausedState(false);
         const audio = audioRef.current;
-        if (!audio || !audio.src) return; // still synthesizing; playAt starts it
+        if (!activeRef.current || !audio || !urlRef.current) return;
         const generation = generationRef.current;
+        setStatus("playing");
         Promise.resolve(audio.play()).catch((cause: unknown) => {
             if (generation === generationRef.current) fail(cause);
         });
     }, [fail]);
 
+    const seek = useCallback((to: number) => {
+        const audio = audioRef.current;
+        if (!activeRef.current || !audio || !urlRef.current) return;
+        const end = Number.isFinite(audio.duration) ? audio.duration : to;
+        const next = Math.min(Math.max(to, 0), end);
+        audio.currentTime = next;
+        setPosition(next);
+    }, []);
+
+    const stop = useCallback(() => halt(), [halt]);
+
     const setSpeed = useCallback((next: number) => {
         speedRef.current = next;
         setSpeedState(next);
-        const audio = audioRef.current;
-        if (audio) audio.playbackRate = next;
+        if (audioRef.current) audioRef.current.playbackRate = next;
     }, []);
 
-    const stop = useCallback(() => stopInternal(), [stopInternal]);
+    useEffect(() => {
+        controls.current = { pause, resume, seek, stop };
+    }, [pause, resume, seek, stop]);
 
     return {
-        playing,
-        paused,
-        sentenceIndex,
-        sentenceCount: sentences.length,
+        available: sentences.length > 0,
+        status,
+        prepared,
+        position,
+        length,
+        unit: "seconds",
         speed,
         error,
         play,
         pause,
         resume,
         stop,
+        seek,
         setSpeed,
-        playFrom,
     };
 }

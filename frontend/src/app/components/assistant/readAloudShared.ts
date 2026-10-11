@@ -36,30 +36,46 @@ export function splitIntoReadAloudSentences(text: string): string[] {
     return sentences.slice(0, MAX_READ_ALOUD_SENTENCES);
 }
 
+/**
+ * idle: nothing playing (a finished or stopped reading). preparing: the
+ * audio is being synthesized. playing / paused: the reading is under way.
+ */
+export type ReadAloudStatus = "idle" | "preparing" | "playing" | "paused";
+
 export interface UseReadAloudState {
-    /** A reading session is active: started, not stopped or finished. */
-    playing: boolean;
-    /** The active session is held at the current sentence. */
-    paused: boolean;
-    /** 0-based index of the sentence being spoken. */
-    sentenceIndex: number;
-    sentenceCount: number;
-    /** Playback rate, 0.75 | 1 | 1.25 | 1.5. Applied to live audio too. */
+    /** There is prose to read. */
+    available: boolean;
+    status: ReadAloudStatus;
+    /** Share of the audio synthesized so far, 0 to 1, while preparing. */
+    prepared: number;
+    /**
+     * Where the reading is, out of `length`: seconds of one audio file, or,
+     * for the browser's own voices, sentences.
+     */
+    position: number;
+    length: number;
+    unit: "seconds" | "sentences";
+    /** Playback rate, 0.75 | 1 | 1.25 | 1.5. */
     speed: number;
     error: string | null;
 }
 
 export interface UseReadAloudControls {
-    /** Starts a fresh session from the first sentence. */
+    /** Starts reading from the beginning. Call it from the tap itself. */
     play: () => void;
-    /** Holds the current sentence; playback resumes where it stopped. */
     pause: () => void;
     resume: () => void;
-    /** Ends the session, revokes every object URL, resets progress. */
+    /** Stops and returns to the beginning; synthesized audio is kept for a replay. */
     stop: () => void;
+    /** Moves to a position, in `unit`s. */
+    seek: (position: number) => void;
     setSpeed: (speed: number) => void;
-    /** Starts a session at a specific sentence (0-based). */
-    playFrom: (index: number) => void;
 }
 
 export type UseReadAloud = UseReadAloudState & UseReadAloudControls;
+
+/** A short title for the lock screen: the first sentence, shortened. */
+export function readAloudTitle(text: string): string {
+    const first = splitIntoReadAloudSentences(text)[0] ?? "";
+    return first.length > 80 ? `${first.slice(0, 79).trimEnd()}…` : first;
+}
