@@ -139,6 +139,13 @@ describe("AccessModal — per-recipient roles", () => {
         expect(
             within(creatorRow!).getByText("creator@firm.example"),
         ).toHaveClass("justify-self-start", "text-left");
+        // Emails stay whole: a long one wraps in its column, never an ellipsis.
+        expect(
+            within(creatorRow!).getByText("creator@firm.example"),
+        ).toHaveClass("[overflow-wrap:anywhere]");
+        expect(
+            within(creatorRow!).getByText("creator@firm.example"),
+        ).not.toHaveClass("truncate");
         const ownerPill = within(creatorRow!).getByText("Owner");
         expect(ownerPill).toHaveClass(
             "h-6",

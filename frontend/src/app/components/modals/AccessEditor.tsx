@@ -306,12 +306,12 @@ function OrganizationMemberPicker({
                                     }}
                                     className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${LIQUID_GLASS_HOVER_CLASS}`}
                                 >
-                                    <span className="min-w-0 truncate text-xs text-gray-800">
+                                    <span className="min-w-0 text-xs text-gray-800 [overflow-wrap:anywhere]">
                                         {member.display_name?.trim() ||
                                             member.email}
                                     </span>
                                     {member.display_name ? (
-                                        <span className="min-w-0 truncate text-xs text-gray-400">
+                                        <span className="min-w-0 text-right text-xs text-gray-400 [overflow-wrap:anywhere]">
                                             {member.email}
                                         </span>
                                     ) : null}
@@ -372,10 +372,10 @@ function OrganizationAssignmentList({
                                 key={key}
                                 className={`${LIQUID_GLASS_MODAL_ROW_HOVER_CLASS} grid grid-cols-[minmax(0,1fr)_minmax(10rem,16rem)_1.5rem] items-center gap-3 rounded-lg px-2 py-2 transition-colors`}
                             >
-                                <span className="truncate text-xs text-gray-800">
+                                <span className="min-w-0 text-xs text-gray-800 [overflow-wrap:anywhere]">
                                     {assignment.display_name?.trim() || "—"}
                                 </span>
-                                <span className="max-w-full justify-self-end truncate text-xs text-gray-500">
+                                <span className="min-w-0 max-w-full justify-self-end text-right text-xs text-gray-500 [overflow-wrap:anywhere]">
                                     {assignment.email || "—"}
                                 </span>
                                 {!disabled && !assignment.isCreator ? (
@@ -801,8 +801,8 @@ export function AccessEditor({
                                     role="listitem"
                                     className={`${LIQUID_GLASS_MODAL_ROW_HOVER_CLASS} relative grid grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)_5rem_1.5rem] items-start gap-3 rounded-lg px-2 py-2 transition-colors`}
                                 >
-                                    <p className="truncate pt-1 text-xs text-gray-800">{name}</p>
-                                    <p className="justify-self-start truncate pt-1 text-left text-xs text-gray-500">{entry.email || "—"}</p>
+                                    <p className="min-w-0 pt-1 text-xs text-gray-800 [overflow-wrap:anywhere]">{name}</p>
+                                    <p className="min-w-0 justify-self-start pt-1 text-left text-xs text-gray-500 [overflow-wrap:anywhere]">{entry.email || "—"}</p>
                                     <AccessRolePill
                                         role={entry.role}
                                         label={email || name}
