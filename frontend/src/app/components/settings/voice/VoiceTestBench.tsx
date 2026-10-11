@@ -22,6 +22,7 @@ import { userFacingApiError } from "@/app/lib/userFacingError";
 import { speakWithBrowser } from "@/app/lib/voice/browserSpeech";
 import { DeviceSpeechError, transcribeOnDevice } from "@/app/lib/voice/deviceSpeech";
 import {
+  BrowserModelError,
   hasBrowserModelConsent,
   speakWithBrowserModel,
   transcribeInBrowser,
@@ -241,7 +242,13 @@ export function VoiceTestBench({
         urlsRef.current.push(url);
         update(setSpeechRows, candidate.key, { status: "done", latencyMs: performance.now() - started, costUsd: cost, audioUrl: url });
       } catch (error) {
-        update(setSpeechRows, candidate.key, { status: "failed", error: userFacingApiError(error, "This engine could not speak the sentence.") });
+        update(setSpeechRows, candidate.key, {
+          status: "failed",
+          error:
+            error instanceof BrowserModelError
+              ? error.message
+              : userFacingApiError(error, "This engine could not speak the sentence."),
+        });
       }
     }
     setRunning(null);
@@ -308,7 +315,7 @@ export function VoiceTestBench({
         update(setSttRows, candidate.key, {
           status: "failed",
           error:
-            error instanceof DeviceSpeechError
+            error instanceof DeviceSpeechError || error instanceof BrowserModelError
               ? error.message
               : userFacingApiError(error, "This engine could not transcribe the recording."),
         });

@@ -99,3 +99,36 @@ the recording is transcribed on the phone by Apple's speech recognition
 through Mike's `MikeSpeech` plugin, and it is the app's default for
 dictation. Details and receipts:
 [`mission-19-ios-app.md`](mission-19-ios-app.md).
+
+## The open model on the iPhone (2026-10-11, not accepted)
+
+Reported by the owner: on a real iPhone in Safari, with the models set up,
+dictation and read-aloud with "Open model in browser" reloaded the page with
+no error. Cause: transformers.js 3.8.1 always loads ONNX Runtime's JSEP
+WebAssembly build (the one WebGPU needs, compiled with Asyncify; its largest
+function is 1,271 KB against 728 KB in the plain build). WebKit's optimizing
+compiler runs away on functions that size (WebKit bug 304810, open;
+microsoft/onnxruntime#26827), and iOS kills the page's process. A second
+defect: Kokoro's phonemizer iterates a ReadableStream with `for await`,
+which Safari 26.2 lacks, so Kokoro never finished speaking there.
+
+Fix (`frontend/src/app/lib/voice/browserModels.ts`): in WebKit (Safari, and
+every iPhone and iPad browser) the models run on ONNX Runtime's plain
+WebAssembly build from jsDelivr (same version as the bundled runtime), one
+thread, 8-bit weights (Whisper 77 MB instead of 206 MB, Kokoro 92 MB instead
+of 326 MB), never WebGPU; on iPhone and iPad one model is in memory at a
+time and work is queued. ReadableStream iteration is added where missing.
+WebKit consent is asked again, so setup downloads the files that run. A run
+the page did not survive (marker in the tab's session storage) is reported
+once on the next attempt. Library errors become one plain message. Chrome,
+Edge and Firefox are unchanged.
+
+Receipts, iOS 26.2 Simulator (iPhone 17 Pro), Safari, a harness running the
+real module: the old code crashed the web process ("reason=Crash") and
+Safari reloaded the page, as on the phone; the same settings with only the
+JSEP build kept also crashed, right after Kokoro spoke; the fix spoke the
+test sentence with Kokoro (12.5 s with download), transcribed it with
+Whisper as "The quarterly report shows the North region ahead of plan by
+10%." (6.3 s), and spoke again (3.6 s); the page's process peaked at 940 MB
+and settled at 200 MB with the processor idle. Simulator memory limits are
+not a phone's: the owner's iPhone is the remaining check.

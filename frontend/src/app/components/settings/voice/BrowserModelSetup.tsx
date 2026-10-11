@@ -5,12 +5,13 @@ import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { SettingsDescription } from "@/app/components/settings/SettingsText";
 import {
   BROWSER_MODELS,
+  BrowserModelError,
+  browserModelRuntime,
   estimateBrowserModelSetup,
   hasBrowserModelConsent,
   loadBrowserSpeaker,
   loadBrowserTranscriber,
   setBrowserModelConsent,
-  webgpuAvailable,
   type BrowserModelKind,
 } from "@/app/lib/voice/browserModels";
 import { setupEstimateLabel } from "@/app/lib/voice/pricing";
@@ -21,7 +22,9 @@ type Phase =
   | { step: "estimated"; minutes: number | null }
   | { step: "loading"; progress: number }
   | { step: "ready" }
-  | { step: "failed" };
+  | { step: "failed"; message: string };
+
+const SETUP_FAILED_MESSAGE = "Setup did not finish. Check the connection and try again.";
 
 /**
  * Consent for an open model that runs in this browser. Nothing is fetched
@@ -33,7 +36,13 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
   const [phase, setPhase] = useState<Phase>(() =>
     hasBrowserModelConsent(kind) ? { step: "ready" } : { step: "ask" },
   );
-  const backend = webgpuAvailable() ? "WebGPU" : "WebAssembly (slower; this browser has no WebGPU)";
+  const runtime = browserModelRuntime();
+  const backend =
+    runtime.device === "webgpu"
+      ? "WebGPU"
+      : runtime.webkit
+        ? "WebAssembly (WebGPU is not used in this browser)"
+        : "WebAssembly (slower; this browser has no WebGPU)";
 
   const estimate = async () => {
     setPhase({ step: "estimating" });
@@ -52,9 +61,9 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
       if (kind === "transcription") await loadBrowserTranscriber(onProgress);
       else await loadBrowserSpeaker(onProgress);
       setPhase({ step: "ready" });
-    } catch {
+    } catch (error) {
       setBrowserModelConsent(kind, false);
-      setPhase({ step: "failed" });
+      setPhase({ step: "failed", message: error instanceof BrowserModelError ? error.message : SETUP_FAILED_MESSAGE });
     }
   };
 
@@ -124,7 +133,7 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
       {phase.step === "failed" && (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm text-red-600" role="alert">
-            Setup did not finish. Check the connection and try again.
+            {phase.message}
           </p>
           <PillButtonUI tone="white" size="sm" onClick={() => setPhase({ step: "ask" })}>
             Try again

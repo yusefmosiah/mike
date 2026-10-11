@@ -11,6 +11,8 @@ vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
 }));
 
 import { MikeApiError } from "@/app/lib/mikeApi";
+import { BrowserModelConsentError } from "@/app/lib/voice/browserModels";
+import { VOICE_PREFERENCES_KEY } from "@/app/lib/voice/preferences";
 import {
     DICTATION_UNSUPPORTED_MESSAGE,
     MICROPHONE_ACCESS_DENIED_MESSAGE,
@@ -282,6 +284,33 @@ describe("useDictation", () => {
         );
         expect(result.current.transcript).toBeNull();
         expect(result.current.busy).toBe(false);
+    });
+
+    it("shows the open model's own message when it cannot transcribe", async () => {
+        window.localStorage.setItem(
+            VOICE_PREFERENCES_KEY,
+            JSON.stringify({ transcription: { engine: "webgpu" }, speech: { engine: "operator" } }),
+        );
+        try {
+            const { result } = renderHook(() => useDictation());
+
+            await act(async () => {
+                await result.current.start();
+            });
+            await act(async () => {
+                result.current.stop();
+            });
+
+            // Not set up in Settings → Voice, so nothing is downloaded.
+            await waitFor(() =>
+                expect(result.current.error).toBe(
+                    new BrowserModelConsentError().message,
+                ),
+            );
+            expect(transcribeAudio).not.toHaveBeenCalled();
+        } finally {
+            window.localStorage.removeItem(VOICE_PREFERENCES_KEY);
+        }
     });
 
     it("treats an empty recording as nothing to transcribe", async () => {

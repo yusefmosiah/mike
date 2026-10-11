@@ -7,6 +7,7 @@ import {
     startOnDeviceRecognition,
     type OnDeviceRecognitionSession,
 } from "@/app/lib/voice/browserSpeech";
+import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
 import { transcribeRecording } from "@/app/lib/voice/engines";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
@@ -134,7 +135,8 @@ export function useDictation({
                 }
             } catch (transcribeError) {
                 setError(
-                    transcribeError instanceof DeviceSpeechError
+                    transcribeError instanceof DeviceSpeechError ||
+                        transcribeError instanceof BrowserModelError
                         ? transcribeError.message
                         : userFacingApiError(
                               transcribeError,
