@@ -185,7 +185,10 @@ Rules:
 
 iOS: `configure-ios.mjs` adds a blur view over the window in
 `SceneDelegate.sceneWillResignActive` (marker `MIKE_PRIVACY_COVER`), before
-iOS takes the app switcher's snapshot. The CSS below remains a sketch for
+iOS takes the app switcher's snapshot. A personal build that should show its
+real snapshot in the app switcher is configured with
+`MIKE_APP_SWITCHER_PREVIEW=1 npm run ios:configure` (Info.plist
+`MikeAppSwitcherPreview`); a firm build must leave it unset. The CSS below remains a sketch for
 Android.
 
 `@capacitor/app` is declared. In the shell bootstrap:

@@ -8,7 +8,10 @@
 //     read-aloud.
 //   - SceneDelegate: a native cover over the window whenever the app leaves
 //     the foreground, so the app switcher's snapshot never shows matter
-//     content (CSS alone can lose that race).
+//     content (CSS alone can lose that race). A personal build may show the
+//     real snapshot instead: MIKE_APP_SWITCHER_PREVIEW=1 at configure time
+//     sets Info.plist's MikeAppSwitcherPreview, which the cover checks. Firm
+//     builds leave it unset.
 //   - AppDelegate: the app's Documents and Library excluded from iCloud and
 //     Finder backups.
 import { execFileSync } from "node:child_process";
@@ -53,6 +56,11 @@ if (!has("CFBundleURLTypes")) {
   buddy("Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string mike");
 }
 
+// Whether the app switcher may show the app's real snapshot (see above).
+const preview = process.env.MIKE_APP_SWITCHER_PREVIEW === "1";
+if (has("MikeAppSwitcherPreview")) buddy(`Set :MikeAppSwitcherPreview ${preview}`);
+else buddy(`Add :MikeAppSwitcherPreview bool ${preview}`);
+
 function patch(file, marker, apply) {
   const path = `${app}${file}`;
   const source = readFileSync(path, "utf8");
@@ -72,6 +80,8 @@ patch("SceneDelegate.swift", "MIKE_PRIVACY_COVER", (source) =>
     private var privacyCover: UIView?
 
     func sceneWillResignActive(_ scene: UIScene) {
+        // MIKE_APP_SWITCHER_PREVIEW: a personal build may opt out.
+        if Bundle.main.object(forInfoDictionaryKey: "MikeAppSwitcherPreview") as? Bool == true { return }
         guard let window = window, privacyCover == nil else { return }
         let cover = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
         cover.frame = window.bounds
@@ -86,6 +96,16 @@ patch("SceneDelegate.swift", "MIKE_PRIVACY_COVER", (source) =>
     }
 }
 `,
+  ),
+);
+
+// Projects configured before the opt-out existed have the cover without it.
+patch("SceneDelegate.swift", "MIKE_APP_SWITCHER_PREVIEW", (source) =>
+  source.replace(
+    "        guard let window = window, privacyCover == nil else { return }",
+    `        // MIKE_APP_SWITCHER_PREVIEW: a personal build may opt out.
+        if Bundle.main.object(forInfoDictionaryKey: "MikeAppSwitcherPreview") as? Bool == true { return }
+        guard let window = window, privacyCover == nil else { return }`,
   ),
 );
 
