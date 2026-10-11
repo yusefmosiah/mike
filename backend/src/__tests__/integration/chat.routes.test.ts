@@ -757,6 +757,39 @@ describe("POST /chat — streaming endpoint", () => {
         expect(res.text).toContain("[DONE]");
     });
 
+    it("stores an empty completion so a reload shows why it ended", async () => {
+        runLLMStream.mockResolvedValue({ fullText: "", events: [], citations: [] });
+
+        await request(app).post("/chat").set("Authorization", "Bearer test").send(VALID_BODY);
+
+        expect(findAssistantUpdate()?.value).toMatchObject({
+            content: [{ type: "error", message: expect.stringContaining("empty response") }],
+        });
+    });
+
+    it("keeps the steps of a turn that stopped before writing an answer", async () => {
+        // A run of reasoning and code cells with no prose: before, nothing was
+        // stored, the empty answer row was hidden, and every step was lost.
+        const steps = [
+            { type: "reasoning", text: "Estimate the token count first." },
+            { type: "content", text: "\n\n" },
+            { type: "reasoning", text: "Then the throughput." },
+        ];
+        runLLMStream.mockResolvedValue({ fullText: "\n\n", events: steps, citations: [] });
+
+        const res = await request(app).post("/chat").set("Authorization", "Bearer test").send(VALID_BODY);
+
+        expect(res.text).toContain("stopped before writing an answer");
+        expect(findAssistantUpdate()?.value).toMatchObject({
+            content: [
+                steps[0],
+                steps[2],
+                { type: "error", message: expect.stringContaining("stopped before writing an answer") },
+            ],
+            citations: null,
+        });
+    });
+
     it("forwards a rejected API key as a fixable error, not a retry prompt", async () => {
         // "Please try again" sends the user to retry something that cannot
         // succeed until they change the key, so the engine's verdict that this
@@ -955,7 +988,7 @@ describe("POST /chat — streaming endpoint", () => {
             },
         ],
     ])(
-        "still reports an empty response for intermediate activity %#",
+        "stores intermediate activity with the answerless-turn error %#",
         async (...events) => {
             runLLMStream.mockResolvedValue({
                 fullText: " ",
@@ -968,9 +1001,14 @@ describe("POST /chat — streaming endpoint", () => {
                 .set("Authorization", "Bearer test")
                 .send(VALID_BODY);
 
-            expect(res.text).toContain("empty response");
+            // Blank text is not work; anything else is kept for a reload.
+            const work = events.filter((event) => !(event.type === "content" && !event.text.trim()));
+            const message = work.length ? "stopped before writing an answer" : "empty response";
+            expect(res.text).toContain(message);
             expect(res.text.match(/data: \[DONE\]/g)).toHaveLength(1);
-            expect(findAssistantUpdate()).toBeUndefined();
+            expect(findAssistantUpdate()?.value).toMatchObject({
+                content: [...work, { type: "error", message: expect.stringContaining(message) }],
+            });
         },
     );
 

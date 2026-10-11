@@ -323,11 +323,39 @@ export async function driveChatTurn(
                 approvalEvents.length > 0 ||
                 events?.some(isMeaningfulTextlessAssistantOutput);
             if (!fullText?.trim() && !hasToolOutput) {
+                // Keep whatever work the turn did (reasoning, code cells,
+                // reads) with the error: an answer row left empty is dropped
+                // from the transcript, so a reload would lose all of it.
+                const work = stripTransientAssistantEvents(events ?? []).filter(
+                    (event) => !(event.type === "content" && !event.text.trim()),
+                );
+                const message = work.length
+                    ? "The model stopped before writing an answer. Ask it to continue, or pick a different model."
+                    : "The model returned an empty response. Try again, or pick a different model.";
+                const stored = [...work, { type: "error" as const, message }];
+                const saveError = askInputsResponse
+                    ? null
+                    : await updateReservedAssistantMessage(stored, null);
+                if (askInputsResponse) {
+                    await appendAssistantEventsToMessage(
+                        db,
+                        chatId,
+                        askInputsResponse.assistant_message_id,
+                        userId,
+                        stored,
+                        [],
+                    );
+                }
+                if (saveError) {
+                    console.error(
+                        "[chat/stream] failed to save an answerless turn",
+                        safeError(saveError),
+                    );
+                }
                 write(
                     `data: ${JSON.stringify({
                         type: "error",
-                        message:
-                            "The model returned an empty response. Try again, or pick a different model.",
+                        message,
                         safe_to_display: true,
                     })}\n\n`,
                 );
