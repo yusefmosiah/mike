@@ -283,13 +283,16 @@ export function ModelToggleUI({
                         aria-hidden="true"
                         className="h-1 w-1 shrink-0 rounded-full bg-gray-400/80"
                       />
-                      <span className="flex-1">{model.label}</span>
-                      {model.seesImages && (
-                        <span className="text-[9px] font-medium text-gray-400">
-                          <span className="sr-only">, </span>
-                          Sees images
-                        </span>
-                      )}
+                      {/* "Sees images" on its own line, so it never squeezes a long name. */}
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="break-words">{model.label}</span>
+                        {model.seesImages && (
+                          <span className="text-[9px] font-medium text-gray-400">
+                            <span className="sr-only">, </span>
+                            Sees images
+                          </span>
+                        )}
+                      </span>
                       {model.source &&
                         (routeCounts.get(
                           `${model.group}\u0000${model.label.toLocaleLowerCase()}`,

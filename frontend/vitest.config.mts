@@ -1,12 +1,16 @@
 import { fileURLToPath } from "node:url";
-import react from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 const resolvePath = (relative: string) =>
     fileURLToPath(new URL(relative, import.meta.url));
 
 export default defineConfig({
-    plugins: [react()],
+    // The app builds with the React Compiler (next.config.ts), so tests do
+    // too: code that reads mutable state during render passes uncompiled
+    // tests and breaks in production (useModelVision did).
+    plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
     resolve: {
         // Mirror the `@/*` path alias from tsconfig.json so unit tests resolve
         // the same module specifiers the app uses.
