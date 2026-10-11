@@ -161,13 +161,51 @@ account and model (`opencode-go/glm-5.3-flash`, code mode), sent through
   /single-documents/bedcb34d-.../versions` lists version 1 (765 bytes) and
   version 2 (796 bytes, current). The `~/` path now works.
 
-Not yet run live: acceptance 4 (share and revoke) needs a second staging
-account, and the agent does not create accounts on staging; 5 (two users)
-is covered by tests. On 2026-10-11 staging's `auth.users` held one account
-(the owner's) and no test accounts, so there is no one to share from. To
-run it: the owner signs up a second account on staging (any email they
-control), shares a document from it with their main account, and the agent
-runs the check turns before and after the revoke.
+- Acceptance 4 (share and revoke), with the owner's approval of a
+  server-side test account (2026-10-11). A labelled account,
+  `mission16-share-test@example.com`, was created through GoTrue's admin API
+  on node-a (not `owner-link`, which would have given it the owner's
+  workstation VM). It created the project "Mission 16 share check",
+  uploaded `share-check.md` (a passphrase line) and shared the project with
+  the owner as viewer: `{"role":"viewer"}`. The same check turn, sent as the
+  owner (`opencode-go/glm-5.3-flash`, code mode):
+
+  Shared (chat `6dbfb69b-f977-4386-9bd1-25adb80e4f00`), the agent's code
+  printed:
+
+  ```text
+  /home/agent/mike/projects
+  /home/agent/mike/projects/PSNP
+  … (PSNP's six documents)
+  /home/agent/mike/projects/Mission 16 share check
+  /home/agent/mike/projects/Mission 16 share check/share-check.md
+
+  found: /home/agent/mike/projects/Mission 16 share check/share-check.md
+
+  # Shared by the test account
+
+  The share-check passphrase is HERON-4417.
+  ```
+
+  Revoked from the test account: `DELETE /projects/…/access/<owner>` gave
+  HTTP 204, and the project's access list no longer had the owner. The
+  next turn (chat `ace3e129-efbf-4b88-840d-73dc875ef519`):
+
+  ```text
+  FIND:
+  /home/agent/mike/projects
+  /home/agent/mike/projects/PSNP
+  … (PSNP's six documents)
+
+  FOUND:[]
+  ```
+
+  and the agent answered that there is no `share-check.md` anywhere under
+  `~/mike`. Afterwards the project was deleted (HTTP 204) and the account
+  deleted (HTTP 200); `auth.users` holds one account again and no project
+  of that name remains.
+
+5 (two users) is covered by tests.
 
 ## Not yet
 
