@@ -33,6 +33,8 @@ export type WorkflowStore = Map<
     listed?: boolean;
     /** The skill's name in the standard's spelling ("contract-review"). */
     name?: string;
+    /** Its current text was read (read_workflow) or saved during this turn. */
+    read?: boolean;
     description?: string | null;
     /** The skill's other files (scripts/, references/), as one stored zip. */
     files?: { path: string; size: number }[] | null;

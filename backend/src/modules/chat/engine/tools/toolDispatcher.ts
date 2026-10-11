@@ -21,6 +21,7 @@ import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspa
 import {
   readSkillFile,
   rememberSkill,
+  unreadSkillEdit,
   runInstallSkill,
   runSaveSkill,
   skillFilesNotice,
@@ -963,6 +964,21 @@ export async function runToolCalls(
     } else if (tc.function.name === "save_skill" || tc.function.name === "install_skill") {
       const installing = tc.function.name === "install_skill";
       const user = { id: userId, email: options.userEmail };
+      const unread = installing ? null : unreadSkillEdit(workflowStore, args);
+      if (unread) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error:
+              `This would replace the user's skill '${unread.name}'. First read its current text with ` +
+              `read_workflow (workflow_id "${unread.id}"), then call save_skill again with skill_id ` +
+              `"${unread.id}" and the whole text, changing only what the user asked for and keeping ` +
+              "everything else word for word.",
+          }),
+        });
+        continue;
+      }
       const result = installing
         ? await runInstallSkill(db, user, args)
         : await runSaveSkill(db, user, args, {
@@ -989,6 +1005,7 @@ export async function runToolCalls(
       const wfId = args.workflow_id as string;
       const wf = workflowStore?.get(wfId);
       if (wf) {
+        wf.read = true;
         write(
           `data: ${JSON.stringify({ type: "workflow_applied", workflow_id: wfId, title: wf.title })}\n\n`,
         );

@@ -16,6 +16,7 @@ import {
   runSaveSkill,
   skillFilesNotice,
   skillSavedMessage,
+  unreadSkillEdit,
 } from "../skillTools";
 
 const db = {} as Db;
@@ -156,8 +157,32 @@ describe("after a save", () => {
 
     const store: WorkflowStore = new Map();
     rememberSkill(store, { ok: true, saved, body: "Steps." });
-    expect(store.get("w1")).toMatchObject({ skill_md: "Steps.", listed: true, name: "deposition-summary" });
+    expect(store.get("w1")).toMatchObject({ skill_md: "Steps.", listed: true, name: "deposition-summary", read: true });
     rememberSkill(undefined, { ok: true, saved, body: "" });
+  });
+});
+
+describe("unreadSkillEdit", () => {
+  const store = (): WorkflowStore =>
+    new Map([
+      ["w1", { title: "Deal Memo", skill_md: "# Deal memo", name: "deal-memo" }],
+      ["w2", { title: "NDA first pass", skill_md: "# NDA", name: "nda-first-pass", read: true }],
+    ]);
+
+  it("names an existing skill whose current text was not read this turn, by id or by name", () => {
+    expect(unreadSkillEdit(store(), { skill_id: "w1", name: "deal-memo" })).toEqual({ id: "w1", name: "deal-memo" });
+    expect(unreadSkillEdit(store(), { name: "Deal Memo" })).toEqual({ id: "w1", name: "deal-memo" });
+    const untitled: WorkflowStore = new Map([["w3", { title: "Old workflow", skill_md: "x" }]]);
+    expect(unreadSkillEdit(untitled, { skill_id: "w3", name: "old" })).toEqual({ id: "w3", name: "Old workflow" });
+  });
+
+  it("lets through a read skill, a new name, an unknown id, a folder save and a missing store", () => {
+    expect(unreadSkillEdit(store(), { skill_id: "w2", name: "nda-first-pass" })).toBeNull();
+    expect(unreadSkillEdit(store(), { name: "new-skill" })).toBeNull();
+    expect(unreadSkillEdit(store(), { name: "" })).toBeNull();
+    expect(unreadSkillEdit(store(), { skill_id: "nope", name: "deal-memo" })).toBeNull();
+    expect(unreadSkillEdit(store(), { name: "deal-memo", path: "~/drafts/deal-memo" })).toBeNull();
+    expect(unreadSkillEdit(undefined, { name: "deal-memo" })).toBeNull();
   });
 });
 

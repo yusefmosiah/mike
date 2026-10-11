@@ -115,6 +115,38 @@ skill from chat ("also check the governing-law clause") is the same call.
   of the skill folder, and its versions with Restore.
 - **Not yet.** K3, the transcriber.
 
+## Staging receipts (2026-10-11), not accepted
+
+Through `mike-staging api` on node-a, the owner's staging account,
+`opencode-go/glm-5.3-flash` in code mode, three separate chats:
+
+- **Codify a workflow (chat `12a7ab1f`).** The user described how they want a
+  "deal memo" (five sections, under 300 words, never invent numbers) and
+  asked to save it. One `save_skill` call: `workflow_applied` with action
+  "saved", version 1, skill `deal-memo` (`0f8101d6-3de2-4327-8d22-b83c3bd31af1`).
+  The saved text kept every rule the user gave.
+- **Use it in a fresh chat (chat `48b6970a`).** "Deal memo please" plus a
+  term sheet, with no mention of the skill. The model found `deal-memo` in
+  the system prompt's skills list, called `read_workflow` with its id, and
+  answered in the saved structure: bold bottom line, parties, a money table
+  with Amount / When due / Conditions, three risks tied to the terms, open
+  questions. Two malformed code cells came first (model noise).
+- **Change it from chat (chat `1b4773b9`).** "Add a sixth section, Next steps
+  ... raise the limit to 350 words. Keep everything else the same." Saved as
+  version 2 (`GET /workflows/:id/versions` returned `[(2, 'chat'), (1,
+  'chat')]`). Defect: the model never read version 1; it rewrote the skill
+  from the one-line listing and dropped "never invent numbers", replaced the
+  money table's columns and loosened the bottom line. Fix: `save_skill`
+  that would replace an existing skill (by `skill_id` or by name) is refused
+  unless that skill was read with `read_workflow` (or saved) in the same
+  turn; the refusal tells the model to read it and resend the whole text with
+  only the requested change. Folder saves are grounded in their files and
+  are not checked. Tests: `unreadSkillEdit` cases in `skillTools.test.ts`,
+  and `toolDispatcherSkillEdit.test.ts` (refused, read, saved).
+
+Not yet run live: `install_skill` from a GitHub link; the edit with the
+fix deployed.
+
 ## The boundaries we keep
 
 1. Skill scripts run only in the user's VM, which holds no credentials.

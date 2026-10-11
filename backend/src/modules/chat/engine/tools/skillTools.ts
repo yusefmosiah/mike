@@ -129,6 +129,29 @@ export function skillSavedMessage(result: Extract<SkillToolResult, { ok: true }>
   });
 }
 
+/**
+ * The existing skill a chat save would overwrite without its current text
+ * having been read this turn, or null. A model asked to change one part of
+ * a skill otherwise rewrites the whole of it from the one-line listing and
+ * drops what the user asked to keep (staging, 2026-10-11). A save from a
+ * workstation folder is grounded in its files and is not checked.
+ */
+export function unreadSkillEdit(
+  store: WorkflowStore | undefined,
+  args: Record<string, unknown>,
+): { id: string; name: string } | null {
+  if (!store || str(args.path)) return null;
+  const id = str(args.skill_id);
+  const name = skillName(str(args.name) ?? "");
+  const match = id
+    ? store.has(id)
+      ? ([id, store.get(id)!] as const)
+      : undefined
+    : Array.from(store.entries()).find(([, skill]) => name && skill.name === name);
+  if (!match || match[1].read) return null;
+  return { id: match[0], name: match[1].name ?? match[1].title };
+}
+
 /** Makes a saved skill readable for the rest of this turn. */
 export function rememberSkill(store: WorkflowStore | undefined, result: Extract<SkillToolResult, { ok: true }>): void {
   if (!store) return;
@@ -137,6 +160,7 @@ export function rememberSkill(store: WorkflowStore | undefined, result: Extract<
     title: saved.title,
     skill_md: result.body || store.get(saved.skillId)?.skill_md || "",
     listed: true,
+    read: true,
     name: saved.name,
     description: saved.description,
     files: saved.files,
