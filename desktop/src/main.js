@@ -40,6 +40,9 @@ function isShellPage(url) {
     return shellPageUrls.has(parsed.href);
   } catch { return false; }
 }
+// Height kept free under the inset traffic lights (window y 0–36 with the
+// sidebar's 12px margin: the lights end near y 30).
+const TITLEBAR_INSET_PX = 24;
 const PING_TIMEOUT_MS = 3_000;
 const PROBE_TIMEOUT_MS = 5_000;
 
@@ -484,7 +487,33 @@ function createWindow() {
     void win.webContents
       .insertCSS("html, body { -webkit-app-region: no-drag; }")
       .catch(() => {});
+    titlebarInsetKey = null;
+    void applyTitlebarInset();
   });
+
+  // The product's sidebar keeps a strip of this height free (and draggable)
+  // under the traffic lights (frontend AppSidebar). Full screen hides the
+  // traffic lights, so the strip goes too.
+  let titlebarInsetKey = null;
+  const applyTitlebarInset = async () => {
+    if (!win || !/^https?:/.test(win.webContents.getURL())) return;
+    const wanted = !win.isFullScreen();
+    try {
+      if (wanted && !titlebarInsetKey) {
+        titlebarInsetKey = await win.webContents.insertCSS(
+          `:root { --mike-titlebar-inset: ${TITLEBAR_INSET_PX}px; }`,
+        );
+      } else if (!wanted && titlebarInsetKey) {
+        const key = titlebarInsetKey;
+        titlebarInsetKey = null;
+        await win.webContents.removeInsertedCSS(key);
+      }
+    } catch {
+      // The page went away mid-call; the next navigation applies it again.
+    }
+  };
+  win.on("enter-full-screen", () => void applyTitlebarInset());
+  win.on("leave-full-screen", () => void applyTitlebarInset());
 
   void connectOrExplain();
 }

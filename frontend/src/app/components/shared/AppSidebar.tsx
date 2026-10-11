@@ -280,6 +280,16 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                     "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 md:relative",
                 )}
             >
+                {/* Room for the Mac app's inset traffic lights, and a
+                    handle to drag its window by: desktop/src/main.js sets
+                    --mike-titlebar-inset; in a browser it is unset and this
+                    strip has no height. */}
+                <div
+                    aria-hidden="true"
+                    data-testid="titlebar-inset"
+                    className="shrink-0 [-webkit-app-region:drag]"
+                    style={{ height: "var(--mike-titlebar-inset, 0px)" }}
+                />
                 {/* Toggle + Logo */}
                 <div
                     className={`h-11 shrink-0 items-center justify-between px-1.5 ${

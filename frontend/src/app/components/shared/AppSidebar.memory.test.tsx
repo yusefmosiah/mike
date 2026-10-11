@@ -86,6 +86,15 @@ describe("AppSidebar account dropdown", () => {
     expect(assistant.parentElement?.nextElementSibling).toContainElement(ide);
   });
 
+  it("leaves a strip for the Mac app's title bar that has no height in a browser", () => {
+    render(<AppSidebar isOpen onToggle={vi.fn()} />);
+
+    const strip = screen.getByTestId("titlebar-inset");
+    expect(strip).toHaveAttribute("aria-hidden", "true");
+    expect(strip.style.height).toBe("var(--mike-titlebar-inset, 0px)");
+    expect(strip.nextElementSibling).toContainElement(screen.getByRole("button", { name: "Close sidebar" }));
+  });
+
   it("shows a warning popup when sign out fails", async () => {
     state.signOut.mockRejectedValue(new Error("network unavailable"));
     const user = userEvent.setup();
