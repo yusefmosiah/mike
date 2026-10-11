@@ -178,10 +178,35 @@ End to end on staging (2026-10-10, owner's permission to sign in):
 
   Usage: 11,495 input tokens, 66 output.
 
+In a browser (2026-10-11): headless Chromium on the owner's Mac, signed in
+with a GoTrue session minted on node-a and set as the backend's
+`__Host-mike-session` cookie, plus a gate cookie signed with the gate's key.
+No password was typed. The cookie file was deleted afterwards.
+
+- The chat shows the question, the `cliff-walk.jpg` chip and Gemma 4's
+  answer. Clicking the chip opens the image in the document panel (V1).
+- The picker showed no "Sees images" at first, although
+  `POST /api/models/vision` answered `true` for Qwen and Gemma. React's
+  fiber props showed the picker got Qwen without `seesImages`, and the
+  hook's state counter had moved. Cause: the React Compiler memoized
+  `useModelVision`'s result on the id list, while the answers lived in a
+  module-level map. Vitest runs without the compiler, so the tests passed.
+  Fixed in `d8e5f961` with `useSyncExternalStore`. After the deploy, the
+  open menu has two "Sees images" labels (Qwen; Gemma below the scroll
+  edge), and Qwen's row reads "Qwen 3.8 27B Uncensored · Phala attested,
+  Sees images".
+- `opencode-go/glm-5.3-flash`, `opencode-go/deepseek-v4.1-flash` and
+  `opencode-go/muse-spark-1.3-contributor` report vision from pi's catalog.
+  Sent the red/blue test image in the container, each answered "The left
+  half is red and the right half is blue."
+
 Not yet done:
 
-- The same turn seen in a browser: the image in the document panel and the
-  "Sees images" label in the picker on staging.
+- Run the frontend tests under the React Compiler, as production does.
+  plugin-react 6 needs `oxc-transform-react` or `@rolldown/plugin-babel`,
+  a new dev dependency, so this waits for the owner.
+- A row with "Sees images" squeezes a long model name onto three lines;
+  the label could sit on its own line.
 - Ollama vision (probe `/api/show`).
 - OpenRouter models outside pi's catalog stay text-only.
 - Image parts are stored base64 in Pi Durable's transcript, about 1 to 3 MB
