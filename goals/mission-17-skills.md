@@ -144,8 +144,17 @@ Through `mike-staging api` on node-a, the owner's staging account,
   are not checked. Tests: `unreadSkillEdit` cases in `skillTools.test.ts`,
   and `toolDispatcherSkillEdit.test.ts` (refused, read, saved).
 
-Not yet run live: `install_skill` from a GitHub link; the edit with the
-fix deployed.
+- **Install from GitHub (chat `e1ce7b90`).** "Install this skill:
+  https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring".
+  `install_skill` resolved `main` to commit `dbd4588f` and saved
+  `doc-coauthoring` (`33d7d75f`), action "installed", version 1, source
+  `.../tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/doc-coauthoring`.
+  Defect: `read_workflow` in the same turn returned an empty body (the
+  install recorded no text for the turn), so the model fetched the raw file
+  from GitHub instead. Fix: the import returns the skill's body and the chat
+  keeps it for the rest of the turn.
+
+Not yet run live: the edit and the same-turn read with both fixes deployed.
 
 ## The boundaries we keep
 

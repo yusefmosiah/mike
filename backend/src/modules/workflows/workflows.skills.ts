@@ -314,7 +314,7 @@ export async function importSkill(
   user: { id: string; email: string | null | undefined },
   from: { url: string } | { zip: Buffer; filename?: string },
   deps: { fetchImpl?: typeof fetch } = {},
-): Promise<ServiceResult<SavedSkill & { sourceUrl: string | null }>> {
+): Promise<ServiceResult<SavedSkill & { sourceUrl: string | null; body: string }>> {
   let imported: ImportedSkill;
   try {
     imported =
@@ -326,7 +326,8 @@ export async function importSkill(
     return failure("unavailable", "The skill could not be fetched. Try again in a minute.", "skill_fetch_failed");
   }
   const saved = await saveSkill(db, user, { skill: imported.skill, source: "import", sourceUrl: imported.sourceUrl });
-  return saved.ok ? ok({ ...saved.data, sourceUrl: imported.sourceUrl }) : saved;
+  // The body lets a chat that just installed the skill read it this turn.
+  return saved.ok ? ok({ ...saved.data, sourceUrl: imported.sourceUrl, body: imported.skill.body }) : saved;
 }
 
 /** The skill as a standard folder in a zip: <name>/SKILL.md and its files. */

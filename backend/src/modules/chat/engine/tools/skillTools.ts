@@ -105,8 +105,8 @@ export async function runInstallSkill(
   if (!result.ok) {
     return { ok: false, error: result.kind === "error" ? "The skill could not be installed." : result.detail };
   }
-  const { sourceUrl, ...saved } = result.data;
-  return { ok: true, saved, body: "", sourceUrl };
+  const { sourceUrl, body, ...saved } = result.data;
+  return { ok: true, saved, body, sourceUrl };
 }
 
 /** The tool result the model sees for a save or an install. */

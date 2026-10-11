@@ -131,9 +131,16 @@ describe("runSaveSkill", () => {
 
 describe("runInstallSkill", () => {
   it("installs from a link and reports where it came from", async () => {
-    workflows.importSkill.mockResolvedValue({ ok: true, data: { ...saved, sourceUrl: "https://github.com/a/b/tree/c/d" } });
+    workflows.importSkill.mockResolvedValue({
+      ok: true,
+      data: { ...saved, sourceUrl: "https://github.com/a/b/tree/c/d", body: "# Steps" },
+    });
     const result = await runInstallSkill(db, user, { url: "https://github.com/a/b/tree/main/d" });
-    expect(result).toMatchObject({ ok: true, sourceUrl: "https://github.com/a/b/tree/c/d" });
+    expect(result).toMatchObject({ ok: true, sourceUrl: "https://github.com/a/b/tree/c/d", body: "# Steps" });
+    // Readable in the same turn (staging, 2026-10-11: it read back empty).
+    const store: WorkflowStore = new Map();
+    rememberSkill(store, result as never);
+    expect(store.get("w1")?.skill_md).toBe("# Steps");
     expect(JSON.parse(skillSavedMessage(result as never, true))).toMatchObject({
       ok: true,
       skill_id: "w1",
