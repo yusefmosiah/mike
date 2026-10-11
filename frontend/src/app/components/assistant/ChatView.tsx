@@ -1764,7 +1764,7 @@ export function ChatView({
 
             {panelMounted && (
                 <div
-                    className={`fixed inset-0 z-40 flex justify-center p-3 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
+                    className={`fixed inset-0 z-40 flex justify-center p-3 max-md:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
                 >
                     <AssistantSidePanel
                         tabs={tabs}
