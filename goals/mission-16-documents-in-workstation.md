@@ -163,7 +163,11 @@ account and model (`opencode-go/glm-5.3-flash`, code mode), sent through
 
 Not yet run live: acceptance 4 (share and revoke) needs a second staging
 account, and the agent does not create accounts on staging; 5 (two users)
-is covered by tests.
+is covered by tests. On 2026-10-11 staging's `auth.users` held one account
+(the owner's) and no test accounts, so there is no one to share from. To
+run it: the owner signs up a second account on staging (any email they
+control), shares a document from it with their main account, and the agent
+runs the check turns before and after the revoke.
 
 ## Not yet
 
