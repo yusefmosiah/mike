@@ -736,10 +736,12 @@
     }
 
     /* The iPhone app, edge to edge (lib/displayEdge.ts): the composer sits
-       as far from the bottom of the screen as from its sides, its corners
-       concentric with the display's, and the send button's with its own. */
+       as far from the bottom of the screen as from its sides. Its top
+       corners keep the composer's own radius; its bottom corners are
+       concentric with the display's, and the controls move in from them so
+       the round send button sits inside the curve instead of against it. */
     :root[data-display-edge] [data-document-scroll] {
-        --chat-composer-gap: 0.75rem;
+        --chat-composer-gap: 6px;
     }
 
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-composer"] {
@@ -747,7 +749,13 @@
     }
 
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-surface"] {
-        border-radius: calc(var(--display-corner-radius, 55px) - var(--chat-composer-gap));
+        --chat-composer-bottom-radius: calc(var(--display-corner-radius, 55px) - var(--chat-composer-gap));
+        border-radius: 21px 21px var(--chat-composer-bottom-radius) var(--chat-composer-bottom-radius);
+    }
+
+    :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-controls"] {
+        /* The left controls stay in line with the text above them. */
+        padding: 0.625rem 1.4375rem 1.4375rem 0.375rem;
     }
 
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-send-button"] {

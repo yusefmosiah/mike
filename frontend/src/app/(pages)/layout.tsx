@@ -12,6 +12,7 @@ import { FullScreenLoader } from "@/app/components/shared/FullScreenLoader";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import { cn } from "@/app/lib/utils";
 import { watchDisplayEdge } from "@/app/lib/displayEdge";
+import { watchHorizontalSwipe } from "@/app/lib/horizontalSwipe";
 
 export default function MikeLayout({
     children,
@@ -85,6 +86,26 @@ export default function MikeLayout({
             setIsSidebarOpen(!isSidebarOpen);
         }
     };
+
+    // On a phone, a swipe right across the page reveals the sidebar and a
+    // swipe left puts it away, as in other chat apps.
+    const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
+    useEffect(() => {
+        if (!mainElement || isSidebarOpen) return;
+        return watchHorizontalSwipe(mainElement, {
+            direction: "right",
+            enabled: () => window.innerWidth < 768,
+            onSwipe: () => setIsSidebarOpen(true),
+        });
+    }, [mainElement, isSidebarOpen]);
+    useEffect(() => {
+        if (!isSidebarOpen) return;
+        return watchHorizontalSwipe(window, {
+            direction: "left",
+            enabled: () => window.innerWidth < 768,
+            onSwipe: () => setIsSidebarOpen(false),
+        });
+    }, [isSidebarOpen]);
 
     const handleMobileActionsContainerRef = useCallback(
         (node: HTMLDivElement | null) => {
@@ -175,6 +196,7 @@ export default function MikeLayout({
                                     />
                                 </div>
                                 <main
+                                    ref={setMainElement}
                                     className={cn(
                                         "flex w-full flex-1 flex-col md:h-full md:overflow-hidden",
                                         scrollsDocument ? "overflow-visible" : "h-full overflow-y-auto",

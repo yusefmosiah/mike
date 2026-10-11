@@ -939,6 +939,7 @@ function ChatInputForChatImpl(
                     {/* Controls */}
                     <div
                         ref={controlsRef}
+                        data-slot="chat-input-controls"
                         className="flex items-center justify-between py-2.5 pr-2.5 pl-1.5"
                     >
                         <div className="flex items-center gap-1">

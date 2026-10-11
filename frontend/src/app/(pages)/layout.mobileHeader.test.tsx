@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MikeLayout from "./layout";
@@ -151,5 +151,40 @@ describe("desktop sidebar persistence", () => {
 
         expect(sidebarState.isOpen).toBe(false);
         expect(localStorage.getItem("sidebarOpen")).toBe("false");
+    });
+});
+
+describe("sidebar swipes on a phone", () => {
+    const swipe = (target: EventTarget, from: number, to: number) => {
+        for (const [type, x] of [["touchstart", from], ["touchmove", to], ["touchend", to]] as const) {
+            const event = new Event(type, { bubbles: true });
+            Object.defineProperty(event, "touches", {
+                value: type === "touchend" ? [] : [{ clientX: x, clientY: 300 }],
+            });
+            act(() => {
+                target.dispatchEvent(event);
+            });
+        }
+    };
+
+    it("reveals the sidebar on a swipe right across the page and hides it on a swipe left", () => {
+        const width = window.innerWidth;
+        window.innerWidth = 390;
+        try {
+            render(
+                <MikeLayout>
+                    <div>Page</div>
+                </MikeLayout>,
+            );
+            expect(sidebarState.isOpen).toBe(false);
+
+            swipe(screen.getByText("Page"), 20, 160);
+            expect(sidebarState.isOpen).toBe(true);
+
+            swipe(document.body, 300, 120);
+            expect(sidebarState.isOpen).toBe(false);
+        } finally {
+            window.innerWidth = width;
+        }
     });
 });
