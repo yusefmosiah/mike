@@ -128,6 +128,34 @@ build.
    users), and a symlink in `out/` pointing outside is refused.
 6. Backend tests, the architecture test and the stack tests pass.
 
+## Staging receipts (2026-10-11), not accepted
+
+The first live turn (chat `11a455a8`, before `df12113e`) saved
+`inventory.md` but found no `~/mike`: code-mode turns (`run_python`) never
+synced. After `df12113e` deployed (staging deploy of `8cb586f2`), the same
+account and model (`opencode-go/glm-5.3-flash`, code mode), sent through
+`mike-staging api` on node-a, chat `c8bdc5dd-e56d-40a4-9d35-99618140b16a`:
+
+- `find ~/mike -maxdepth 3` listed `.manifest.json`, `projects/PSNP/` with
+  its six documents (four `.docx` reports and briefings, two dated market
+  reports, `Tabular Review Pilot - 10 Documents.xlsx`) and `library/` with
+  `cliff-walk.jpg` and the earlier `inventory.md`. `ls ~/skills` listed
+  `compare-documents`, `draft-from-template`, `extract-key-terms`,
+  `proofread` (acceptance 1, and Mission 17's `~/skills`).
+- The agent wrote `~/mike/out/workspace-check.md` and saved it with
+  `save_to_mike(..., to_library=True)`: `doc_created` for document
+  `bedcb34d-4c52-48df-90a1-2e5b12d6d24b`, version 1, read back with
+  `read_document` (acceptance 2, library form).
+- Defect found: the first `save_to_mike(path="~/mike/out/workspace-check.md")`
+  failed with "Could not read ~/mike/out/workspace-check.md: no such file";
+  the agent retried with `/home/agent/mike/out/...`, which worked. The guest
+  readers joined `~/...` onto the home directory literally. Fixed for
+  `save_to_mike` and `save_skill`'s folder path (`READ_FILE`, `READ_TREE` in
+  `lib/workstation/files.ts`), with tests.
+
+Not yet run live: acceptance 3 (`replace`), 4 (share and revoke), 5 (two
+users; covered by tests).
+
 ## Not yet
 
 - A `mike-save` command inside the VM. The tool is enough for the agent; a

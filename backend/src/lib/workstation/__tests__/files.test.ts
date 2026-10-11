@@ -147,6 +147,16 @@ describe("readWorkstationFile", () => {
       bytes: Buffer.from("# Summary\n"),
     });
     expect(await readWorkstationFile(target, "mike/out/summary.md", 1000, localSsh)).toMatchObject({ ok: true });
+    // The path the tools' own descriptions suggest (staging, 2026-10-11:
+    // "~/mike/out/..." was read as /home/agent/~/mike/out/...).
+    expect(await readWorkstationFile(target, "~/mike/out/summary.md", 1000, localSsh)).toEqual({
+      ok: true,
+      bytes: Buffer.from("# Summary\n"),
+    });
+    expect(await readWorkstationFile(target, "~/../etc/hostname", 1000, localSsh)).toEqual({
+      ok: false,
+      error: "the path is outside the workstation home directory",
+    });
   });
 
   it("refuses symlinks, directories, large files, missing files and paths outside home", async () => {
@@ -223,6 +233,8 @@ describe("readWorkstationTree", () => {
       ["scripts/empty.txt", ""],
       ["scripts/fill.py", "print('fill')"],
     ]);
+    const viaTilde = await readWorkstationTree(target, "~/drafts/pdf", limits, localSsh);
+    expect(viaTilde.ok && viaTilde.files.map((f) => f.path)).toEqual(["SKILL.md", "scripts/empty.txt", "scripts/fill.py"]);
   });
 
   it("refuses symlinks, missing or non-folders, paths outside home and folders over the limits", async () => {

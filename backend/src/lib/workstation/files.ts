@@ -219,13 +219,16 @@ export async function writeWorkspaceBatch(
 }
 
 /**
- * Copies one file out: a regular file inside /home/agent, opened without
- * following a symlink, at most `maxBytes`. Exit 3 means "not a regular
+ * Copies one file out: a regular file inside /home/agent (absolute, relative
+ * to it, or under "~/"), opened without following a symlink, at most
+ * `maxBytes`. Exit 3 means "not a regular
  * file", 4 "too large", 5 "outside the home directory", 6 "missing".
  */
 export const READ_FILE = String.raw`
 import os, stat, sys
 home, path, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+if path == "~" or path.startswith("~/"):
+    path = home + path[1:]
 full = os.path.normpath(path if os.path.isabs(path) else os.path.join(home, path))
 if not full.startswith(home + os.sep):
     sys.exit(5)
@@ -288,6 +291,8 @@ export async function readWorkstationFile(
 export const READ_TREE = String.raw`
 import json, os, stat, sys
 home, path, max_files, max_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+if path == "~" or path.startswith("~/"):
+    path = home + path[1:]
 full = os.path.normpath(path if os.path.isabs(path) else os.path.join(home, path))
 if not full.startswith(home + os.sep):
     sys.exit(5)
