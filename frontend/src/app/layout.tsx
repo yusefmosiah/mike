@@ -7,7 +7,7 @@ import { Providers } from "@/app/components/providers";
 
 export const metadata: Metadata = {
     metadataBase: new URL("https://app.mikeoss.com"),
-    title: brand.name,
+    title: brand.title,
     description: brand.description,
     icons: {
         icon: [
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
         type: "website",
         url: "https://app.mikeoss.com",
         siteName: brand.name,
-        title: brand.name,
+        title: brand.title,
         description: brand.description,
         images: [
             {
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     },
     twitter: {
         card: "summary_large_image",
-        title: brand.name,
+        title: brand.title,
         description: brand.description,
         images: ["/link-image.jpg"],
     },

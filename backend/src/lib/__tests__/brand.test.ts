@@ -9,7 +9,7 @@ describe("brand", () => {
     });
 
     it("trims fields and refuses a brand missing one", () => {
-        const full = { name: " Acme ", description: "d", website: "https://acme.test", sourceUrl: "https://src.test" };
+        const full = { name: " Acme ", title: "Acme", description: "d", website: "https://acme.test", sourceUrl: "https://src.test" };
         expect(parseBrand(JSON.stringify(full)).name).toBe("Acme");
         expect(() => parseBrand(JSON.stringify({ ...full, sourceUrl: " " }))).toThrow('"sourceUrl"');
         expect(() => parseBrand(JSON.stringify({ ...full, name: 1 }))).toThrow('"name"');

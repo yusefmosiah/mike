@@ -8,7 +8,8 @@ the Word add-in through its `@brand` webpack alias, and the API through
 
 | Field | Used for |
 | --- | --- |
-| `name` | The name people see: page titles, the logo, the agent's prompt, generated files' author, the authenticator-app entry, the name connectors see when you sign in to them, the built-in workflows' author |
+| `name` | The name people see: the logo, the agent's prompt, generated files' author, the authenticator-app entry, the name connectors see when you sign in to them, the built-in workflows' author |
+| `title` | The browser tab and link-preview title |
 | `description` | The page description and link previews |
 | `website` | Where the logo links in production |
 | `sourceUrl` | Where the source code is published. The AGPL requires an install to offer its users the source it runs, so a rebranded install keeps this pointing at its own published source |

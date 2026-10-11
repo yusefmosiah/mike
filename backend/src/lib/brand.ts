@@ -6,6 +6,7 @@ import path from "node:path";
 
 export interface Brand {
   name: string;
+  title: string;
   description: string;
   website: string;
   sourceUrl: string;
@@ -18,7 +19,7 @@ export const BRAND_FILE = path.resolve(__dirname, "../../../packages/brand/brand
 
 export function parseBrand(text: string): Brand {
   const value: unknown = JSON.parse(text);
-  const fields = ["name", "description", "website", "sourceUrl"] as const;
+  const fields = ["name", "title", "description", "website", "sourceUrl"] as const;
   if (typeof value !== "object" || value === null) throw new Error("brand.json must be an object");
   const record = value as Record<string, unknown>;
   for (const field of fields) {
@@ -27,6 +28,7 @@ export function parseBrand(text: string): Brand {
   }
   return {
     name: (record.name as string).trim(),
+    title: (record.title as string).trim(),
     description: (record.description as string).trim(),
     website: (record.website as string).trim(),
     sourceUrl: (record.sourceUrl as string).trim(),

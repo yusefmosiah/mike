@@ -5,6 +5,7 @@
  */
 export interface Brand {
     name: string;
+    title: string;
     description: string;
     website: string;
     sourceUrl: string;
