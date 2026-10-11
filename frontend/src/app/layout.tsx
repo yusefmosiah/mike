@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 // Self-hosted Inter and EB Garamond; sets --font-inter and --font-eb-garamond.
 import "./fonts/fonts.css";
 import "./globals.css";
@@ -39,6 +39,14 @@ export const metadata: Metadata = {
             "AI-powered legal document analysis and contract review platform.",
         images: ["/link-image.jpg"],
     },
+};
+
+// `cover` lets the iPhone app's page run under the status bar and home
+// indicator; layouts pad with env(safe-area-inset-*) where they must clear it.
+export const viewport: Viewport = {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
 };
 
 export default function RootLayout({

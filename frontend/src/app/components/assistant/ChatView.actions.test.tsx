@@ -460,7 +460,10 @@ describe("ChatView header actions", () => {
         ).toHaveClass("top-4.5");
         expect(
             document.querySelector('[data-slot="chat-messages-content"]'),
-        ).toHaveStyle({ paddingTop: "76px" });
+        ).toHaveStyle({
+            // Below the header, and below the status bar when the page runs under it.
+            paddingTop: "calc(76px + env(safe-area-inset-top, 0px))",
+        });
 
         fireEvent.click(screen.getByRole("button", { name: "New chat" }));
 

@@ -28,8 +28,11 @@ const config: CapacitorConfig = {
     // console output forwarded by the WebView at other logging levels).
     loggingBehavior: "none",
     ios: {
-        // The web view stays inside the safe area (notch, home indicator).
-        contentInset: "always",
+        // The web view fills the screen, under the status bar and the home
+        // indicator. The page pads itself with env(safe-area-inset-*), blurs
+        // what scrolls under the clock, and scrolls the document on chat
+        // threads so a tap on the status bar scrolls back to the top.
+        contentInset: "never",
         // No inspection of the web view in release builds.
         webContentsDebuggingEnabled: false,
         backgroundColor: "#f9fafb",

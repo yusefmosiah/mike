@@ -11,6 +11,7 @@ import { AppSidebar } from "@/app/components/shared/AppSidebar";
 import { FullScreenLoader } from "@/app/components/shared/FullScreenLoader";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import { cn } from "@/app/lib/utils";
+import { watchDisplayEdge } from "@/app/lib/displayEdge";
 
 export default function MikeLayout({
     children,
@@ -30,6 +31,10 @@ export default function MikeLayout({
     const isChatPage =
         /^\/assistant\/chat\/[^/]+\/?$/.test(pathname) ||
         /^\/projects\/[^/]+\/assistant\/chat\/[^/]+\/?$/.test(pathname);
+    // On a phone these pages scroll the document itself (globals.css), so a
+    // tap on the status bar scrolls the thread to the top.
+    const scrollsDocument = /^\/assistant\/chat\/[^/]+\/?$/.test(pathname);
+    useEffect(() => watchDisplayEdge(), []);
     const [mobileActionsContainer, setMobileActionsContainer] =
         useState<HTMLDivElement | null>(null);
 
@@ -122,21 +127,36 @@ export default function MikeLayout({
         <ChatHistoryProvider>
             <PageChromeContext.Provider value={pageChromeValue}>
                 <SidebarContext.Provider value={sidebarValue}>
-                    <div className="h-dvh flex flex-col bg-app-background">
+                    <div
+                        data-document-scroll={scrollsDocument || undefined}
+                        className={cn(
+                            "flex flex-col bg-app-background",
+                            scrollsDocument ? "min-h-dvh md:h-dvh" : "h-dvh",
+                        )}
+                    >
+                        <div
+                            aria-hidden="true"
+                            className="status-bar-scrim pointer-events-none fixed inset-x-0 top-0 z-20 md:hidden"
+                        />
                         <div className="flex-1 flex min-w-0 overflow-visible">
                             <AppSidebar
                                 isOpen={isSidebarOpen}
                                 onToggle={handleSidebarToggle}
                             />
-                            <div className="flex-1 flex flex-col h-dvh md:overflow-hidden relative w-full">
+                            <div
+                                className={cn(
+                                    "flex-1 flex flex-col md:overflow-hidden relative w-full",
+                                    scrollsDocument ? "min-h-dvh md:h-dvh" : "h-dvh",
+                                )}
+                            >
                                 {/* Mobile header */}
                                 <div
                                     data-slot="mobile-header"
                                     className={cn(
                                         "z-30 flex items-center gap-3 overflow-visible px-4 md:hidden",
                                         isChatPage
-                                            ? "pointer-events-none fixed inset-x-0 top-0 bg-transparent pb-2 pt-3"
-                                            : "relative shrink-0 pb-2 pt-3",
+                                            ? "pointer-events-none fixed inset-x-0 top-0 bg-transparent pb-2 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)]"
+                                            : "relative shrink-0 pb-2 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)]",
                                     )}
                                 >
                                     <HeaderButtonsUI className="pointer-events-auto">
@@ -154,7 +174,12 @@ export default function MikeLayout({
                                         className="pointer-events-auto ml-auto flex min-w-0 flex-1 items-center justify-end"
                                     />
                                 </div>
-                                <main className="flex h-full w-full flex-1 flex-col overflow-y-auto md:overflow-hidden">
+                                <main
+                                    className={cn(
+                                        "flex w-full flex-1 flex-col md:h-full md:overflow-hidden",
+                                        scrollsDocument ? "overflow-visible" : "h-full overflow-y-auto",
+                                    )}
+                                >
                                     {children}
                                 </main>
                             </div>

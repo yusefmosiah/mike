@@ -1,0 +1,70 @@
+/**
+ * Edge-to-edge layout in the iPhone app.
+ *
+ * The app's web view fills the whole screen, under the status bar and the
+ * home indicator. When it does, the page marks the document root with
+ * `data-display-edge` and sets `--display-corner-radius`, so the chat
+ * composer can sit near the bottom of the screen with corners concentric
+ * with the display's (globals.css). Safari and older app builds, whose web
+ * view stops at the safe area, report no bottom inset and keep the ordinary
+ * layout.
+ */
+
+/** Display corner radii in points, by portrait screen size in points. */
+const CORNER_RADIUS_BY_SCREEN: Record<string, number> = {
+    "375x812": 39, // X, XS, 11 Pro, 12 mini, 13 mini
+    "414x896": 41.5, // XR, XS Max, 11, 11 Pro Max
+    "390x844": 47.33, // 12, 12 Pro, 13, 13 Pro, 14, 16e
+    "428x926": 53.33, // 12 Pro Max, 13 Pro Max, 14 Plus
+    "393x852": 55, // 14 Pro, 15, 15 Pro, 16
+    "430x932": 55, // 14 Pro Max, 15 Plus, 15 Pro Max, 16 Plus
+    "402x874": 62, // 16 Pro, 17, 17 Pro
+    "420x912": 62, // Air
+    "440x956": 62, // 16 Pro Max, 17 Pro Max
+};
+const DEFAULT_CORNER_RADIUS = 55;
+
+export function displayCornerRadius(width: number, height: number): number {
+    const key = `${Math.min(width, height)}x${Math.max(width, height)}`;
+    return CORNER_RADIUS_BY_SCREEN[key] ?? DEFAULT_CORNER_RADIUS;
+}
+
+type CapacitorGlobal = { getPlatform?: () => string };
+
+function inIosApp(): boolean {
+    const capacitor = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor;
+    return capacitor?.getPlatform?.() === "ios";
+}
+
+/** The bottom safe-area inset as laid out (0 when the page stops above it). */
+function bottomInset(): number {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+        "position:fixed;left:0;bottom:0;width:0;visibility:hidden;pointer-events:none;height:env(safe-area-inset-bottom,0px)";
+    document.body.appendChild(probe);
+    const height = probe.getBoundingClientRect().height;
+    probe.remove();
+    return height;
+}
+
+/** Marks or unmarks the document root for edge-to-edge layout. */
+export function updateDisplayEdge(): void {
+    const root = document.documentElement;
+    if (inIosApp() && bottomInset() > 0) {
+        root.dataset.displayEdge = "";
+        root.style.setProperty(
+            "--display-corner-radius",
+            `${displayCornerRadius(window.screen.width, window.screen.height)}px`,
+        );
+    } else {
+        delete root.dataset.displayEdge;
+        root.style.removeProperty("--display-corner-radius");
+    }
+}
+
+/** Keeps the mark current through rotation and resizing; returns a cleanup. */
+export function watchDisplayEdge(): () => void {
+    updateDisplayEdge();
+    window.addEventListener("resize", updateDisplayEdge);
+    return () => window.removeEventListener("resize", updateDisplayEdge);
+}

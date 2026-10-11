@@ -701,3 +701,67 @@
         font-size: max(16px, 1em);
     }
 }
+
+/* The chat composer's distance from the bottom of the screen. On a phone it
+   clears the home indicator, unless the app runs edge to edge (below). */
+:root {
+    --chat-composer-gap: 0.75rem;
+}
+
+/* On a phone, a chat thread scrolls the page instead of a box inside it
+   ((pages)/layout.tsx sets data-document-scroll). A tap on the status bar
+   then scrolls the thread to the top, in Safari and in the iPhone app, and
+   text runs on under the status bar. The composer and its chrome stay put.
+   Unlayered: these must outrank the layout utilities on the same nodes. */
+@media (width < 48rem) {
+    [data-document-scroll] {
+        --chat-composer-gap: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    [data-document-scroll] [data-slot="chat-messages-scroller"] {
+        flex: none;
+        overflow: visible;
+    }
+
+    [data-document-scroll] [data-slot="chat-messages-content"] {
+        min-height: 100dvh;
+    }
+
+    [data-document-scroll] :is(
+            [data-slot="chat-composer-dock"],
+            [data-slot="chat-composer-fade"],
+            [data-slot="chat-scroll-button"]
+        ) {
+        position: fixed;
+    }
+
+    /* The iPhone app, edge to edge (lib/displayEdge.ts): the composer sits
+       as far from the bottom of the screen as from its sides, its corners
+       concentric with the display's, and the send button's with its own. */
+    :root[data-display-edge] [data-document-scroll] {
+        --chat-composer-gap: 0.75rem;
+    }
+
+    :root[data-display-edge] [data-document-scroll] [data-slot="chat-composer"] {
+        padding-inline: var(--chat-composer-gap);
+    }
+
+    :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-surface"] {
+        border-radius: calc(var(--display-corner-radius, 55px) - var(--chat-composer-gap));
+    }
+
+    :root[data-display-edge] [data-document-scroll] [data-slot="chat-send-button"] {
+        border-radius: 9999px;
+    }
+}
+
+/* Text scrolling under the status bar blurs out instead of colliding with
+   the clock. Zero height wherever the page does not reach under it. */
+.status-bar-scrim {
+    height: calc(env(safe-area-inset-top, 0px) * 1.4);
+    background: color-mix(in srgb, var(--app-background) 72%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+    mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}

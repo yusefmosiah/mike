@@ -17,6 +17,11 @@ import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { CodeApprovalRequests } from "./CodeApprovalRequests";
 import { ChatInput } from "./ChatInput";
+import {
+    computedPadding,
+    onScrollViewportChange,
+    scrollViewportOf,
+} from "@/app/lib/scrollViewport";
 import { InitialView } from "./InitialView";
 import { QuickActionsModal } from "./QuickActionsModal";
 import { AddDocumentsModal } from "@/app/components/modals/AddDocumentsModal";
@@ -941,8 +946,9 @@ export function ChatView({
 
     useEffect(() => {
         const container = messagesContainerRef.current;
+        const content = messagesContentRef.current;
         const userMessage = latestUserMessageRef.current;
-        if (!container || !userMessage) return;
+        if (!container || !content || !userMessage) return;
         // Size the latest response so that, scrolled to the bottom, the latest
         // user message sits CHAT_MESSAGE_TOP_PADDING below the viewport top —
         // the same place scrollLatestUserToTop puts it. Measure the real
@@ -953,13 +959,13 @@ export function ChatView({
             setMinHeight(
                 `${Math.max(
                     0,
-                    container.clientHeight -
-                        CHAT_MESSAGE_TOP_PADDING -
+                    scrollViewportOf(container).height -
+                        computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING) -
                         userMessage.offsetHeight -
                         // One list gap before the response and one before
                         // the trailing scroll anchor (messagesEndRef).
                         messageGap * 2 -
-                        DEFAULT_ASSISTANT_BOTTOM_PADDING,
+                        computedPadding(content, "bottom", DEFAULT_ASSISTANT_BOTTOM_PADDING),
                 )}px`,
             );
         };
@@ -967,7 +973,12 @@ export function ChatView({
         const observer = new ResizeObserver(update);
         observer.observe(container);
         observer.observe(userMessage);
-        return () => observer.disconnect();
+        // On a phone the page scrolls, and its height changes with Safari's bars.
+        window.addEventListener("resize", update);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", update);
+        };
     }, [messages.length]);
 
     const isInitialView = Boolean(onInitialSubmit);
@@ -978,10 +989,10 @@ export function ChatView({
         let frame: number | null = null;
         const measure = () => {
             frame = null;
-            const height = c.scrollHeight;
+            const viewport = scrollViewportOf(c);
             const visible =
-                height > c.clientHeight &&
-                height - c.scrollTop - c.clientHeight > 10;
+                viewport.scrollHeight > viewport.height &&
+                viewport.scrollHeight - viewport.scrollTop - viewport.height > 10;
             // Avoid dispatching even an unchanged value during a busy stream:
             // React cannot always bail out eagerly while other work is queued.
             if (visible !== scrollButtonVisibleRef.current) {
@@ -998,11 +1009,11 @@ export function ChatView({
         const observer = new ResizeObserver(scheduleMeasure);
         observer.observe(c);
         observer.observe(content);
-        c.addEventListener("scroll", scheduleMeasure, { passive: true });
+        const stopListening = onScrollViewportChange(c, scheduleMeasure);
         scheduleMeasure();
         return () => {
             observer.disconnect();
-            c.removeEventListener("scroll", scheduleMeasure);
+            stopListening();
             if (frame !== null) cancelAnimationFrame(frame);
         };
         // The container mounts when the initial screen becomes a conversation.
@@ -1022,18 +1033,23 @@ export function ChatView({
                     const container = messagesContainerRef.current;
                     const element = latestUserMessageRef.current;
                     if (!container || !element) return;
+                    const viewport = scrollViewportOf(container);
+                    const content = messagesContentRef.current;
                     // Measure both nodes in viewport coordinates. `offsetTop`
                     // can be relative to the centered inner column rather
                     // than this scrolling element, which positions a
                     // revisited thread at the wrong message.
                     const messageTop =
                         element.getBoundingClientRect().top -
-                        container.getBoundingClientRect().top +
-                        container.scrollTop;
-                    container.scrollTo({
+                        viewport.top +
+                        viewport.scrollTop;
+                    viewport.scrollTo({
                         top: Math.max(
                             0,
-                            messageTop - CHAT_MESSAGE_TOP_PADDING,
+                            messageTop -
+                                (content
+                                    ? computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING)
+                                    : CHAT_MESSAGE_TOP_PADDING),
                         ),
                         behavior,
                     });
@@ -1283,6 +1299,7 @@ export function ChatView({
                         {/* Scrollable messages */}
                         <div
                             ref={messagesContainerRef}
+                            data-slot="chat-messages-scroller"
                             className="flex-1 w-full overflow-y-auto"
                             style={{ scrollbarGutter: "stable both-edges" }}
                         >
@@ -1291,8 +1308,11 @@ export function ChatView({
                                 data-slot="chat-messages-content"
                                 className="w-full max-w-4xl mx-auto px-6 md:px-8 min-h-full flex flex-col relative"
                                 style={{
-                                    paddingTop: CHAT_MESSAGE_TOP_PADDING,
-                                    paddingBottom: messagesBottomPadding,
+                                    // Clear the status bar when the page runs
+                                    // under it, and the composer's gap from
+                                    // the bottom of the screen.
+                                    paddingTop: `calc(${CHAT_MESSAGE_TOP_PADDING}px + env(safe-area-inset-top, 0px))`,
+                                    paddingBottom: `calc(${messagesBottomPadding}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px)`,
                                 }}
                             >
                                 {!messagesVisible && (
@@ -1551,7 +1571,10 @@ export function ChatView({
                             </div>
                         </div>
 
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+                        <div
+                            data-slot="chat-composer-fade"
+                            className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
+                        >
                             <div className="mx-auto h-28 w-full max-w-4xl px-4 md:px-6">
                                 <div className="assistant-chat-input-fade h-full w-full" />
                             </div>
@@ -1560,12 +1583,10 @@ export function ChatView({
                         {/* Scroll to bottom button */}
                         {showScrollButton && (
                             <div
+                                data-slot="chat-scroll-button"
                                 className="absolute left-1/2 -translate-x-1/2 z-19"
                                 style={{
-                                    bottom:
-                                        inputHeight +
-                                        CHAT_INPUT_BOTTOM_OFFSET +
-                                        SCROLL_BUTTON_INPUT_GAP,
+                                    bottom: `calc(${inputHeight + SCROLL_BUTTON_INPUT_GAP}px + var(--chat-composer-gap))`,
                                 }}
                             >
                                 <button
@@ -1581,14 +1602,18 @@ export function ChatView({
 
                         {/* Chat input */}
                         {accessResolved && (
-                            <div className="absolute bottom-3 left-0 right-0 w-full z-30">
-                                <div className="pointer-events-none absolute -bottom-3 left-0 right-0 z-0">
-                                    <div className="mx-auto h-7 w-full max-w-4xl px-4 md:px-6">
+                            <div
+                                data-slot="chat-composer-dock"
+                                className="absolute bottom-0 left-0 right-0 w-full z-30 pb-[var(--chat-composer-gap)]"
+                            >
+                                <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-0">
+                                    <div className="mx-auto h-[calc(var(--chat-composer-gap)+1rem)] w-full max-w-4xl px-4 md:px-6">
                                         <div className="h-full rounded-t-[20px] bg-app-background" />
                                     </div>
                                 </div>
                                 <div
                                     ref={measuredInputRef}
+                                    data-slot="chat-composer"
                                     className="relative z-20 w-full max-w-4xl mx-auto px-4 md:px-6"
                                 >
                                     <div className="w-full rounded-t-[20px] bg-transparent">

@@ -315,11 +315,11 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             <div
                 className={cn(
                     isOpen
-                        ? "w-64 h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)]"
+                        ? "w-64 h-[calc(100dvh-1rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-1.5rem)]"
                         : "max-md:hidden w-[46px] md:h-[calc(100dvh-1.5rem)] h-auto pointer-events-none md:pointer-events-auto",
                     "my-2 ml-2 mr-0 md:my-3 md:ml-3 md:mr-0 rounded-2xl backdrop-blur-2xl overflow-visible",
                     LIQUID_GLASS_FLOAT_CLASS,
-                    "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 md:relative",
+                    "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 max-md:fixed max-md:top-[env(safe-area-inset-top,0px)] md:relative",
                     dismissing && "max-md:pointer-events-none max-md:-translate-x-[calc(100%+1rem)]",
                 )}
                 data-dismissing={dismissing || undefined}
