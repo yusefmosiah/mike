@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -40,6 +41,13 @@ export default defineConfig({
         globals: true,
         environment: "jsdom",
         setupFiles: ["./vitest.setup.ts"],
+        // What next.config.ts inlines for src/app/lib/brand.ts.
+        env: {
+            NEXT_PUBLIC_BRAND: readFileSync(
+                resolvePath("../packages/brand/brand.json"),
+                "utf8",
+            ),
+        },
         // jsdom 27's CSS-color parser (@asamuzakjp/css-color) is CJS but
         // require()s the ESM-only @csstools/css-calc. That require() happens
         // in the worker process while the jsdom environment boots — before

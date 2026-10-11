@@ -275,7 +275,7 @@ test("does not send without the required Word document context", async ({
   await page.getByRole("button", { name: "Send" }).click();
 
   await expect(page.getByRole("alert")).toHaveText(
-    "Mike couldn't read the current Word document. Please try again.",
+    "The current Word document couldn't be read. Please try again.",
   );
   await expect(composer).toHaveValue("Review this document");
   await expect(page.locator("[data-message-id]")).toHaveCount(0);
@@ -2344,7 +2344,7 @@ test("does not broaden one edit across repeated exact passages", async ({
 
   await expect(
     page.getByText(
-      "Skipped — this text appears 2 times in the document. Tell Mike which one to change.",
+      "Skipped — this text appears 2 times in the document. Say which one to change.",
     ),
   ).toBeVisible();
   await expect(

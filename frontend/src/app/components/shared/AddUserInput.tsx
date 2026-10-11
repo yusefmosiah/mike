@@ -81,7 +81,7 @@ export function AddUserInput({
                 ? await lookupUserByEmail(email)
                 : { exists: false, email, display_name: null };
             if (requireExistingUser && !user.exists) {
-                setError(`${email} does not belong to a Mike user.`);
+                setError(`${email} doesn't have an account here.`);
                 return;
             }
 

@@ -86,7 +86,7 @@ export async function cleanImage(
 ): Promise<CleanImage> {
   const format = IMAGE_FORMAT_BY_FILE_TYPE[fileType.toLowerCase()];
   if (!format) {
-    throw new ImageRejectedError("unsupported_image", "This file type is not an image Mike accepts.");
+    throw new ImageRejectedError("unsupported_image", "This file type isn't a supported image.");
   }
   if (bytes.byteLength > MAX_IMAGE_BYTES) {
     throw new ImageRejectedError("image_too_large", "Images can be at most 20 MB.");

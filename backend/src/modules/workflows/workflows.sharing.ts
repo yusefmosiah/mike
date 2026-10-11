@@ -306,7 +306,7 @@ export async function shareWorkflow(
     return {
       ok: false,
       kind: "missing_user",
-      detail: `${missingEmails[0]} does not belong to a Mike user.`,
+      detail: `${missingEmails[0]} doesn't have an account here.`,
     };
 
   const rows = normalizedEmails.map((email: string) => ({

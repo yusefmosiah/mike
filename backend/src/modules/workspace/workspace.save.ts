@@ -92,7 +92,7 @@ export async function saveToMike(
   const filename = (input.filename?.trim() || path.posix.basename(input.path.trim())).slice(0, 255);
   const fileType = documentSuffix(filename);
   if (!ALLOWED_DOCUMENT_TYPES.has(fileType)) {
-    return { ok: false, error: `Mike documents can be ${ALLOWED_DOCUMENT_TYPES_LABEL}; "${filename}" is not one of them.` };
+    return { ok: false, error: `Documents can be ${ALLOWED_DOCUMENT_TYPES_LABEL}; "${filename}" is not one of them.` };
   }
 
   // Authorize before reading anything out of the VM.

@@ -3,13 +3,14 @@ import { buildSystemPrompt } from "../../modules/chat/engine/prompts";
 import { COURTLISTENER_SYSTEM_PROMPT } from "../../modules/chat/engine/tools/courtlistenerTools";
 import { buildWordChatSystemPrompt } from "../../modules/chat/engine/wordPrompt";
 import { buildTabularMessages } from "../../modules/tabular/tabular.chats";
-import { MIKE_OPEN_SOURCE } from "../agentIdentity";
+import { OPEN_SOURCE_NOTE } from "../agentIdentity";
+import { BRAND } from "../brand";
 
 describe("buildSystemPrompt", () => {
     it("always contains the core identity and rules", () => {
         for (const prompt of [buildSystemPrompt(true), buildSystemPrompt(false)]) {
             expect(prompt).toContain(
-                "This is the system prompt for Mike, an open-source AI agent for knowledge work",
+                `This is the system prompt for ${BRAND.name}, an open-source AI agent for knowledge work`,
             );
             expect(prompt).toContain("Do not fabricate document content.");
             expect(prompt).toContain(
@@ -151,11 +152,12 @@ describe("assistant identity", () => {
         ["tabular", tabularSystem],
     ];
 
-    it.each(surfaces)("%s introduces Mike as an open-source agent, without role-play", (_name, build) => {
+    it.each(surfaces)("%s introduces the agent by the brand's name as an open-source agent, without role-play", (_name, build) => {
         const prompt = build();
-        expect(prompt).toMatch(/^This is the system prompt for Mike, an open-source AI agent for knowledge work/);
-        expect(prompt).toContain(MIKE_OPEN_SOURCE);
-        expect(prompt).not.toMatch(/\byou are (mike|an? )/i);
+        expect(prompt.startsWith(`This is the system prompt for ${BRAND.name}, an open-source AI agent for knowledge work`)).toBe(true);
+        expect(prompt).toContain(OPEN_SOURCE_NOTE);
+        expect(prompt).not.toMatch(/\byou are an? /i);
+        expect(prompt.toLowerCase()).not.toContain(`you are ${BRAND.name.toLowerCase()}`);
         expect(prompt).not.toMatch(/legal assistant|legal document analyst|strength in legal/i);
         expect(prompt).not.toContain("for lawyers and legal professionals");
     });

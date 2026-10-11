@@ -1,4 +1,5 @@
 import React from "react";
+import brand from "@brand";
 import { MikeIcon } from "../../../shared/chat/mike-icon";
 import { cn } from "../../../shared/lib/utils";
 
@@ -7,7 +8,7 @@ interface WordAddinLogoProps {
   className?: string;
 }
 
-/** Mike logo lockup shared by branded Word add-in surfaces. */
+/** Logo lockup shared by branded Word add-in surfaces. */
 export function WordAddinLogo({
   size = "md",
   className,
@@ -22,7 +23,7 @@ export function WordAddinLogo({
           large ? "text-4xl" : "text-2xl"
         )}
       >
-        Mike
+        {brand.name}
       </span>
     </div>
   );

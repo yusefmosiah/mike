@@ -26,7 +26,7 @@ export const DEVICE_TRANSCRIBE_FAILURE_MESSAGE =
 const DEVICE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
     "not-installed": "Download Apple's speech model in Settings → Voice to dictate on this iPhone.",
     unavailable: "This iPhone cannot transcribe this language on the device.",
-    "permission-denied": "Speech recognition is turned off for Mike in the iPhone's Settings.",
+    "permission-denied": "Speech recognition is turned off for this app in the iPhone's Settings.",
     "unsupported-audio": "This recording format cannot be transcribed on this iPhone.",
     "too-long": "The recording is too long to transcribe on this iPhone.",
 };

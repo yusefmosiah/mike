@@ -138,7 +138,7 @@ function mcpOAuthPopupHtml(payload: {
   <body>
     <main>
       <h1>${payload.success ? "Authorization complete" : "Authorization failed"}</h1>
-      <p>${payload.success ? "You can return to Mike." : "Return to Mike and try connecting again."}</p>
+      <p>${payload.success ? "You can close this window." : "Close this window and try connecting again."}</p>
     </main>
     <script nonce="${nonce}">
       const message = ${message};
@@ -749,7 +749,7 @@ userRouter.get(
                     mcpOAuthPopupHtml(
                         {
                             success: false,
-                            detail: "Google Drive authorization could not be completed. Return to Mike and try again.",
+                            detail: "Google Drive authorization could not be completed. Close this window and try again.",
                         },
                         nonce,
                     ),
@@ -978,7 +978,7 @@ for (const provider of ["gmail", "google-calendar"] as const) {
                     mcpOAuthPopupHtml(
                         {
                             success: false,
-                            detail: "Google authorization could not be completed. Return to Mike and try again.",
+                            detail: "Google authorization could not be completed. Close this window and try again.",
                         },
                         nonce,
                     ),

@@ -171,7 +171,7 @@ export async function upsertContentGrant(
             return {
                 ok: false,
                 kind: "validation",
-                detail: `${email} does not belong to a Mike user.`,
+                detail: `${email} doesn't have an account here.`,
             };
     } catch (error) {
         return {

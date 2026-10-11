@@ -318,7 +318,7 @@ describe("NewProjectModal sharing", () => {
 
         expect(
             await screen.findByText(
-                "future@firm.test does not belong to a Mike user.",
+                "future@firm.test doesn't have an account here.",
             ),
         ).toBeInTheDocument();
         expect(grantProjectAccess).not.toHaveBeenCalled();

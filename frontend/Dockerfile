@@ -1,7 +1,8 @@
 # Build from the repository root: `docker build -f frontend/Dockerfile .`
 # (docker-compose.yml does the same). The image needs the frontend plus the
 # one sibling directory production code reaches through a tsconfig `paths`
-# alias: `@mike/contracts` -> /packages/contracts. Nothing else. `next build`
+# alias: `@mike/contracts` -> /packages/contracts, and the brand that
+# next.config.ts reads from /packages/brand. Nothing else. `next build`
 # type-checks tsconfig.build.json, which leaves test files -- and their
 # imports of shared fixtures and add-in sources -- out of the image.
 #
@@ -16,6 +17,7 @@ COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
 COPY packages/contracts /packages/contracts
+COPY packages/brand /packages/brand
 
 # Browser-side Sentry DSN (optional). Inlined by next build, so it must be
 # present here rather than at container start. See docs/observability.md.

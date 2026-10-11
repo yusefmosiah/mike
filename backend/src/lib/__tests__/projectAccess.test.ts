@@ -257,7 +257,7 @@ describe("project access grants", () => {
         ).resolves.toEqual({
             ok: false,
             kind: "validation",
-            detail: "future@firm.example does not belong to a Mike user.",
+            detail: "future@firm.example doesn't have an account here.",
         });
         expect(await grantsOf(db, "p1")).toEqual([]);
     });

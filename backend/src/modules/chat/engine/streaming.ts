@@ -1159,7 +1159,7 @@ export async function runLLMStream(params: {
       });
       if (!outcome.kernelLost) void kernels.afterCell(key, kernelLauncher);
       const content = sync && !sync.ok
-        ? `[note] Your Mike documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date.\n${cellResultContent(outcome)}`
+        ? `[note] Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date.\n${cellResultContent(outcome)}`
         : cellResultContent(outcome);
       Object.assign(cellEvent, {
         status: outcome.status === "ok" ? "ok" : "failed",

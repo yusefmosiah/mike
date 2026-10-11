@@ -1314,7 +1314,7 @@ async function resolveTrackedEditNow(
         handle,
         status: "error",
         error:
-          "The revisions in this passage changed after Mike applied the edit. Review them directly in Word.",
+          "The revisions in this passage changed after the edit was applied. Review them directly in Word.",
       };
     }
     if (entry.stableEditId && entry.bookmarkName) {
@@ -2876,7 +2876,7 @@ export function useWordDoc() {
                 result.status = mutationApplied ? "applied-unmanaged" : "error";
                 result.reason = "word-error";
                 result.error = mutationApplied
-                  ? "Applied in Word, but Mike couldn’t retain its review controls. Review it from Word’s Review tab."
+                  ? "Applied in Word, but its review controls couldn’t be kept. Review it from Word’s Review tab."
                   : describeWordFailure(
                       error,
                       "Word couldn’t apply this change.",

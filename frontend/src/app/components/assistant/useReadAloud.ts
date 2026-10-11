@@ -1,3 +1,4 @@
+import { brand } from "@/app/lib/brand";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
@@ -68,7 +69,7 @@ function setMediaSession(title: string | null, handlers: Partial<Record<MediaAct
     if (!session) return;
     try {
         session.metadata =
-            title !== null && typeof MediaMetadata !== "undefined" ? new MediaMetadata({ title, artist: "Mike" }) : null;
+            title !== null && typeof MediaMetadata !== "undefined" ? new MediaMetadata({ title, artist: brand.name }) : null;
         const actions: MediaAction[] = ["play", "pause", "stop", "seekto", "seekbackward", "seekforward"];
         for (const action of actions) session.setActionHandler(action, handlers[action] ?? null);
     } catch {

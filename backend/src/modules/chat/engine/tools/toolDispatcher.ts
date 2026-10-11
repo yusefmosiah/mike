@@ -1952,7 +1952,7 @@ export async function runToolCalls(
                   truncated: result.truncated,
                   duration_ms: result.durationMs,
                   ...(sync && !sync.ok
-                    ? { documents_note: "Your Mike documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date." }
+                    ? { documents_note: "Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date." }
                     : {}),
                 }
               : { error: result.error },

@@ -1,9 +1,22 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
+
+// The product's name (packages/brand/brand.json), inlined into the build as
+// NEXT_PUBLIC_BRAND and read through src/app/lib/brand.ts. Read here, not
+// imported, because Turbopack resolves nothing outside its root (frontend/).
+const BRAND_JSON = readFileSync(
+    path.join(__dirname, "..", "packages", "brand", "brand.json"),
+    "utf8",
+);
 
 const nextConfig: NextConfig = {
     /* config options here */
     reactCompiler: true,
+    env: {
+        NEXT_PUBLIC_BRAND: JSON.stringify(JSON.parse(BRAND_JSON)),
+    },
     typescript: {
         // `next build` type-checks this program instead of tsconfig.json. It
         // excludes test files, so the production image (built from an

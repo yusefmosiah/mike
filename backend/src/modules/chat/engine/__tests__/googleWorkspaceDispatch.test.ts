@@ -162,5 +162,5 @@ it("refuses a write that needs approval on a surface that cannot pause for it", 
   expect(fetchMock).not.toHaveBeenCalled();
   expect(result.askInputsEvents).toEqual([]);
   expect(result.mcpEvents[0]).toMatchObject({ status: "error" });
-  expect(result.mcpEvents[0].error).toContain("only available in the Mike assistant");
+  expect(result.mcpEvents[0].error).toContain("only available in the assistant chat");
 });

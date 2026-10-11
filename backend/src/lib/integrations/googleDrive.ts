@@ -134,7 +134,7 @@ export function googleDriveSetupInstructions(redirectUri: string): string {
         "GOOGLE_DRIVE_OAUTH_CLIENT_ID and GOOGLE_DRIVE_OAUTH_CLIENT_SECRET " +
         "(or the GOOGLE_MCP_OAUTH_* equivalents) in backend/.env and restart. " +
         "The redirect URI is derived from API_PUBLIC_URL, so fix that first if it " +
-        "is not the address browsers use to reach Mike."
+        "is not the address browsers use to reach the app."
     );
 }
 

@@ -109,7 +109,7 @@ function reconnectFailureOf(error: unknown): TurnReconnectFailure | null {
 class WordTurnRestartedAfterEdits extends Error {
   constructor() {
     super(
-      "Mike restarted while answering. Reopen this chat to see the finished answer.",
+      "The server restarted while answering. Reopen this chat to see the finished answer.",
     );
     this.name = "WordTurnRestartedAfterEdits";
   }
@@ -339,7 +339,7 @@ export function useWordAssistantChat({
             console.error("Failed to read the current Word document", error);
             if (requestIsCurrent()) {
               setRequestError(
-                "Mike couldn't read the current Word document. Please try again.",
+                "The current Word document couldn't be read. Please try again.",
               );
             }
             return;

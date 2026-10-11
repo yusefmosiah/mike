@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/app/lib/brand";
 import { useState, useEffect } from "react";
 import { Send, CheckCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -44,7 +45,7 @@ export default function SupportPage() {
         {
             value: "question",
             label: "Question",
-            description: "Ask a question about using Mike",
+            description: `Ask a question about using ${brand.name}`,
         },
         {
             value: "other",

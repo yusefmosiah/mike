@@ -1,5 +1,6 @@
 // workflows types — implementation behind the module facade.
 import { type ProjectRole } from "../../lib/permissions";
+import { BRAND } from "../../lib/brand";
 
 // Unexpected data-access failures travel back to the route as the raw error
 // object. The route logs it and answers with the opaque internal-error body
@@ -72,7 +73,7 @@ export type OpenSourceSubmissionSummary = Pick<
 };
 
 export const DEFAULT_WORKFLOW_CONTRIBUTOR: WorkflowContributor = {
-  name: "Mike",
+  name: BRAND.name,
   organisation: null,
   role: null,
   linkedin: null,

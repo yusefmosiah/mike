@@ -15,6 +15,11 @@ The repository requires Node.js 22 or newer and contains three applications:
 
 The root `e2e/` directory contains the web application's Playwright tests.
 
+The product's name is a per-install setting in `packages/brand/brand.json`
+(see its README). Never write the name literally in text people see: read it
+from `@/app/lib/brand` in the web app, `@brand` in the add-in, or
+`backend/src/lib/brand.ts` in the API, or better, word the text so it does not need the name.
+
 ## UI and Design
 
 Read `docs/design-system.md` before making a non-trivial UI change. It is the

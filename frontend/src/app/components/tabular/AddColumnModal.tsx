@@ -481,7 +481,7 @@ export function AddColumnModal({
                                             prompt: e.target.value,
                                         })
                                     }
-                                    placeholder="Write the analysis prompt — describe what Mike should extract from each document for this column…"
+                                    placeholder="Write the analysis prompt — describe what to extract from each document for this column…"
                                     className="mt-2 min-h-36"
                                 />
                                                 </>

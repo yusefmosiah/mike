@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { brand } from "@/app/lib/brand";
 import { MikeIcon } from "@/app/components/chat/mike-icon";
 
 interface SiteLogoProps {
@@ -18,7 +19,7 @@ export function SiteLogo({
 }: SiteLogoProps) {
     const landingHref =
         process.env.NODE_ENV === "production"
-            ? "https://mikeoss.com"
+            ? brand.website
             : "http://localhost:3000";
     const sizeClasses = {
         sm: "text-xl",
@@ -45,7 +46,7 @@ export function SiteLogo({
             >
                 <MikeIcon size={iconSizes[size]} />
             </span>
-            <span>Mike</span>
+            <span>{brand.name}</span>
         </h1>
     );
 

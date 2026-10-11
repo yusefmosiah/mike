@@ -7,6 +7,7 @@
     "types": ["node", "office-js", "office-runtime", "react", "react-dom"],
     "paths": {
       "@mike/contracts": ["../packages/contracts/index.d.ts"],
+      "@brand": ["../packages/brand/brand.json"],
       "react": [
         "./node_modules/@types/react/index.d.ts"
       ],
@@ -110,6 +111,7 @@
     "allowUnusedLabels": false,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true
   },

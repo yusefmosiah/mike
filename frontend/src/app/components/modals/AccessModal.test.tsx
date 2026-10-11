@@ -321,7 +321,7 @@ describe("AccessModal — per-recipient roles", () => {
         await user.click(screen.getByRole("button", { name: "Add" }));
         expect(
             await screen.findByText(
-                "newcounsel@outside.example does not belong to a Mike user.",
+                "newcounsel@outside.example doesn't have an account here.",
             ),
         ).toBeInTheDocument();
         expect(onGrant).not.toHaveBeenCalled();

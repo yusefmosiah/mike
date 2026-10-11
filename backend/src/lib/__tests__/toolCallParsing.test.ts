@@ -103,7 +103,7 @@ describe("parseTextToolCalls", () => {
     it("raises a recoverable-failure message when the markup names no tool", () => {
         expect(() =>
             parseTextToolCalls("<tool_call>{not a tool at all}</tool_call>", 0),
-        ).toThrow(/did not identify an executable tool|could not recover/);
+        ).toThrow(/did not identify an executable tool|could not be recovered/);
     });
 });
 

@@ -48,7 +48,7 @@ export function googleWorkspaceSetupInstructions(
     `${api}, then set GOOGLE_WORKSPACE_OAUTH_CLIENT_ID and ` +
     "GOOGLE_WORKSPACE_OAUTH_CLIENT_SECRET (or the Google Drive client variables) " +
     "in backend/.env and restart. The redirect URI is derived from " +
-    "API_PUBLIC_URL, so fix that first if it is not the address browsers use to reach Mike."
+    "API_PUBLIC_URL, so fix that first if it is not the address browsers use to reach the app."
   );
 }
 export function googleWorkspaceEnv() {

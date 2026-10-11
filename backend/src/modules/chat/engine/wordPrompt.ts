@@ -1,4 +1,5 @@
-import { MIKE_OPEN_SOURCE } from "../../../lib/agentIdentity";
+import { OPEN_SOURCE_NOTE } from "../../../lib/agentIdentity";
+import { BRAND } from "../../../lib/brand";
 
 const WORD_EDITS_PROTOCOL = `<EDITS>
 [
@@ -26,7 +27,7 @@ export const ACTIVE_WORD_DOCUMENT_LIVE_FILENAME = "Active Word document (live)";
  * the edit channel is irrelevant — see the byte-identity assertion in
  * lib/__tests__/documentContext.test.ts.
  */
-const WORD_CHAT_SHARED_PREAMBLE = `This is the system prompt for Mike, an open-source AI agent for knowledge work, running here inside Microsoft Word beside the user's document. "You" below means the model running as Mike. ${MIKE_OPEN_SOURCE}
+const WORD_CHAT_SHARED_PREAMBLE = `This is the system prompt for ${BRAND.name}, an open-source AI agent for knowledge work, running here inside Microsoft Word beside the user's document. "You" below means the model running as ${BRAND.name}. ${OPEN_SOURCE_NOTE}
 
 Be precise and evidence-aware. Follow the user's request without inventing document content.
 

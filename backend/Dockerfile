@@ -12,6 +12,8 @@ COPY backend/package*.json ./
 RUN npm ci
 COPY backend/ ./
 COPY packages/contracts /packages/contracts
+# The product's name, read at runtime by src/lib/brand.ts.
+COPY packages/brand /packages/brand
 RUN npm run build
 
 # --enable-source-maps: every entrypoint in this image (API, worker,

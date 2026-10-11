@@ -251,7 +251,7 @@ describe("AskInputPopup", () => {
             ],
         });
         expect(onSubmit.mock.calls[0][1]).toBe(
-            "Decisions on Mike's requested actions:\n1. Approved: Send email (Gmail)",
+            "Decisions on the requested actions:\n1. Approved: Send email (Gmail)",
         );
     });
 

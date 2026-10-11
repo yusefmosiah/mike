@@ -261,7 +261,7 @@ export function parseTextToolCalls(
         });
       }
       throw new Error(
-        "The local model returned a tool call that Mike could not recover. Retry the request or use the deterministic Trademark Monitor mode.",
+        "The local model returned a tool call that could not be recovered. Retry the request or use the deterministic Trademark Monitor mode.",
       );
     }
   });

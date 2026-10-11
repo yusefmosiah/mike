@@ -1,3 +1,4 @@
+import { brand } from "@/app/lib/brand";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { synthesizeSpeech } from "@/app/lib/mikeApi";
@@ -280,7 +281,7 @@ describe("useReadAloud with synthesized audio", () => {
             },
         );
         const { result } = await startReading("Lock screen title. More.");
-        expect(session.metadata).toMatchObject({ init: { title: "Lock screen title.", artist: "Mike" } });
+        expect(session.metadata).toMatchObject({ init: { title: "Lock screen title.", artist: brand.name } });
 
         const run = (action: string, details: Partial<MediaSessionActionDetails> = {}) =>
             act(() => handlers.get(action)?.({ action, ...details } as MediaSessionActionDetails));

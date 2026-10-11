@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/app/lib/brand";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signup } from "@/app/lib/authApi";
@@ -121,7 +122,7 @@ function SignupContent() {
                             Account created!
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                            Taking you to Mike...
+                            {`Taking you to ${brand.name}…`}
                         </p>
                         <Link
                             href="/assistant"

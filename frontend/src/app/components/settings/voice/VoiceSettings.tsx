@@ -32,7 +32,7 @@ import { VoiceTestBench } from "./VoiceTestBench";
 function unavailableReason(engine: VoiceEngine): string {
   switch (engine) {
     case "device":
-      return "Apple's speech on the phone needs Mike's iPhone app (an up-to-date build to read aloud).";
+      return "Apple's speech on the phone needs the iPhone app (an up-to-date build to read aloud).";
     case "operator":
       return "This deployment has no speech server configured.";
     case "openrouter":

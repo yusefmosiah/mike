@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/app/lib/brand";
 import {
     useState,
     useEffect,
@@ -353,7 +354,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                         shouldAnimate ? "sidebar-fade-in" : ""
                                     }`}
                                 >
-                                    Mike
+                                    {brand.name}
                                 </span>
                             </Link>
                         </div>

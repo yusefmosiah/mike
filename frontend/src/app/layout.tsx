@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { brand } from "@/app/lib/brand";
 // Self-hosted Inter and EB Garamond; sets --font-inter and --font-eb-garamond.
 import "./fonts/fonts.css";
 import "./globals.css";
@@ -6,9 +7,8 @@ import { Providers } from "@/app/components/providers";
 
 export const metadata: Metadata = {
     metadataBase: new URL("https://app.mikeoss.com"),
-    title: "Mike - Legal AI Platform",
-    description:
-        "AI-powered legal document analysis and contract review platform.",
+    title: brand.name,
+    description: brand.description,
     icons: {
         icon: [
             { url: "/icon.svg", type: "image/svg+xml" },
@@ -19,24 +19,22 @@ export const metadata: Metadata = {
     openGraph: {
         type: "website",
         url: "https://app.mikeoss.com",
-        siteName: "Mike",
-        title: "Mike - Legal AI Platform",
-        description:
-            "AI-powered legal document analysis and contract review platform.",
+        siteName: brand.name,
+        title: brand.name,
+        description: brand.description,
         images: [
             {
                 url: "/link-image.jpg",
                 width: 1200,
                 height: 651,
-                alt: "Mike",
+                alt: brand.name,
             },
         ],
     },
     twitter: {
         card: "summary_large_image",
-        title: "Mike - Legal AI Platform",
-        description:
-            "AI-powered legal document analysis and contract review platform.",
+        title: brand.name,
+        description: brand.description,
         images: ["/link-image.jpg"],
     },
 };

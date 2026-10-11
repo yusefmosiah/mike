@@ -169,7 +169,7 @@ export function ConnectorDetailsModal({
                                             </p>
                                             <p className="mt-0.5 text-xs text-gray-500">
                                                 {hasWriteTools || toolsLoading
-                                                    ? "Mike asks you in the chat before running an action that changes data."
+                                                    ? "You're asked in the chat before an action that changes data runs."
                                                     : "This connector has no write actions right now."}
                                             </p>
                                         </div>

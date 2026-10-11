@@ -145,7 +145,7 @@ function PersonalisationForm({
       <section className="space-y-3">
         <SettingsHeading>Personalisation</SettingsHeading>
         <SettingsDescription>
-          Tell Mike about your role and practice so responses can be tailored to
+          Describe your role and practice so responses can be tailored to
           your professional context.
         </SettingsDescription>
         <SettingsCard>

@@ -95,8 +95,8 @@ describe("prompt-injection flags", () => {
 
   it("flags an outside-content tool whose result talks to the AI", async () => {
     const [result] = await turn([{ id: "w1", name: "fetch_web_page", input: { url: "https://example.com", text: injected } }]);
-    expect(result.content).toMatch(/\[Mike security notice: this fetch_web_page result .*override_instructions/);
-    expect(JSON.parse(result.content.split("\n\n[Mike security notice")[0])).toMatchObject({ tool: "fetch_web_page" });
+    expect(result.content).toMatch(/\[Security notice: this fetch_web_page result .*override_instructions/);
+    expect(JSON.parse(result.content.split("\n\n[Security notice")[0])).toMatchObject({ tool: "fetch_web_page" });
   });
 
   it("leaves ordinary results and Mike's own instructions alone", async () => {
@@ -104,14 +104,14 @@ describe("prompt-injection flags", () => {
       { id: "w1", name: "fetch_web_page", input: { url: "https://example.com", text: "Weather today: sunny." } },
       { id: "r1", name: "read_workflow", input: { text: injected } },
     ]);
-    for (const result of results) expect(result.content).not.toContain("Mike security notice");
+    for (const result of results) expect(result.content).not.toContain("[Security notice");
   });
 
   it("flags a cell once, on its own result, not each inner call", async () => {
     const [result] = await turn([
       { id: "s1", name: "run_python", input: { code: `p = await tools.read_document({"doc_id": "a", "text": ${JSON.stringify(injected)}})\nprint(p["args"]["text"])` } },
     ]);
-    expect(result.content.match(/Mike security notice/g)).toHaveLength(1);
+    expect(result.content.match(/\[Security notice/g)).toHaveLength(1);
     expect(result.content).toMatch(/this run_python result/);
   });
 });

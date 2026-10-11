@@ -218,7 +218,7 @@ test("reports an ambiguous match without touching the document", async ({
 
   await expect(
     page.getByText(
-      "Skipped — this text appears 2 times in the document. Tell Mike which one to change.",
+      "Skipped — this text appears 2 times in the document. Say which one to change.",
     ),
   ).toBeVisible();
   expect((await addin.wordCalls()).trackedChanges).toEqual([]);
@@ -704,7 +704,7 @@ test("a reloaded failed tool edit still explains itself", async ({
 
   await expect(
     page.getByText(
-      "Skipped — this text appears 2 times in the document. Tell Mike which one to change.",
+      "Skipped — this text appears 2 times in the document. Say which one to change.",
     ),
   ).toBeVisible();
 });

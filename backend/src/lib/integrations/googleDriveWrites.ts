@@ -325,7 +325,7 @@ async function sendDriveWrite(
     // A timeout, server error or unreadable success response may follow a
     // completed write. Never repeat the mutation automatically.
     throw new GoogleDriveUserError(
-      "The outcome is uncertain. Check Google Drive before trying again; Mike will not retry this action.",
+      "The outcome is uncertain. Check Google Drive before trying again; this action will not be retried automatically.",
     );
   }
 }

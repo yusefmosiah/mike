@@ -80,7 +80,7 @@ describe("code mode and ~/mike", () => {
   it("says when the copy could not be brought up to date, and still runs the cell", async () => {
     syncWorkspaceOncePerTurn.mockResolvedValue({ ok: false, error: "workstation unreachable" });
     const [result] = await turn([{ id: "p1", name: "run_python", input: { code: "print('ran')" } }]);
-    expect(result!.content).toMatch(/^\[note\] Your Mike documents and skills could not all be brought up to date/);
+    expect(result!.content).toMatch(/^\[note\] Your documents and skills could not all be brought up to date/);
     expect(result!.content).toContain("ran");
   });
 });
