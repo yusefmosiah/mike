@@ -339,4 +339,63 @@ describe("useDictation", () => {
         expect(stopTrack).toHaveBeenCalled();
         expect(MockMediaRecorder.instances).toHaveLength(0);
     });
+    describe("in the iPhone app", () => {
+        const nativePromise = vi.fn();
+        beforeEach(() => {
+            vi.stubGlobal("Capacitor", {
+                PluginHeaders: [{ name: "MikeSpeech", methods: [] }],
+                nativePromise,
+            });
+            MockMediaRecorder.isTypeSupported.mockImplementation(
+                (type: string) =>
+                    type === "audio/webm;codecs=opus" || type === "audio/mp4",
+            );
+        });
+        afterEach(() => {
+            MockMediaRecorder.isTypeSupported.mockImplementation(
+                (type: string) => type === "audio/webm;codecs=opus",
+            );
+        });
+
+        it("records AAC and transcribes it on the phone by default", async () => {
+            nativePromise.mockResolvedValue({ text: " Draft the letter. " });
+            const { result } = renderHook(() => useDictation());
+
+            await act(async () => {
+                await result.current.start();
+            });
+            expect(MockMediaRecorder.instances.at(-1)?.mimeType).toBe(
+                "audio/mp4",
+            );
+            await act(async () => {
+                result.current.stop();
+            });
+
+            await waitFor(() =>
+                expect(result.current.transcript).toBe("Draft the letter."),
+            );
+            expect(nativePromise).toHaveBeenCalledWith(
+                "MikeSpeech",
+                "transcribe",
+                expect.objectContaining({ mimeType: "audio/mp4" }),
+            );
+            expect(transcribeAudio).not.toHaveBeenCalled();
+        });
+
+        it("shows the phone's own message when it cannot transcribe", async () => {
+            nativePromise.mockRejectedValue({ code: "not-installed" });
+            const { result } = renderHook(() => useDictation());
+
+            await act(async () => {
+                await result.current.start();
+            });
+            await act(async () => {
+                result.current.stop();
+            });
+
+            await waitFor(() =>
+                expect(result.current.error).toMatch(/Download Apple's speech model/),
+            );
+        });
+    });
 });

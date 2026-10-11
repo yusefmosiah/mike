@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import { deviceSpeechSupported } from "./deviceSpeech";
 
 /**
  * Voice preferences (goals/mission-10-voice.md): which engine transcribes
@@ -10,16 +11,19 @@ import { useCallback, useSyncExternalStore } from "react";
  * browser's built-in voices and an on-device model exist on one machine and
  * not the next.
  *
- *  - "operator": the deployment's own speech server (the default).
+ *  - "device": Apple's speech recognition on the phone, in Mike's iPhone
+ *    app (dictation only; the default there).
+ *  - "operator": the deployment's own speech server (the default elsewhere).
  *  - "openrouter": OpenRouter, the comparison lane; never in strict private
  *    mode (the server refuses it there too).
  *  - "browser": the browser's own engine (on-device recognition, the
  *    operating system's voices).
  *  - "webgpu": an open model downloaded into this browser, after consent.
  */
-export type VoiceEngine = "operator" | "openrouter" | "browser" | "webgpu";
+export type VoiceEngine = "device" | "operator" | "openrouter" | "browser" | "webgpu";
 
 export const VOICE_ENGINES: readonly VoiceEngine[] = [
+    "device",
     "operator",
     "openrouter",
     "browser",
@@ -36,6 +40,16 @@ export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
     speech: { engine: "operator" },
 };
 
+/**
+ * The defaults on this device: dictation stays on the phone in the iPhone
+ * app, and goes to the deployment's speech server elsewhere.
+ */
+export function defaultVoicePreferences(): VoicePreferences {
+    return deviceSpeechSupported()
+        ? { ...DEFAULT_VOICE_PREFERENCES, transcription: { engine: "device" } }
+        : DEFAULT_VOICE_PREFERENCES;
+}
+
 export const VOICE_PREFERENCES_KEY = "mike.voice.v1";
 const CHANGE_EVENT = "mike:voice-preferences";
 
@@ -47,17 +61,19 @@ const text = (value: unknown): string | undefined =>
 
 /** Anything malformed falls back to the defaults, field by field. */
 export function parseVoicePreferences(raw: unknown): VoicePreferences {
+    const defaults = defaultVoicePreferences();
     const root = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const t = (root.transcription && typeof root.transcription === "object" ? root.transcription : {}) as Record<string, unknown>;
     const s = (root.speech && typeof root.speech === "object" ? root.speech : {}) as Record<string, unknown>;
     return {
         transcription: {
-            engine: isEngine(t.engine) ? t.engine : DEFAULT_VOICE_PREFERENCES.transcription.engine,
+            engine: isEngine(t.engine) ? t.engine : defaults.transcription.engine,
             ...(text(t.model) ? { model: text(t.model) } : {}),
             ...(text(t.language) ? { language: text(t.language) } : {}),
         },
         speech: {
-            engine: isEngine(s.engine) ? s.engine : DEFAULT_VOICE_PREFERENCES.speech.engine,
+            // The phone's engine only transcribes.
+            engine: isEngine(s.engine) && s.engine !== "device" ? s.engine : defaults.speech.engine,
             ...(text(s.model) ? { model: text(s.model) } : {}),
             ...(text(s.voice) ? { voice: text(s.voice) } : {}),
         },
@@ -65,6 +81,7 @@ export function parseVoicePreferences(raw: unknown): VoicePreferences {
 }
 
 let cachedRaw: string | null | undefined;
+let cachedDevice: boolean | undefined;
 let cachedValue: VoicePreferences = DEFAULT_VOICE_PREFERENCES;
 
 export function loadVoicePreferences(): VoicePreferences {
@@ -74,12 +91,15 @@ export function loadVoicePreferences(): VoicePreferences {
     } catch {
         // Storage blocked (private window, policy): the defaults apply.
     }
-    if (raw === cachedRaw) return cachedValue;
+    // The defaults depend on whether this page runs in the iPhone app.
+    const device = deviceSpeechSupported();
+    if (raw === cachedRaw && device === cachedDevice) return cachedValue;
     cachedRaw = raw;
+    cachedDevice = device;
     try {
-        cachedValue = raw ? parseVoicePreferences(JSON.parse(raw)) : DEFAULT_VOICE_PREFERENCES;
+        cachedValue = raw ? parseVoicePreferences(JSON.parse(raw)) : defaultVoicePreferences();
     } catch {
-        cachedValue = DEFAULT_VOICE_PREFERENCES;
+        cachedValue = defaultVoicePreferences();
     }
     return cachedValue;
 }
@@ -116,6 +136,7 @@ export function useVoicePreferences(): [VoicePreferences, (next: VoicePreference
 
 /** What this deployment and this browser can actually do. */
 export interface VoiceAvailability {
+    deviceRecognition: boolean;
     operatorTranscription: boolean;
     operatorSpeech: boolean;
     openRouter: boolean;
@@ -130,6 +151,8 @@ export function engineAvailable(
     availability: VoiceAvailability,
 ): boolean {
     switch (engine) {
+        case "device":
+            return kind === "transcription" && availability.deviceRecognition;
         case "operator":
             return kind === "transcription" ? availability.operatorTranscription : availability.operatorSpeech;
         case "openrouter":
@@ -143,8 +166,8 @@ export function engineAvailable(
 
 /**
  * The engine a request will use: the chosen one when it is available here,
- * otherwise the first available of operator, browser, webgpu. OpenRouter is
- * never a fallback; it runs only when chosen and allowed.
+ * otherwise the first available of device, operator, browser, webgpu.
+ * OpenRouter is never a fallback; it runs only when chosen and allowed.
  */
 export function resolveVoiceEngine(
     kind: "transcription" | "speech",
@@ -153,7 +176,7 @@ export function resolveVoiceEngine(
 ): VoiceEngine | null {
     const chosen = preferences[kind].engine;
     if (engineAvailable(kind, chosen, availability)) return chosen;
-    for (const engine of ["operator", "browser", "webgpu"] as const) {
+    for (const engine of ["device", "operator", "browser", "webgpu"] as const) {
         if (engineAvailable(kind, engine, availability)) return engine;
     }
     return null;

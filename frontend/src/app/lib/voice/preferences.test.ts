@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     DEFAULT_VOICE_PREFERENCES,
     VOICE_PREFERENCES_KEY,
+    defaultVoicePreferences,
+    engineAvailable,
     loadVoicePreferences,
     parseVoicePreferences,
     resolveVoiceEngine,
@@ -15,6 +17,7 @@ import {
 } from "./preferences";
 
 const everything: VoiceAvailability = {
+    deviceRecognition: false,
     operatorTranscription: true,
     operatorSpeech: true,
     openRouter: true,
@@ -23,7 +26,14 @@ const everything: VoiceAvailability = {
     webgpu: true,
 };
 
-afterEach(() => window.localStorage.clear());
+afterEach(() => {
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+});
+
+/** The iPhone app's shell: the Capacitor bridge with Mike's speech plugin. */
+const inApp = () =>
+    vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }], nativePromise: vi.fn() });
 
 describe("parseVoicePreferences", () => {
     it("keeps valid choices and drops the rest field by field", () => {
@@ -43,6 +53,32 @@ describe("load and save", () => {
         expect(loadVoicePreferences()).toEqual({ transcription: { engine: "browser" }, speech: { engine: "webgpu", voice: "bf_emma" } });
         window.localStorage.setItem(VOICE_PREFERENCES_KEY, "{not json");
         expect(loadVoicePreferences()).toEqual(DEFAULT_VOICE_PREFERENCES);
+    });
+});
+
+describe("in the iPhone app", () => {
+    it("dictates on the phone by default, and keeps a saved choice", () => {
+        expect(defaultVoicePreferences()).toEqual(DEFAULT_VOICE_PREFERENCES);
+        inApp();
+        expect(defaultVoicePreferences().transcription).toEqual({ engine: "device" });
+        expect(loadVoicePreferences()).toEqual({ transcription: { engine: "device" }, speech: { engine: "operator" } });
+        expect(parseVoicePreferences({ speech: { engine: "browser" } }).transcription.engine).toBe("device");
+        saveVoicePreferences({ transcription: { engine: "operator" }, speech: { engine: "operator" } });
+        expect(loadVoicePreferences().transcription.engine).toBe("operator");
+    });
+
+    it("offers the phone for dictation only", () => {
+        const phone = { ...everything, deviceRecognition: true };
+        expect(engineAvailable("transcription", "device", phone)).toBe(true);
+        expect(engineAvailable("transcription", "device", everything)).toBe(false);
+        expect(engineAvailable("speech", "device", phone)).toBe(false);
+        expect(parseVoicePreferences({ speech: { engine: "device" } }).speech.engine).toBe("operator");
+    });
+
+    it("falls back to the phone first when the chosen engine is missing", () => {
+        const prefs = { transcription: { engine: "openrouter" as const }, speech: { engine: "operator" as const } };
+        const phone = { ...everything, openRouter: false, deviceRecognition: true };
+        expect(resolveVoiceEngine("transcription", prefs, phone)).toBe("device");
     });
 });
 

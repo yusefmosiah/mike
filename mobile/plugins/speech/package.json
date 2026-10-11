@@ -1,0 +1,16 @@
+{
+    "name": "@mike/speech",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Mike's iOS plugin: dictation with Apple's on-device speech recognition.",
+    "license": "AGPL-3.0-only",
+    "files": [
+        "ios/Sources",
+        "Package.swift"
+    ],
+    "capacitor": {
+        "ios": {
+            "src": "ios"
+        }
+    }
+}

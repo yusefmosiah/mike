@@ -7,6 +7,7 @@ import {
     startOnDeviceRecognition,
     type OnDeviceRecognitionSession,
 } from "@/app/lib/voice/browserSpeech";
+import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
 import { transcribeRecording } from "@/app/lib/voice/engines";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
@@ -19,6 +20,12 @@ const PREFERRED_MIME_TYPES = [
     "audio/webm",
     "audio/mp4",
 ] as const;
+
+/**
+ * The iPhone's own engine reads AAC; the web view's WebM (Opus) is refused
+ * there, so AAC comes first.
+ */
+const DEVICE_MIME_TYPES = ["audio/mp4"] as const;
 
 export const MICROPHONE_ACCESS_DENIED_MESSAGE = "Microphone access denied";
 export const DICTATION_UNSUPPORTED_MESSAGE =
@@ -57,7 +64,8 @@ export interface UseDictationResult {
 
 /**
  * Records a microphone clip and transcribes it with the engine chosen in
- * Settings → Voice (the operator by default; see lib/voice). With the
+ * Settings → Voice (the operator by default, the phone itself in the iPhone
+ * app; see lib/voice). With the
  * browser's own engine, the browser listens on device instead of a
  * recording being made. The hook owns the capture lifecycle only: it never
  * inserts text into a composer and never submits anything — callers decide
@@ -126,10 +134,12 @@ export function useDictation({
                 }
             } catch (transcribeError) {
                 setError(
-                    userFacingApiError(
-                        transcribeError,
-                        TRANSCRIBE_FAILURE_MESSAGE,
-                    ),
+                    transcribeError instanceof DeviceSpeechError
+                        ? transcribeError.message
+                        : userFacingApiError(
+                              transcribeError,
+                              TRANSCRIBE_FAILURE_MESSAGE,
+                          ),
                 );
             } finally {
                 busyRef.current = false;
@@ -203,7 +213,11 @@ export function useDictation({
                 stream.getTracks().forEach((track) => track.stop());
                 return;
             }
-            const mimeType = PREFERRED_MIME_TYPES.find((type) =>
+            const preferredTypes: readonly string[] =
+                loadVoicePreferences().transcription.engine === "device"
+                    ? DEVICE_MIME_TYPES
+                    : PREFERRED_MIME_TYPES;
+            const mimeType = preferredTypes.find((type) =>
                 MediaRecorder.isTypeSupported(type),
             );
             try {

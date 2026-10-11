@@ -10,6 +10,8 @@ const local = vi.hoisted(() => ({
     speakWithBrowserModel: vi.fn(async () => new Blob(["wav"])),
 }));
 vi.mock("./browserModels", () => local);
+const phone = vi.hoisted(() => ({ transcribeOnDevice: vi.fn(async () => "phone words") }));
+vi.mock("./deviceSpeech", () => phone);
 
 import { synthesizeSentence, transcribeRecording } from "./engines";
 
@@ -26,6 +28,12 @@ describe("transcribeRecording", () => {
     it("names OpenRouter and the model when chosen", async () => {
         await transcribeRecording(blob, { engine: "openrouter", model: "qwen/qwen3-asr-0.6b" });
         expect(api.transcribeAudio).toHaveBeenCalledWith(blob, { provider: "openrouter", model: "qwen/qwen3-asr-0.6b", language: undefined });
+    });
+
+    it("hands the recording to the phone for the device engine", async () => {
+        expect(await transcribeRecording(blob, { engine: "device", language: "en-GB" })).toBe("phone words");
+        expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, "en-GB");
+        expect(api.transcribeAudio).not.toHaveBeenCalled();
     });
 
     it("stays in the browser for the browser model", async () => {

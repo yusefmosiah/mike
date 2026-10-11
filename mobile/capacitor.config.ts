@@ -1,32 +1,40 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * Enterprise mobile shell for Mike (iOS/Android).
+ * Mike for iPhone (and later Android): a native shell around the hosted web
+ * app, the same pattern as the Mac app (desktop/) and the Word add-in.
  *
- * Distribution policy: firm MDM only, inside the firm's WireGuard VPN — there
- * is no public App Store / Google Play track, and none is planned (see
- * goals/station-10-mobile-client-and-ocr.md and README.md in this directory
- * for the deployment and device-hardening guide).
+ * The shell loads the deployed Mike server (`server.url`), by default our
+ * staging deployment, so every web change reaches the app without a new
+ * build. A static export of the frontend is not possible (it uses server
+ * routes; README.md, How the pieces fit). A firm build sets MIKE_SERVER_URL
+ * to its host inside the VPN at `cap sync` time.
  *
- * `webDir` expects a STATIC EXPORT of the Next.js frontend at
- * ../frontend/out. A plain `next build` emits .next/, which Capacitor cannot
- * serve, so the operator must enable static export in frontend/next.config.ts
- * (`output: "export"`) before the shells are synced. That frontend change is
- * deliberately not made here.
- *
- * No `server.url` is configured: the shell serves bundled assets and talks
- * only to the firm backend, over the VPN.
+ * `webDir` holds only the page shown when the server cannot be reached.
  */
+const serverUrl = (process.env.MIKE_SERVER_URL ?? "https://choir-ip.com").replace(/\/+$/, "");
+
 const config: CapacitorConfig = {
     appId: "com.firm.mike",
     appName: "Mike",
-    webDir: "../frontend/out",
+    webDir: "www",
+    server: {
+        url: serverUrl,
+        // Only the Mike server renders in the app; other links open in Safari.
+        allowNavigation: [new URL(serverUrl).hostname],
+        errorPath: "offline.html",
+    },
     // Matter text must not reach native device logs (Xcode/Logcat capture
     // console output forwarded by the WebView at other logging levels).
     loggingBehavior: "none",
+    ios: {
+        // The web view stays inside the safe area (notch, home indicator).
+        contentInset: "always",
+        // No inspection of the web view in release builds.
+        webContentsDebuggingEnabled: false,
+        backgroundColor: "#f9fafb",
+    },
     android: {
-        // The shell talks to the firm backend over HTTPS only; plaintext mixed
-        // content stays off and remote WebView debugging stays off in release.
         allowMixedContent: false,
         webContentsDebuggingEnabled: false,
     },

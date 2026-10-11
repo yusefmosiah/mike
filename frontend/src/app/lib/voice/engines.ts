@@ -8,12 +8,16 @@
  */
 
 import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
+import { transcribeOnDevice } from "./deviceSpeech";
 import { loadVoicePreferences, type VoicePreferences } from "./preferences";
 
 export async function transcribeRecording(
     blob: Blob,
     preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
 ): Promise<string> {
+    if (preferences.engine === "device") {
+        return transcribeOnDevice(blob, preferences.language);
+    }
     if (preferences.engine === "webgpu") {
         const { transcribeInBrowser } = await import("./browserModels");
         return transcribeInBrowser(blob);

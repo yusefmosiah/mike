@@ -2,12 +2,13 @@
     "name": "mike-mobile",
     "version": "0.1.0",
     "private": true,
-    "description": "Enterprise Capacitor shell for Mike: iOS and Android via firm MDM over WireGuard VPN. No public app store distribution.",
+    "description": "Mike for iPhone and Android: a Capacitor shell around the hosted Mike web app.",
     "license": "AGPL-3.0-only",
     "scripts": {
-        "copy-web": "cap copy",
-        "build": "npm run copy-web",
-        "sync": "cap sync",
+        "www": "node scripts/write-www.mjs",
+        "sync": "npm run www && cap sync",
+        "ios:configure": "node scripts/configure-ios.mjs",
+        "ios:add": "npm run www && cap add ios && npm run ios:configure",
         "build:ios": "cap build ios",
         "build:android": "cap build android"
     },
@@ -15,9 +16,12 @@
         "@capacitor/app": "^8.1.2",
         "@capacitor/camera": "^8.2.5",
         "@capacitor/core": "^8.5.2",
-        "@capacitor/preferences": "^8.0.1"
+        "@capacitor/ios": "^8.5.3",
+        "@capacitor/preferences": "^8.0.1",
+        "@mike/speech": "file:plugins/speech"
     },
     "devDependencies": {
         "@capacitor/cli": "^8.5.2"
-    }
+    },
+    "type": "module"
 }

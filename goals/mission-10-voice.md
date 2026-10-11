@@ -91,3 +91,11 @@ transformers.js dependency grew the staging frontend image from 2.75 GB to
 disk, unused by the browser. It also brings a
 moderate `sprintf-js` advisory on a path the app never runs; trimming that
 needs a Dockerfile change, left for the owner.
+
+## The iPhone app's engine (2026-10-11, not accepted)
+
+A fifth engine, "device" ("This iPhone"), exists only inside the iPhone app:
+the recording is transcribed on the phone by Apple's speech recognition
+through Mike's `MikeSpeech` plugin, and it is the app's default for
+dictation. Details and receipts:
+[`mission-19-ios-app.md`](mission-19-ios-app.md).

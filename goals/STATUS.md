@@ -76,6 +76,9 @@ None of it is accepted until the owner says so.
 - **Mobile:** fields no longer trigger iOS focus zoom, long words wrap in
   messages, and a table toolbar's phone menu closes once an action runs.
 - **Mac app:** the wrapper is built, not accepted ([`mission-18-mac-app.md`](mission-18-mac-app.md)).
+- **iPhone app:** builds and runs in the simulator against staging, with an
+  offline page and dictation on the phone through Apple's speech recognition;
+  not signed, not on a device ([`mission-19-ios-app.md`](mission-19-ios-app.md)).
 - **Model costs:** volume work defaults to OpenCode Go flash models; OpenRouter is
   kept for decision models ([`docs/model-costs.md`](../docs/model-costs.md)).
 
@@ -401,6 +404,7 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 
 | # | Mission | State | File |
 |---|---|---|---|
+| 19 | The iPhone app: Capacitor shell around the hosted web app, with dictation by Apple's on-device speech recognition | built, awaiting review; simulator receipts, no device | [`mission-19-ios-app.md`](mission-19-ios-app.md) |
 | 18 | The Mac app: upstream's Electron wrapper around the hosted web app, without local mode | built, awaiting review | [`mission-18-mac-app.md`](mission-18-mac-app.md) |
 | 17 | Skills in the standard format: import, create and customize from chat, run in the workstation; the transcriber first | K0–K2 built, awaiting review; K3 (transcriber) not yet | [`mission-17-skills.md`](mission-17-skills.md) |
 | 16 | Documents in the workstation: `~/mike/` read-only copy now, NAS mount later, `save_to_mike` back (reverses Mission 13's "documents stay out") | built, awaiting review; staging receipt in progress | [`mission-16-documents-in-workstation.md`](mission-16-documents-in-workstation.md) |

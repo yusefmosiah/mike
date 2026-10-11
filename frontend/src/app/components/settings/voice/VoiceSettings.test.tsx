@@ -90,3 +90,38 @@ describe("VoiceSettings", () => {
         ]);
     });
 });
+
+describe("VoiceSettings in the iPhone app", () => {
+    const nativePromise = vi.fn();
+    beforeEach(() => {
+        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }], nativePromise });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        nativePromise.mockReset();
+    });
+
+    it("dictates on the phone by default and downloads Apple's model on request", async () => {
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "status" ? { state: "downloadable" } : { state: "available" },
+        );
+        render(<VoiceSettings />);
+        const dictation = await screen.findByRole("group", { name: "Dictation engine" });
+        await waitFor(() =>
+            expect(Array.from(dictation.querySelectorAll("button")).map((b) => [b.textContent, b.getAttribute("aria-pressed")])[0])
+                .toEqual(["This iPhone", "true"]),
+        );
+        expect(screen.getByText(/after downloading Apple's speech model/)).toBeInTheDocument();
+        nativePromise.mockImplementation(async () => ({ state: "available" }));
+        fireEvent.click(screen.getByRole("button", { name: "Download speech model" }));
+        await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", {}));
+        expect(await screen.findByText(/the recording never leaves it/)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Download speech model" })).not.toBeInTheDocument();
+    });
+
+    it("says when the phone's model is downloading", async () => {
+        nativePromise.mockResolvedValue({ state: "downloading" });
+        render(<VoiceSettings />);
+        expect(await screen.findByText(/speech model for this language is downloading/)).toBeInTheDocument();
+    });
+});

@@ -20,6 +20,7 @@ import {
 } from "@/app/lib/mikeApi";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { speakWithBrowser } from "@/app/lib/voice/browserSpeech";
+import { DeviceSpeechError, transcribeOnDevice } from "@/app/lib/voice/deviceSpeech";
 import {
   hasBrowserModelConsent,
   speakWithBrowserModel,
@@ -36,7 +37,7 @@ const DEFAULT_SENTENCE =
 type Candidate = {
   key: string;
   label: string;
-  engine: "operator" | "openrouter" | "browser" | "webgpu";
+  engine: "device" | "operator" | "openrouter" | "browser" | "webgpu";
   model?: string;
 };
 
@@ -197,6 +198,7 @@ export function VoiceTestBench({
     ...speechModels.map((id) => ({ key: `or:${id}`, label: `OpenRouter: ${nameOf(catalog?.speech, id)}`, engine: "openrouter" as const, model: id })),
   ];
   const sttCandidates: Candidate[] = [
+    ...(availability.deviceRecognition ? [{ key: "device", label: "Apple speech on this iPhone", engine: "device" as const }] : []),
     ...(availability.operatorTranscription ? [{ key: "operator", label: "This server", engine: "operator" as const }] : []),
     ...(availability.webgpu && hasBrowserModelConsent("transcription")
       ? [{ key: "webgpu", label: "Whisper Base in this browser", engine: "webgpu" as const }]
@@ -253,7 +255,9 @@ export function VoiceTestBench({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      // The iPhone's own engine reads AAC, not the web view's WebM.
+      const mimeType = availability.deviceRecognition && MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: Blob[] = [];
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data);
@@ -280,6 +284,11 @@ export function VoiceTestBench({
     for (const candidate of sttCandidates) {
       const started = performance.now();
       try {
+        if (candidate.engine === "device") {
+          const text = await transcribeOnDevice(clip);
+          update(setSttRows, candidate.key, { status: "done", latencyMs: performance.now() - started, costUsd: undefined, transcript: text });
+          continue;
+        }
         if (candidate.engine === "webgpu") {
           const text = await transcribeInBrowser(clip);
           update(setSttRows, candidate.key, { status: "done", latencyMs: performance.now() - started, costUsd: undefined, transcript: text });
@@ -296,7 +305,13 @@ export function VoiceTestBench({
           transcript: result.text,
         });
       } catch (error) {
-        update(setSttRows, candidate.key, { status: "failed", error: userFacingApiError(error, "This engine could not transcribe the recording.") });
+        update(setSttRows, candidate.key, {
+          status: "failed",
+          error:
+            error instanceof DeviceSpeechError
+              ? error.message
+              : userFacingApiError(error, "This engine could not transcribe the recording."),
+        });
       }
     }
     setRunning(null);

@@ -6,77 +6,89 @@ is no public App Store / Google Play track, and none is planned (station-10
 boundary, `goals/station-10-mobile-client-and-ocr.md`).
 
 App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://`
-· license AGPL-3.0-only.
+· license AGPL-3.0-only. Progress: `goals/mission-19-ios-app.md`.
 
-## Status: scaffold, not a built app
+## Status: iOS builds and runs in the simulator; not signed, not on a device
 
-Committed here:
-
-- `capacitor.config.ts` — app identity and the `webDir` wiring to the frontend
-  build output.
-- `package.json` — Capacitor core/cli plus the first plugins the shell needs
-  (`@capacitor/app`, `@capacitor/preferences`, `@capacitor/camera`).
-- This guide — deployment, VPN, and device-hardening policy, with the native
-  snippets an operator applies when the shells are generated.
-
-Deliberately not here yet:
-
-- No `ios/` / `android/` native projects; they are generated locally with
-  `npx cap add` (needs Xcode / Android SDK) and are git-ignored.
-- No build, sync, simulator, or device run has been performed from this
-  scaffold. Treat these files as a scaffold, not a tested app.
-- No `npm install` has run here and no lockfile is committed; versions resolve
-  on first install.
-- Biometric unlock, the native blur cover, OS backup exclusion, push, and
-  deep-link routing are policy and hook points described below — not
-  implemented code.
-- The frontend is not statically exportable as-is (see Operator preflight).
+- `capacitor.config.ts` loads the deployed Mike web app (`server.url`), by
+  default our staging deployment (`https://choir-ip.com`); a firm build sets
+  `MIKE_SERVER_URL` to its host inside the VPN. Only that host renders in the
+  app; other links open in Safari.
+- `www/` holds only the page shown when the server cannot be reached ("Mike
+  can't be reached", with a retry).
+- `scripts/configure-ios.mjs` applies the native hardening to the generated
+  project: permission prompts, the `mike://` scheme, the app-switcher privacy
+  cover and backup exclusion (below).
+- `plugins/speech/` is Mike's own plugin: dictation with Apple's on-device
+  speech recognition (below).
+- Android has not been generated or built.
 
 ## How the pieces fit
 
-- The WebView serves a static export of the Next.js frontend from `webDir`
-  (`../frontend/out`); nothing is loaded from the public internet.
-- The device talks only to the firm backend, over the firm WireGuard VPN.
-  Model, STT/TTS, and search operators are reached by the backend, never by
-  the phone.
+- The web view loads the firm's Mike server, so every web change reaches the
+  app without a new build, as in the Mac app (`desktop/`). A static export of
+  the frontend is not possible: it uses server routes and middleware.
+- The device talks only to the firm server, over the firm WireGuard VPN.
+  Model, search and server-side speech operators are reached by the backend,
+  never by the phone. On-device dictation (below) needs no network at all.
 - Every build made from this directory must preserve the station-10 boundaries:
-  no confidential matter text in push notifications, and the app window blurs
-  immediately on backgrounding.
+  no confidential matter text in push notifications, and the app window is
+  covered immediately when it leaves the foreground.
 
-## Operator preflight
+## Build and run (iOS)
 
-1. Toolchains: Node.js LTS with npm; Xcode for iOS; Android Studio + JDK for
-   Android.
-2. Produce the web bundle (frontend config is owned by the frontend and is not
-   touched here): `capacitor.config.ts` expects `frontend/out`, but a plain
-   `next build` emits `.next/`. Enable a static export in the frontend
-   (`output: "export"` in `frontend/next.config.ts`, then
-   `npm run build --prefix frontend`), which emits `frontend/out/`.
-   Caveat: static export forbids server-dependent Next features (API routes,
-   middleware, server rendering). The frontend currently uses server-side
-   routes, so this is a real configuration decision — the mobile bundle must be
-   pointed at a firm API origin at build time. If a static export is not
-   viable, the alternative enterprise pattern is a Capacitor `server.url`
-   pointing at the firm-hosted web app inside the VPN; it is not configured
-   here and would replace the `webDir` pipeline.
-3. `npm install --prefix mobile`.
-4. Generate the shells: `npx cap add ios` and/or `npx cap add android`
-   (installs `@capacitor/ios` / `@capacitor/android`; requires the toolchains).
-5. Apply Native shell hardening (below) to the generated projects.
-6. `npm run sync` (`cap sync`) — copies the web export into each shell and
-   updates plugins and native dependencies.
+Needs Node.js 22+, Xcode, and an iOS simulator runtime.
+
+```bash
+cd mobile
+npm install
+npm run ios:add            # first time: www, cap add ios, configure-ios
+npm run sync               # after a plugin or config change
+npm run ios:configure      # safe to re-run
+npx cap open ios           # or build from the command line (below)
+```
+
+`MIKE_SERVER_URL=https://mike.firm.internal npm run sync` points a build at
+another server (it also writes `www/server.js`, the offline page's retry
+target).
+
+Command-line build for the simulator:
+
+```bash
+cd ios/App
+xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+```
+
+Run it from a clean environment if your shell exports a compiler toolchain
+(a Nix or Homebrew dev shell sets `LD`, `CC`, `SDKROOT`): xcodebuild takes
+environment variables as build settings, and a foreign `ld` fails with
+`ld: -objc_abi_version '-Xlinker' not supported`. For example, prefix
+`env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin`.
 
 ### Scripts
 
 | Script | Runs | Purpose |
 |---|---|---|
-| `copy-web` | `cap copy` | Copy `frontend/out` into each added platform. |
-| `build` | `npm run copy-web` | Alias: assemble the web bundle into the shells (the web app itself is built in `frontend/`). |
-| `sync` | `cap sync` | `copy` plus plugin / native dependency update. |
-| `build:ios` | `cap build ios` | Signed iOS artifact from the generated project (signing per firm profiles). |
-| `build:android` | `cap build android` | Signed Android artifact (keystore params via `cap build --help`). |
+| `www` | `scripts/write-www.mjs` | Write `www/server.js` (the offline page's retry URL). |
+| `sync` | `www` + `cap sync` | Copy `www/`, write `capacitor.config.json`, update plugins (SPM). |
+| `ios:add` | `www` + `cap add ios` + `ios:configure` | Generate the iOS project. |
+| `ios:configure` | `scripts/configure-ios.mjs` | Apply the hardening to the generated project. |
+| `build:ios` | `cap build ios` | Signed iOS artifact (signing per firm profiles). |
+| `build:android` | `cap build android` | Signed Android artifact (not yet generated). |
 
-Open the shells for native edits with `npx cap open ios` / `npx cap open android`.
+## Dictation on the phone
+
+In the app, Settings → Voice offers a "This iPhone" dictation engine, and it is
+the default there. The web app records the clip as it does for every engine
+and hands it to the `MikeSpeech` plugin (`plugins/speech/`), which transcribes
+it with Apple's speech recognition on the phone: `SpeechAnalyzer` on iOS 26
+and later, `SFSpeechRecognizer` with on-device recognition only on older
+systems. Audio never leaves the phone and never reaches Mike's backend or
+Apple. A language whose model is not on the phone shows "Download speech
+model" (a system download from Apple, started only by that click). The web
+side is `frontend/src/app/lib/voice/deviceSpeech.ts`; the plugin's methods
+and error codes are in `plugins/speech/README.md`.
 
 ## Distribution: MDM only
 
@@ -106,8 +118,9 @@ channels. Confirm the final wording with firm counsel.
 - The MDM-pushed VPN profile must route the firm API host and its DNS. If the
   tunnel is split, the split must still cover the API origin; a full tunnel
   covers everything.
-- Assets are bundled in the app; only API traffic crosses the tunnel.
-- Do not configure a public `server.url` or run the app off-VPN.
+- A firm build sets `MIKE_SERVER_URL` to the Mike host inside the tunnel. The
+  default (our staging deployment) is for development only; do not ship a
+  build pointed at a public server or run the app off-VPN.
 
 ### Backend strict private mode (PRIVATE_MODE_ALLOWED_EGRESS_HOSTS)
 
@@ -126,7 +139,10 @@ private/loopback hosts, or hosts listed in `PRIVATE_MODE_ALLOWED_EGRESS_HOSTS`
 
 ## Native shell hardening
 
-Apply to the generated `ios/` / `android/` projects (preflight step 5).
+`npm run ios:configure` applies 2 (the native cover), 3 (iOS backup
+exclusion) and the permission and URL-scheme declarations of 5 and 6 to the
+generated iOS project. The rest is policy for the Android project and for
+plugins not yet installed.
 
 ### 1. Biometric unlock (hook point; two plugins, not yet installed)
 
@@ -159,7 +175,12 @@ Rules:
   cached matter content. The web layer's own authentication remains the source
   of truth.
 
-### 2. Blur on background (required)
+### 2. Blur on background (required; iOS native cover implemented)
+
+iOS: `configure-ios.mjs` adds a blur view over the window in
+`SceneDelegate.sceneWillResignActive` (marker `MIKE_PRIVACY_COVER`), before
+iOS takes the app switcher's snapshot. The CSS below remains a sketch for
+Android.
 
 `@capacitor/app` is declared. In the shell bootstrap:
 
@@ -184,7 +205,10 @@ snapshot can still show content. Add a native cover that appears instantly on
 (not installed here; confirm Capacitor 8 compatibility at install time) or a
 small AppDelegate overlay — and treat it as required for shipping.
 
-### 3. OS backup exclusion (required)
+### 3. OS backup exclusion (required; iOS implemented)
+
+iOS: `configure-ios.mjs` adds the exclusion below to `AppDelegate`
+(marker `MIKE_BACKUP_EXCLUSION`).
 
 Android — add to the `<application>` tag in
 `android/app/src/main/AndroidManifest.xml`:
@@ -329,7 +353,9 @@ controls domain certificates.
 
 ### 6. Microphone (dictation) and camera (scanner)
 
-Dictation reuses the existing web UI and the backend speech proxy:
+In the app, dictation runs on the phone by default (Dictation on the phone,
+above). The user can choose the deployment's speech server instead, which uses
+the backend speech proxy:
 
 - `POST {firm-api}/audio/transcriptions` with
   `{ audio_base64, mimetype, filename?, language? }` → `{ text }`.
@@ -342,9 +368,11 @@ Dictation reuses the existing web UI and the backend speech proxy:
   correctly.
 - Open verification item (station-10): confirm the deployed operator decodes
   what both platforms' WebViews actually produce, on real devices.
-- Native permissions: iOS `NSMicrophoneUsageDescription` (Info.plist) and
-  Android `RECORD_AUDIO`; scanner: iOS `NSCameraUsageDescription` and Android
-  `CAMERA`. `@capacitor/camera` is declared for scanner input.
+- Native permissions: iOS `NSMicrophoneUsageDescription` and
+  `NSSpeechRecognitionUsageDescription` (asked only on iOS before 26, for
+  `SFSpeechRecognizer`) and Android `RECORD_AUDIO`; scanner: iOS
+  `NSCameraUsageDescription` and Android `CAMERA`. `@capacitor/camera` is
+  declared for scanner input.
 
 ## Plugin inventory
 
@@ -355,21 +383,25 @@ Dictation reuses the existing web UI and the backend speech proxy:
 | `@capacitor/app` | declared | background/foreground listener, deep-link events. |
 | `@capacitor/preferences` | declared | non-secret settings only. |
 | `@capacitor/camera` | declared | scanner input. |
+| `@mike/speech` (`plugins/speech/`) | installed, iOS | dictation with Apple's on-device recognition. |
 | `@aparajita/capacitor-biometric-auth` | required before ship, not installed | biometric unlock. |
 | `@aparajita/capacitor-secure-storage` | required before ship, not installed | Keychain/Keystore token storage. |
-| `@capacitor/privacy-screen` | recommended, not installed | native app-switcher cover. |
 | `@capacitor/push-notifications` | optional, not installed | push (policy above). |
-| `@capacitor/ios`, `@capacitor/android` | added by `npx cap add` | platform projects. |
+| `@capacitor/ios` | installed | iOS platform. |
+| `@capacitor/android` | not installed | Android platform. |
 
 ## Remaining work
 
-- [ ] Enable the frontend static export (or decide the `server.url` alternative).
-- [ ] `npm install`, generate shells, re-apply the hardening patches.
+- [x] Load the hosted web app (`server.url`) with an offline page.
+- [x] Generate the iOS shell and apply the hardening by script.
+- [x] Native app-switcher cover and backup exclusion (iOS).
+- [x] On-device dictation with Apple's speech recognition (iOS).
+- [ ] Run on a real iPhone; sign with the firm's profile.
 - [ ] Implement the biometric gate and secure token storage.
-- [ ] Implement the native app-switcher cover.
 - [ ] Implement deep-link routing.
 - [ ] Enforce the push payload rule if push is ever enabled.
-- [ ] Verify STT format compatibility on real iOS/Android devices.
+- [ ] Verify server STT format compatibility on real iOS/Android devices.
+- [ ] Generate and harden the Android shell.
 - [ ] Firm security audit against the station-10 checklist: device-local
       storage encrypted, window blurs on background, OS backups exclude
       matter files.

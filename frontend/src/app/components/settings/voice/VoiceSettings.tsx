@@ -11,6 +11,7 @@ import {
   browserVoices,
   installOnDeviceRecognition,
 } from "@/app/lib/voice/browserSpeech";
+import { installDeviceSpeech } from "@/app/lib/voice/deviceSpeech";
 import {
   DEFAULT_KOKORO_VOICE,
   browserModelVoices,
@@ -30,6 +31,8 @@ import { VoiceTestBench } from "./VoiceTestBench";
 /** Why the saved choice cannot run here, if it cannot. */
 function unavailableReason(engine: VoiceEngine): string {
   switch (engine) {
+    case "device":
+      return "Dictating on the phone needs Mike's iPhone app.";
     case "operator":
       return "This deployment has no speech server configured.";
     case "openrouter":
@@ -42,6 +45,7 @@ function unavailableReason(engine: VoiceEngine): string {
 }
 
 const ENGINE_LABELS: Record<VoiceEngine, string> = {
+  device: "This iPhone",
   operator: "This server",
   openrouter: "OpenRouter",
   browser: "This browser",
@@ -73,7 +77,8 @@ function EnginePills({
 /** Settings → Voice: engines, models, voices and a side-by-side test bench. */
 export function VoiceSettings() {
   const [preferences, setPreferences] = useVoicePreferences();
-  const { options, availability, recognitionStatus, refreshRecognition, loading, error } = useVoiceAvailability();
+  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, loading, error } =
+    useVoiceAvailability();
   const [systemVoices, setSystemVoices] = useState<VoiceChoice[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
   const [installing, setInstalling] = useState(false);
@@ -143,6 +148,32 @@ export function VoiceSettings() {
             )}
             {unavailableNote && <SettingsDescription>{unavailableNote}</SettingsDescription>}
           </SettingsRow>
+          {stt.engine === "device" && availability.deviceRecognition && (
+            <SettingsRow>
+              <SettingsDescription>
+                {deviceStatus === "available"
+                  ? "Apple's speech recognition runs on this iPhone; the recording never leaves it."
+                  : deviceStatus === "downloading"
+                    ? "Apple's speech model for this language is downloading."
+                    : "This iPhone can transcribe on the device after downloading Apple's speech model for this language."}
+              </SettingsDescription>
+              {deviceStatus === "downloadable" && (
+                <PillButtonUI
+                  tone="white"
+                  size="sm"
+                  loading={installing}
+                  onClick={async () => {
+                    setInstalling(true);
+                    await installDeviceSpeech(stt.language);
+                    setInstalling(false);
+                    refreshDevice();
+                  }}
+                >
+                  Download speech model
+                </PillButtonUI>
+              )}
+            </SettingsRow>
+          )}
           {stt.engine === "operator" && options?.operator.transcription && (
             <SettingsRow>
               <SettingsDescription>Uses {options.operator.transcription.model} on this deployment&apos;s speech server.</SettingsDescription>
