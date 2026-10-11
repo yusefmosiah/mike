@@ -113,7 +113,7 @@ skill from chat ("also check the governing-law clause") is the same call.
 - **Web.** Workflows has "Import skill" (GitHub link or zip); an assistant
   workflow has a Skill tab with its description, source, files, a download
   of the skill folder, and its versions with Restore.
-- **Not yet.** K3, the transcriber.
+- **K3**: built 2026-10-11 (below).
 
 ## Staging receipts (2026-10-11), not accepted
 
@@ -172,7 +172,43 @@ Through `mike-staging api` on node-a, the owner's staging account,
   "Context Gathering", "Refinement & Structure" and "Reader Testing" from
   it.
 
-Not yet run live: the transcriber skill (K3).
+## K3, the transcriber (2026-10-11), not accepted
+
+- **YouTube from node-a.** Refused, on the host and inside the workstation
+  (through the egress proxy): yt-dlp 2026.06.09 printed "Sign in to confirm
+  you're not a bot", and youtube-transcript-api raised `RequestBlocked`
+  ("YouTube is blocking requests from your IP"). From the owner's Mac (a home
+  address, i.e. personal mode) both worked: captions ("We're going to have
+  two or three lectures on harmonic oscillator") and the title "6. 3-D Box
+  and QM Separation of Variables" for `4bfrkd8_zPo`. Getting past the block
+  from node-a would take a residential proxy (a cost decision) or account
+  cookies (YouTube bans such accounts); neither is done.
+- **Guest image.** `yt-dlp`, `ffmpeg-headless` and `youtube-transcript-api`
+  added to `infra/workstation/guest.nix`; node-a generation 56 after a test
+  activation under the rollback timer; the five VMs restarted with their
+  homes intact (`ws ssh ws-owner yt-dlp --version` printed 2026.06.09).
+- **The skill.** `skills/youtube-transcript/` in this repo (SKILL.md,
+  `scripts/transcribe.py`), ported from `~/media/transcripts/transcribe.py`:
+  captions from the API, then yt-dlp's subtitles; metadata from yt-dlp;
+  Markdown with frontmatter to `~/mike/out/`; exit 3 when YouTube refuses the
+  address, 4 when there are no captions. Dropped: the MLX engines, the iCloud
+  mirror, the docs-md publish, audio transcription (CPU speech recognition
+  waits for the benchmark). From the Mac: 28,071 characters via the API, and
+  28,049 via the yt-dlp path alone; in node-a's workstation: exit 3, nothing
+  written.
+- **On staging.** Chat `9580dad8`: "Install this skill:
+  https://github.com/yusefmosiah/mike/tree/main/skills/youtube-transcript",
+  installed as `youtube-transcript` (`4a6fea81`), pinned to commit
+  `daa32e23`. Chat `ab4756bc`: "Get me a transcript of
+  https://www.youtube.com/watch?v=4bfrkd8_zPo and save it to my library".
+  The model read the skill, ran
+  `/home/agent/skills/youtube-transcript/scripts/transcribe.py` in the
+  workstation (the script reached `~/skills` through the sync), got exit 3,
+  and told the user YouTube refuses the workstation's data-centre address,
+  without trying scraper sites, offering: paste YouTube's transcript, upload
+  a subtitle file, or personal mode. This is acceptance 6's second branch:
+  the receipt records why YouTube refused node-a and what personal mode
+  showed.
 
 ## The boundaries we keep
 
