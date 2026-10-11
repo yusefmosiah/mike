@@ -75,11 +75,30 @@ $ npm test --prefix backend -- src/__tests__/integration/connectors.routes.test.
       Tests  42 passed (42)
 ```
 
+## Title bar (2026-10-11), not accepted
+
+The web app drew to the top edge behind the inset traffic lights: the
+sidebar's logo started at y 19 (CSS px, measured over CDP in the packaged
+app), under lights that end near y 30, and the product declared no drag
+region, so the window could not be moved by its top. Now (`91c369a3`) the
+shell sets `--mike-titlebar-inset: 24px` on product pages (removed in full
+screen) and the sidebar starts with a strip of that height marked
+`-webkit-app-region: drag`; in a browser the variable is unset and the strip
+has no height. Packaged app against staging after the deploy, signed in
+with a minted session (cookie files deleted afterwards):
+
+```text
+windowed {"url":"/assistant","inset":"24px","strip":{"x":13,"y":13,"w":254,"h":24},"stripRegion":"drag","bodyRegion":"no-drag","logo":{"x":25,"y":43,"w":70,"h":33}}
+```
+
+Still by hand: the native title bar itself (CDP screenshots leave it out,
+and this terminal has no Screen Recording permission), dragging the window
+by the strip, and the full-screen toggle.
+
 ## Not done
 
-- **By hand:** the menu shortcuts (CDP cannot press native menu items), and
-  whether the inset traffic lights overlap the sidebar's logo (screenshots
-  over CDP do not include the native title bar).
+- **By hand:** the menu shortcuts (CDP cannot press native menu items) and
+  the title bar checks above.
 - **The e2e suites** (`npm run e2e`, `npm run e2e:flows`) need the local e2e
   stack; not run yet.
 - **A connector sign-in in the app** against staging (needs a connector

@@ -11,7 +11,8 @@ let
   cfg = config.workstation;
   # Code mode (Mission 11) runs the agent's Python here: dill keeps a
   # conversation's variables across kernel restarts; the rest is for web
-  # data, documents and analysis larger than memory.
+  # data, documents and analysis larger than memory. youtube-transcript-api
+  # is the transcriber skill's caption source (Mission 17, K3).
   python = pkgs.python3.withPackages (ps: with ps; [
     beautifulsoup4
     dill
@@ -28,6 +29,7 @@ let
     python-docx
     requests
     xlsxwriter
+    youtube-transcript-api
   ]);
 in
 {
@@ -96,6 +98,7 @@ in
       bashInteractive
       coreutils
       curl
+      ffmpeg-headless
       file
       findutils
       git
@@ -106,6 +109,8 @@ in
       python
       ripgrep
       unzip
+      # The transcriber skill: video metadata and captions, audio when asked.
+      yt-dlp
       zip
     ];
 
