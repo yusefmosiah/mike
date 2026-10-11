@@ -129,6 +129,23 @@ base64 over several chunks, error codes to messages), preferences (default
 shows the phone's message), Settings → Voice in the app (default pill,
 download button, downloading state).
 
+Another language, through the same bridge (2026-10-11): a harness page
+on `localhost:8765` asked for fr-FR, which the simulator did not have,
+installed Apple's model through the plugin's `install`, and transcribed a
+French clip made with `say` (`afconvert -d aac`):
+
+```text
+{"k":"status fr-FR before","v":{"state":"downloadable","engine":"dictation-transcriber","locale":"fr-FR"}}
+{"k":"transcribe before install error","v":{"code":"not-installed"}}
+{"k":"install fr-FR","v":{"locale":"fr-FR","state":"available","engine":"dictation-transcriber","ms":22238}}
+{"k":"status fr-FR after","v":{"engine":"dictation-transcriber","locale":"fr-FR","state":"available"}}
+{"k":"transcribe fr-FR","v":{"text":"Bonjour, veuillez préparer une courte lettre à l'avocat adverse et confirmer la date de la déposition","ms":2470}}
+```
+
+The spoken text was "Bonjour. Veuillez préparer une courte lettre à
+l'avocat adverse et confirmer la date de la déposition." The app was synced
+back to `https://choir-ip.com` afterwards.
+
 ## Not done
 
 - Not run on a real iPhone; not signed. On 2026-10-11 this Mac had no
@@ -145,7 +162,6 @@ download button, downloading state).
 - No live partial results while speaking: the plugin transcribes the finished
   clip, like every other engine. `SpeechAnalyzer` can stream; that would need
   native capture instead of the web view's recorder.
-- Apple's model downloads (other languages) were not exercised.
 - Biometric unlock, secure token storage, deep-link routing, push, Android:
   unchanged (README, Remaining work).
 - `npm audit` in `mobile/`: 3 moderate findings in `@capacitor/cli`'s build
