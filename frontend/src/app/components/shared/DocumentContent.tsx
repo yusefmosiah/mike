@@ -370,6 +370,7 @@ export function DocumentContent({
                         filename={resolvedDocument.title}
                         refetchKey={refetchKey}
                         rounded={false}
+                        canEdit={canEdit}
                     />
                 ) : viewType === "spreadsheet" ? (
                     <SpreadsheetView
