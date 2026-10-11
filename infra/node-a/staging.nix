@@ -11,7 +11,7 @@
 #   /var/lib/mike-staging/backend.env  model and search keys, copied in by the operator
 #   /var/lib/mike-staging/workstation.env  the owner's workstation VM, written by owner-link
 #   /var/lib/mike-staging/backups/<time>/  daily: postgres.dump (restore-checked) and storage.tar.zst
-#   mike-staging deploy | deploy-sha <sha> | up | down | ps | logs [svc] | owner-link <email> | backup | health
+#   mike-staging deploy | deploy-sha <sha> | up | down | ps | logs [svc] | owner-link <email> | api <email> <METHOD> <path> [curl args] | backup | health
 #
 # GitHub Actions deploys main through `deploy-sha` (.github/workflows/deploy-staging.yml),
 # as the mike-deploy user whose key may run nothing else.
@@ -201,6 +201,41 @@ let
             compose up -d backend >&2
           fi
           jq -r '.action_link // .properties.action_link' <<<"$link" ;;
+        api)
+          # Calls the backend as an existing account, from this host:
+          #   mike-staging api <email> <METHOD> <path> [curl args...]
+          # The session comes from GoTrue's admin API (a magic link verified
+          # here), so no password is used; it never leaves this host and is
+          # cached, 0600, until it expires. Requests go to the backend's
+          # loopback port, behind the gate. A presigned storage upload goes
+          # to 127.0.0.1:9000 with `Host: ${domain}`, the host it was signed
+          # for. Accounts are never created here; owner-link does that.
+          email=''${2:?email}; method=''${3:?method}; path=''${4:?path}; shift 4
+          auth=http://127.0.0.1:54321
+          umask 077
+          mkdir -p ${root}/api-sessions
+          cache=${root}/api-sessions/$(printf '%s' "$email" | sha256sum | cut -c1-16)
+          if [ ! -f "$cache" ] || [ "$(jq -r '.expires_at // 0' "$cache")" -le $(( $(date +%s) + 60 )) ]; then
+            admin=$(mktemp)
+            trap 'rm -f "$admin"' EXIT
+            printf 'Authorization: Bearer %s\n' "$(grep '^AUTH_SERVICE_KEY=' ${root}/secrets.env | cut -d= -f2-)" > "$admin"
+            found=$(curl -fsS -G "$auth/admin/users" -H "@$admin" \
+              --data-urlencode "filter=$email" --data-urlencode per_page=1000 \
+              | jq --arg e "$email" '[.users[] | select((.email // "" | ascii_downcase) == ($e | ascii_downcase))] | length')
+            if [ "$found" != 1 ]; then echo "no staging account for that email" >&2; exit 1; fi
+            hashed=$(curl -fsS -X POST "$auth/admin/generate_link" -H "@$admin" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg e "$email" '{type:"magiclink", email:$e}')" | jq -r '.hashed_token // .properties.hashed_token')
+            curl -fsS -X POST "$auth/verify" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg h "$hashed" '{type:"magiclink", token_hash:$h}')" \
+              | jq '{access_token, expires_at}' > "$cache.new"
+            mv "$cache.new" "$cache"
+            rm -f "$admin"
+          fi
+          # The token reaches curl in a file, not on its command line.
+          header=$(mktemp)
+          trap 'rm -f "$header"' EXIT
+          jq -r '"Authorization: Bearer " + .access_token' "$cache" > "$header"
+          curl -sS -X "$method" "http://127.0.0.1:3001$path" -H "@$header" "$@" ;;
         backup)
           # A dump that has not been restored is a hope, not a backup: each
           # one is restored into a scratch database and its tables counted.
@@ -229,7 +264,7 @@ let
             exit 1
           fi
           echo "healthy" ;;
-        *) echo "usage: mike-staging deploy|deploy-sha <sha>|up|down|ps|logs [svc]|compose ...|owner-link <email>|backup|health" >&2; exit 2 ;;
+        *) echo "usage: mike-staging deploy|deploy-sha <sha>|up|down|ps|logs [svc]|compose ...|owner-link <email>|api <email> <METHOD> <path> [curl args]|backup|health" >&2; exit 2 ;;
       esac
     '';
   };
