@@ -16,8 +16,8 @@
 //
 // Driving over CDP deliberately exercises the same binary a user double-clicks
 // — not `electron .` — so packaging regressions (asar paths, resources) fail
-// the test too. Native menu items can't be driven over CDP; menu coverage is
-// manual for now.
+// the test too. Native menu items can't be driven over CDP; menus.e2e.mjs
+// drives them from the main process instead.
 
 import { chromium } from "playwright-core";
 import { spawn } from "node:child_process";
