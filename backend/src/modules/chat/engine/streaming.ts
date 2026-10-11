@@ -51,6 +51,7 @@ import {
 import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import { skillsPromptSection } from "./contextBuilders";
+import { syncWorkspaceOncePerTurn } from "../../workspace/workspace.service";
 import {
   getCachedCaseOpinionTexts,
   type CourtlistenerTurnState,
@@ -1089,6 +1090,11 @@ export async function runLLMStream(params: {
       const key = conversationId ?? `turn-${turnKernelId}`;
       if (call.input.reset === true) kernels.discard(key);
       if (workstation) await snapshotOncePerTurn(turnEditState, workstation.snapshot);
+      // ~/mike and ~/skills, as before a run_command: once per turn, only in
+      // the user's own workstation.
+      const sync = workstation && !isGuest
+        ? await syncWorkspaceOncePerTurn(turnEditState, db, { id: userId, email: userEmail }, workstation)
+        : null;
       let session;
       try {
         session = await kernels.acquire(key, kernelLauncher, pythonSpecs);
@@ -1152,7 +1158,9 @@ export async function runLLMStream(params: {
         kernel_lost: outcome.kernelLost,
       });
       if (!outcome.kernelLost) void kernels.afterCell(key, kernelLauncher);
-      const content = cellResultContent(outcome);
+      const content = sync && !sync.ok
+        ? `[note] Your Mike documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date.\n${cellResultContent(outcome)}`
+        : cellResultContent(outcome);
       Object.assign(cellEvent, {
         status: outcome.status === "ok" ? "ok" : "failed",
         output: capText(content, MAX_CELL_EVENT_CHARS),
