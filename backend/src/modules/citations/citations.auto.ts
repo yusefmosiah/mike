@@ -52,6 +52,18 @@ export function citingParagraphs(content: string, blocks: Parameters<typeof para
     .map((text) => text.replace(/\s+/g, " ").trim().toLowerCase());
 }
 
+/**
+ * A document that declares itself a copy of a source, with front matter
+ * naming the `source` it was taken from (a pulled transcript, a saved web
+ * page), is source material rather than writing that cites: its links and
+ * quotations are the source's own, so there is nothing of the author's to
+ * check. Automatic checks skip it; a check can still be asked for.
+ */
+export function isSourceCopy(content: string): boolean {
+  const frontMatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+  return !!frontMatter && /^source:[ \t]*["']?[^\s"']/m.test(frontMatter[1]);
+}
+
 /** A version's citation fingerprint: the set of its citing paragraphs, hashed and sorted. */
 export function citationFingerprint(content: string, blocks: Parameters<typeof paragraphs>[1]): string[] {
   return [...new Set(citingParagraphs(content, blocks).map((text) => sha256(text).slice(0, 24)))].sort();
@@ -60,12 +72,17 @@ export function citationFingerprint(content: string, blocks: Parameters<typeof p
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((value, index) => value === b[index]);
 
 /** Fingerprints never change for a version; keep recent ones. */
-const fingerprints = new Map<string, string[] | null>();
+const fingerprints = new Map<string, string[] | "source" | null>();
 
-async function fingerprintOf(db: Db, documentId: string, versionId: string): Promise<string[] | null> {
+async function fingerprintOf(db: Db, documentId: string, versionId: string): Promise<string[] | "source" | null> {
   if (fingerprints.has(versionId)) return fingerprints.get(versionId)!;
   const read = await readVersionText(db, documentId, versionId);
-  const value = read && read !== "gone" ? citationFingerprint(read.content, read.blockOffsets) : null;
+  const value =
+    read && read !== "gone"
+      ? isSourceCopy(read.content)
+        ? "source"
+        : citationFingerprint(read.content, read.blockOffsets)
+      : null;
   fingerprints.set(versionId, value);
   if (fingerprints.size > 500) fingerprints.delete(fingerprints.keys().next().value!);
   return value;
@@ -73,8 +90,8 @@ async function fingerprintOf(db: Db, documentId: string, versionId: string): Pro
 
 export type AutoCheck = {
   started: boolean;
-  /** Why no check started: current version already checked, nothing cited, citations unchanged, unreadable. */
-  reason: "started" | "current" | "no_citations" | "unchanged" | "unreadable";
+  /** Why no check started: current version already checked, nothing cited, a copy of a source, citations unchanged, unreadable. */
+  reason: "started" | "current" | "no_citations" | "source_copy" | "unchanged" | "unreadable";
   task: VerificationTask | null;
 };
 
@@ -100,10 +117,11 @@ export async function autoCheckCitations(
 
   const now = await fingerprintOf(db, args.documentId, current.id);
   if (now === null) return ok({ started: false, reason: "unreadable", task: latest });
+  if (now === "source") return ok({ started: false, reason: "source_copy", task: latest });
   if (now.length === 0) return ok({ started: false, reason: "no_citations", task: latest });
   if (latest?.document_version_id && latest.status !== "failed" && latest.status !== "cancelled") {
     const before = await fingerprintOf(db, args.documentId, latest.document_version_id);
-    if (before && sameSet(before, now)) return ok({ started: false, reason: "unchanged", task: latest });
+    if (Array.isArray(before) && sameSet(before, now)) return ok({ started: false, reason: "unchanged", task: latest });
   }
   // A check of an older version is superseded by this one.
   if (latest && (latest.status === "queued" || latest.status === "running")) {

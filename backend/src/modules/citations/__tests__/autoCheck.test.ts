@@ -23,7 +23,7 @@ vi.mock("../citations.tasks", () => ({
   }),
 }));
 
-import { autoCheckCitations, citationFingerprint, citingParagraphs } from "../citations.auto";
+import { autoCheckCitations, citationFingerprint, citingParagraphs, isSourceCopy } from "../citations.auto";
 
 // Fingerprints are cached per version id, so each test uses its own ids.
 let prefix = 0;
@@ -76,6 +76,19 @@ describe("citation fingerprint", () => {
   });
 });
 
+describe("isSourceCopy", () => {
+  it("needs front matter at the very top with a source", () => {
+    expect(isSourceCopy('---\nsource: "https://example.com/a"\n---\nText')).toBe(true);
+    expect(isSourceCopy("\uFEFF---\r\ntitle: x\r\nsource: https://example.com/a\r\n---\r\n")).toBe(true);
+    expect(isSourceCopy("---\ntitle: A memo\n---\nSee https://example.com.")).toBe(false);
+    expect(isSourceCopy("---\nsource:\n---\n")).toBe(false);
+    expect(isSourceCopy('---\nsource: ""\ntitle: x\n---\n')).toBe(false);
+    expect(isSourceCopy("---\nsource:\ntitle: x\n---\n")).toBe(false);
+    expect(isSourceCopy("Intro\n---\nsource: https://example.com\n---")).toBe(false);
+    expect(isSourceCopy(memo)).toBe(false);
+  });
+});
+
 describe("automatic citation check", () => {
   it("checks a first version that cites something, and not one that cites nothing", async () => {
     texts.set(v("v1"), memo);
@@ -85,6 +98,24 @@ describe("automatic citation check", () => {
     started.length = 0;
     const result = await run();
     expect(result.ok && result.data.reason).toBe("no_citations");
+    expect(started).toEqual([]);
+  });
+
+  it("skips a copy of a source, such as a pulled transcript", async () => {
+    const transcript = [
+      "---",
+      'source: "https://www.youtube.com/watch?v=abc"',
+      'method: "youtube-transcript-api"',
+      "---",
+      "",
+      "# A talk",
+      "",
+      "Links from the description: https://example.com/sponsor",
+      'He said "this is a quotation that is long enough to be quoting a source".',
+    ].join("\n");
+    texts.set(v("v1"), transcript);
+    const result = await run();
+    expect(result.ok && result.data.reason).toBe("source_copy");
     expect(started).toEqual([]);
   });
 
