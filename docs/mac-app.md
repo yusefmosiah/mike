@@ -1,7 +1,9 @@
-# Mac app (planned)
+# Mac app
 
-**Status:** planned, not started. The owner chose on 2026-10-10 to build the
-wrapper first and to leave the self-contained local mode for later.
+**Status:** the wrapper is built in [`desktop/`](../desktop/README.md), not
+accepted; receipts in [`goals/mission-18-mac-app.md`](../goals/mission-18-mac-app.md).
+The owner chose on 2026-10-10 to build the wrapper first and to leave the
+self-contained local mode for later.
 
 The Mac app is a desktop window around the Mike web app. It loads a deployed
 Mike server, by default ours, so every web change reaches the app without a new

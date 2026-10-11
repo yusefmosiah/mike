@@ -75,7 +75,7 @@ None of it is accepted until the owner says so.
     20261010_05_document_citation_checks.sql" and "Up to date."
 - **Mobile:** fields no longer trigger iOS focus zoom, long words wrap in
   messages, and a table toolbar's phone menu closes once an action runs.
-- **Mac app:** planned, not started ([`docs/mac-app.md`](../docs/mac-app.md)).
+- **Mac app:** the wrapper is built, not accepted ([`mission-18-mac-app.md`](mission-18-mac-app.md)).
 - **Model costs:** volume work defaults to OpenCode Go flash models; OpenRouter is
   kept for decision models ([`docs/model-costs.md`](../docs/model-costs.md)).
 
@@ -401,8 +401,9 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 
 | # | Mission | State | File |
 |---|---|---|---|
-| 17 | Skills in the standard format: import, create and customize from chat, run in the workstation; the transcriber first | planned (owner direction 2026-10-11) | [`mission-17-skills.md`](mission-17-skills.md) |
-| 16 | Documents in the workstation: `~/mike/` read-only copy now, NAS mount later, `save_to_mike` back (reverses Mission 13's "documents stay out") | planned (owner direction 2026-10-11) | [`mission-16-documents-in-workstation.md`](mission-16-documents-in-workstation.md) |
+| 18 | The Mac app: upstream's Electron wrapper around the hosted web app, without local mode | built, awaiting review | [`mission-18-mac-app.md`](mission-18-mac-app.md) |
+| 17 | Skills in the standard format: import, create and customize from chat, run in the workstation; the transcriber first | K0–K2 built, awaiting review; K3 (transcriber) not yet | [`mission-17-skills.md`](mission-17-skills.md) |
+| 16 | Documents in the workstation: `~/mike/` read-only copy now, NAS mount later, `save_to_mike` back (reverses Mission 13's "documents stay out") | built, awaiting review; staging receipt in progress | [`mission-16-documents-in-workstation.md`](mission-16-documents-in-workstation.md) |
 | 15 | Images in, for the models that can see | built, awaiting review; staging photo turn and browser check recorded | [`mission-15-vision.md`](mission-15-vision.md) |
 | 7 | Pi runtime, GoTrue-only, restart-safe turns, branch titles | built, awaiting review | this file; `pi-durable-decision-2026-10-08.md` |
 | 12 | Cleanup: tests, live reconnect, docs | built, awaiting review | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
