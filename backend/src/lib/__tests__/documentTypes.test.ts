@@ -96,6 +96,9 @@ describe("contentTypeForDocumentType", () => {
             jpeg: "image/jpeg",
             webp: "image/webp",
             gif: "image/gif",
+            txt: "text/plain; charset=utf-8",
+            md: "text/markdown; charset=utf-8",
+            csv: "text/csv; charset=utf-8",
         };
         for (const type of ALLOWED_DOCUMENT_TYPES) {
             expect(contentTypeForDocumentType(type)).toBe(expected[type]);

@@ -12,10 +12,13 @@ export const ALLOWED_DOCUMENT_TYPES = new Set([
   "jpeg",
   "webp",
   "gif",
+  "txt",
+  "md",
+  "csv",
 ]);
 
 export const ALLOWED_DOCUMENT_TYPES_LABEL =
-  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif";
+  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif, txt, md, csv";
 
 /**
  * Upload extensions handled as images (lib/images cleans them on the way in),
@@ -102,6 +105,12 @@ export function contentTypeForDocumentType(fileType: string | null | undefined) 
     case "webp":
     case "gif":
       return `image/${IMAGE_FORMAT_BY_FILE_TYPE[(fileType ?? "").toLowerCase()]}`;
+    case "txt":
+      return "text/plain; charset=utf-8";
+    case "md":
+      return "text/markdown; charset=utf-8";
+    case "csv":
+      return "text/csv; charset=utf-8";
     default:
       return "application/octet-stream";
   }

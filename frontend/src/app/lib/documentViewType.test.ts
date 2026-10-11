@@ -40,6 +40,14 @@ describe("resolveDocumentViewType", () => {
     expect(resolveDocumentViewType({ fileType: "image/svg+xml" })).toBe("pdf");
   });
 
+  it("shows plain text in the text viewer, by type, MIME or filename", () => {
+    expect(resolveDocumentViewType({ fileType: "md" })).toBe("text");
+    expect(resolveDocumentViewType({ fileType: "text/csv; charset=utf-8" })).toBe("text");
+    expect(resolveDocumentViewType({ fileType: "text/plain" })).toBe("text");
+    expect(resolveDocumentViewType({ filename: "Notes.TXT" })).toBe("text");
+    expect(resolveDocumentViewType({ fileType: "text/html" })).toBe("pdf");
+  });
+
   it("allows a caller to override the legacy Word viewer", () => {
     expect(
       resolveDocumentViewType({

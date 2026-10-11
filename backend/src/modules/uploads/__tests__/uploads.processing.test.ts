@@ -14,6 +14,7 @@ import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagnosticErrorTags } from "../../../lib/observability/sentryPrivacy";
 import { ImageRejectedError } from "../../../lib/images";
+import { TextRejectedError } from "../../../lib/textFiles";
 
 const mocks = vi.hoisted(() => ({
   deleteFile: vi.fn(),
@@ -364,6 +365,39 @@ describe("upload processing", () => {
     const file = { ...baseFile, filename: "logo.png", file_type: "png", expected_size_bytes: svg.byteLength };
 
     await expect(processUploadFile(fakeDb({}) as never, baseSession, file)).rejects.toBeInstanceOf(ImageRejectedError);
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+    expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
+  });
+
+  it("stores a text file as uploaded, without a PDF rendition", async () => {
+    const text = Buffer.from("name,amount\nAcme,10\n");
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([text]));
+    const file = {
+      ...baseFile,
+      filename: "ledger.csv",
+      file_type: "csv",
+      content_type: "text/csv",
+      expected_size_bytes: text.byteLength,
+    };
+    const db = fakeDb({
+      documents: [{ data: { id: file.resource_id, user_id: baseSession.user_id }, error: null }],
+    });
+
+    await processUploadFile(db as never, baseSession, file);
+
+    expect(mocks.officeFileToPdf).not.toHaveBeenCalled();
+    expect(db.rpc).toHaveBeenCalledWith(
+      "create_document_version",
+      expect.objectContaining({ p_version: expect.objectContaining({ file_type: "csv" }) }),
+    );
+  });
+
+  it("refuses a binary file named as text, storing nothing", async () => {
+    const binary = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([binary]));
+    const file = { ...baseFile, filename: "notes.txt", file_type: "txt", expected_size_bytes: binary.byteLength };
+
+    await expect(processUploadFile(fakeDb({}) as never, baseSession, file)).rejects.toBeInstanceOf(TextRejectedError);
     expect(mocks.copyFile).not.toHaveBeenCalled();
     expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
   });

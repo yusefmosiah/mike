@@ -1,7 +1,7 @@
 import Image from "next/image";
-import { File, FileImage } from "lucide-react";
+import { File, FileImage, FileText } from "lucide-react";
 
-export type FileTypeKind = "pdf" | "word" | "excel" | "ppt" | "image" | "other";
+export type FileTypeKind = "pdf" | "word" | "excel" | "ppt" | "image" | "text" | "other";
 
 /**
  * Normalize a file_type value (e.g. "pdf") or a filename (e.g. "deck.pptx")
@@ -17,6 +17,7 @@ export function fileTypeKind(value: string | null | undefined): FileTypeKind {
     if (ext === "xlsx" || ext === "xlsm" || ext === "xls") return "excel";
     if (ext === "pptx" || ext === "ppt") return "ppt";
     if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
+    if (ext === "txt" || ext === "md" || ext === "csv") return "text";
     return "other";
 }
 
@@ -112,6 +113,8 @@ export function FileTypeIcon({
             );
         case "image":
             return <FileImage aria-hidden="true" className={`${cls} text-gray-500`} />;
+        case "text":
+            return <FileText aria-hidden="true" className={`${cls} text-gray-500`} />;
         default:
             return <File className={`${cls} text-gray-500`} />;
     }

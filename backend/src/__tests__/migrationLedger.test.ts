@@ -87,6 +87,28 @@ describe("migrate.sh transaction detection", () => {
     };
     const runsInTransaction = (file: string) =>
         ask("runs_in_transaction", file);
+    // One bash for many files: a process per shipped migration passed the
+    // test timeout once there were 120 of them.
+    const answeredYes = (fn: string, files: string[]) => {
+        const out = execFileSync(
+            "bash",
+            [
+                "-c",
+                'source "$1" || exit 99; fn="$2"; shift 2; for f in "$@"; do if "$fn" "$f"; then echo "yes $f"; else s=$?; [ "$s" -eq 1 ] || exit "$s"; fi; done',
+                "test",
+                script,
+                fn,
+                ...files,
+            ],
+            { stdio: "pipe", encoding: "utf8" },
+        );
+        return new Set(
+            out
+                .split("\n")
+                .filter((line) => line.startsWith("yes "))
+                .map((line) => line.slice(4)),
+        );
+    };
 
     it.each([
         ["plain DDL", "create table t (id int);\n", true],
@@ -137,17 +159,20 @@ describe("migrate.sh transaction detection", () => {
     ];
 
     it("runs every other migration in a transaction unless it is marked", () => {
+        const pathOf = (file: string) =>
+            path.join(repoRoot, "backend/migrations", file);
+        const inTransaction = answeredYes(
+            "runs_in_transaction",
+            migrations.map(pathOf),
+        );
         const outside = migrations.filter(
-            (file) =>
-                !runsInTransaction(path.join(repoRoot, "backend/migrations", file)),
+            (file) => !inTransaction.has(pathOf(file)),
         );
-        const unmarked = outside.filter(
-            (file) =>
-                !ask(
-                    "has_no_transaction_marker",
-                    path.join(repoRoot, "backend/migrations", file),
-                ),
+        const marked = answeredYes(
+            "has_no_transaction_marker",
+            outside.map(pathOf),
         );
+        const unmarked = outside.filter((file) => !marked.has(pathOf(file)));
         expect(
             unmarked,
             "add a `-- migrate:no-transaction` line to a new migration that cannot run in a transaction",

@@ -1126,7 +1126,7 @@ create table if not exists public.upload_session_files (
   constraint upload_session_files_filename_check
     check (length(filename) between 1 and 255),
   constraint upload_session_files_file_type_check
-    check (file_type in ('pdf', 'docx', 'doc', 'xlsx', 'xlsm', 'xls', 'pptx', 'ppt', 'png', 'jpg', 'jpeg', 'webp', 'gif')),
+    check (file_type in ('pdf', 'docx', 'doc', 'xlsx', 'xlsm', 'xls', 'pptx', 'ppt', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'txt', 'md', 'csv')),
   constraint upload_session_files_content_type_check
     check (length(content_type) between 1 and 255),
   constraint upload_session_files_size_check
@@ -4429,7 +4429,7 @@ begin
        or file_row.resource_id is null
        or length(file_row.client_id) not between 1 and 128
        or length(file_row.filename) not between 1 and 255
-       or file_row.file_type not in ('pdf', 'docx', 'doc', 'xlsx', 'xlsm', 'xls', 'pptx', 'ppt', 'png', 'jpg', 'jpeg', 'webp', 'gif')
+       or file_row.file_type not in ('pdf', 'docx', 'doc', 'xlsx', 'xlsm', 'xls', 'pptx', 'ppt', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'txt', 'md', 'csv')
        or length(file_row.content_type) not between 1 and 255
        or file_row.expected_size_bytes not between 1 and 104857600
        or length(file_row.staging_storage_path) < 1
@@ -8134,5 +8134,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_07_workstation_assignments.sql'),
   ('20261010_08_temporary_workstations.sql'),
   ('20261010_09_chat_code_approvals.sql'),
-  ('20261010_10_image_upload_types.sql')
+  ('20261010_10_image_upload_types.sql'),
+  ('20261010_11_text_upload_types.sql')
 on conflict (filename) do nothing;

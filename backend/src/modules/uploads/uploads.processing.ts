@@ -33,6 +33,7 @@ import {
 import { asReportableError } from "../../lib/httpError";
 import { contentTypeForDocumentType, isImageFileType, shouldConvertToPdf } from "../../lib/documentTypes";
 import { cleanImage, ImageRejectedError } from "../../lib/images";
+import { decodeTextFile, isTextFileType, TextRejectedError } from "../../lib/textFiles";
 import { uploadJobWallClockMs } from "../../lib/runtimeConfig";
 import {
   copyFile,
@@ -104,6 +105,8 @@ const TERMINAL_UPLOAD_ERROR_CODES = new Set([
   // Not an image sharp may open, or one too large to open safely.
   "unsupported_image",
   "image_too_large",
+  // A .txt, .md or .csv that is not UTF-8 text.
+  "unsupported_text",
   "size_mismatch",
   "content_type_mismatch",
   // The destination document no longer exists. Retrying cannot make it exist
@@ -343,9 +346,11 @@ async function requireSealedFile(
       size,
       sha256: hash.digest("hex"),
     };
-    return isImageFileType(file.file_type)
-      ? await cleanImageArtifact(artifact, file.file_type)
-      : artifact;
+    if (isImageFileType(file.file_type)) {
+      return await cleanImageArtifact(artifact, file.file_type);
+    }
+    if (isTextFileType(file.file_type)) decodeTextFile(await readFile(filePath));
+    return artifact;
   } catch (error) {
     await removeTemporaryArtifact(directory);
     if (error instanceof StorageOperationError) {
@@ -910,10 +915,17 @@ export async function processUploadJob(
         terminalProcessingFailure =
           error instanceof DeletedDocumentError ||
           error instanceof ChangedDocumentError ||
-          error instanceof ImageRejectedError;
+          error instanceof ImageRejectedError ||
+          error instanceof TextRejectedError;
         // A stale editor save and an image that is not one are the person's
         // to fix, not ours to be alerted about.
-        if (!(error instanceof ChangedDocumentError || error instanceof ImageRejectedError)) {
+        if (
+          !(
+            error instanceof ChangedDocumentError ||
+            error instanceof ImageRejectedError ||
+            error instanceof TextRejectedError
+          )
+        ) {
           reportError(error, {
             tags: {
               component: "upload-worker",
@@ -941,7 +953,8 @@ export async function processUploadJob(
             error_code: error instanceof ChangedDocumentError
               ? "document_changed"
               : error instanceof DeletedDocumentError ? "document_deleted"
-              : error instanceof ImageRejectedError ? error.code
+              : error instanceof ImageRejectedError || error instanceof TextRejectedError
+                ? error.code
               : "processing_failed",
             updated_at: new Date().toISOString(),
           })

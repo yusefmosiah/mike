@@ -132,7 +132,7 @@ describe("upload session routes", () => {
 
   it("rejects unsupported file extensions before reserving a session", async () => {
     const requestBody = manifest();
-    requestBody.files[0].filename = "notes.txt";
+    requestBody.files[0].filename = "install.sh";
 
     const response = await request(app)
       .post("/upload-sessions")
@@ -141,7 +141,7 @@ describe("upload session routes", () => {
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({
       code: "invalid_upload_session",
-      detail: expect.stringContaining("Unsupported file type: txt"),
+      detail: expect.stringContaining("Unsupported file type: sh"),
     });
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.getSignedUploadUrl).not.toHaveBeenCalled();

@@ -13,6 +13,7 @@ import {
   generatedDocKey,
   uploadFile,
 } from "../../../../lib/storage";
+import { isTextFileType, textForModel } from "../../../../lib/textFiles";
 import { convertedPdfKey, docxToPdf } from "../../../../lib/convert";
 import { enqueueConversion } from "../../../../lib/queue/conversionQueue";
 import { enqueueDbJob, enqueueStorageCleanup } from "../../../../lib/dbq/enqueue";
@@ -2172,6 +2173,8 @@ export async function readDocumentContent(
           );
         }
       }
+    } else if (isTextFileType(fileType)) {
+      text = textForModel(Buffer.from(raw).toString("utf8"));
     } else {
       devLog(
         `[read_document] unknown file_type="${docInfo.file_type}" for filename="${docInfo.filename}", trying mammoth`,
@@ -2558,8 +2561,8 @@ export async function documentModelFor(params: {
       if (fileType === "docx") return docxToModel(await docxView(raw, documentId, db, loaded.versionId));
       if (isSpreadsheetDocumentType(fileType) || fileType === "csv") return spreadsheetToModel(raw);
       if (fileType === "pptx") return presentationToModel(raw);
-      if (fileType === "md" || fileType === "markdown") return markdownToModel(raw.toString("utf8"));
-      if (fileType === "txt") return textToModel(raw.toString("utf8"));
+      if (fileType === "md" || fileType === "markdown") return markdownToModel(textForModel(raw.toString("utf8")));
+      if (fileType === "txt") return textToModel(textForModel(raw.toString("utf8")));
       // Legacy Office (.doc, .ppt): through their PDF rendering, as reads do.
       const pdf = await docxToPdf(raw);
       return pdfToModel(await extractPdfPages(pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) as ArrayBuffer));

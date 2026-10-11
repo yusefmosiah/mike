@@ -514,6 +514,7 @@ export function panelDocumentType(filename: string): PanelDocumentType {
     return "spreadsheet";
   }
   if (extension && isImageFilename(filename)) return "image";
+  if (extension === "txt" || extension === "md" || extension === "csv") return "text";
   return "pdf";
 }
 

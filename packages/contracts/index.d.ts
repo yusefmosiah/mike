@@ -5,6 +5,7 @@ export type SourceDocumentType =
   | "pdf"
   | "spreadsheet"
   | "image"
+  | "text"
   | "case"
   | "legislation";
 

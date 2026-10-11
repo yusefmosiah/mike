@@ -9,17 +9,19 @@ export const UNSUPPORTED_DOCUMENT_WARNING_MESSAGE =
  * them on the way in (backend/src/lib/images.ts).
  */
 export const SUPPORTED_IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
-export const SUPPORTED_ATTACHMENT_ACCEPT = `${SUPPORTED_DOCUMENT_ACCEPT},${SUPPORTED_IMAGE_ACCEPT}`;
+/** Plain text attaches where images do; the backend checks it is UTF-8. */
+export const SUPPORTED_TEXT_ACCEPT = ".txt,.md,.csv";
+export const SUPPORTED_ATTACHMENT_ACCEPT = `${SUPPORTED_DOCUMENT_ACCEPT},${SUPPORTED_IMAGE_ACCEPT},${SUPPORTED_TEXT_ACCEPT}`;
 export const UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE =
-    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, and image (PNG, JPEG, WebP, GIF) files can be uploaded.";
+    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, text (TXT, Markdown, CSV) and image (PNG, JPEG, WebP, GIF) files can be uploaded.";
 export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const IMAGE_TOO_LARGE_WARNING_MESSAGE = "Images can be at most 20 MB.";
 
-/** Accept images as well as documents. */
-export type UploadKinds = { images?: boolean };
+/** Accept images and plain text as well as documents. */
+export type UploadKinds = { images?: boolean; text?: boolean };
 
-/** What attaches to a chat or a project: documents and images. */
-export const ATTACHMENTS: UploadKinds = { images: true };
+/** What attaches to a chat or a project: documents, images and plain text. */
+export const ATTACHMENTS: UploadKinds = { images: true, text: true };
 
 const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
     "pdf",
@@ -33,6 +35,7 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
 ]);
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
+const TEXT_EXTENSIONS = new Set(["txt", "md", "csv"]);
 
 function extensionOf(name: string): string | undefined {
     return name.split(".").pop()?.toLowerCase();
@@ -50,6 +53,7 @@ export function isSupportedDocumentFile(file: File, kinds: UploadKinds = {}): bo
     const extension = extensionOf(file.name);
     if (!extension) return false;
     if (SUPPORTED_DOCUMENT_EXTENSIONS.has(extension)) return true;
+    if (kinds.text && TEXT_EXTENSIONS.has(extension)) return true;
     return !!kinds.images && IMAGE_EXTENSIONS.has(extension) && !isOversizedImage(file);
 }
 
@@ -70,7 +74,7 @@ export function formatUnsupportedDocumentWarning(
     kinds: UploadKinds = {},
 ): string | null {
     if (files.length === 0) return null;
-    if (!kinds.images) return UNSUPPORTED_DOCUMENT_WARNING_MESSAGE;
+    if (!kinds.images && !kinds.text) return UNSUPPORTED_DOCUMENT_WARNING_MESSAGE;
     const oversized = files.filter(isOversizedImage).length;
     return combineUploadWarnings(
         oversized < files.length ? UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE : null,

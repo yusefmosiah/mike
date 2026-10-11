@@ -120,7 +120,7 @@ describe("combineUploadWarnings", () => {
     });
 });
 
-describe("attachments: documents and images", () => {
+describe("attachments: documents, images and text", () => {
     const sized = (name: string, bytes: number) =>
         Object.defineProperty(new File(["x"], name), "size", { value: bytes });
 
@@ -137,6 +137,18 @@ describe("attachments: documents and images", () => {
     it("keeps images out where only documents belong", () => {
         expect(isSupportedDocumentFile(file("photo.png"))).toBe(false);
         expect(formatUnsupportedDocumentWarning([file("photo.png")])).toBe(UNSUPPORTED_DOCUMENT_WARNING_MESSAGE);
+    });
+
+    it("accepts plain text only where attachments are", () => {
+        for (const name of ["notes.txt", "README.md", "ledger.CSV"]) {
+            expect(isSupportedDocumentFile(file(name), ATTACHMENTS)).toBe(true);
+            expect(isSupportedDocumentFile(file(name))).toBe(false);
+        }
+        expect(isSupportedDocumentFile(file("notes.txt"), { text: true })).toBe(true);
+        expect(isSupportedDocumentFile(file("photo.png"), { text: true })).toBe(false);
+        expect(formatUnsupportedDocumentWarning([file("run.sh")], { text: true })).toBe(
+            UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+        );
     });
 
     it("refuses an SVG and an image over 20 MB, saying which", () => {

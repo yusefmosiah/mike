@@ -19,6 +19,7 @@ import { PdfView } from "@/app/components/shared/views/PdfView";
 import { DocxView } from "@/app/components/shared/views/DocxView";
 import { SpreadsheetView } from "@/app/components/shared/views/SpreadsheetView";
 import { ImageView } from "@/app/components/shared/views/ImageView";
+import { TextView } from "@/app/components/shared/views/TextView";
 import { CloseButton } from "@/shared/ui/CloseButton";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
@@ -556,6 +557,14 @@ export function DocumentSidePanel({
                             />
                         ) : selectedViewType === "image" ? (
                             <ImageView
+                                rounded="top-right"
+                                key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
+                                documentId={doc.id}
+                                versionId={selectedVersionId}
+                                filename={selectedFilename}
+                            />
+                        ) : selectedViewType === "text" ? (
+                            <TextView
                                 rounded="top-right"
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 documentId={doc.id}

@@ -16,6 +16,7 @@ import type { SourceSubdocument } from "@mike/contracts";
 export type { SourceDocument } from "@mike/contracts";
 import type { SourceDocument } from "@mike/contracts";
 import { isImageFileType } from "./documentTypes";
+import { isTextFileType } from "./textFiles";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -221,5 +222,6 @@ export function sourceDocumentType(filename: string): SourceDocumentType {
     return "spreadsheet";
   }
   if (extension && isImageFileType(extension)) return "image";
+  if (extension && isTextFileType(extension)) return "text";
   return "pdf";
 }

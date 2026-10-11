@@ -32,8 +32,12 @@ describe("fileTypeKind", () => {
         expect(fileTypeKind("DOCX")).toBe("word");
     });
 
+    it("knows plain text", () => {
+        expect(["txt", "md", "CSV"].map(fileTypeKind)).toEqual(["text", "text", "text"]);
+    });
+
     it("falls back to other for unknown, empty, or nullish input", () => {
-        expect(fileTypeKind("txt")).toBe("other");
+        expect(fileTypeKind("sh")).toBe("other");
         expect(fileTypeKind("")).toBe("other");
         expect(fileTypeKind(null)).toBe("other");
         expect(fileTypeKind(undefined)).toBe("other");
