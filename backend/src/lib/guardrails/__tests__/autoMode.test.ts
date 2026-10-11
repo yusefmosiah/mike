@@ -49,6 +49,7 @@ const T2_NAMES = [
     "generate_docx",
     "generate_excel",
     "generate_ppt",
+    "save_to_mike",
 ];
 
 const T3_NAMES = [

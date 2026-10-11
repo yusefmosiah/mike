@@ -60,6 +60,7 @@ export const DOCUMENT_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "generate_docx",
   "generate_excel",
   "generate_ppt",
+  "save_to_mike",
 ]);
 
 /**

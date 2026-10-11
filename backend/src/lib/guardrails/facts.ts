@@ -50,7 +50,7 @@ const KNOWN_EFFECTS: Readonly<Record<string, Effect>> = {
   courtlistener_read_case: "read", courtlistener_verify_citations: "read",
   // Mike document writes are tracked changes or new documents.
   edit_document: "create", replicate_document: "create", generate_docx: "create",
-  generate_excel: "create", generate_ppt: "create",
+  generate_excel: "create", generate_ppt: "create", save_to_mike: "create",
   // The open web: a query or URL can carry matter text to any host.
   web_search: "egress", fetch_web_page: "egress",
   // Gmail.

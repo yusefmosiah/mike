@@ -594,7 +594,13 @@ export async function runLLMStream(params: {
   // A guest the host has not allowed for the whole thread works with the
   // direct tools; each run_command waits for the host (workstationGate).
   let guestAllowed = !isGuest || !!guestCode?.standing;
-  const workstationTools = workstation ? WORKSTATION_TOOLS : [];
+  // A guest runs commands in the host's workstation but cannot save its files
+  // into Mike, and the host's documents are not re-synced for them.
+  const workstationTools = !workstation
+    ? []
+    : isGuest
+      ? WORKSTATION_TOOLS.filter((tool) => tool.function.name === "run_command")
+      : WORKSTATION_TOOLS;
   const baseTools = [
     ...conversationTools,
     ...researchTools,
@@ -1372,6 +1378,7 @@ export async function runLLMStream(params: {
           userEmail,
           model,
           workstation,
+          workspaceOwned: !!workstation && !isGuest,
           workstationGate,
         },
       );

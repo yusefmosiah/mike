@@ -17,6 +17,7 @@ import {
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
+import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
 import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
@@ -337,6 +338,12 @@ export async function runToolCalls(
     model?: string | null;
     /** The user's workstation VM, resolved once per turn (lib/workstation); run_command needs it. */
     workstation?: WorkstationTarget | null;
+    /**
+     * The workstation is this user's own (not a host's, for a guest): their
+     * documents are synced to ~/mike before the turn's first command, and
+     * save_to_mike is offered.
+     */
+    workspaceOwned?: boolean;
     /**
      * Runs before a command in someone else's workstation (a guest in a
      * shared thread): resolves with why it may not run, or null when it may.
@@ -1848,6 +1855,9 @@ export async function runToolCalls(
         }
         const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
         await snapshotOncePerTurn(turnEditState, target.snapshot);
+        const sync = options.workspaceOwned
+          ? await syncWorkspaceOncePerTurn(turnEditState, db, { id: userId, email: options.userEmail }, target)
+          : null;
         const result = await runInWorkstation(target, {
           command: String(args.command ?? ""),
           cwd: typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined,
@@ -1866,10 +1876,53 @@ export async function runToolCalls(
                   timed_out: result.timedOut,
                   truncated: result.truncated,
                   duration_ms: result.durationMs,
+                  ...(sync && !sync.ok
+                    ? { documents_note: "Your Mike documents could not be brought up to date in ~/mike this turn; what is there may be out of date." }
+                    : {}),
                 }
               : { error: result.error },
           ),
         });
+      }
+    } else if (tc.function.name === "save_to_mike") {
+      const target = options.workstation ?? null;
+      if (!target || !options.workspaceOwned) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: "save_to_mike works only in your own workstation." }),
+        });
+      } else {
+        const saved = await saveToMike(db, { id: userId, email: options.userEmail }, target, {
+          path: String(args.path ?? ""),
+          filename: typeof args.filename === "string" ? args.filename : undefined,
+          replace: typeof args.replace === "string" && args.replace.trim() ? args.replace : undefined,
+          projectId: args.to_library === true ? null : (projectId ?? null),
+        });
+        if (saved.ok) {
+          registerGeneratedDocument(
+            tc,
+            {
+              filename: saved.filename,
+              download_url: buildDownloadUrl(saved.storagePath, saved.filename),
+              document_id: saved.documentId,
+              version_id: saved.versionId,
+              version_number: saved.versionNumber,
+              storage_path: saved.storagePath,
+              message: saved.created
+                ? `Saved as the document '${saved.filename}'.`
+                : `Saved as version ${saved.versionNumber} of '${saved.filename}'.`,
+            },
+            saved.filename,
+            saved.fileType,
+          );
+        } else {
+          toolResults.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({ error: saved.error }),
+          });
+        }
       }
     } else if (tc.function.name === "fetch_web_page") {
       const url = String(args.url ?? "").trim();

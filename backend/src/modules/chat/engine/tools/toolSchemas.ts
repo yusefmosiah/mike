@@ -20,6 +20,7 @@ export const DOCUMENT_MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "generate_docx",
   "generate_excel",
   "generate_ppt",
+  "save_to_mike",
 ]);
 
 /** Read a tool schema's function name, whatever shape the entry arrived in. */
@@ -142,7 +143,7 @@ export const WORKSTATION_TOOLS = [
     function: {
       name: "run_command",
       description:
-        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr. Mike's own documents are not in the workstation.",
+        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. The user's Mike documents are files under ~/mike, read-only and up to date at the start of each turn: ~/mike/projects/<project>/<folder>/..., ~/mike/library/... and ~/mike/templates/.... Write results elsewhere (for example ~/mike/out/) and give them back with save_to_mike. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr.",
       parameters: {
         type: "object",
         properties: {
@@ -160,6 +161,36 @@ export const WORKSTATION_TOOLS = [
           },
         },
         required: ["command"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_to_mike",
+      description:
+        "Save a file from the workstation into Mike: as a new document in this chat's project (or the library), or, with replace, as a new version of a document under ~/mike. This is the only way a workstation file reaches Mike. Mike documents can be PDF, Word, Excel, PowerPoint, images (PNG, JPEG, WebP, GIF) and plain text (.txt, .md, .csv).",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "The file in the workstation, e.g. ~/mike/out/summary.md (absolute or relative to /home/agent).",
+          },
+          filename: {
+            type: "string",
+            description: "The document's name in Mike, with its extension. Default: the file's own name.",
+          },
+          replace: {
+            type: "string",
+            description: "A file under ~/mike (e.g. ~/mike/projects/Acme/Contract.docx) whose document should get this file as its new version, instead of creating a document.",
+          },
+          to_library: {
+            type: "boolean",
+            description: "Create the document in the user's library rather than this chat's project.",
+          },
+        },
+        required: ["path"],
       },
     },
   },

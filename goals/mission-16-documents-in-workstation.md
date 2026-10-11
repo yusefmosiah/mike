@@ -35,38 +35,58 @@ build.
   ```text
   ~/mike/
     projects/<project name>/<folder>/<file>
-    library/<folder>/<file>
-    chats/<chat title>/<attachment>     standalone chats' attachments
-    out/                               what the agent wants to give back
+    library/<folder>/<file>             the user's own documents outside projects
+    templates/<folder>/<file>           the user's templates
+    out/                                scratch space for results
+    .manifest.json                      what the harness copied, for the next sync
   ```
 
   Everything except `out/` is read-only (files `0444`, directories `0555`).
-  - **Phase 1 (copy).** Before a command-running turn, the harness brings
-    `~/mike/` up to date over the ssh channel it already uses (`lib/workstation/exec.ts`):
-    it adds new and changed files and removes anything the user can no longer
-    read or that was deleted. Only changes travel; a manifest
-    (`~/mike/.manifest.json`, document id, version id, sha256 per path) tells
-    the harness what is there.
+  Names are made safe for a filesystem, and clashes are numbered in creation
+  order (`Lease.docx`, `Lease (2).docx`), so a sync never shuffles files
+  between names.
+  - **Phase 1 (copy), built.** Once per turn, before the turn's first
+    `run_command`, the harness brings `~/mike/` up to date over the ssh channel
+    it already uses (`backend/src/lib/workstation/files.ts`): a small Python
+    receiver in the guest writes new and changed files through a temporary
+    name and an atomic rename, and removes anything the user can no longer
+    read or that was deleted. Only changes travel, in sessions of about 64 MB.
+    The manifest records the version id and size of each path; an entry whose
+    file the agent removed or changed is dropped when it is read, so that file
+    is sent again. A sync failure does not stop the command; the command's
+    result says the documents could not be copied.
   - **Phase 2 (mount).** When the NAS exists, the same tree is a read-only
     mount (virtiofs or NFS) of a per-user view, and the copy step goes away.
-    The layout, the manifest format and `out/` do not change, so nothing the
-    agent or a skill does changes either.
+    The layout and `out/` do not change, so nothing the agent or a skill does
+    changes either.
 - **Scope: everything the user can read in Mike.** The same documents the
-  web app shows them. Sharing and org grants are evaluated by the existing
-  access checks at sync time, never inside the VM.
-- **One way back: publish.** A tool, `save_to_mike`, and the same thing as a
-  command inside the VM (`mike-save <file> [--project P] [--folder F]
-  [--replace <path under ~/mike>]`, which writes a request file under
-  `~/mike/out/` that the harness picks up at the end of the command):
+  web app shows them (`backend/src/modules/workspace/workspace.view.ts`):
+  every accessible project's ready documents, plus their own library and
+  templates. Sharing and org grants are evaluated by the existing access
+  checks at sync time, never inside the VM. Workflow assets stay out.
+- **One way back: `save_to_mike`.** A tool with `path`, and optionally
+  `filename`, `replace` and `to_library`
+  (`backend/src/modules/workspace/workspace.save.ts`):
   - A new file becomes a new document in the chat's project, or in the
-    library for a standalone chat.
-  - `--replace` names a file under `~/mike/`; the harness looks it up in the
-    manifest and records a new version of that document through
-    `createDocumentVersion`, if the user may still write to it.
+    library for a standalone chat or with `to_library`. Creating in a project
+    needs edit access there.
+  - `replace` names a file under `~/mike/`; the harness resolves it against a
+    fresh view of what the user can read, and records a new version of that
+    document through the documents module (`storeDocumentFile`) if the user
+    can still edit it.
   - Nothing is ingested implicitly. Files left in `out/` without a save stay
     there.
+  - Results can be any Mike document type. Plain text (`.txt`, `.md`, `.csv`)
+    became a document type for this, so a Markdown summary or a CSV comes
+    back as itself; the upload path accepts it too, checked to be UTF-8 with
+    no NUL bytes, and the web app shows it in a plain-text viewer.
 - **Results show in chat.** Each save is a visible tool result with a link to
-  the new document or version.
+  the new document or version, like any generated document.
+- **Guests.** In a shared thread whose code runs in the host's workstation,
+  a guest gets `run_command` only, gated by the host as before. There is no
+  sync and no `save_to_mike` in someone else's workstation: the host's
+  `~/mike` holds the host's documents, and a guest's documents never go
+  there.
 
 ## The boundaries we keep
 
@@ -75,9 +95,11 @@ build.
 2. **Permissions are checked when the harness reads or writes,** never by
    trusting anything from the VM. A publish rechecks write permission at
    publish time; a stale copy never grants write access.
-3. **The harness reads back only regular files** under `~/mike/out/` (or the
-   path named in a save): no symlinks (`O_NOFOLLOW`), size-capped, type
-   sniffed as for any upload.
+3. **The harness reads back only the regular file a save names,** inside
+   `/home/agent`: no symlinks (`O_NOFOLLOW`, and the parent directory's real
+   path must stay in the home directory), at most 100 MB, and its bytes must
+   be the type its name says (images are re-encoded as uploads are, text must
+   be UTF-8, Office and PDF files must start with their signatures).
 
 ## What we will not build
 
@@ -107,6 +129,11 @@ build.
 6. Backend tests, the architecture test and the stack tests pass.
 
 ## Not yet
+
+- A `mike-save` command inside the VM. The tool is enough for the agent; a
+  command would need a request file the harness polls for.
+- A separate `~/mike/chats/` tree. A standalone chat's attachments are
+  library documents, so they are under `~/mike/library/` already.
 
 - The NAS and the phase 2 mount.
 - Large libraries: measure the first full copy and the per-turn delta on a

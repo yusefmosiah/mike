@@ -22,6 +22,7 @@ export {
     getDocument,
     listSingleDocuments,
     deleteDocument,
+    ensureDocumentAccess,
 } from "./documents.access";
 
 export {
@@ -55,6 +56,7 @@ export { handleConversionConvert, markConversionFailed } from "./documents.conve
 export { sweepStaleProcessingDocuments } from "./documents.maintenance";
 
 export { createDocumentVersion, type NewDocumentVersion, type DocumentVersionRecord } from "./documents.lifecycle";
+export { storeDocumentFile, type StoredDocumentFile } from "./documents.store";
 export { handleDocumentCleanup } from "./documents.cleanupJobs";
 export { copyDocumentVersionFiles } from "./documents.copyFiles";
 export { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "./documents.cleanupJobs";

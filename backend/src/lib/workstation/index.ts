@@ -14,3 +14,11 @@ export {
 } from "./exec";
 export { requestSnapshot, snapshotOncePerTurn, type SnapshotResult } from "./snapshot";
 export { connectVsockMux } from "./vsockMux";
+export {
+  readWorkspaceManifest,
+  readWorkstationFile,
+  WORKSPACE_ROOT,
+  writeWorkspaceBatch,
+  type ManifestEntry,
+  type WorkspaceBatch,
+} from "./files";

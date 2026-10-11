@@ -108,6 +108,9 @@ const ROUTELESS_MODULES: Record<string, true> = {
   // Retrieval chunks and searches document text for chat context assembly
   // (wiring deferred); it is never called over HTTP.
   retrieval: true,
+  // Workspace syncs a user's documents into their workstation and saves
+  // files back (Mission 16); the chat engine calls it, nothing over HTTP.
+  workspace: true,
 };
 
 describe("backend architecture", () => {
