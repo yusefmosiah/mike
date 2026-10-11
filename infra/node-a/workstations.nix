@@ -247,6 +247,15 @@ in
       MaxClients = 200;
       LogLevel = "Info";
       DisableViaHeader = true;
+      # YouTube asks data-centre addresses to sign in, so captions cannot be
+      # fetched from here. Its hosts go out through the owner's Mac instead:
+      # infra/home-egress keeps an ssh reverse tunnel open onto this port,
+      # behind a proxy that reaches these hosts and nothing else. With the
+      # tunnel down, these requests fail as they did before; nothing else
+      # changes.
+      Upstream = map (site: ''http 127.0.0.1:18118 "${site}"'') [
+        "youtube.com" ".youtube.com" "youtu.be" "youtube-nocookie.com" ".youtube-nocookie.com"
+      ];
     };
   };
 
@@ -278,6 +287,8 @@ in
         # connections to this host or anything internal, whatever a name
         # resolves to. Replies to the VMs are established traffic.
         type filter hook output priority filter - 1; policy accept;
+        # One exception: the home-egress tunnel the Upstream lines above use.
+        meta skuid ${toString proxyUid} ct state new ip daddr 127.0.0.1 tcp dport 18118 accept
         meta skuid ${toString proxyUid} ct state new ip daddr { ${privateV4} } drop
         meta skuid ${toString proxyUid} ct state new meta nfproto ipv6 drop
       }
