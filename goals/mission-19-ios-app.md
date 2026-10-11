@@ -131,9 +131,14 @@ download button, downloading state).
 
 ## Not done
 
-- Not run on a real iPhone; not signed. Dictation was not tried with a live
-  microphone (unattended, at night); the harness fed a recorded clip through
-  the same plugin call.
+- Not run on a real iPhone; not signed. On 2026-10-11 this Mac had no
+  signing identity (`security find-identity -v -p codesigning`: "0 valid
+  identities found"), no Apple account in Xcode, and no iPhone attached
+  (`xcrun devicectl list devices` listed a paired Apple Watch and two
+  simulators). Running on the owner's phone needs them to sign in to Xcode
+  with their Apple ID (a free account can install for 7 days) and connect the
+  phone. Dictation was not tried with a live microphone (unattended); the
+  harness fed a recorded clip through the same plugin call.
 - The web change reaches the app only after it deploys to the server the app
   loads; the in-app Settings → Voice and composer with "This iPhone" were
   checked by unit tests, not on screen (staging is behind the access gate).

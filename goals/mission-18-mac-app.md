@@ -133,11 +133,72 @@ The first `npm run e2e` after starting `next dev` failed with
 navigation" while the dev server compiled its first pages; the rerun above
 passed unchanged.
 
+## The menu, from the main process (2026-10-11)
+
+`e2e/menus.e2e.mjs` (`npm run e2e:menus`) opens Node's inspector on the
+packaged app's main process, clicks each item the shell defines and checks
+the result over CDP, and puts the window in and out of full screen. Same
+local stack as above:
+
+```text
+$ MIKE_E2E_URL=http://localhost:3100 npm run e2e:menus
+✓ signed up and in
+✓ menu shortcuts: Settings… Cmd+,, Change Server… Cmd+Shift+,, Hide Mike Command+H, Hide Others Command+Alt+H, Quit Mike CommandOrControl+Q, New Chat Cmd+N, Assistant Cmd+1, Projects Cmd+2, Library Cmd+3, Tabular Review Cmd+4, Workflows Cmd+5, History Cmd+6, Close Window CommandOrControl+W, Undo CommandOrControl+Z, Redo Shift+CommandOrControl+Z, Cut CommandOrControl+X, Copy CommandOrControl+C, Paste CommandOrControl+V, Paste and Match Style Cmd+Option+Shift+V, Select All CommandOrControl+A, Home Cmd+Shift+H, Reload CmdOrCtrl+R, Force Reload Shift+CmdOrCtrl+R, Actual Size CommandOrControl+0, Zoom In CommandOrControl+Plus, Zoom Out CommandOrControl+-, Toggle Full Screen Control+Command+F, Toggle Developer Tools Alt+Command+I, Minimize CommandOrControl+M
+✓ File › Projects → /projects
+✓ File › Library → /library
+✓ File › Tabular Review → /tabular-reviews
+✓ File › Workflows → /workflows
+✓ File › History → /history
+✓ File › Assistant → /assistant
+✓ File › New Chat → /assistant
+✓ Mike › Settings… → /settings
+✓ View › Home → /assistant
+✓ full screen: strip 24px → 0px → 24px
+✓ Help › Mike on GitHub → default browser (captured)
+✓ Mike › Change Server… → connect page
+MENUS E2E PASSED
+```
+
+What this cannot do, tried in the same run before narrowing the suite:
+key events sent to the window (`webContents.sendInputEvent`, ⌘1…⌘6, ⌘N,
+⌘,, ⌘⇧H, ⌘=, ⌘⇧,) left the page where it was, since they never reach the
+native menu; and `MenuItem.click()` on the Toggle Full Screen role item left
+`isFullScreen()` false for six seconds, while `setFullScreen(true)` worked.
+So the shortcuts are registered (listed above) but pressing them, and the
+role items (Edit, zoom, Toggle Full Screen), stay by hand.
+
+**Release hardening found here:** the development build (`npm run dist`)
+leaves `RunAsNode`, `EnableNodeOptionsEnvironmentVariable` and
+`EnableNodeCliInspectArguments` on (`npx @electron/fuses read --app
+dist/mac-arm64/Mike.app`), so anyone who can start it can run code in it
+with full Node; this suite depends on that. The release config
+(`electron-builder.release.json`, `npm run dist:signed`) now turns all three
+off and turns on `OnlyLoadAppFromAsar` and
+`EnableEmbeddedAsarIntegrityValidation`. File-protocol privileges stay on
+because the connect page is a `file://` page. Checked with an unsigned build
+of the release config (`--mac dir -c.mac.identity=null
+-c.mac.notarize=false`):
+
+```text
+RunAsNode is Disabled
+EnableNodeOptionsEnvironmentVariable is Disabled
+EnableNodeCliInspectArguments is Disabled
+EnableEmbeddedAsarIntegrityValidation is Enabled
+OnlyLoadAppFromAsar is Enabled
+```
+
+Launched with `--inspect=9341`, after an ad-hoc re-sign (flipping the fuses
+edits the binary after the linker's ad-hoc signature, and macOS refuses to
+run it until it is signed again, which a real release does anyway), it
+loaded its connect page from `app.asar` and nothing listened on 9341.
+
 ## Not done
 
-- **By hand:** the menu shortcuts (CDP cannot press native menu items) and
-  the title bar checks above.
+- **By hand:** pressing the shortcuts and the role items (see the menu
+  section), the traffic lights, and dragging the window by its strip.
 - **A connector sign-in in the app** against staging (needs a connector
   configured there).
-- **Signing and notarization** need the owner's Apple Developer ID.
+- **Signing and notarization** need the owner's Apple Developer ID. This Mac
+  has none: `security find-identity -v -p codesigning` printed "0 valid
+  identities found" (2026-10-11), and Xcode has no Apple account signed in.
 - **CI:** no job builds the app yet; a macOS runner job is a cost decision.
