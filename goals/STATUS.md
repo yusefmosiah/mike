@@ -75,7 +75,12 @@ None of it is accepted until the owner says so.
     20261010_05_document_citation_checks.sql" and "Up to date."
 - **Mobile:** fields no longer trigger iOS focus zoom, long words wrap in
   messages, and a table toolbar's phone menu closes once an action runs.
-- **Mac app:** the wrapper is built, not accepted ([`mission-18-mac-app.md`](mission-18-mac-app.md)).
+- **Mac app:** the wrapper is built, not accepted; both CDP e2e suites pass
+  against current code (flows 11/11) ([`mission-18-mac-app.md`](mission-18-mac-app.md)).
+- **Open voice models on iPhone:** Safari reloaded the page when Whisper or
+  Kokoro ran. In WebKit they now run on ONNX Runtime's plain WebAssembly
+  build, one model at a time on iPhone; checked in the iOS 26.2 Simulator,
+  not yet on the owner's phone ([`mission-10-voice.md`](mission-10-voice.md)).
 - **iPhone app:** builds and runs in the simulator against staging, with an
   offline page and dictation on the phone through Apple's speech recognition;
   not signed, not on a device ([`mission-19-ios-app.md`](mission-19-ios-app.md)).
