@@ -338,6 +338,9 @@ describe("Google Drive callback and disconnect", () => {
         expect(res.headers["content-security-policy"]).toContain(
             "script-src 'nonce-",
         );
+        // The popup must keep window.opener to report back (browsers and the
+        // Mac app); helmet's same-origin default would cut it.
+        expect(res.headers["cross-origin-opener-policy"]).toBe("unsafe-none");
         expect(completeGoogleDriveOAuth).toHaveBeenCalledWith(
             "u1",
             "s",
