@@ -154,7 +154,25 @@ Through `mike-staging api` on node-a, the owner's staging account,
   from GitHub instead. Fix: the import returns the skill's body and the chat
   keeps it for the rest of the turn.
 
-Not yet run live: the edit and the same-turn read with both fixes deployed.
+- **The edit again, with the fix deployed (chat `a894a4c6`).** Version 1
+  restored through `POST /workflows/:id/versions/:versionId/restore` (it
+  became version 5), then the same request as chat `1b4773b9`. The model
+  first called `read_workflow`, then saved version 6: version 1 word for
+  word, with "under 350 words" in both places and a sixth section "Next
+  steps — at most three concrete actions for our side". The refusal path
+  did not fire live (the model read first on its own, following the new
+  tool description); `toolDispatcherSkillEdit.test.ts` covers it. An
+  earlier attempt (chat `41e45d9f`) ran on the previous image during the
+  rollout and saved without reading.
+
+- **Install and read in one turn, fix deployed (chat `97b56653`).**
+  `install_skill` saved `doc-coauthoring` as version 3 (same commit
+  `dbd4588f`); `read_workflow` right after returned the full SKILL.md
+  ("# Doc Co-Authoring Workflow ..."), and the answer quoted its stages
+  "Context Gathering", "Refinement & Structure" and "Reader Testing" from
+  it.
+
+Not yet run live: the transcriber skill (K3).
 
 ## The boundaries we keep
 
