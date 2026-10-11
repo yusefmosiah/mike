@@ -587,6 +587,20 @@ describe("content and reasoning deltas", () => {
     ]);
   });
 
+  it("keeps a skill save's action and version, and drops anything else", async () => {
+    expect(
+      await eventsOf([
+        { type: "workflow_applied", workflow_id: "w1", title: "nda", action: "saved", version_number: 3 },
+        { type: "workflow_applied", workflow_id: "w2", title: "pdf", action: "installed", version_number: "x" },
+        { type: "workflow_applied", workflow_id: "w3", title: "odd", action: "deleted" },
+      ]),
+    ).toEqual([
+      { type: "workflow_applied", workflow_id: "w1", title: "nda", action: "saved", version_number: 3 },
+      { type: "workflow_applied", workflow_id: "w2", title: "pdf", action: "installed", version_number: undefined },
+      { type: "workflow_applied", workflow_id: "w3", title: "odd" },
+    ]);
+  });
+
   it("merges consecutive reasoning deltas and finalizes them at the end of the stream", async () => {
     expect(
       await eventsOf([

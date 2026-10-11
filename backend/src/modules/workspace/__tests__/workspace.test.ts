@@ -20,6 +20,7 @@ import {
   buildWorkspaceView,
   safeSegment,
   saveToMike,
+  syncSkills,
   syncWorkspace,
   syncWorkspaceOncePerTurn,
   uniqueName,
@@ -381,5 +382,47 @@ describe("saveToMike", () => {
       ok: false,
       error: "Could not read out/link.md: not a regular file.",
     });
+  });
+});
+
+describe("syncSkills", () => {
+  it("writes each skill's SKILL.md and files under its name, numbering a clash", async () => {
+    const { packSkillFiles } = await import("../../../lib/skillFormat");
+    const packed = await packSkillFiles([{ path: "scripts/fill.py", bytes: Buffer.from("print('fill')") }]);
+    const writeBatch = vi.fn().mockResolvedValue({ ok: true });
+    const download = vi.fn(async () => packed!.zip.buffer.slice(packed!.zip.byteOffset, packed!.zip.byteOffset + packed!.zip.byteLength) as ArrayBuffer);
+    const result = await syncSkills(db, user, target, {
+      listSkills: async () => [
+        { name: "pdf", skillMd: "---\nname: pdf\n---\nA", files: packed!.entries, filesPath: "bundle.zip" },
+        { name: "pdf", skillMd: "---\nname: pdf\n---\nB", files: [], filesPath: null },
+      ],
+      readManifest: async (_target, root) => {
+        expect(root).toBe("/home/agent/skills");
+        return { ok: true, files: { "old/SKILL.md": { version: "x", size: 1 } } };
+      },
+      writeBatch,
+      download,
+    });
+    expect(result).toMatchObject({ ok: true, written: 3, deleted: 1 });
+    const [, batch, tree] = writeBatch.mock.calls[0]!;
+    expect(tree).toEqual({ root: "/home/agent/skills", writable: "" });
+    expect(batch.delete).toEqual(["old/SKILL.md"]);
+    expect(batch.files.map((f: { path: string; bytes: Buffer }) => [f.path, f.bytes.toString()])).toEqual([
+      ["pdf/SKILL.md", "---\nname: pdf\n---\nA"],
+      ["pdf/scripts/fill.py", "print('fill')"],
+      ["pdf (2)/SKILL.md", "---\nname: pdf\n---\nB"],
+    ]);
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a skills failure with the turn's sync, after the documents", async () => {
+    const result = await syncWorkspaceOncePerTurn({}, db, user, target, {
+      buildView: async () => new Map(),
+      listSkills: async () => {
+        throw new Error("down");
+      },
+      readManifest: async () => ({ ok: true, files: {} }),
+    });
+    expect(result).toEqual({ ok: false, error: "the skills could not be copied to the workstation" });
   });
 });

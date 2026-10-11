@@ -50,6 +50,7 @@ import {
 } from "./citations";
 import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
+import { skillsPromptSection } from "./contextBuilders";
 import {
   getCachedCaseOpinionTexts,
   type CourtlistenerTurnState,
@@ -658,9 +659,13 @@ export async function runLLMStream(params: {
         conversationId ? kernels.knownNames(conversationId) : [],
       )}`
     : memory.systemPrompt;
-  const systemPrompt = isGuest && workstation
-    ? `${promptWithCode}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
+  // The user's skills, listed every turn so a chat finds one unprompted.
+  const promptWithSkills = workflowStore
+    ? `${promptWithCode}\n\n${skillsPromptSection(workflowStore, { workstation: !!workstation && !isGuest })}`
     : promptWithCode;
+  const systemPrompt = isGuest && workstation
+    ? `${promptWithSkills}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
+    : promptWithSkills;
   const chatMessages: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")
     .map(
@@ -1426,6 +1431,7 @@ export async function runLLMStream(params: {
           type: "workflow_applied",
           workflow_id: wf.workflow_id,
           title: wf.title,
+          ...(wf.action ? { action: wf.action, version_number: wf.version_number } : {}),
         });
       }
       for (const e of docsEdited) {

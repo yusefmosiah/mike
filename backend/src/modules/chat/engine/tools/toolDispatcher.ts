@@ -19,6 +19,22 @@ import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
 import {
+  readSkillFile,
+  rememberSkill,
+  runInstallSkill,
+  runSaveSkill,
+  skillFilesNotice,
+  skillSavedMessage,
+} from "./skillTools";
+
+/** A skill read, saved or installed in this turn, shown in the chat. */
+type WorkflowAppliedResult = {
+  workflow_id: string;
+  title: string;
+  action?: "saved" | "installed";
+  version_number?: number;
+};
+import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
 } from "./connectorApprovals";
@@ -368,7 +384,7 @@ export async function runToolCalls(
   }[];
   docsCreated: DocCreatedResult[];
   docsReplicated: DocReplicatedResult[];
-  workflowsApplied: { workflow_id: string; title: string }[];
+  workflowsApplied: WorkflowAppliedResult[];
   docsEdited: DocEditedResult[];
   askInputsEvents: AskInputsEvent[];
   courtlistenerEvents: CourtlistenerToolEvent[];
@@ -392,7 +408,7 @@ export async function runToolCalls(
   }[] = [];
   const docsCreated: DocCreatedResult[] = [];
   const docsReplicated: DocReplicatedResult[] = [];
-  const workflowsApplied: { workflow_id: string; title: string }[] = [];
+  const workflowsApplied: WorkflowAppliedResult[] = [];
   const docsEdited: DocEditedResult[] = [];
   const askInputsEvents: AskInputsEvent[] = [];
   const courtlistenerEvents: CourtlistenerToolEvent[] = [];
@@ -923,12 +939,51 @@ export async function runToolCalls(
             .map(([id, w]) => ({
               id,
               title: w.title,
+              ...(w.name ? { name: w.name } : {}),
+              ...(w.description ? { description: w.description } : {}),
+              ...(w.files?.length ? { files: w.files.length } : {}),
             }))
         : [];
       toolResults.push({
         role: "tool",
         tool_call_id: tc.id,
         content: JSON.stringify(list),
+      });
+    } else if (tc.function.name === "read_workflow" && typeof args.file === "string" && args.file.trim()) {
+      const wf = workflowStore?.get(String(args.workflow_id ?? ""));
+      const content = wf
+        ? await readSkillFile(wf, args.file).catch(() => "The file could not be read.")
+        : `Workflow '${String(args.workflow_id ?? "")}' not found.`;
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        // Part of the skill, so the skill's own fence: follow, never override.
+        content: nonce && wf ? spotlightWorkflow(content, nonce) : content,
+      });
+    } else if (tc.function.name === "save_skill" || tc.function.name === "install_skill") {
+      const installing = tc.function.name === "install_skill";
+      const user = { id: userId, email: options.userEmail };
+      const result = installing
+        ? await runInstallSkill(db, user, args)
+        : await runSaveSkill(db, user, args, {
+            workstation: options.workstation ?? null,
+            workspaceOwned: !!options.workspaceOwned,
+          });
+      if (result.ok) {
+        rememberSkill(workflowStore, result);
+        const applied: WorkflowAppliedResult = {
+          workflow_id: result.saved.skillId,
+          title: result.saved.title,
+          action: installing ? "installed" : "saved",
+          version_number: result.saved.versionNumber,
+        };
+        write(`data: ${JSON.stringify({ type: "workflow_applied", ...applied })}\n\n`);
+        workflowsApplied.push(applied);
+      }
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: result.ok ? skillSavedMessage(result, installing) : JSON.stringify({ error: result.error }),
       });
     } else if (tc.function.name === "read_workflow") {
       const wfId = args.workflow_id as string;
@@ -972,10 +1027,13 @@ export async function runToolCalls(
               )
               .join("\n")}`
           : "";
+      const filesNotice = wf
+        ? skillFilesNotice(wf, !!options.workstation && !!options.workspaceOwned)
+        : "";
       toolResults.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: `${instructions}${assetNotice}`,
+        content: `${instructions}${assetNotice}${filesNotice}`,
       });
     } else if (tc.function.name === "read_table_cells" && tabularStore) {
       const colIndices = args.col_indices as number[] | undefined;
@@ -1877,7 +1935,7 @@ export async function runToolCalls(
                   truncated: result.truncated,
                   duration_ms: result.durationMs,
                   ...(sync && !sync.ok
-                    ? { documents_note: "Your Mike documents could not be brought up to date in ~/mike this turn; what is there may be out of date." }
+                    ? { documents_note: "Your Mike documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date." }
                     : {}),
                 }
               : { error: result.error },

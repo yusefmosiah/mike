@@ -51,6 +51,7 @@ const KNOWN_EFFECTS: Readonly<Record<string, Effect>> = {
   // Mike document writes are tracked changes or new documents.
   edit_document: "create", replicate_document: "create", generate_docx: "create",
   generate_excel: "create", generate_ppt: "create", save_to_mike: "create",
+  save_skill: "create", install_skill: "create",
   // The open web: a query or URL can carry matter text to any host.
   web_search: "egress", fetch_web_page: "egress",
   // Gmail.

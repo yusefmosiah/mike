@@ -17,6 +17,8 @@ export { connectVsockMux } from "./vsockMux";
 export {
   readWorkspaceManifest,
   readWorkstationFile,
+  readWorkstationTree,
+  SKILLS_ROOT,
   WORKSPACE_ROOT,
   writeWorkspaceBatch,
   type ManifestEntry,

@@ -51,7 +51,8 @@ export function metadataFromWorkflowRecord(
   return {
     name: workflowNameFromSkillMd(workflow.prompt_md),
     title: workflow.title ?? "",
-    description: null,
+    // A skill's SKILL.md description (goals/mission-17-skills.md).
+    description: typeof workflow.description === "string" && workflow.description.trim() ? workflow.description : null,
     type,
     contributors: normalizeContributors(workflow.contributors) ?? [
       DEFAULT_WORKFLOW_CONTRIBUTOR,
@@ -76,6 +77,9 @@ export function withDatabaseWorkflow(workflow: WorkflowRecord) {
     practice: _practice,
     jurisdictions: _jurisdictions,
     prompt_md,
+    // A storage key; the browser gets the file listing (files), not where
+    // the bundle lives.
+    files_path: _filesPath,
     ...rest
   } = workflow;
   return {

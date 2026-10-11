@@ -23,6 +23,7 @@ import { ACTIVE_WORD_DOCUMENT_LIVE_FILENAME } from "./wordPrompt";
 import { parseCitations, createCitation } from "./citations";
 import type { AssistantEvent } from "./streaming";
 import { catalogWorkflowId, ensureDefaultWorkflows } from "../../../lib/workflowCatalog";
+import { describeFromBody, skillName } from "../../../lib/skillFormat";
 
 // ---------------------------------------------------------------------------
 // Prompt-injection spotlighting helpers
@@ -249,7 +250,11 @@ export async function enrichWithPriorEvents(
         );
       }
     } else if (ev?.type === "workflow_applied") {
-      lines.push(`- applied workflow: ${untrustedRef(ev.title)}`);
+      lines.push(
+        ev.action === "saved" || ev.action === "installed"
+          ? `- ${ev.action} skill: ${untrustedRef(ev.title)} (id ${String(ev.workflow_id)}, version ${String(ev.version_number ?? "?")})`
+          : `- applied workflow: ${untrustedRef(ev.title)}`,
+      );
     } else if (ev?.type === "ask_inputs") {
       const items = (Array.isArray(ev.items) ? ev.items : []) as Record<
         string,
@@ -1368,20 +1373,25 @@ export async function buildWorkflowStore(
     }
   }
 
-  // Then overlay user-owned assistant workflows.
+  // Then overlay user-owned assistant workflows: the user's skills.
+  const skillColumns = "id, title, prompt_md, description, files, files_path, created_at";
+  const asSkill = (wf: Record<string, unknown>) => ({
+    title: String(wf.title ?? ""),
+    skill_md: String(wf.prompt_md ?? ""),
+    listed: true,
+    name: skillName(String(wf.title ?? "")) || "skill",
+    description: (wf.description as string | null) ?? null,
+    files: (wf.files as { path: string; size: number }[] | null) ?? null,
+    files_path: (wf.files_path as string | null) ?? null,
+  });
   const { data: workflows } = await db
     .from("workflows")
-    .select("id, title, prompt_md")
+    .select(skillColumns)
     .eq("user_id", userId)
-    .eq("type", "assistant");
-  for (const wf of workflows ?? []) {
-    if (wf.prompt_md) {
-      store.set(wf.id, {
-        title: wf.title,
-        skill_md: wf.prompt_md,
-        listed: true,
-      });
-    }
+    .eq("type", "assistant")
+    .order("created_at", { ascending: true });
+  for (const wf of (workflows ?? []) as Record<string, unknown>[]) {
+    if (wf.prompt_md) store.set(String(wf.id), asSkill(wf));
   }
 
   // Shared assistant workflows must also be readable by workflow tools.
@@ -1396,17 +1406,11 @@ export async function buildWorkflowStore(
     if (sharedIds.length > 0) {
       const { data: sharedWorkflows } = await db
         .from("workflows")
-        .select("id, title, prompt_md")
+        .select(skillColumns)
         .in("id", sharedIds)
         .eq("type", "assistant");
-      for (const wf of sharedWorkflows ?? []) {
-        if (wf.prompt_md) {
-          store.set(wf.id, {
-            title: wf.title,
-            skill_md: wf.prompt_md,
-            listed: true,
-          });
-        }
+      for (const wf of (sharedWorkflows ?? []) as Record<string, unknown>[]) {
+        if (wf.prompt_md && !store.has(String(wf.id))) store.set(String(wf.id), asSkill(wf));
       }
     }
   }
@@ -1441,4 +1445,52 @@ export async function buildWorkflowStore(
     }
   }
   return store;
+}
+
+const SKILLS_PROMPT_BUDGET = 8_000;
+const MAX_PROMPT_SKILLS = 150;
+
+/** One line of plain text: no newlines, no fence tokens, bounded. */
+function promptLine(text: string, max: number): string {
+  return text
+    .replace(/<(\/?)(untrusted-content|workflow-instructions)/gi, "&lt;$1$2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+/**
+ * The system prompt's list of the user's skills (goals/mission-17-skills.md),
+ * so every chat can find one without being told. Built per turn, so a skill
+ * saved in one chat is listed in every other chat's next turn. Past a size
+ * budget the list keeps names only and list_workflows has the rest.
+ */
+export function skillsPromptSection(
+  store: WorkflowStore | undefined,
+  opts: { workstation: boolean },
+): string {
+  const skills = [...(store?.entries() ?? [])].filter(([, skill]) => skill.listed !== false);
+  const where = opts.workstation
+    ? "read it with read_workflow (or ~/skills/<name>/SKILL.md in the workstation, where its scripts and other files are)"
+    : "read it with read_workflow";
+  const header = [
+    "# Skills",
+    `These are the user's skills: instructions they saved for reuse. When a request fits one, ${where} before you start, and follow it.`,
+    "When the user asks you to remember how to do something, to turn what you just did into a skill, or to save a prompt for reuse, write it as a skill with save_skill. Changing a skill saves a new version.",
+  ];
+  if (!skills.length) return [...header, "The user has no skills yet."].join("\n");
+  const full = skills.slice(0, MAX_PROMPT_SKILLS).map(([id, skill]) => {
+    const description = skill.description?.trim() || describeFromBody(skill.skill_md) || skill.title;
+    return `- ${promptLine(skill.name ?? skill.title, 80)} (id ${id}): ${promptLine(description, 300)}`;
+  });
+  const truncated = skills.length > MAX_PROMPT_SKILLS;
+  let lines = full;
+  if (full.join("\n").length > SKILLS_PROMPT_BUDGET || truncated) {
+    lines = skills
+      .slice(0, MAX_PROMPT_SKILLS)
+      .map(([id, skill]) => `- ${promptLine(skill.name ?? skill.title, 80)} (id ${id})`);
+    lines.push("(Descriptions left out to save space; list_workflows gives them.)");
+  }
+  if (truncated) lines.push(`(${skills.length - MAX_PROMPT_SKILLS} more; list_workflows lists every skill.)`);
+  return [...header, ...lines].join("\n");
 }

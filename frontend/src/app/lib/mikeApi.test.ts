@@ -47,6 +47,11 @@ import {
     deleteTabularChat,
     deleteTabularReview,
     deleteWorkflow,
+    exportSkill,
+    importSkillFromUrl,
+    importSkillZip,
+    listWorkflowVersions,
+    restoreWorkflowVersion,
     deleteWorkflowAsset,
     deleteWorkflowShare,
     cancelGoogleDriveOAuth,
@@ -2891,6 +2896,24 @@ describe("thin endpoint wrappers", () => {
             method: "DELETE",
         },
         {
+            name: "importSkillFromUrl",
+            call: () => importSkillFromUrl("https://github.com/a/b/tree/main/c"),
+            url: "/workflows/import",
+            method: "POST",
+            body: { url: "https://github.com/a/b/tree/main/c" },
+        },
+        {
+            name: "listWorkflowVersions",
+            call: () => listWorkflowVersions("w1"),
+            url: "/workflows/w1/versions",
+        },
+        {
+            name: "restoreWorkflowVersion",
+            call: () => restoreWorkflowVersion("w1", "v1"),
+            url: "/workflows/w1/versions/v1/restore",
+            method: "POST",
+        },
+        {
             name: "openSourceWorkflow",
             call: () =>
                 openSourceWorkflow("w1", {
@@ -3333,6 +3356,34 @@ describe("unwrapping and blob wrappers", () => {
 
         await exportTabularReviewsData();
         expect(lastFetchCall().url).toBe("/api/user/tabular-reviews/export");
+    });
+
+    it("importSkillZip sends the zip itself, named in the query", async () => {
+        fetchMock.mockResolvedValue(jsonResponse({ id: "w1" }));
+        const zip = new File(["PK"], "Lease Summary.zip", { type: "application/zip" });
+
+        await importSkillZip(zip);
+
+        const { url, init } = lastFetchCall();
+        expect(url).toBe("/api/workflows/import?filename=Lease%20Summary.zip");
+        expect(init.method).toBe("POST");
+        expect(init.body).toBe(zip);
+        expect(init.headers).toMatchObject({ "Content-Type": "application/zip" });
+    });
+
+    it("exportSkill downloads the skill folder", async () => {
+        fetchMock.mockResolvedValue(
+            new Response("zip-bytes", {
+                status: 200,
+                headers: { "content-disposition": 'attachment; filename="pdf.zip"' },
+            }),
+        );
+
+        const { blob, filename } = await exportSkill("w1");
+
+        expect(lastFetchCall().url).toBe("/api/workflows/w1/export");
+        expect(filename).toBe("pdf.zip");
+        expect(await blob.text()).toBe("zip-bytes");
     });
 
     it("downloadUserExport streams the finished artifact by encoded id", async () => {

@@ -13,6 +13,8 @@ import { resolveWorkflowAccess, resolveCreatorScopedWorkflow } from "./workflows
 
 import { getLatestOpenSourceSubmission } from "./workflows.submissions";
 
+import { deleteSkillBundles, ensureOriginalVersion, recordSkillVersion, skillBundleKeys } from "./workflows.skills";
+
 export type CreateWorkflowResult =
   | { ok: true; workflow: Record<string, unknown> }
   | { ok: false; kind: "validation"; detail: string }
@@ -165,6 +167,10 @@ export async function updateWorkflow(
   if (!access || !access.allowEdit) {
     return { ok: false, kind: "not_editable" };
   }
+  // An assistant workflow is a skill: a change to its SKILL.md is a version.
+  const versioned =
+    access.workflow.type === "assistant" && ("prompt_md" in updates || "title" in updates);
+  if (versioned) await ensureOriginalVersion(db, workflowId, userId);
   const { data, error } = await db
     .from("workflows")
     .update(updates)
@@ -172,6 +178,7 @@ export async function updateWorkflow(
     .select("*")
     .single();
   if (error || !data) return { ok: false, kind: "not_editable" };
+  if (versioned) await recordSkillVersion(db, workflowId, userId, "edit");
   return {
     ok: true,
     body: withWorkflowAccess(withDatabaseWorkflow(data as WorkflowRecord), {
@@ -205,6 +212,7 @@ export async function deleteWorkflow(
   if (!workflow) return { ok: false, kind: "not_found" };
 
   const keys = await captureInlineDocumentCleanup(db, { workflowId });
+  const bundles = await skillBundleKeys(db, workflowId);
   const { error } = await db
     .from("workflows")
     .delete()
@@ -212,6 +220,7 @@ export async function deleteWorkflow(
     .select("id");
   if (error) return { ok: false, kind: "db_error", error };
   await completeInlineDocumentCleanup(db, keys);
+  deleteSkillBundles(bundles);
   return { ok: true };
 }
 

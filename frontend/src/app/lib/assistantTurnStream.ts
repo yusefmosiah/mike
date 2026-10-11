@@ -635,6 +635,15 @@ export async function consumeAssistantTurnStream(
             type: "workflow_applied",
             workflow_id: data.workflow_id as string,
             title: data.title as string,
+            ...(data.action === "saved" || data.action === "installed"
+              ? {
+                  action: data.action,
+                  version_number:
+                    typeof data.version_number === "number"
+                      ? data.version_number
+                      : undefined,
+                }
+              : {}),
           });
           continue;
         }

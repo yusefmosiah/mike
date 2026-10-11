@@ -21,7 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { readWorkspaceManifest, readWorkstationFile, writeWorkspaceBatch } from "../files";
+import { readWorkspaceManifest, readWorkstationFile, readWorkstationTree, writeWorkspaceBatch } from "../files";
 import type { WorkstationTarget } from "../exec";
 
 const target: WorkstationTarget = { host: "vm", user: "agent", identityFile: "/keys/dev" };
@@ -179,5 +179,77 @@ describe("readWorkstationFile", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+describe("~/skills", () => {
+  it("is written read-only with no writable folder, so a skill may be called out", async () => {
+    const tree = { root: "/home/agent/skills", writable: "" };
+    const result = await writeWorkspaceBatch(
+      target,
+      {
+        delete: [],
+        files: [{ path: "out/SKILL.md", bytes: Buffer.from("x") }],
+        manifest: { "out/SKILL.md": { version: "v", size: 1 } },
+      },
+      localSsh,
+      tree,
+    );
+    expect(result).toEqual({ ok: true });
+    expect(mode(path.join(home, "skills", "out", "SKILL.md"))).toBe(0o444);
+    expect(mode(path.join(home, "skills", "out"))).toBe(0o555);
+    expect(await readWorkspaceManifest(target, localSsh, "/home/agent/skills")).toEqual({
+      ok: true,
+      files: { "out/SKILL.md": { version: "v", size: 1 } },
+    });
+  });
+});
+
+describe("readWorkstationTree", () => {
+  const limits = { maxFiles: 10, maxBytes: 1000 };
+
+  it("copies a folder's regular files, skipping caches", async () => {
+    const dir = path.join(home, "drafts", "pdf");
+    mkdirSync(path.join(dir, "scripts", "__pycache__"), { recursive: true });
+    mkdirSync(path.join(dir, ".git"), { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), "---\nname: pdf\n---\nSteps.");
+    writeFileSync(path.join(dir, "scripts", "fill.py"), "print('fill')");
+    writeFileSync(path.join(dir, "scripts", "empty.txt"), "");
+    writeFileSync(path.join(dir, "scripts", "__pycache__", "fill.pyc"), "junk");
+    writeFileSync(path.join(dir, ".git", "HEAD"), "ref");
+    const result = await readWorkstationTree(target, "drafts/pdf/", limits, localSsh);
+    expect(result.ok && result.files.map((f) => [f.path, f.bytes.toString()])).toEqual([
+      ["SKILL.md", "---\nname: pdf\n---\nSteps."],
+      ["scripts/empty.txt", ""],
+      ["scripts/fill.py", "print('fill')"],
+    ]);
+  });
+
+  it("refuses symlinks, missing or non-folders, paths outside home and folders over the limits", async () => {
+    const dir = path.join(home, "drafts", "s");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "a.txt"), "x".repeat(600));
+    writeFileSync(path.join(dir, "b.txt"), "x".repeat(600));
+    expect(await readWorkstationTree(target, "drafts/s", limits, localSsh)).toEqual({ ok: false, error: "the folder is too large" });
+    expect(await readWorkstationTree(target, "drafts/s", { maxFiles: 1, maxBytes: 10_000 }, localSsh)).toEqual({
+      ok: false,
+      error: "the folder has too many files",
+    });
+    expect(await readWorkstationTree(target, "drafts/s/a.txt", limits, localSsh)).toEqual({ ok: false, error: "not a folder" });
+    expect(await readWorkstationTree(target, "drafts/none", limits, localSsh)).toEqual({ ok: false, error: "no such folder" });
+    expect(await readWorkstationTree(target, "/etc", limits, localSsh)).toEqual({
+      ok: false,
+      error: "the path is outside the workstation home directory",
+    });
+    symlinkSync("/etc/passwd", path.join(dir, "link"));
+    expect(await readWorkstationTree(target, "drafts/s", { maxFiles: 10, maxBytes: 10_000 }, localSsh)).toEqual({
+      ok: false,
+      error: "the folder contains a symbolic link",
+    });
+    symlinkSync(dir, path.join(home, "door"));
+    expect(await readWorkstationTree(target, "door", limits, localSsh)).toEqual({
+      ok: false,
+      error: "the path is outside the workstation home directory",
+    });
   });
 });

@@ -63,6 +63,8 @@ type TurnEvent = {
   document_id?: string;
   title?: string;
   workflow_id?: string;
+  /** workflow_applied: "saved" or "installed" for a skill saved from chat. */
+  action?: string;
   // doc_replicated nests each produced copy under `copies` (see the
   // AssistantEvent union in chat/streaming.ts); the top-level `filename` is the
   // *source* document and there is no top-level document_id.
@@ -236,7 +238,9 @@ export function chatTurnAuditEvents(
         : ev?.type === "doc_edited"
           ? "document.edited"
           : ev?.type === "workflow_applied"
-            ? "workflow.applied"
+            ? ev.action === "saved" || ev.action === "installed"
+              ? "workflow.saved"
+              : "workflow.applied"
             : null;
     if (!action) continue;
     rows.push({

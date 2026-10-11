@@ -508,15 +508,26 @@ export function WorkflowAppliedBlock({
     title,
     showConnector,
     onClick,
+    action,
+    versionNumber,
 }: {
     title: string;
     showConnector?: boolean;
     onClick?: () => void;
+    /** A skill saved or installed from chat, rather than read. */
+    action?: "saved" | "installed";
+    versionNumber?: number;
 }) {
+    const label =
+        action === "saved"
+            ? "Saved skill"
+            : action === "installed"
+              ? "Installed skill"
+              : "Read";
     return (
         <EventBlock showConnector={showConnector} dotColor="green">
-            <div className="flex min-w-0 items-center gap-1.5">
-                <EventLabel className="shrink-0">Read</EventLabel>
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <EventLabel className="shrink-0">{label}</EventLabel>
                 {onClick ? (
                     <button
                         type="button"
@@ -533,6 +544,11 @@ export function WorkflowAppliedBlock({
                         <span className="truncate">{title}</span>
                     </span>
                 )}
+                {action && versionNumber && versionNumber > 1 ? (
+                    <span className="shrink-0 text-gray-500">
+                        version {versionNumber}
+                    </span>
+                ) : null}
             </div>
         </EventBlock>
     );

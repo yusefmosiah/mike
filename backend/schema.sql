@@ -1244,7 +1244,15 @@ create table if not exists public.workflows (
   practice text default 'General Transactions',
   jurisdictions text[] default array['General']::text[],
   org_id uuid references public.organizations(id) on delete restrict,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Skills (goals/mission-17-skills.md): the SKILL.md description, where an
+  -- imported skill came from, its other files as one zip, and SKILL.md
+  -- fields other than name and description.
+  description text,
+  source_url text,
+  files jsonb,
+  files_path text,
+  frontmatter jsonb
 );
 
 create index if not exists idx_workflows_user
@@ -1252,6 +1260,31 @@ create index if not exists idx_workflows_user
 
 create index if not exists idx_workflows_org
   on public.workflows(org_id);
+
+-- Every saved state of a skill, so one changed from chat or re-imported can
+-- be restored. The workflows row holds the current state.
+create table if not exists public.workflow_versions (
+  id uuid primary key default gen_random_uuid(),
+  workflow_id uuid not null references public.workflows(id) on delete cascade,
+  version_number integer not null check (version_number > 0),
+  title text not null,
+  description text,
+  prompt_md text,
+  files jsonb,
+  files_path text,
+  frontmatter jsonb,
+  source text not null
+    check (source in ('original', 'edit', 'chat', 'import', 'restore')),
+  source_url text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint workflow_versions_number_unique unique (workflow_id, version_number)
+);
+
+create index if not exists workflow_versions_workflow_idx
+  on public.workflow_versions (workflow_id, version_number desc);
+
+alter table public.workflow_versions enable row level security;
 
 create table if not exists public.hidden_workflows (
   id uuid primary key default gen_random_uuid(),
@@ -6876,6 +6909,7 @@ revoke all on public.document_edits from anon, authenticated;
 revoke all on public.workflows from anon, authenticated;
 revoke all on public.hidden_workflows from anon, authenticated;
 revoke all on public.workflow_shares from anon, authenticated;
+revoke all on public.workflow_versions from anon, authenticated;
 revoke all on public.workflow_org_access_overrides from anon, authenticated;
 revoke all on public.workflow_open_source_submissions from anon, authenticated;
 revoke all on public.mike_workflows from anon, authenticated;
@@ -8135,5 +8169,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_08_temporary_workstations.sql'),
   ('20261010_09_chat_code_approvals.sql'),
   ('20261010_10_image_upload_types.sql'),
-  ('20261010_11_text_upload_types.sql')
+  ('20261010_11_text_upload_types.sql'),
+  ('20261010_12_skill_versions.sql')
 on conflict (filename) do nothing;

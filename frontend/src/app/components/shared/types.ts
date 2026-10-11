@@ -890,6 +890,10 @@ export interface Workflow {
   is_owner?: boolean;
   access_role?: "owner" | "editor" | "viewer";
   open_source_submission?: WorkflowOpenSourceSubmission | null;
+  /** Skills (goals/mission-17-skills.md): where an imported one came from. */
+  source_url?: string | null;
+  /** The skill's files besides SKILL.md. */
+  files?: { path: string; size: number }[] | null;
 }
 
 export interface QuickAction {

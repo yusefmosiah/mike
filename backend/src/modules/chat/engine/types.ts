@@ -31,6 +31,12 @@ export type WorkflowStore = Map<
     title: string;
     skill_md: string;
     listed?: boolean;
+    /** The skill's name in the standard's spelling ("contract-review"). */
+    name?: string;
+    description?: string | null;
+    /** The skill's other files (scripts/, references/), as one stored zip. */
+    files?: { path: string; size: number }[] | null;
+    files_path?: string | null;
     assets?: {
       asset_id: string;
       filename: string;

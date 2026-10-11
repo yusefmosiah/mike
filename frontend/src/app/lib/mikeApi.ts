@@ -3362,6 +3362,70 @@ export async function deleteWorkflow(workflowId: string): Promise<void> {
     await apiRequest(`/workflows/${workflowId}`, { method: "DELETE" });
 }
 
+/** A skill imported from a GitHub folder or a zip (goals/mission-17-skills.md). */
+export type ImportedSkill = {
+    id: string;
+    name: string;
+    title: string;
+    version_number: number;
+    created: boolean;
+    source_url: string | null;
+};
+
+export async function importSkillFromUrl(url: string): Promise<ImportedSkill> {
+    return apiRequest<ImportedSkill>("/workflows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+    });
+}
+
+export async function importSkillZip(file: File): Promise<ImportedSkill> {
+    return apiRequest<ImportedSkill>(
+        `/workflows/import?filename=${encodeURIComponent(file.name)}`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/zip" },
+            body: file,
+        },
+    );
+}
+
+export type WorkflowVersion = {
+    id: string;
+    version_number: number;
+    title: string;
+    description: string | null;
+    files: { path: string; size: number }[] | null;
+    source: "original" | "edit" | "chat" | "import" | "restore";
+    source_url: string | null;
+    created_at: string;
+};
+
+export async function listWorkflowVersions(
+    workflowId: string,
+): Promise<WorkflowVersion[]> {
+    return apiRequest<WorkflowVersion[]>(`/workflows/${workflowId}/versions`);
+}
+
+export async function restoreWorkflowVersion(
+    workflowId: string,
+    versionId: string,
+): Promise<{ version_number: number }> {
+    return apiRequest<{ version_number: number }>(
+        `/workflows/${workflowId}/versions/${versionId}/restore`,
+        { method: "POST" },
+    );
+}
+
+/** The skill as a standard folder: <name>/SKILL.md and its other files. */
+export async function exportSkill(workflowId: string): Promise<{
+    blob: Blob;
+    filename: string | null;
+}> {
+    return apiBlobRequest(`/workflows/${workflowId}/export`);
+}
+
 export async function openSourceWorkflow(
     workflowId: string,
     payload: {

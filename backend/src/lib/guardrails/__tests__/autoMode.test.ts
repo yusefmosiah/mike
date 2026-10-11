@@ -50,6 +50,8 @@ const T2_NAMES = [
     "generate_excel",
     "generate_ppt",
     "save_to_mike",
+    "save_skill",
+    "install_skill",
 ];
 
 const T3_NAMES = [

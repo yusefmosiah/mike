@@ -677,6 +677,8 @@ export function AssistantMessage({
                 <WorkflowAppliedBlock
                     key={globalIdx}
                     title={event.title}
+                    action={event.action}
+                    versionNumber={event.version_number}
                     showConnector={showConnector}
                     onClick={
                         onWorkflowClick

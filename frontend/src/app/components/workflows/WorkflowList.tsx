@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileDown,
   Plus,
 } from "lucide-react";
 import {
@@ -25,6 +26,7 @@ import { restoreOptimisticallyDeletedRows } from "@/app/lib/optimisticRows";
 import type { Workflow, WorkflowAddon } from "../shared/types";
 import { UseWorkflowModal } from "./UseWorkflowModal";
 import { NewWorkflowModal } from "./NewWorkflowModal";
+import { ImportSkillModal } from "./ImportSkillModal";
 import { TableToolbar } from "../shared/TableToolbar";
 import { RowActionMenuItems, RowActions } from "../shared/RowActions";
 import { PageHeader } from "@/app/components/shared/PageHeader";
@@ -114,6 +116,7 @@ export function WorkflowList({
   const [addonsLoading, setAddonsLoading] = useState(true);
   const [selected, setSelected] = useState<Workflow | null>(null);
   const [newModalOpen, setNewModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [activeTab, setActiveTab] = useQueryParamTab(
     WORKFLOW_TAB_IDS,
     packKey ? "addons" : initialTab,
@@ -498,6 +501,11 @@ export function WorkflowList({
               activeTab === "addons" ? "Search add-ons…" : "Search workflows…",
           },
           {
+            icon: <FileDown className="h-3.5 w-3.5" aria-hidden />,
+            label: "Import skill",
+            onClick: () => setImportOpen(true),
+          },
+          {
             type: "new",
             onClick: () => setNewModalOpen(true),
             title: "New workflow",
@@ -609,6 +617,14 @@ export function WorkflowList({
 
       <UseWorkflowModal workflow={selected} onClose={() => setSelected(null)} />
 
+      <ImportSkillModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={(skill) => {
+          setImportOpen(false);
+          router.push(`/workflows/assistant/${skill.id}?tab=skill`);
+        }}
+      />
       <NewWorkflowModal
         open={newModalOpen}
         onClose={(createdWithoutHandoff) => {

@@ -90,6 +90,7 @@ import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { useQueryParamTab } from "@/app/hooks/useQueryParamTab";
 import { downloadWorkflowZip } from "./workflowZipExport";
 import { WorkflowAssets, type WorkflowAssetsHandle } from "./WorkflowAssets";
+import { WorkflowSkillPanel } from "./WorkflowSkillPanel";
 // dynamic import keeps Tiptap (browser-only) out of the SSR bundle
 const WorkflowPromptEditor = dynamic(
   () =>
@@ -106,7 +107,7 @@ interface Props {
 
 type SaveStatus = "idle" | "saving" | "saved";
 type DeleteStatus = "idle" | "loading" | "complete";
-type AssistantTab = "prompt" | "assets";
+type AssistantTab = "prompt" | "assets" | "skill";
 type WorkflowShare = Awaited<ReturnType<typeof listWorkflowShares>>[number];
 
 const NAME_COL_W = "w-[332px] shrink-0";
@@ -114,7 +115,12 @@ const PROMPT_COL_W = "min-w-[240px] max-w-[360px] flex-1";
 const PROMPT_HEADER_WITH_ACTIONS_W = "min-w-[272px] max-w-[392px] flex-1 pr-8";
 const WORKFLOW_CONTRIBUTIONS_ENABLED =
   process.env.NEXT_PUBLIC_WORKFLOW_CONTRIBUTIONS_ENABLED === "true";
-const ASSISTANT_TABS: readonly AssistantTab[] = ["prompt", "assets"];
+const ASSISTANT_TABS: readonly AssistantTab[] = ["prompt", "assets", "skill"];
+const ASSISTANT_TAB_ITEMS: { id: AssistantTab; label: string }[] = [
+  { id: "prompt", label: "Prompt" },
+  { id: "assets", label: "Assets" },
+  { id: "skill", label: "Skill" },
+];
 
 // ---------------------------------------------------------------------------
 // Page
@@ -254,6 +260,9 @@ export function WorkflowDetailPage({ id, workflowType }: Props) {
   // ---------------------------------------------------------------------------
   // Load workflow
   // ---------------------------------------------------------------------------
+  // Bumped after a version is restored, to reload the workflow and remount
+  // the editor on the restored text.
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     getWorkflow(id)
       .then((wf) => {
@@ -269,7 +278,7 @@ export function WorkflowDetailPage({ id, workflowType }: Props) {
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [id, workflowType]);
+  }, [id, workflowType, reloadKey]);
 
   const fetchWorkflowShares = useCallback(async () => {
     const shares = await listWorkflowShares(id);
@@ -688,16 +697,20 @@ export function WorkflowDetailPage({ id, workflowType }: Props) {
           /* ── Assistant: WYSIWYG editor ── */
           <>
             <TableToolbar<AssistantTab>
-              items={[
-                { id: "prompt", label: "Prompt" },
-                { id: "assets", label: "Assets" },
-              ]}
+              items={ASSISTANT_TAB_ITEMS}
               active={assistantTab}
               onChange={setAssistantTab}
             />
-            {assistantTab === "prompt" ? (
+            {assistantTab === "skill" ? (
+              <WorkflowSkillPanel
+                workflow={workflow}
+                readOnly={readOnly}
+                onRestored={() => setReloadKey((key) => key + 1)}
+              />
+            ) : assistantTab === "prompt" ? (
               <div className="mx-4 mb-2 min-h-0 min-w-0 flex-1 md:mx-8 md:mb-3">
                 <WorkflowPromptEditor
+                  key={reloadKey}
                   value={promptMd}
                   onChange={readOnly ? undefined : handlePromptChange}
                   readOnly={readOnly}
@@ -1011,10 +1024,7 @@ function AssistantWorkflowEditorSkeleton() {
   return (
     <>
       <TableToolbar<AssistantTab>
-        items={[
-          { id: "prompt", label: "Prompt" },
-          { id: "assets", label: "Assets" },
-        ]}
+        items={ASSISTANT_TAB_ITEMS}
         active="prompt"
       />
       <div className="mx-4 mb-2 min-h-0 min-w-0 flex-1 md:mx-8 md:mb-3">

@@ -343,7 +343,14 @@ export type AssistantEvent =
         version_id: string;
       }[];
     }
-  | { type: "workflow_applied"; workflow_id: string; title: string }
+  | {
+      type: "workflow_applied";
+      workflow_id: string;
+      title: string;
+      /** A skill saved or installed from chat; absent when a workflow was read. */
+      action?: "saved" | "installed";
+      version_number?: number;
+    }
   | {
       type: "doc_edited";
       filename: string;

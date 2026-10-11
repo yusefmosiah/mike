@@ -2,7 +2,7 @@
 // call the service layer in workflows.service.ts, and map its typed results
 // onto status codes and JSON responses.
 
-import { Router, type Request, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import type { ParamsFlatDictionary } from "express-serve-static-core";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
@@ -12,6 +12,7 @@ import { normalizeSearchTerm } from "../../lib/search";
 import { parseWorkflowSort } from "../../lib/sort";
 import { parseWorkflowScope } from "./workflows.overview";
 import { sendInternalError } from "../../lib/httpError";
+import { sendServiceFailure } from "../../lib/serviceResult";
 import {
   listWorkflows,
   listWorkflowsPage,
@@ -38,6 +39,10 @@ import {
   listWorkflowShares,
   deleteWorkflowShare,
   shareWorkflow,
+  importSkill,
+  exportSkill,
+  listSkillVersions,
+  restoreSkillVersion,
   type Db,
   type WorkflowAssetFailure,
   type WorkflowMetadata,
@@ -413,6 +418,62 @@ workflowsRouter.delete(
     res.status(204).send();
   }),
 );
+
+// POST /workflows/import
+// A skill in the standard format: JSON { url } for a GitHub folder, or the
+// zip itself (Content-Type application/zip, ?filename=...).
+workflowsRouter.post(
+  "/import",
+  requireAuth,
+  express.raw({ type: ["application/zip", "application/x-zip-compressed", "application/octet-stream"], limit: "20mb" }),
+  asyncRoute(async (req, res) => {
+    const user = { id: res.locals.userId as string, email: res.locals.userEmail as string | undefined };
+    const db = createDb();
+    const from = Buffer.isBuffer(req.body)
+      ? { zip: req.body, filename: typeof req.query.filename === "string" ? req.query.filename : undefined }
+      : typeof req.body?.url === "string" && req.body.url.trim()
+        ? { url: req.body.url as string }
+        : null;
+    if (!from) return void res.status(400).json({ detail: "Give a GitHub link or a zip file." });
+    const result = await importSkill(db, user, from);
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.status(result.data.created ? 201 : 200).json({
+      id: result.data.skillId,
+      name: result.data.name,
+      title: result.data.title,
+      version_number: result.data.versionNumber,
+      created: result.data.created,
+      source_url: result.data.sourceUrl,
+    });
+  }),
+);
+
+// GET /workflows/:workflowId/versions
+workflowsRouter.get("/:workflowId/versions", requireAuth, asyncRoute(async (req, res) => {
+  const user = { id: res.locals.userId as string, email: res.locals.userEmail as string | undefined };
+  const result = await listSkillVersions(createDb(), user, req.params.workflowId);
+  if (!result.ok) return void sendServiceFailure(res, result);
+  res.json(result.data);
+}));
+
+// POST /workflows/:workflowId/versions/:versionId/restore
+workflowsRouter.post("/:workflowId/versions/:versionId/restore", requireAuth, asyncRoute(async (req, res) => {
+  const user = { id: res.locals.userId as string, email: res.locals.userEmail as string | undefined };
+  const result = await restoreSkillVersion(createDb(), user, req.params.workflowId, req.params.versionId);
+  if (!result.ok) return void sendServiceFailure(res, result);
+  res.json({ version_number: result.data.versionNumber });
+}));
+
+// GET /workflows/:workflowId/export
+// The skill as a standard folder: <name>/SKILL.md plus its other files.
+workflowsRouter.get("/:workflowId/export", requireAuth, asyncRoute(async (req, res) => {
+  const user = { id: res.locals.userId as string, email: res.locals.userEmail as string | undefined };
+  const result = await exportSkill(createDb(), user, req.params.workflowId);
+  if (!result.ok) return void sendServiceFailure(res, result);
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${result.data.filename}"`);
+  res.send(result.data.zip);
+}));
 
 // GET /workflows/:workflowId
 workflowsRouter.get("/:workflowId", requireAuth, asyncRoute(async (req, res) => {

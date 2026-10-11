@@ -9,10 +9,14 @@
  * nothing about standing in the project whose documents these tools would
  * rewrite. See `allowDocumentMutation` in ../streaming.ts.
  *
+ * save_skill and install_skill write the caller's own skills rather than a
+ * document, but they are here too: a read-only seat in someone else's thread
+ * should not let that thread's content install instructions for the caller.
+ *
  * Everything else in the base set — read_document, find_in_document,
- * list_documents, fetch_documents, ask_inputs, the workflow and research
- * tools — only reads, so a collaborator who may talk in the thread keeps the
- * whole conversational surface.
+ * list_documents, fetch_documents, ask_inputs, list_workflows, read_workflow
+ * and the research tools — only reads, so a collaborator who may talk in the
+ * thread keeps the whole conversational surface.
  */
 export const DOCUMENT_MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "edit_document",
@@ -21,6 +25,8 @@ export const DOCUMENT_MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "generate_excel",
   "generate_ppt",
   "save_to_mike",
+  "save_skill",
+  "install_skill",
 ]);
 
 /** Read a tool schema's function name, whatever shape the entry arrived in. */
@@ -108,7 +114,7 @@ export const WORKFLOW_TOOLS = [
     function: {
       name: "list_workflows",
       description:
-        "List all workflows available to the user. Returns each workflow's ID and title. Call this when the user asks to run a workflow, apply a template, or you need to discover what workflows exist.",
+        "List the user's skills (also called workflows), with each one's ID, name and description. The system prompt already lists them when there are not too many; call this when it says the list was shortened, or to check what exists.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -117,16 +123,76 @@ export const WORKFLOW_TOOLS = [
     function: {
       name: "read_workflow",
       description:
-        "Read the full instructions (prompt) of a workflow by its ID. Call this after list_workflows to load a specific workflow's prompt, then follow those instructions.",
+        "Read a skill's instructions (its SKILL.md) by ID, then follow them. Pass file to read one of the skill's other files instead, such as a reference it points to.",
       parameters: {
         type: "object",
         properties: {
           workflow_id: {
             type: "string",
-            description: "The workflow ID to read",
+            description: "The skill's ID",
+          },
+          file: {
+            type: "string",
+            description: "Optional: a file inside the skill, such as 'references/checklist.md'.",
           },
         },
         required: ["workflow_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_skill",
+      description:
+        "Save a skill: instructions that any of the user's chats can find and follow, in the standard SKILL.md format. Use it when the user asks to turn what you just did into a skill, to remember a way of working, to save a prompt for reuse, or to change one of their skills. Write for a reader who has none of this conversation: when to use the skill, what to ask for or check first, the steps (naming the tools or commands that worked), what the result should look like, and how to check it. Keep what generalizes and leave out this chat's particular documents and names unless the user wants them. Saving a name the user already has makes a new version of it; to change a skill by ID pass skill_id, and a skill the user cannot edit is saved as their own copy. In the workstation you can instead write a folder (SKILL.md plus scripts/, references/, assets/) and pass its path.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Short lowercase name with hyphens, such as 'nda-first-pass'.",
+          },
+          description: {
+            type: "string",
+            description:
+              "One or two sentences: what the skill does and when to use it. Later chats decide whether to use the skill from this alone.",
+          },
+          instructions: {
+            type: "string",
+            description: "The SKILL.md body, in Markdown. Frontmatter is optional.",
+          },
+          files: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description:
+              "Optional small text files to include, by path, such as {\"scripts/extract.py\": \"...\", \"references/checklist.md\": \"...\"}.",
+          },
+          path: {
+            type: "string",
+            description: "Instead of instructions: a skill folder in the workstation that holds a SKILL.md.",
+          },
+          skill_id: {
+            type: "string",
+            description: "Optional: the ID of the skill to change.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "install_skill",
+      description:
+        "Install a published skill from GitHub as the user's own: a folder that holds a SKILL.md, such as https://github.com/owner/repo/tree/main/skills/name. Use it when the user asks to install or add a skill from a link. Installing copies files and runs nothing; installing the same skill again saves a new version.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The GitHub link to the skill's folder or its SKILL.md." },
+        },
+        required: ["url"],
       },
     },
   },
@@ -143,7 +209,7 @@ export const WORKSTATION_TOOLS = [
     function: {
       name: "run_command",
       description:
-        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. The user's Mike documents are files under ~/mike, read-only and up to date at the start of each turn: ~/mike/projects/<project>/<folder>/..., ~/mike/library/... and ~/mike/templates/.... Write results elsewhere (for example ~/mike/out/) and give them back with save_to_mike. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr.",
+        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. The user's Mike documents are files under ~/mike, read-only and up to date at the start of each turn: ~/mike/projects/<project>/<folder>/..., ~/mike/library/... and ~/mike/templates/.... The user's skills are under ~/skills/<name>/ (SKILL.md plus any scripts), also read-only. Write results elsewhere (for example ~/mike/out/) and give them back with save_to_mike. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr.",
       parameters: {
         type: "object",
         properties: {

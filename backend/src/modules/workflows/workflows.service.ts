@@ -71,3 +71,19 @@ export {
   type WorkflowAddonImportFailure,
   type ImportWorkflowAddonResult,
 } from "./workflows.addons";
+export {
+  type SavedSkill,
+  type SkillRow,
+  type SkillVersion,
+  type SkillVersionSource,
+  saveSkill,
+  importSkill,
+  exportSkill,
+  listSkillVersions,
+  restoreSkillVersion,
+  loadSkillFiles,
+  skillMdOf,
+  skillNameOf,
+  listWorkstationSkills,
+} from "./workflows.skills";
+export { parseGithubUrl } from "./workflows.skillImport";

@@ -51,10 +51,11 @@ Mike calls skills "workflows".
   github.com/owner/repo/tree/main/skills/x"): a zip upload or a GitHub folder
   resolved to a commit, through the existing safe extractor with the
   frontmatter check relaxed to the standard. Import never runs anything.
-- **Create from chat.** The model writes a folder anywhere in the workstation
-  (by convention `~/skills-drafts/<name>/`) and calls `save_skill` with its
-  path. The harness reads it back as it reads `~/mike/out/` (regular files
-  only, size caps), validates it and stores a version.
+- **Create from chat.** The model calls `save_skill` with the instructions
+  (and any small text files) directly, or writes a folder anywhere in the
+  workstation and passes its path. The harness reads a folder back as it
+  reads a `save_to_mike` file (regular files only, no symlinks, size caps),
+  validates it and stores a version.
 - **Customize.** Copy `~/skills/<name>/` to a draft, edit, `save_skill`.
   Saving over an imported skill makes a new version of the user's copy and
   keeps "imported from <url>@<commit>". Upstream updates are never applied
@@ -65,6 +66,54 @@ Mike calls skills "workflows".
 - **Visible, reversible.** Each save is a tool result in the chat. The Skills
   page shows versions; restoring or deleting one is a click. No approval
   dialog.
+
+## Making skills
+
+Owner direction, 2026-10-10: the focus is "making new skills, not just from
+source material, but codifying workflows and prompts". Three ways in, all
+ending in `save_skill`:
+
+- **What we just did.** After a chat has worked out how to do something
+  ("summarize this deposition by topic with page:line cites"), the user says
+  "make that a skill". The model writes the steps that worked for a reader
+  with none of the conversation: when to use it, what to ask for first, the
+  steps and the tools or commands, the result's form, and how to check it.
+- **A prompt the user keeps pasting.** "Save this as a skill called X": the
+  prompt becomes the body, with a description that says when it applies.
+- **Source material.** A document, a repository or a published skill becomes
+  a skill, in the workstation when it needs scripts.
+
+The system prompt tells every chat to do this when asked, and to change a
+skill by saving it again; `save_skill`'s description carries the writing
+guidance. Saving a name the user already has is a new version, so refining a
+skill from chat ("also check the governing-law clause") is the same call.
+
+## Built (2026-10-10)
+
+- **Storage.** `workflows` gained `description`, `source_url`, `files`,
+  `files_path` and `frontmatter`; `workflow_versions` keeps every state
+  (migration `20261010_12_skill_versions.sql`). The other files are one zip
+  per version in object storage. Edits on the Workflows page are versions
+  too; a skill that predates versions records its existing state as
+  version 1 ("original") the first time it changes.
+- **Format.** `backend/src/lib/skillFormat.ts` parses and renders SKILL.md,
+  checks a folder (no `..`, absolute paths or symlinks; 200 files, 5 MB a
+  file, 20 MB in all, counted as bytes are inflated) and packs or unpacks the
+  zip. Only `name` and `description` are read from the frontmatter; a missing
+  description is taken from the body; other fields are kept.
+- **Chat.** `save_skill` (inline instructions and small files, or a folder in
+  the user's own workstation), `install_skill` (a GitHub folder, resolved to
+  a commit), `read_workflow` with `file` for a skill's references. Every
+  turn's system prompt lists the user's skills as `name (id): description`,
+  names only past 8,000 characters. A save shows in the chat as "Saved skill
+  X" with its version. Saved skills are readable in the same turn and listed
+  in every chat's next turn.
+- **Workstation.** `~/skills/<name>/` (SKILL.md plus the files), read-only,
+  synced with `~/mike` once per turn before the first command.
+- **Web.** Workflows has "Import skill" (GitHub link or zip); an assistant
+  workflow has a Skill tab with its description, source, files, a download
+  of the skill folder, and its versions with Restore.
+- **Not yet.** K3, the transcriber.
 
 ## The boundaries we keep
 
@@ -98,7 +147,7 @@ Mike calls skills "workflows".
     laptop has a home address.
   - Add `yt-dlp`, `ffmpeg` and `youtube-transcript-api` to the guest image.
   - Port `~/media/transcripts/transcribe.py` into a skill: captions first,
-    yt-dlp audio as the fallback, output saved with `mike-save`. Drop the
+    yt-dlp audio as the fallback, output saved with `save_to_mike`. Drop the
     Apple-only parts (MLX engines, the iCloud mirror) and the public
     docs-md publish.
   - CPU speech recognition comes after a benchmark on the workstation's
