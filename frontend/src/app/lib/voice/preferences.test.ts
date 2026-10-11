@@ -18,6 +18,7 @@ import {
 
 const everything: VoiceAvailability = {
     deviceRecognition: false,
+    deviceSpeech: false,
     operatorTranscription: true,
     operatorSpeech: true,
     openRouter: true,
@@ -31,9 +32,12 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-/** The iPhone app's shell: the Capacitor bridge with Mike's speech plugin. */
-const inApp = () =>
-    vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }], nativePromise: vi.fn() });
+/** The iPhone app's shell: the Capacitor bridge with Mike's speech plugin (which can speak, in newer builds). */
+const inApp = (speaks = false) =>
+    vi.stubGlobal("Capacitor", {
+        PluginHeaders: [{ name: "MikeSpeech", methods: speaks ? [{ name: "transcribe" }, { name: "speak" }] : [{ name: "transcribe" }] }],
+        nativePromise: vi.fn(),
+    });
 
 describe("parseVoicePreferences", () => {
     it("keeps valid choices and drops the rest field by field", () => {
@@ -67,12 +71,18 @@ describe("in the iPhone app", () => {
         expect(loadVoicePreferences().transcription.engine).toBe("operator");
     });
 
-    it("offers the phone for dictation only", () => {
+    it("reads aloud on the phone by default when the app's plugin can speak", () => {
+        inApp(true);
+        expect(defaultVoicePreferences()).toEqual({ transcription: { engine: "device" }, speech: { engine: "device" } });
+    });
+
+    it("offers the phone for dictation, and for read-aloud when its plugin can speak", () => {
         const phone = { ...everything, deviceRecognition: true };
         expect(engineAvailable("transcription", "device", phone)).toBe(true);
         expect(engineAvailable("transcription", "device", everything)).toBe(false);
         expect(engineAvailable("speech", "device", phone)).toBe(false);
-        expect(parseVoicePreferences({ speech: { engine: "device" } }).speech.engine).toBe("operator");
+        expect(engineAvailable("speech", "device", { ...phone, deviceSpeech: true })).toBe(true);
+        expect(parseVoicePreferences({ speech: { engine: "device" } }).speech.engine).toBe("device");
     });
 
     it("falls back to the phone first when the chosen engine is missing", () => {

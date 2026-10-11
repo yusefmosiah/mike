@@ -25,53 +25,32 @@
  * is kept in memory at a time. A run the page did not survive is reported on
  * the next attempt instead of failing silently again. Reproduced and checked
  * in Safari on the iOS 26.2 Simulator; see goals/mission-10-voice.md.
+ *
+ * The models run in a Web Worker (browserModels.engine.ts, through
+ * browserModels.worker.ts): on one WebAssembly thread Kokoro takes seconds
+ * per sentence, and on the page's main thread that froze the iPhone app.
+ * Consent, the one-model queue and the crash marker stay on the page.
  */
 
+import type { EngineRequest } from "./browserModels.engine";
 import { estimateSetupMinutes, measureDownloadSpeed } from "./pricing";
 
-export type BrowserModelKind = "transcription" | "speech";
-
-/** How the models run in this browser; see browserModelRuntime(). */
-export interface BrowserModelRuntime {
-    device: "webgpu" | "wasm";
-    /** Safari or any iOS browser: ONNX Runtime's plain WebAssembly build. */
-    webkit: boolean;
-    /** iPhone and iPad: only one model in memory at a time. */
-    oneModelAtATime: boolean;
-}
-
-type Dtype = "fp32" | "q8" | "q4";
-/** transformers.js's file name suffix for each weight type. */
-const DTYPE_SUFFIX: Record<Dtype, string> = { fp32: "", q8: "_quantized", q4: "_q4" };
-
-export interface BrowserModelSpec {
-    id: string;
-    label: string;
-    repo: string;
-    /** The weights of each ONNX session in the model, by runtime. */
-    dtypes: (runtime: BrowserModelRuntime) => Record<string, Dtype>;
-}
-
-export const BROWSER_MODELS: Record<BrowserModelKind, BrowserModelSpec> = {
-    transcription: {
-        id: "whisper-base",
-        label: "Whisper Base",
-        repo: "onnx-community/whisper-base",
-        // 77 MB in WebKit. Elsewhere 206 MB: the q4 decoder keeps its
-        // vocabulary embedding in fp32.
-        dtypes: (runtime) =>
-            runtime.webkit
-                ? { encoder_model: "q8", decoder_model_merged: "q8" }
-                : { encoder_model: "fp32", decoder_model_merged: "q4" },
-    },
-    speech: {
-        id: "kokoro-82m",
-        label: "Kokoro 82M",
-        repo: "onnx-community/Kokoro-82M-v1.0-ONNX",
-        // 326 MB in fp32 on WebGPU, 92 MB in q8 on WebAssembly.
-        dtypes: (runtime) => ({ model: runtime.device === "webgpu" ? "fp32" : "q8" }),
-    },
-};
+export {
+    BROWSER_MODELS,
+    DEFAULT_KOKORO_VOICE,
+    type BrowserModelKind,
+    type BrowserModelRuntime,
+    type BrowserModelSpec,
+    type SetupProgress,
+} from "./browserModels.spec";
+import {
+    BROWSER_MODELS,
+    DEFAULT_KOKORO_VOICE,
+    DTYPE_SUFFIX,
+    type BrowserModelKind,
+    type BrowserModelRuntime,
+    type SetupProgress,
+} from "./browserModels.spec";
 
 const HUB = "https://huggingface.co";
 /** A small file on the same host, for the speed test. */
@@ -83,8 +62,6 @@ const CONSENT_KEY = "mike.voice.browser-models.v1";
  * after its process is killed, and another tab's run does not count.
  */
 const RUNNING_KEY = "mike.voice.browser-models.running.v1";
-/** Where transformers.js fetches ONNX Runtime's WebAssembly by default. */
-const ORT_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@";
 
 interface NavigatorLike {
     userAgent?: string;
@@ -214,130 +191,58 @@ export async function estimateBrowserModelSetup(
     return estimateSetupMinutes(bytes, bytesPerSecond);
 }
 
-export type SetupProgress = (fraction: number) => void;
+/**
+ * The engine's worker, started on first use. A worker that dies (an error
+ * it could not report) fails its pending requests and is started again on
+ * the next one.
+ */
+let engineWorker: Worker | null = null;
+let nextRequestId = 0;
+const pendingRequests = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: unknown) => void; onProgress?: SetupProgress }
+>();
 
-function progressReporter(onProgress?: SetupProgress) {
-    const files = new Map<string, { loaded: number; total: number }>();
-    return (event: { status?: string; file?: string; loaded?: number; total?: number }) => {
-        if (!onProgress || event.status !== "progress" || !event.file) return;
-        files.set(event.file, { loaded: event.loaded ?? 0, total: event.total ?? 0 });
-        let loaded = 0;
-        let total = 0;
-        for (const file of files.values()) {
-            loaded += file.loaded;
-            total += file.total;
+function startEngineWorker(): Worker | null {
+    if (typeof Worker === "undefined") return null;
+    if (engineWorker) return engineWorker;
+    const worker = new Worker(new URL("./browserModels.worker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (event: MessageEvent<{ id: number; type: string; fraction?: number; result?: unknown }>) => {
+        const { id, type } = event.data;
+        const pending = pendingRequests.get(id);
+        if (!pending) return;
+        if (type === "progress") {
+            pending.onProgress?.(event.data.fraction ?? 0);
+            return;
         }
-        if (total > 0) onProgress(Math.min(1, loaded / total));
+        pendingRequests.delete(id);
+        if (type === "done") pending.resolve(event.data.result);
+        else pending.reject(new Error("The open model failed."));
     };
+    worker.onerror = (event) => {
+        event.preventDefault();
+        const failed = [...pendingRequests.values()];
+        pendingRequests.clear();
+        worker.terminate();
+        engineWorker = null;
+        for (const pending of failed) pending.reject(new Error("The open model's worker stopped."));
+    };
+    engineWorker = worker;
+    return worker;
 }
 
-/** The parts of transformers.js's `env` this module sets. */
-interface TransformersEnv {
-    allowLocalModels: boolean;
-    backends?: { onnx?: { versions?: { web?: string }; wasm?: { wasmPaths?: unknown; numThreads?: number } } };
-}
-
-/**
- * In WebKit, ONNX Runtime's plain WebAssembly build (the same version as the
- * bundled ONNX Runtime) on one thread, instead of the JSEP build. Must run
- * before the first model loads: ONNX Runtime starts its WebAssembly once.
- */
-function configureRuntime(env: TransformersEnv, runtime: BrowserModelRuntime): void {
-    env.allowLocalModels = false;
-    if (!runtime.webkit) return;
-    const onnx = env.backends?.onnx;
-    const version = onnx?.versions?.web;
-    if (!onnx?.wasm || !version) throw new Error("ONNX Runtime Web is missing");
-    const dist = `${ORT_CDN}${version}/dist/`;
-    onnx.wasm.wasmPaths = { mjs: `${dist}ort-wasm-simd-threaded.mjs`, wasm: `${dist}ort-wasm-simd-threaded.wasm` };
-    onnx.wasm.numThreads = 1;
-}
-
-type Transcriber = ((audio: Float32Array) => Promise<{ text: string } | Array<{ text: string }>>) & {
-    dispose?: () => Promise<unknown>;
-};
-let transcriber: Promise<Transcriber> | null = null;
-
-function transcriberInstance(runtime: BrowserModelRuntime, onProgress?: SetupProgress): Promise<Transcriber> {
-    transcriber ??= (async () => {
-        const { pipeline, env } = await import("@huggingface/transformers");
-        configureRuntime(env as unknown as TransformersEnv, runtime);
-        const run = await pipeline("automatic-speech-recognition", BROWSER_MODELS.transcription.repo, {
-            device: runtime.device,
-            dtype: BROWSER_MODELS.transcription.dtypes(runtime),
-            progress_callback: progressReporter(onProgress),
-        });
-        return run as unknown as Transcriber;
-    })().catch((error: unknown) => {
-        transcriber = null;
-        throw error;
-    });
-    return transcriber;
-}
-
-interface KokoroModel {
-    generate(text: string, options: { voice?: string; speed?: number }): Promise<{ toBlob(): Blob }>;
-    model?: { dispose?: () => Promise<unknown> };
-}
-let kokoro: Promise<KokoroModel> | null = null;
-
-/**
- * Kokoro's phonemizer unpacks its WebAssembly with `for await` over a
- * ReadableStream, which Safari 26.2 cannot iterate: the import rejects in the
- * background and every `generate` waits forever. This adds the iteration
- * where the browser lacks it, before kokoro-js is imported.
- */
-function ensureStreamIteration(): void {
-    const proto = ReadableStream.prototype as unknown as Record<symbol, unknown>;
-    if (typeof proto[Symbol.asyncIterator] === "function") return;
-    Object.defineProperty(proto, Symbol.asyncIterator, {
-        configurable: true,
-        writable: true,
-        value: async function* (this: ReadableStream<unknown>) {
-            const reader = this.getReader();
-            try {
-                for (;;) {
-                    const { done, value } = await reader.read();
-                    if (done) return;
-                    yield value;
-                }
-            } finally {
-                reader.releaseLock();
-            }
-        },
-    });
-}
-
-function speakerInstance(runtime: BrowserModelRuntime, onProgress?: SetupProgress): Promise<KokoroModel> {
-    kokoro ??= (async () => {
-        ensureStreamIteration();
-        const [{ KokoroTTS }, { env }] = await Promise.all([import("kokoro-js"), import("@huggingface/transformers")]);
-        configureRuntime(env as unknown as TransformersEnv, runtime);
-        const model = await KokoroTTS.from_pretrained(BROWSER_MODELS.speech.repo, {
-            dtype: BROWSER_MODELS.speech.dtypes(runtime).model,
-            device: runtime.device,
-            progress_callback: progressReporter(onProgress) as never,
-        });
-        return model as unknown as KokoroModel;
-    })().catch((error: unknown) => {
-        kokoro = null;
-        throw error;
-    });
-    return kokoro;
-}
-
-/** Frees the model that is not `kind`, so only one is in memory. */
-async function releaseOther(kind: BrowserModelKind): Promise<void> {
-    if (kind === "transcription" && kokoro) {
-        const held = kokoro;
-        kokoro = null;
-        await held.then((model) => model.model?.dispose?.()).catch(() => undefined);
+/** Runs a request in the engine's worker, or here where there are no workers. */
+async function runEngine<T>(request: EngineRequest, onProgress?: SetupProgress): Promise<T> {
+    const worker = startEngineWorker();
+    if (!worker) {
+        const { handleEngineRequest } = await import("./browserModels.engine");
+        return (await handleEngineRequest(request, onProgress)) as T;
     }
-    if (kind === "speech" && transcriber) {
-        const held = transcriber;
-        transcriber = null;
-        await held.then((run) => run.dispose?.()).catch(() => undefined);
-    }
+    const id = ++nextRequestId;
+    return new Promise<T>((resolve, reject) => {
+        pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
+        worker.postMessage({ id, ...request });
+    });
 }
 
 let running = 0;
@@ -383,7 +288,7 @@ function withModel<T>(kind: BrowserModelKind, work: (runtime: BrowserModelRuntim
             markRunning(null);
             throw new BrowserModelError(BROWSER_MODEL_RESTARTED_MESSAGE);
         }
-        if (runtime.oneModelAtATime) await releaseOther(kind);
+        if (runtime.oneModelAtATime) await runEngine({ op: "release-other", kind });
         running += 1;
         markRunning(kind);
         try {
@@ -400,15 +305,15 @@ function withModel<T>(kind: BrowserModelKind, work: (runtime: BrowserModelRuntim
 }
 
 /** Downloads (first time) and loads Whisper. Requires consent. */
-export function loadBrowserTranscriber(onProgress?: SetupProgress): Promise<Transcriber> {
+export function loadBrowserTranscriber(onProgress?: SetupProgress): Promise<void> {
     if (!consented("transcription")) return Promise.reject(new BrowserModelConsentError());
-    return withModel("transcription", (runtime) => transcriberInstance(runtime, onProgress));
+    return withModel("transcription", (runtime) => runEngine<void>({ op: "load", kind: "transcription", runtime }, onProgress));
 }
 
 /** Downloads (first time) and loads Kokoro. Requires consent. */
-export function loadBrowserSpeaker(onProgress?: SetupProgress): Promise<KokoroModel> {
+export function loadBrowserSpeaker(onProgress?: SetupProgress): Promise<void> {
     if (!consented("speech")) return Promise.reject(new BrowserModelConsentError());
-    return withModel("speech", (runtime) => speakerInstance(runtime, onProgress));
+    return withModel("speech", (runtime) => runEngine<void>({ op: "load", kind: "speech", runtime }, onProgress));
 }
 
 /** Errors from the libraries become one message written for the user. */
@@ -435,18 +340,13 @@ async function decodeForWhisper(blob: Blob): Promise<Float32Array> {
 export async function transcribeInBrowser(blob: Blob): Promise<string> {
     if (!consented("transcription")) throw new BrowserModelConsentError();
     try {
-        return await withModel("transcription", async (runtime) => {
-            const run = await transcriberInstance(runtime);
-            const output = await run(await decodeForWhisper(blob));
-            const text = Array.isArray(output) ? output.map((part) => part.text).join(" ") : output.text;
-            return text.trim();
-        });
+        return await withModel("transcription", async (runtime) =>
+            runEngine<string>({ op: "transcribe", runtime, samples: await decodeForWhisper(blob) }),
+        );
     } catch (error) {
         throw forUser(error);
     }
 }
-
-export const DEFAULT_KOKORO_VOICE = "af_heart";
 
 /** Kokoro's voices, by name, from the model repository. */
 export async function browserModelVoices(deps: { fetch?: typeof fetch } = {}): Promise<string[]> {
@@ -463,11 +363,9 @@ export async function browserModelVoices(deps: { fetch?: typeof fetch } = {}): P
 export async function speakWithBrowserModel(text: string, options: { voice?: string; speed?: number } = {}): Promise<Blob> {
     if (!consented("speech")) throw new BrowserModelConsentError();
     try {
-        return await withModel("speech", async (runtime) => {
-            const model = await speakerInstance(runtime);
-            const audio = await model.generate(text, { voice: options.voice ?? DEFAULT_KOKORO_VOICE, speed: options.speed });
-            return audio.toBlob();
-        });
+        return await withModel("speech", (runtime) =>
+            runEngine<Blob>({ op: "speak", runtime, text, voice: options.voice, speed: options.speed }),
+        );
     } catch (error) {
         throw forUser(error);
     }

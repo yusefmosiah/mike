@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
+import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
 import { speechRenderPlan, synthesizeSentence } from "@/app/lib/voice/engines";
 import { useVoicePreferences, type VoicePreferences } from "@/app/lib/voice/preferences";
 import {
@@ -37,7 +38,7 @@ const SKIP_SECONDS = 10;
 
 function readAloudErrorMessage(cause: unknown): string {
     if (typeof cause === "string") return cause;
-    if (cause instanceof BrowserModelError) return cause.message;
+    if (cause instanceof BrowserModelError || cause instanceof DeviceSpeechError) return cause.message;
     if (cause instanceof DOMException && cause.name === "NotAllowedError") return PLAYBACK_BLOCKED_MESSAGE;
     return userFacingApiError(cause, READ_ALOUD_FAILED_MESSAGE);
 }

@@ -88,7 +88,7 @@ describe("stored consent", () => {
         vi.mocked(Storage.prototype.setItem).mockRestore();
         expect(mod.hasBrowserModelConsent("speech")).toBe(false);
         lib.fromPretrained.mockResolvedValue({ generate: vi.fn() });
-        await expect(mod.loadBrowserSpeaker()).resolves.toBeDefined();
+        await expect(mod.loadBrowserSpeaker()).resolves.toBeUndefined();
     });
 });
 
@@ -180,7 +180,7 @@ describe("Whisper in the browser", () => {
         mod.setBrowserModelConsent("transcription", true);
         lib.pipeline.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(vi.fn());
         await expect(mod.loadBrowserTranscriber()).rejects.toThrow("offline");
-        await expect(mod.loadBrowserTranscriber()).resolves.toBeDefined();
+        await expect(mod.loadBrowserTranscriber()).resolves.toBeUndefined();
         expect(lib.pipeline).toHaveBeenCalledTimes(2);
     });
 });
@@ -236,7 +236,7 @@ describe("Kokoro in the browser", () => {
         mod.setBrowserModelConsent("speech", true);
         lib.fromPretrained.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce({ generate: vi.fn() });
         await expect(mod.loadBrowserSpeaker()).rejects.toThrow("offline");
-        await expect(mod.loadBrowserSpeaker()).resolves.toBeDefined();
+        await expect(mod.loadBrowserSpeaker()).resolves.toBeUndefined();
     });
 
     it("still refuses without consent", async () => {
@@ -395,7 +395,7 @@ describe("a page that died while a model ran", () => {
         const speaking = mod.speakWithBrowserModel("Hi");
         await vi.waitFor(() => expect(window.sessionStorage.getItem(RUNNING_KEY)).toBe("speech"));
         // A second run in the same page is not taken for a dead page.
-        await expect(mod.loadBrowserSpeaker()).resolves.toBeDefined();
+        await expect(mod.loadBrowserSpeaker()).resolves.toBeUndefined();
         window.dispatchEvent(new Event("pagehide"));
         expect(window.sessionStorage.getItem(RUNNING_KEY)).toBeNull();
         finish(spoken());

@@ -13,6 +13,8 @@ vi.mock("./browserModels", () => local);
 const phone = vi.hoisted(() => ({
     transcribeOnDevice: vi.fn(async () => "phone words"),
     deviceSpeechSupported: vi.fn(() => false),
+    deviceVoiceSupported: vi.fn(() => false),
+    speakOnDevice: vi.fn(async () => new Blob(["wav"])),
 }));
 vi.mock("./deviceSpeech", () => phone);
 
@@ -51,6 +53,8 @@ describe("synthesizeSentence", () => {
         expect(api.synthesizeSpeech).toHaveBeenLastCalledWith("Hi.");
         await synthesizeSentence("Hi.", { engine: "openrouter", model: "hexgrad/kokoro-82m", voice: "af_heart" });
         expect(api.synthesizeSpeech).toHaveBeenLastCalledWith("Hi.", { provider: "openrouter", model: "hexgrad/kokoro-82m", voice: "af_heart" });
+        await synthesizeSentence("Hi.", { engine: "device", voice: "zoe" });
+        expect(phone.speakOnDevice).toHaveBeenCalledWith("Hi.", "zoe");
         await synthesizeSentence("Hi.", { engine: "webgpu", voice: "bm_george" });
         expect(local.speakWithBrowserModel).toHaveBeenCalledWith("Hi.", { voice: "bm_george" });
     });
@@ -64,6 +68,7 @@ describe("speechRenderPlan", () => {
 
     it("sends a few sentences at a time, one by one, to the model in the browser", () => {
         expect(speechRenderPlan({ engine: "webgpu" })).toEqual({ maxChars: 300, concurrency: 1 });
+        expect(speechRenderPlan({ engine: "device" })).toEqual({ maxChars: 1200, concurrency: 1 });
     });
 
     it("reads the saved preferences by default", () => {

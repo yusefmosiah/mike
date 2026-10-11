@@ -7,7 +7,7 @@ import {
   onDeviceRecognitionStatus,
 } from "@/app/lib/voice/browserSpeech";
 import { browserModelsSupported } from "@/app/lib/voice/browserModels";
-import { deviceSpeechStatus, type DeviceSpeechState } from "@/app/lib/voice/deviceSpeech";
+import { deviceSpeechStatus, deviceVoiceSupported, type DeviceSpeechState } from "@/app/lib/voice/deviceSpeech";
 import type { VoiceAvailability } from "@/app/lib/voice/preferences";
 
 export type RecognitionStatus = Awaited<ReturnType<typeof onDeviceRecognitionStatus>>;
@@ -78,11 +78,14 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     options,
     availability: {
       deviceRecognition: deviceStatus !== "unavailable",
+      deviceSpeech: deviceVoiceSupported(),
       operatorTranscription: !!options?.operator.transcription,
       operatorSpeech: !!options?.operator.speech,
       openRouter: !!options?.openrouter.available && !!options.openrouter.catalog,
       browserRecognition: recognitionStatus !== "unavailable",
-      browserSpeech: browserSpeechSupported(),
+      // In the iPhone app the web view's own voices stay silent; Apple's
+      // voices come through the plugin instead ("This iPhone").
+      browserSpeech: browserSpeechSupported() && !deviceVoiceSupported(),
       webgpu: browserModelsSupported(),
     },
     recognitionStatus,

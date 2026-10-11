@@ -11,7 +11,7 @@ import {
   browserVoices,
   installOnDeviceRecognition,
 } from "@/app/lib/voice/browserSpeech";
-import { installDeviceSpeech } from "@/app/lib/voice/deviceSpeech";
+import { deviceVoices, installDeviceSpeech } from "@/app/lib/voice/deviceSpeech";
 import {
   DEFAULT_KOKORO_VOICE,
   browserModelVoices,
@@ -32,7 +32,7 @@ import { VoiceTestBench } from "./VoiceTestBench";
 function unavailableReason(engine: VoiceEngine): string {
   switch (engine) {
     case "device":
-      return "Dictating on the phone needs Mike's iPhone app.";
+      return "Apple's speech on the phone needs Mike's iPhone app (an up-to-date build to read aloud).";
     case "operator":
       return "This deployment has no speech server configured.";
     case "openrouter":
@@ -81,6 +81,7 @@ export function VoiceSettings() {
     useVoiceAvailability();
   const [systemVoices, setSystemVoices] = useState<VoiceChoice[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
+  const [phoneVoices, setPhoneVoices] = useState<VoiceChoice[]>([]);
   const [installing, setInstalling] = useState(false);
   const catalog = options?.openrouter.available ? options.openrouter.catalog : null;
   const stt = preferences.transcription;
@@ -90,6 +91,19 @@ export function VoiceSettings() {
     if (tts.engine !== "browser") return;
     void browserVoices().then((voices) =>
       setSystemVoices(voices.map((v) => ({ id: v.voiceURI, label: v.name, detail: `${v.lang}${v.localService ? " · on this device" : " · online"}` }))),
+    );
+  }, [tts.engine]);
+
+  useEffect(() => {
+    if (tts.engine !== "device") return;
+    void deviceVoices().then((voices) =>
+      setPhoneVoices(
+        voices.map((v) => ({
+          id: v.id,
+          label: v.name,
+          detail: v.quality === "default" ? v.language : `${v.language} · ${v.quality}`,
+        })),
+      ),
     );
   }, [tts.engine]);
 
@@ -277,6 +291,22 @@ export function VoiceSettings() {
                 </>
               )}
               <SettingsDescription>For comparing models while testing. Answer text goes to OpenRouter and the provider it routes to.</SettingsDescription>
+            </SettingsRow>
+          )}
+          {tts.engine === "device" && engineAvailable("speech", "device", availability) && (
+            <SettingsRow layout="stacked">
+              <SettingsLabel>Voice</SettingsLabel>
+              <VoiceChoiceDropdown
+                label="Read-aloud voice"
+                value={tts.voice}
+                placeholder="The iPhone's default voice"
+                choices={phoneVoices}
+                onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "device", voice } })}
+              />
+              <SettingsDescription>
+                Apple&apos;s voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be
+                downloaded in the iPhone&apos;s Accessibility settings, under spoken content.
+              </SettingsDescription>
             </SettingsRow>
           )}
           {tts.engine === "browser" && (

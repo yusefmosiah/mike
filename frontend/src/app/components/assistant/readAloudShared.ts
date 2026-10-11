@@ -15,7 +15,7 @@ const SENTENCE_PATTERN = /[^.!?]+[.!?]+/g;
 export const MAX_READ_ALOUD_SENTENCES = 200;
 
 /** Playback rates offered by the read-aloud control; 1 is engine default. */
-export const READ_ALOUD_SPEEDS = [0.75, 1, 1.25, 1.5] as const;
+export const READ_ALOUD_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
 
 export function splitIntoReadAloudSentences(text: string): string[] {
     const trimmed = text.trim();
@@ -55,7 +55,7 @@ export interface UseReadAloudState {
     position: number;
     length: number;
     unit: "seconds" | "sentences";
-    /** Playback rate, 0.75 | 1 | 1.25 | 1.5. */
+    /** Playback rate, one of READ_ALOUD_SPEEDS. */
     speed: number;
     error: string | null;
 }

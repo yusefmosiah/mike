@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import { deviceSpeechSupported } from "./deviceSpeech";
+import { deviceSpeechSupported, deviceVoiceSupported } from "./deviceSpeech";
 
 /**
  * Voice preferences (goals/mission-10-voice.md): which engine transcribes
@@ -11,8 +11,9 @@ import { deviceSpeechSupported } from "./deviceSpeech";
  * browser's built-in voices and an on-device model exist on one machine and
  * not the next.
  *
- *  - "device": Apple's speech recognition on the phone, in Mike's iPhone
- *    app (dictation only; the default there).
+ *  - "device": Apple's speech on the phone, in Mike's iPhone app: on-device
+ *    recognition for dictation and Apple's voices for read-aloud (the
+ *    default there).
  *  - "operator": the deployment's own speech server (the default elsewhere).
  *  - "openrouter": OpenRouter, the comparison lane; never in strict private
  *    mode (the server refuses it there too).
@@ -41,13 +42,16 @@ export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
 };
 
 /**
- * The defaults on this device: dictation stays on the phone in the iPhone
- * app, and goes to the deployment's speech server elsewhere.
+ * The defaults on this device: in the iPhone app dictation and read-aloud
+ * stay on the phone (read-aloud only in app builds whose plugin can speak);
+ * elsewhere both go to the deployment's speech server.
  */
 export function defaultVoicePreferences(): VoicePreferences {
-    return deviceSpeechSupported()
-        ? { ...DEFAULT_VOICE_PREFERENCES, transcription: { engine: "device" } }
-        : DEFAULT_VOICE_PREFERENCES;
+    if (!deviceSpeechSupported()) return DEFAULT_VOICE_PREFERENCES;
+    return {
+        transcription: { engine: "device" },
+        speech: { engine: deviceVoiceSupported() ? "device" : DEFAULT_VOICE_PREFERENCES.speech.engine },
+    };
 }
 
 export const VOICE_PREFERENCES_KEY = "mike.voice.v1";
@@ -72,8 +76,7 @@ export function parseVoicePreferences(raw: unknown): VoicePreferences {
             ...(text(t.language) ? { language: text(t.language) } : {}),
         },
         speech: {
-            // The phone's engine only transcribes.
-            engine: isEngine(s.engine) && s.engine !== "device" ? s.engine : defaults.speech.engine,
+            engine: isEngine(s.engine) ? s.engine : defaults.speech.engine,
             ...(text(s.model) ? { model: text(s.model) } : {}),
             ...(text(s.voice) ? { voice: text(s.voice) } : {}),
         },
@@ -137,6 +140,8 @@ export function useVoicePreferences(): [VoicePreferences, (next: VoicePreference
 /** What this deployment and this browser can actually do. */
 export interface VoiceAvailability {
     deviceRecognition: boolean;
+    /** Apple's voices, through the iPhone app's plugin. */
+    deviceSpeech: boolean;
     operatorTranscription: boolean;
     operatorSpeech: boolean;
     openRouter: boolean;
@@ -152,7 +157,7 @@ export function engineAvailable(
 ): boolean {
     switch (engine) {
         case "device":
-            return kind === "transcription" && availability.deviceRecognition;
+            return kind === "transcription" ? availability.deviceRecognition : availability.deviceSpeech;
         case "operator":
             return kind === "transcription" ? availability.operatorTranscription : availability.operatorSpeech;
         case "openrouter":

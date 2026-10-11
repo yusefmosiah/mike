@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+    DEVICE_SPEAK_FAILURE_MESSAGE,
     DEVICE_TRANSCRIBE_FAILURE_MESSAGE,
     DeviceSpeechError,
     deviceSpeechStatus,
     deviceSpeechSupported,
+    deviceVoices,
+    deviceVoiceSupported,
     installDeviceSpeech,
+    speakOnDevice,
     transcribeOnDevice,
 } from "./deviceSpeech";
 
 const nativePromise = vi.fn();
 
-function inApp(headers = [{ name: "MikeSpeech" }]) {
+function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ name: "MikeSpeech" }]) {
     vi.stubGlobal("Capacitor", { PluginHeaders: headers, nativePromise });
 }
 
@@ -117,5 +121,75 @@ describe("transcribeOnDevice", () => {
 
     it("refuses in a browser", async () => {
         await expect(transcribeOnDevice(new Blob(["a"]))).rejects.toThrow(/cannot transcribe this language/);
+    });
+});
+
+describe("deviceVoiceSupported", () => {
+    it("is true only when the app's plugin lists the speak method", () => {
+        expect(deviceVoiceSupported()).toBe(false);
+        inApp();
+        expect(deviceVoiceSupported()).toBe(false);
+        inApp([{ name: "MikeSpeech", methods: [{ name: "transcribe" }] }]);
+        expect(deviceVoiceSupported()).toBe(false);
+        inApp([{ name: "MikeSpeech", methods: [{ name: "transcribe" }, { name: "speak" }] }]);
+        expect(deviceVoiceSupported()).toBe(true);
+    });
+});
+
+describe("deviceVoices", () => {
+    it("lists the phone's voices and drops malformed entries", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({
+            voices: [
+                { id: "com.apple.voice.premium.en-US.Zoe", name: "Zoe", language: "en-US", quality: "premium" },
+                { id: "com.apple.voice.compact.en-GB.Daniel", name: "Daniel", language: "en-GB" },
+                { id: 3, name: "bad", language: "x" },
+                null,
+            ],
+        });
+        expect(await deviceVoices()).toEqual([
+            { id: "com.apple.voice.premium.en-US.Zoe", name: "Zoe", language: "en-US", quality: "premium" },
+            { id: "com.apple.voice.compact.en-GB.Daniel", name: "Daniel", language: "en-GB", quality: "default" },
+        ]);
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "voices");
+    });
+
+    it("is empty in a browser, on a failure, or on an unexpected answer", async () => {
+        expect(await deviceVoices()).toEqual([]);
+        inApp();
+        nativePromise.mockRejectedValueOnce(new Error("no"));
+        expect(await deviceVoices()).toEqual([]);
+        nativePromise.mockResolvedValueOnce({ voices: "nope" });
+        expect(await deviceVoices()).toEqual([]);
+        nativePromise.mockResolvedValueOnce(null);
+        expect(await deviceVoices()).toEqual([]);
+    });
+});
+
+describe("speakOnDevice", () => {
+    it("asks the phone for the text in a voice and returns the WAV", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ audio: btoa("RIFF"), mimeType: "audio/wav" });
+        const blob = await speakOnDevice("Hello.", "voice-1");
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "speak", { text: "Hello.", voice: "voice-1" });
+        expect(blob.type).toBe("audio/wav");
+        expect(await blob.text()).toBe("RIFF");
+
+        nativePromise.mockResolvedValueOnce({ audio: btoa("x") });
+        await speakOnDevice("Hi.");
+        expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "speak", { text: "Hi." });
+    });
+
+    it("turns failures into messages for the user", async () => {
+        await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
+        inApp();
+        nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "too-long" }));
+        await expect(speakOnDevice("Hi.")).rejects.toThrow("This is too long to read aloud on this iPhone at once.");
+        nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "failed" }));
+        await expect(speakOnDevice("Hi.")).rejects.toBeInstanceOf(DeviceSpeechError);
+        nativePromise.mockResolvedValueOnce({ audio: "" });
+        await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
+        nativePromise.mockResolvedValueOnce(null);
+        await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
     });
 });

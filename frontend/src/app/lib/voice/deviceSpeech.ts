@@ -14,7 +14,7 @@ import { knownErrorCodeMessage } from "@/app/lib/userFacingError";
 export type DeviceSpeechState = "available" | "downloadable" | "downloading" | "unavailable";
 
 interface CapacitorBridge {
-    PluginHeaders?: { name: string }[];
+    PluginHeaders?: { name: string; methods?: { name: string }[] }[];
     nativePromise?: (plugin: string, method: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -45,6 +45,17 @@ function nativePromise(): NonNullable<CapacitorBridge["nativePromise"]> | null {
 /** True inside Mike's iPhone app, whose shell has the speech plugin. */
 export function deviceSpeechSupported(): boolean {
     return nativePromise() !== null;
+}
+
+/**
+ * True when the app's plugin can also read aloud with Apple's voices (app
+ * builds before 2026-10-11 can only transcribe).
+ */
+export function deviceVoiceSupported(): boolean {
+    if (!nativePromise()) return false;
+    const cap = (window as unknown as { Capacitor: CapacitorBridge }).Capacitor;
+    const header = cap.PluginHeaders?.find((entry) => entry.name === PLUGIN);
+    return !!header?.methods?.some((method) => method.name === "speak");
 }
 
 function stateOf(result: unknown): DeviceSpeechState {
@@ -106,4 +117,56 @@ export async function transcribeOnDevice(blob: Blob, language?: string): Promise
     }
     const text = result && typeof result === "object" ? (result as { text?: unknown }).text : undefined;
     return typeof text === "string" ? text : "";
+}
+
+export interface DeviceVoice {
+    id: string;
+    name: string;
+    language: string;
+    /** "default", "enhanced" or "premium" (downloaded in the iPhone's Settings). */
+    quality: string;
+}
+
+/** The voices installed on the phone, best first within each language. */
+export async function deviceVoices(): Promise<DeviceVoice[]> {
+    const call = nativePromise();
+    if (!call) return [];
+    try {
+        const result = await call(PLUGIN, "voices");
+        const voices = result && typeof result === "object" ? (result as { voices?: unknown }).voices : undefined;
+        if (!Array.isArray(voices)) return [];
+        return voices.filter(
+            (voice): voice is DeviceVoice =>
+                !!voice &&
+                typeof voice === "object" &&
+                typeof (voice as DeviceVoice).id === "string" &&
+                typeof (voice as DeviceVoice).name === "string" &&
+                typeof (voice as DeviceVoice).language === "string",
+        ).map((voice) => ({ ...voice, quality: typeof voice.quality === "string" ? voice.quality : "default" }));
+    } catch {
+        return [];
+    }
+}
+
+export const DEVICE_SPEAK_FAILURE_MESSAGE = "Could not read this aloud on this iPhone. Please try again.";
+const DEVICE_SPEAK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+    "too-long": "This is too long to read aloud on this iPhone at once.",
+};
+
+/** `text` spoken by one of the phone's voices, as a WAV file. */
+export async function speakOnDevice(text: string, voice?: string): Promise<Blob> {
+    const call = nativePromise();
+    if (!call) throw new DeviceSpeechError(DEVICE_SPEAK_FAILURE_MESSAGE);
+    let result: unknown;
+    try {
+        result = await call(PLUGIN, "speak", { text, ...(voice ? { voice } : {}) });
+    } catch (error) {
+        throw new DeviceSpeechError(knownErrorCodeMessage(error, DEVICE_SPEAK_ERROR_MESSAGES, DEVICE_SPEAK_FAILURE_MESSAGE));
+    }
+    const audio = result && typeof result === "object" ? (result as { audio?: unknown }).audio : undefined;
+    if (typeof audio !== "string" || !audio) throw new DeviceSpeechError(DEVICE_SPEAK_FAILURE_MESSAGE);
+    const binary = atob(audio);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: "audio/wav" });
 }

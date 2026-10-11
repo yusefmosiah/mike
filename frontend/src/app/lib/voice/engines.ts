@@ -8,7 +8,7 @@
  */
 
 import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
-import { transcribeOnDevice } from "./deviceSpeech";
+import { speakOnDevice, transcribeOnDevice } from "./deviceSpeech";
 import { loadVoicePreferences, type VoicePreferences } from "./preferences";
 
 export async function transcribeRecording(
@@ -40,13 +40,17 @@ export async function transcribeRecording(
 export function speechRenderPlan(
     preferences: VoicePreferences["speech"] = loadVoicePreferences().speech,
 ): { maxChars: number; concurrency: number } {
-    return preferences.engine === "webgpu" ? { maxChars: 300, concurrency: 1 } : { maxChars: 1200, concurrency: 3 };
+    if (preferences.engine === "webgpu") return { maxChars: 300, concurrency: 1 };
+    // The phone renders one utterance at a time.
+    if (preferences.engine === "device") return { maxChars: 1200, concurrency: 1 };
+    return { maxChars: 1200, concurrency: 3 };
 }
 
 export async function synthesizeSentence(
     text: string,
     preferences: VoicePreferences["speech"] = loadVoicePreferences().speech,
 ): Promise<Blob> {
+    if (preferences.engine === "device") return speakOnDevice(text, preferences.voice);
     if (preferences.engine === "webgpu") {
         const { speakWithBrowserModel } = await import("./browserModels");
         return speakWithBrowserModel(text, { voice: preferences.voice });
