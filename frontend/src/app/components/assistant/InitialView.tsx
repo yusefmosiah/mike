@@ -127,7 +127,7 @@ export function InitialView({
             <div className="min-h-0 w-full max-w-4xl justify-self-center px-0 pt-1 xl:px-8">
                 <div className="text-center">
                     <p className="text-xs py-2 mb-12 text-gray-500">
-                        AI can make mistakes. Answers are not legal advice.
+                        AI can make mistakes.
                     </p>
                 </div>
 
