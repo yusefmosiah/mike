@@ -28,6 +28,12 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
 - The web view loads the firm's Mike server, so every web change reaches the
   app without a new build, as in the Mac app (`desktop/`). A static export of
   the frontend is not possible: it uses server routes and middleware.
+- The web view fills the screen (`contentInset: "never"`): the page pads
+  itself with `env(safe-area-inset-*)`, blurs text scrolling under the status
+  bar, and on chat threads scrolls the document, so a tap on the status bar
+  scrolls back to the top. When the page detects it runs edge to edge
+  (`frontend/src/app/lib/displayEdge.ts`), the composer sits near the bottom
+  of the screen with corners concentric with the display's.
 - The device talks only to the firm server, over the firm WireGuard VPN.
   Model, search and server-side speech operators are reached by the backend,
   never by the phone. On-device dictation (below) needs no network at all.
