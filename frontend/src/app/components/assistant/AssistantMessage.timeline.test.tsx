@@ -94,6 +94,35 @@ describe("AssistantMessage timeline", () => {
         ).toHaveLength(2);
     });
 
+    it("keeps steps separated only by blank text in one card", () => {
+        const read = (filename: string): AssistantEvent => ({
+            type: "doc_read",
+            filename,
+            document_id: filename,
+            version_id: "v1",
+            version_number: 1,
+        });
+        render(
+            <AssistantMessage
+                events={[
+                    read("lease.pdf"),
+                    { type: "content", text: "\n\n" },
+                    read("deed.pdf"),
+                    { type: "content", text: " \n" },
+                    read("survey.pdf"),
+                    { type: "content", text: "All three agree." },
+                    read("title.pdf"),
+                ]}
+            />,
+        );
+
+        // Blank chunks between tool calls do not split the run; prose does.
+        expect(
+            screen.getAllByRole("button", { name: /Completed in/ }).map((b) => b.textContent),
+        ).toEqual(["Completed in 3 steps", "Completed in 1 step"]);
+        expect(screen.getByText("All three agree.")).toBeInTheDocument();
+    });
+
     it("does not mark the response failed when a single tool call fails", () => {
         const { container } = render(
             <AssistantMessage

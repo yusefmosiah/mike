@@ -242,6 +242,8 @@ function TRAssistantMessage({
     {
         let current: Extract<TREventGroup, { kind: "pre" }> | null = null;
         events.forEach((e, i) => {
+            // A bare newline between tool calls does not end a run of steps.
+            if (e.type === "content" && !e.text.trim()) return;
             if (e.type === "content") {
                 if (current) {
                     groups.push(current);

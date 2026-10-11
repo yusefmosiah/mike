@@ -389,6 +389,10 @@ export function AssistantMessage({
         let current: Extract<EventGroup, { kind: "pre" }> | null = null;
         events.forEach((e, i) => {
             if (!isRenderableEvent(e)) return;
+            // Models often emit a bare newline between tool calls. Splitting
+            // the run there stacks one card per call with empty gaps between,
+            // so only prose with something to read ends a group.
+            if (e.type === "content" && !e.text.trim()) return;
             if (e.type === "content") {
                 if (current) {
                     groups.push(current);

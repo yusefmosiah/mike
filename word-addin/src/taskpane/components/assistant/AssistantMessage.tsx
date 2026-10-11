@@ -201,6 +201,8 @@ function AssistantMessageImpl({
     };
 
     message.events.forEach((event, eventIndex) => {
+      // A bare newline between tool calls does not end a run of steps.
+      if (isWordContentEvent(event) && !event.text.trim()) return;
       if (isWordContentEvent(event)) {
         flushPre();
         const projection = projectRedlineStream(event.text);
