@@ -153,8 +153,17 @@ account and model (`opencode-go/glm-5.3-flash`, code mode), sent through
   `save_to_mike` and `save_skill`'s folder path (`READ_FILE`, `READ_TREE` in
   `lib/workstation/files.ts`), with tests.
 
-Not yet run live: acceptance 3 (`replace`), 4 (share and revoke), 5 (two
-users; covered by tests).
+- Acceptance 3, after the fix deployed (chat `77627889`): the agent copied
+  `~/mike/library/workspace-check.md` to `~/mike/out/`, appended a line and
+  called `save_to_mike(path="~/mike/out/workspace-check.md",
+  replace="/home/agent/mike/library/workspace-check.md")`: "Saved as version
+  2 of 'workspace-check.md'" (same document `bedcb34d`). `GET
+  /single-documents/bedcb34d-.../versions` lists version 1 (765 bytes) and
+  version 2 (796 bytes, current). The `~/` path now works.
+
+Not yet run live: acceptance 4 (share and revoke) needs a second staging
+account, and the agent does not create accounts on staging; 5 (two users)
+is covered by tests.
 
 ## Not yet
 
