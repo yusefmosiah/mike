@@ -401,6 +401,9 @@ Staging (choir-ip.com) is the only deployment; production is not deployed.
 
 | # | Mission | State | File |
 |---|---|---|---|
+| 17 | Skills in the standard format: import, create and customize from chat, run in the workstation; the transcriber first | planned (owner direction 2026-10-11) | [`mission-17-skills.md`](mission-17-skills.md) |
+| 16 | Documents in the workstation: `~/mike/` read-only copy now, NAS mount later, `save_to_mike` back (reverses Mission 13's "documents stay out") | planned (owner direction 2026-10-11) | [`mission-16-documents-in-workstation.md`](mission-16-documents-in-workstation.md) |
+| 15 | Images in, for the models that can see | built, awaiting review; staging photo turn and browser check recorded | [`mission-15-vision.md`](mission-15-vision.md) |
 | 7 | Pi runtime, GoTrue-only, restart-safe turns, branch titles | built, awaiting review | this file; `pi-durable-decision-2026-10-08.md` |
 | 12 | Cleanup: tests, live reconnect, docs | built, awaiting review | [`mission-12-cleanup-2026-10-09.md`](mission-12-cleanup-2026-10-09.md) |
 | 8 | General knowledge-work system prompt | built, awaiting review | [`mission-8-general-agent-prompt.md`](mission-8-general-agent-prompt.md) |
