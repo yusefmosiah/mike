@@ -7,6 +7,7 @@ import type { DocxCloseGuard, DocxSaveState } from "./views/DocxRenderer.types";
 import { SpreadsheetView } from "./views/SpreadsheetView";
 import { ImageView } from "@/app/components/shared/views/ImageView";
 import { TextView } from "@/app/components/shared/views/TextView";
+import { WebPageView } from "@/app/components/shared/views/WebPageView";
 import {
     CitationQuotesSection,
     documentQuoteId,
@@ -152,6 +153,8 @@ export function DocumentContent({
     const documentId = resolvedDocument.document_id;
     const versionId = resolvedDocument.version_id ?? null;
     const isCase = resolvedDocument.type === "case";
+    // A saved web page: not a file, so no versions, permissions or checks.
+    const isWeb = resolvedDocument.type === "web";
     const viewType = resolveDocumentViewType({
         filename: resolvedDocument.title,
         fileType: resolvedDocument.type,
@@ -262,7 +265,7 @@ export function DocumentContent({
                         {/* Opening a document checks its citations if they
                             changed since the last check (backend
                             citations.auto.ts). */}
-                        {!isCase && active && documentId && (
+                        {!isCase && !isWeb && active && documentId && (
                             <div className="px-3 pb-1">
                                 <CitationCheckStatus
                                     documentId={documentId}
@@ -330,6 +333,12 @@ export function DocumentContent({
                         error={documentError}
                         onRetry={retryDocument}
                         onClearQuote={() => setActiveCitationQuoteId(null)}
+                    />
+                ) : isWeb ? (
+                    <WebPageView
+                        document={resolvedDocument}
+                        activeQuote={active ? activeDocumentQuote : undefined}
+                        quoteFocusKey={quoteFocusKey}
                     />
                 ) : viewType === "docx" ? (
                     <DocxView

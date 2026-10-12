@@ -1,8 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import { DocumentTabBar } from "@/app/components/shared/DocumentTabBar";
 import type { Document, PanelDocument } from "@/app/components/shared/types";
+import { isExternalSourceType } from "@/app/components/shared/types";
+import { SourceTypeIcon } from "@/app/components/shared/SourceTypeIcon";
 import type { TabDropPosition } from "@/app/lib/reorderTabs";
 import type { DocumentPermissions } from "@/app/hooks/useDocumentPermissions";
 
@@ -58,23 +59,9 @@ export function ProjectDocumentTabs({
                     (document) => document.id === tab.documentId,
                 );
                 const sourceType = tab.sourceDocument?.type;
-                const legalSource =
-                    sourceType === "case" || sourceType === "legislation";
+                const legalSource = isExternalSourceType(sourceType);
                 return {
-                    icon: legalSource ? (
-                        <Image
-                            src={
-                                sourceType === "case"
-                                    ? "/icons/legal-sources/case-law.svg"
-                                    : "/icons/legal-sources/legislation.svg"
-                            }
-                            alt=""
-                            aria-hidden="true"
-                            width={14}
-                            height={14}
-                            className="h-3.5 w-3.5 shrink-0 object-contain"
-                        />
-                    ) : undefined,
+                    icon: legalSource ? <SourceTypeIcon type={sourceType} /> : undefined,
                     id: tab.documentId,
                     title: tab.filename,
                     versionNumber:

@@ -46,7 +46,7 @@ export async function resolvePanelDocumentVersionResult(
     loadVersions: (documentId: string) => Promise<VersionList> =
         listDocumentVersions,
 ): Promise<PanelDocumentResolution> {
-    if (document.type === "case" || document.version_id)
+    if (document.type === "case" || document.type === "web" || document.version_id)
         return { status: "resolved", document };
 
     let result: VersionList;

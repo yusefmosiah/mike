@@ -18,6 +18,7 @@ import type { Db } from "../../lib/db";
 import type { DbJob } from "../../lib/dbq/types";
 import { enqueueDbJob } from "../../lib/dbq/enqueue";
 import { completeText } from "../../lib/llm";
+import { storeCitationSnapshot } from "../../lib/citationSnapshots";
 import { loadActiveVersion } from "../../lib/documentVersions";
 import { documentSuffix } from "../../lib/documentTypes";
 import { flashModelsFor, resolveEffectiveChatModel } from "../../lib/modelSelection";
@@ -35,7 +36,7 @@ import {
     type WebFetch,
     type WebSearch,
 } from "./citations.sources";
-import { evidenceInSource, matchQuote, sha256, type SnapshotInput, type Verdict } from "./citations.verifier";
+import { evidenceInSource, matchQuote, sha256, type Verdict } from "./citations.verifier";
 
 export const CITATION_CHECK_JOB = "citations.verify";
 /** One step per citation; verification_tasks allows at most 500. */
@@ -180,36 +181,6 @@ export async function startCitationCheck(
     return ok(task as VerificationTask);
 }
 
-/** Store a snapshot once per source and content hash; returns its id. */
-async function storeSnapshot(db: Db, snapshot: SnapshotInput): Promise<string> {
-    const digest = sha256(snapshot.content);
-    let query = db
-        .from("citation_snapshots")
-        .select("id")
-        .eq("source_kind", snapshot.sourceKind)
-        .eq("content_sha256", digest);
-    query = snapshot.versionId ? query.eq("document_version_id", snapshot.versionId) : query.eq("url", snapshot.url ?? "");
-    const { data: existing } = await query.limit(1);
-    const found = (existing as Array<{ id: string }> | null)?.[0];
-    if (found) return found.id;
-    const { data, error } = await db
-        .from("citation_snapshots")
-        .insert({
-            source_kind: snapshot.sourceKind,
-            document_id: snapshot.documentId ?? null,
-            document_version_id: snapshot.versionId ?? null,
-            url: snapshot.url ?? null,
-            content: snapshot.content,
-            content_sha256: digest,
-            block_offsets: snapshot.blockOffsets ?? null,
-            retrieved_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-    if (error || !data) throw error ?? new Error("snapshot not stored");
-    return data.id as string;
-}
-
 async function finish(db: Db, taskId: string, status: VerificationTask["status"], error: string | null = null) {
     const { data: rows } = await db.from("citation_checks").select("id").eq("task_id", taskId);
     await db
@@ -288,7 +259,7 @@ async function checkOne(db: Db, ctx: SourceContext, complete: Complete, citation
         verdict,
         reason,
         sourceKind: candidate.snapshot.sourceKind,
-        snapshotId: await storeSnapshot(db, candidate.snapshot),
+        snapshotId: await storeCitationSnapshot(db, candidate.snapshot),
         judgement,
         quote,
     };

@@ -16,7 +16,7 @@ const web: Citation = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("AssistantMessage web citations", () => {
-    it("opens a cited page in a new tab instead of the document panel", () => {
+    it("opens a cited page in the host's panel, not on its site", () => {
         const open = vi.spyOn(window, "open").mockReturnValue(null);
         const onCitationClick = vi.fn();
         render(
@@ -26,10 +26,25 @@ describe("AssistantMessage web citations", () => {
                 onCitationClick={onCitationClick}
             />,
         );
-        const pills = screen.getAllByRole("button", { name: /Citation 1/ });
-        fireEvent.click(pills[0]);
-        expect(open).toHaveBeenCalledWith("https://www.rocketswire.com/game", "_blank", "noopener,noreferrer");
-        expect(onCitationClick).not.toHaveBeenCalled();
+        fireEvent.click(screen.getAllByRole("button", { name: /Citation 1/ })[0]);
+        expect(onCitationClick).toHaveBeenCalledWith(web);
+        expect(open).not.toHaveBeenCalled();
+    });
+
+    it("opens the page on its site, at the quote, when the host has no panel", () => {
+        const open = vi.spyOn(window, "open").mockReturnValue(null);
+        render(
+            <AssistantMessage
+                events={[{ type: "content", text: "Houston won by 18.[1]" }]}
+                citations={[web]}
+            />,
+        );
+        fireEvent.click(screen.getAllByRole("button", { name: /Citation 1/ })[0]);
+        expect(open).toHaveBeenCalledWith(
+            "https://www.rocketswire.com/game#:~:text=Houston%20won%20135%2D117",
+            "_blank",
+            "noopener,noreferrer",
+        );
     });
 
     it("does not open a stored citation whose url is not http(s)", () => {
@@ -38,7 +53,6 @@ describe("AssistantMessage web citations", () => {
             <AssistantMessage
                 events={[{ type: "content", text: "Text.[1]" }]}
                 citations={[{ ...web, url: "javascript:alert(1)" } as Citation]}
-                onCitationClick={vi.fn()}
             />,
         );
         fireEvent.click(screen.getAllByRole("button", { name: /Citation 1/ })[0]);

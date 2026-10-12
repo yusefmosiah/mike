@@ -310,7 +310,8 @@ export function AssistantMessage({
         }
     }
     const handleOpenCitationSource = (citation: Citation) => {
-        if (citation.kind === "web") {
+        // Without a panel to read it in, a web page opens on its site.
+        if (citation.kind === "web" && !onOpenCitationSource) {
             openWebCitation(citation);
             return;
         }
@@ -318,7 +319,7 @@ export function AssistantMessage({
             onOpenCitationSource(citation);
             return;
         }
-        if (citation.kind === "case" || !onOpenDocument) return;
+        if (citation.kind === "case" || citation.kind === "web" || !onOpenDocument) return;
         onOpenDocument({
             documentId: citation.document_id,
             filename: citation.filename,
@@ -330,13 +331,16 @@ export function AssistantMessage({
         citation.kind === "web" ||
         !!onOpenCitationSource ||
         (citation.kind === "document" || citation.kind === undefined) && !!onOpenDocument;
-    // A web citation opens its page in a new tab; the others open in the panel.
-    const handleCitationClick = onCitationClick
-        ? (citation: Citation) =>
-              citation.kind === "web"
-                  ? openWebCitation(citation)
-                  : onCitationClick(citation)
-        : undefined;
+    // Every citation opens in the host's panel; a web citation opens the
+    // saved page in the reader there, which links on to the live site.
+    // Without a panel, a web page opens on its site.
+    const handleCitationClick =
+        onCitationClick ??
+        (citations.some((citation) => citation.kind === "web")
+            ? (citation: Citation) => {
+                  if (citation.kind === "web") openWebCitation(citation);
+              }
+            : undefined);
     const showCitationBlock =
         !!citationStatus || (!isStreaming && citations.length > 0);
     const handleCopy = async () => {

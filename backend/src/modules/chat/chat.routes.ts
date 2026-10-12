@@ -76,6 +76,7 @@ import {
     revokeThreadCodeApproval,
     type CodeApprovalDecision,
     getChatSubagentTranscript,
+    getChatWebPage,
     grantChatAccess,
     listChatGrants,
     listChatPeople,
@@ -301,6 +302,20 @@ chatRouter.get("/:chatId/subagents/:childId", requireAuth, asyncRoute(async (req
     const result = await getChatSubagentTranscript(createDb(), {
         chatId: req.params.chatId,
         childId: req.params.childId,
+        userId: res.locals.userId as string,
+        userEmail: res.locals.userEmail as string | undefined,
+    });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// GET /chat/:chatId/web-pages/:snapshotId
+// The saved copy of a page one of this chat's web citations cites, for the
+// reader view. Visibility of the chat is enough, as it is for the citation.
+chatRouter.get("/:chatId/web-pages/:snapshotId", requireAuth, asyncRoute(async (req, res) => {
+    const result = await getChatWebPage(createDb(), {
+        chatId: req.params.chatId,
+        snapshotId: req.params.snapshotId,
         userId: res.locals.userId as string,
         userEmail: res.locals.userEmail as string | undefined,
     });

@@ -308,8 +308,8 @@ and the hash.
 
 | Phase | Work | Size |
 | --- | --- | --- |
-| C1 | Persist web snapshots; add `snapshot_id` to citations; expand in place with a Text Fragment "Open page". | Small to medium. |
-| C2 | Reader view in the side panel; unified viewer for Markdown, code and diffs. | Medium. |
+| C1 | Persist web snapshots; add `snapshot_id` to citations; expand in place with a Text Fragment "Open page". | Small to medium. Built 2026-10-12, opening in the panel rather than in place. |
+| C2 | Reader view in the side panel; unified viewer for Markdown, code and diffs. | Medium. Web reader built 2026-10-12, reusing the Markdown view; code and diffs not yet. |
 | C3 | Headless Chromium in the workstation VM as fetch fallback; screenshots. | Medium (infra). |
 | C4 | Separate-origin faithful HTML; device fetch through the Mac app. | Large. |
 

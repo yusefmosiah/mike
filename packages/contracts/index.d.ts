@@ -7,7 +7,9 @@ export type SourceDocumentType =
   | "image"
   | "text"
   | "case"
-  | "legislation";
+  | "legislation"
+  /** A saved copy of a web page a citation cites, shown in the reader view. */
+  | "web";
 
 export type SourceDocumentMetadata = {
   label: string;

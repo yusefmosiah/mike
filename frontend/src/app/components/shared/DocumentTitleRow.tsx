@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { Download, ExternalLink } from "lucide-react";
 import { downloadDocumentFile } from "@/app/lib/downloadDocument";
@@ -13,6 +12,8 @@ import { DocumentVersionPicker } from "./DocumentVersionPicker";
 import type { DocumentVersion } from "@/app/lib/mikeApi";
 import { VersionChip } from "./VersionChip";
 import type { PanelDocument } from "./types";
+import { isExternalSourceType } from "./types";
+import { SourceTypeIcon } from "./SourceTypeIcon";
 import type { DocxSaveState } from "./views/DocxRenderer.types";
 import { DocxSaveErrorPopup } from "./views/DocxSaveErrorPopup";
 
@@ -55,20 +56,8 @@ export function DocumentTitleRow({
             <div className="flex items-center gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="shrink-0">
-                        {document.type === "case" ||
-                        document.type === "legislation" ? (
-                            <Image
-                                src={
-                                    document.type === "case"
-                                        ? "/icons/legal-sources/case-law.svg"
-                                        : "/icons/legal-sources/legislation.svg"
-                                }
-                                alt=""
-                                aria-hidden="true"
-                                width={14}
-                                height={14}
-                                className="h-3.5 w-3.5 shrink-0 object-contain"
-                            />
+                        {isExternalSourceType(document.type) ? (
+                            <SourceTypeIcon type={document.type} />
                         ) : (
                             <FileTypeIcon
                                 fileType={document.title}

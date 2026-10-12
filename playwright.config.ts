@@ -9,6 +9,7 @@ const SYNTHETIC_SPECS = [
     /assistant-streaming\.spec\.ts/,
     /tabular-chat-lifecycle\.spec\.ts/,
     /mobile-layout\.spec\.ts/,
+    /web-citation-reader\.spec\.ts/,
 ];
 
 /* Locally, the backend Playwright starts runs against the mike-e2e stack

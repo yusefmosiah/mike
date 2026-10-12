@@ -67,6 +67,8 @@ import { buildMemoryTurn } from "../../../lib/memory/prompt";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
 import { getWebSnapshot } from "../../../lib/search/engine";
+import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
+import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import {
   cellResultContent,
@@ -1703,6 +1705,10 @@ export async function runLLMStream(params: {
       getSourceText,
       async (clusterId) =>
         getCachedCaseOpinionTexts(courtlistenerTurnState, clusterId),
+    );
+    // Web citations keep the page they were checked against, for the reader.
+    citations = await attachWebSnapshots(citations, getWebSnapshot, (snapshot) =>
+      storeCitationSnapshot(db, snapshot),
     );
   }
   devLog("[chat/stream] final citations", {

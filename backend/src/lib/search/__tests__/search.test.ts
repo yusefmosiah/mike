@@ -127,6 +127,24 @@ describe("fetchPage & Web Snapshot Store", () => {
     expect(retrieved).toBeDefined();
     expect(retrieved?.contentSha256).toBe(page.contentSha256);
   });
+
+  it("keeps the article as reader Markdown beside the plain text quotes are checked against", async () => {
+    const html = `<html><head><title>Board powers</title></head><body>
+      <nav><a href="/">Home</a> <a href="/about">About the court</a></nav>
+      <article><h1>Delaware Chancery Opinion</h1>
+        <p>Under <a href="/dgcl/141">DGCL Section 141</a>, the board of directors manages corporate affairs. ${"The court explained the standard at length. ".repeat(8)}</p>
+      </article><footer>Site footer</footer></body></html>`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, text: async () => html }));
+
+    const page = await fetchPage("https://courts.delaware.gov/opinions/124");
+
+    expect(page.title).toBe("Board powers");
+    expect(page.content).toContain("Under DGCL Section 141 , the board");
+    expect(page.readerMarkdown).toContain("Delaware Chancery Opinion");
+    expect(page.readerMarkdown).toContain("[DGCL Section 141](https://courts.delaware.gov/dgcl/141)");
+    expect(page.readerMarkdown).not.toContain("Site footer");
+    expect(getWebSnapshot("https://courts.delaware.gov/opinions/124")?.readerMarkdown).toBe(page.readerMarkdown);
+  });
 });
 
 describe("search results as citation snapshots", () => {

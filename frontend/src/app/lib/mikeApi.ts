@@ -2576,6 +2576,26 @@ export async function getChatSubagentTranscript(
     );
 }
 
+/** A saved copy of a page one of the chat's web citations cites. */
+export type ChatWebPage = {
+    id: string;
+    url: string;
+    /** The plain text the citation's quotes were checked against. */
+    text: string;
+    /** The page's main content as Markdown, when it could be extracted. */
+    markdown: string | null;
+    retrieved_at: string;
+};
+
+export async function getChatWebPage(
+    chatId: string,
+    snapshotId: string,
+): Promise<ChatWebPage> {
+    return apiRequest<ChatWebPage>(
+        `/chat/${encodeURIComponent(chatId)}/web-pages/${encodeURIComponent(snapshotId)}`,
+    );
+}
+
 export async function getChatAccess(chatId: string): Promise<ContentAccess> {
     return apiRequest<ContentAccess>(`/chat/${chatId}/access`);
 }

@@ -21,10 +21,11 @@ import {
 } from "./types";
 import type { DocumentContentMode } from "./DocumentContent";
 
-const { viewer, resolveEdit, loadVersions } = vi.hoisted(() => ({
+const { viewer, resolveEdit, loadVersions, getChatWebPage } = vi.hoisted(() => ({
     viewer: vi.fn(),
     resolveEdit: vi.fn(),
     loadVersions: vi.fn(),
+    getChatWebPage: vi.fn(),
 }));
 vi.mock("./views/DocxView", () => ({
     DocxView: (props: unknown) => {
@@ -49,6 +50,7 @@ vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     getDocument: vi.fn().mockResolvedValue({ can_edit: true, can_delete: true }),
     resolveDocumentEdit: resolveEdit,
     listDocumentVersions: loadVersions,
+    getChatWebPage,
 }));
 
 const citation: DocumentCitation = {
@@ -385,6 +387,58 @@ it("opens a case citation in the IDE with the same opinion and quote section", (
     expect(screen.getByRole("heading", { name: document.title })).toBeVisible();
     expect(screen.getByLabelText("Citation 4")).toBeVisible();
     expect(screen.getByText(/of this case/)).toBeVisible();
+    expect(viewer).not.toHaveBeenCalled();
+});
+
+it("opens a web citation's saved page in the reader, with a link to the original", async () => {
+    const snapshotId = "6f783e59-35c4-4ddc-896a-94aa4d05a768";
+    const webCitation = {
+        type: "citation_data" as const,
+        kind: "web" as const,
+        ref: 5,
+        url: "https://example.com/ruling",
+        title: "Ruling on appeal",
+        site: "example.com",
+        quotes: [{ quote: "held for the appellant", verification: { verified: true } }],
+        snapshot_id: snapshotId,
+        retrieved_at: "2026-10-12T09:00:00.000Z",
+    };
+    getChatWebPage.mockResolvedValue({
+        id: snapshotId,
+        url: webCitation.url,
+        text: "",
+        markdown: "The court held for the appellant on every ground.",
+        retrieved_at: webCitation.retrieved_at,
+    });
+    const document = panelDocumentFromCitation(webCitation, true, { chatId: "chat-1" });
+    render(
+        <ProjectDocumentPanels
+            documents={[]}
+            activeTabId={document.document_id}
+            onWarningDismiss={vi.fn()}
+            tabs={[
+                {
+                    documentId: document.document_id,
+                    filename: document.title,
+                    fileType: document.type,
+                    sourceDocument: document,
+                    annotation: { kind: "citation", citation: webCitation },
+                },
+            ]}
+        />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Ruling on appeal" })).toBeVisible();
+    expect(screen.getByText(/Site: example.com/)).toBeVisible();
+    expect(screen.getByText(/Saved: October 12, 2026/)).toBeVisible();
+    expect(screen.getByLabelText("Citation 5")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Open original/ })).toHaveAttribute(
+        "href",
+        "https://example.com/ruling#:~:text=held%20for%20the%20appellant",
+    );
+    expect(await screen.findByText(/on every ground/)).toBeVisible();
+    expect(getChatWebPage).toHaveBeenCalledWith("chat-1", snapshotId);
+    expect(loadVersions).not.toHaveBeenCalled();
     expect(viewer).not.toHaveBeenCalled();
 });
 

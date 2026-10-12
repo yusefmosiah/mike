@@ -7,6 +7,7 @@ import {
     forkChat,
     getChat,
     getChatSubagentTranscript,
+    getChatWebPage,
     getVoiceOptions,
     searchProjectDirectory,
     setAutoModeDecisionModel,
@@ -162,6 +163,12 @@ describe("other thin wrappers", () => {
         fetchMock.mockResolvedValue(json({ id: "child/1", events: [] }));
         await getChatSubagentTranscript("chat-1", "child/1");
         expect(lastCall().url).toBe("/api/chat/chat-1/subagents/child%2F1");
+    });
+
+    it("reads a cited web page's saved copy through its chat", async () => {
+        fetchMock.mockResolvedValue(json({ id: "snap-1", url: "https://example.com", text: "", markdown: null, retrieved_at: "" }));
+        await getChatWebPage("chat-1", "snap/1");
+        expect(lastCall().url).toBe("/api/chat/chat-1/web-pages/snap%2F1");
     });
 
     it("reads the deployment's voice options", async () => {

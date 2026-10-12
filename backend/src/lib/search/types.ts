@@ -24,4 +24,6 @@ export interface FetchedPage {
   fetchedAt: string;
   /** "search" when the text is a search result's snippet or content, not the fetched page. */
   source?: "fetch" | "search";
+  /** The page's main content as Markdown, for the reader view; quotes are checked against `content`. */
+  readerMarkdown?: string;
 }

@@ -123,6 +123,11 @@ export type PanelDocumentQuote = SourceDocumentQuote;
 export type PanelSubdocument = SourceSubdocument;
 export type PanelDocument = SourceDocument;
 
+/** A source that is not a project file: no versions, permissions or downloads. */
+export function isExternalSourceType(type: string | undefined): boolean {
+  return type === "case" || type === "legislation" || type === "web";
+}
+
 export function isPanelDocument(value: unknown): value is PanelDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -131,7 +136,7 @@ export function isPanelDocument(value: unknown): value is PanelDocument {
   return (
     typeof document.document_id === "string" &&
     typeof document.title === "string" &&
-    ["docx", "pdf", "spreadsheet", "case", "legislation"].includes(
+    ["docx", "pdf", "spreadsheet", "case", "legislation", "web"].includes(
       String(document.type),
     ) &&
     Array.isArray(document.metadata) &&
@@ -485,7 +490,16 @@ export type WebCitation = {
   quotes: { quote: string; verification?: QuoteVerification }[];
   /** True only when every quote was found in the page or its search result. */
   verified?: boolean;
-  /** Web citations open the page itself, never the document panel. */
+  /**
+   * The saved copy of the page the quotes were checked against, shown in the
+   * reader view. Absent on citations made before pages were saved, or when
+   * the page was never read.
+   */
+  snapshot_id?: string;
+  /** When the saved copy was read. */
+  retrieved_at?: string;
+  /** "search" when the copy is a search result's text, not the page itself. */
+  snapshot_source?: "fetch" | "search";
   document?: undefined;
 };
 
@@ -500,11 +514,45 @@ export function isWebCitation(citation: Citation): citation is WebCitation {
   return citation.kind === "web";
 }
 
+/** True for an http(s) URL: the only kind a web citation may link to. */
+function isWebUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+/**
+ * The cited page on the live web, scrolled to the quote where the browser
+ * supports text fragments (`#:~:text=start,end`); others ignore the fragment.
+ */
+export function webCitationOriginalUrl(citation: WebCitation): string | null {
+  if (!isWebUrl(citation.url)) return null;
+  const quote =
+    citation.quotes.find((entry) => entry.verification?.verified)?.quote ??
+    citation.quotes[0]?.quote;
+  const words = quote?.replace(/\s+/g, " ").trim().split(" ").filter(Boolean) ?? [];
+  if (!words.length) return citation.url;
+  // Text fragments reserve "-", "&" and ","; encodeURIComponent leaves "-".
+  const encode = (text: string) => encodeURIComponent(text).replace(/-/g, "%2D");
+  const directive =
+    words.length > 8
+      ? `${encode(words.slice(0, 4).join(" "))},${encode(words.slice(-4).join(" "))}`
+      : encode(words.join(" "));
+  return `${citation.url}${citation.url.includes("#") ? "" : "#"}:~:text=${directive}`;
+}
+
 /** Opens a cited web page in a new browser tab, with no access back to Mike. */
 export function openWebCitation(citation: WebCitation): void {
   // The server accepts only http(s) URLs; a stored citation is checked again.
-  if (!/^https?:\/\//i.test(citation.url)) return;
-  window.open(citation.url, "_blank", "noopener,noreferrer");
+  const url = webCitationOriginalUrl(citation);
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+const WEB_PAGE_ID = /^web:([^:]+):([0-9a-f-]{36})$/i;
+
+/** The chat and saved page a reader-view document id names, if it names one. */
+export function webPageRef(documentId: string): { chatId: string; snapshotId: string } | null {
+  const match = documentId.match(WEB_PAGE_ID);
+  return match ? { chatId: match[1], snapshotId: match[2] } : null;
 }
 
 export function panelDocumentType(filename: string): PanelDocumentType {
@@ -525,16 +573,26 @@ function legacyCaseSubdocumentId(clusterId: number, opinionId: number): string {
 export function panelDocumentFromCitation(
   citation: Citation,
   includeQuotes = true,
+  /** The chat the citation is in: a web citation's saved page is read through it. */
+  options: { chatId?: string | null } = {},
 ): PanelDocument {
   if (citation.kind === "web") {
-    // Callers open web citations in a browser tab (openWebCitation); this
-    // describes one for any panel that receives it anyway.
+    // The reader view loads the saved copy through the chat that cites it.
+    const saved = options.chatId && citation.snapshot_id ? citation.snapshot_id : null;
+    const original = webCitationOriginalUrl(citation);
     return {
-      document_id: `web:${citation.url}`,
+      document_id: saved ? `web:${options.chatId}:${saved}` : `web:${citation.url}`,
       title: citation.title,
-      type: "legislation",
-      metadata: citation.site ? [{ label: "Site", value: citation.site }] : [],
-      actions: [{ type: "link", url: citation.url, label: "Open page", title: "Open page" }],
+      type: "web",
+      metadata: [
+        ...(citation.site ? [{ label: "Site", value: citation.site }] : []),
+        ...(saved && citation.retrieved_at
+          ? [{ label: citation.snapshot_source === "search" ? "Search result saved" : "Saved", value: citation.retrieved_at, format: "date" as const }]
+          : []),
+      ],
+      actions: original
+        ? [{ type: "link", url: original, label: "Open original", title: "Open original page on its site" }]
+        : [],
       quotes: includeQuotes
         ? citation.quotes.map((quote) => ({
             quote: quote.quote,

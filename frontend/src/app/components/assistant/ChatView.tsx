@@ -474,7 +474,9 @@ export function ChatView({
         async (citation: Citation, options?: { showQuotes?: boolean }) => {
             const showQuotes = options?.showQuotes ?? true;
             const resolution = await resolvePanelDocumentVersionResult(
-                panelDocumentFromCitation(citation, showQuotes),
+                panelDocumentFromCitation(citation, showQuotes, {
+                    chatId: activeChat?.id ?? chatId,
+                }),
             );
             if (resolution.status !== "resolved") {
                 reportUnresolvedDocument(resolution.status);
@@ -496,7 +498,7 @@ export function ChatView({
                 citation,
             });
         },
-        [reportUnresolvedDocument, upsertTab],
+        [activeChat?.id, chatId, reportUnresolvedDocument, upsertTab],
     );
 
     const openCase = useCallback(

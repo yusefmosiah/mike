@@ -7167,6 +7167,8 @@ create table if not exists public.citation_snapshots (
   content_sha256 text not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
   -- Document snapshots: [{ "id": block id, "start": n, "end": n }] into content.
   block_offsets jsonb,
+  -- Web snapshots: the page's main content as Markdown, for the reader view.
+  reader_markdown text,
   retrieved_at timestamptz not null default now()
 );
 
@@ -8170,5 +8172,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_09_chat_code_approvals.sql'),
   ('20261010_10_image_upload_types.sql'),
   ('20261010_11_text_upload_types.sql'),
-  ('20261010_12_skill_versions.sql')
+  ('20261010_12_skill_versions.sql'),
+  ('20261012_01_web_reader_snapshots.sql')
 on conflict (filename) do nothing;

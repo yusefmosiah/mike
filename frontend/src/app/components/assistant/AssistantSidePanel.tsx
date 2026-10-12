@@ -11,11 +11,12 @@ import { useDocumentViewers } from "@/app/hooks/useDocumentViewers";
 import { useDocumentPermissions } from "@/app/hooks/useDocumentPermissions";
 import { type DocumentActions } from "../shared/DocumentTabActions";
 import type { DocumentVersion } from "@/app/lib/mikeApi";
-import Image from "next/image";
 import { BookOpenText } from "lucide-react";
 import { DocPanel, type DocPanelMode } from "./DocPanel";
 import { DocumentTabBar } from "../shared/DocumentTabBar";
 import type { Citation, EditAnnotation, PanelDocument } from "../shared/types";
+import { isExternalSourceType } from "../shared/types";
+import { SourceTypeIcon } from "../shared/SourceTypeIcon";
 import { cn } from "@/app/lib/utils";
 import { LIQUID_GLASS_FLOAT_CLASS } from "@/app/components/ui/liquid-surface";
 import { reorderTabs, type TabDropPosition } from "@/app/lib/reorderTabs";
@@ -213,7 +214,7 @@ export function AssistantSidePanel({
     onOpenDocuments,
 }: Props) {
     const panelRef = useRef<HTMLDivElement>(null);
-    const permissions = useDocumentPermissions(tabs.filter((tab) => !["case", "legislation"].includes(tab.document.type)).map((tab) => tab.document.document_id), canEdit);
+    const permissions = useDocumentPermissions(tabs.filter((tab) => !isExternalSourceType(tab.document.type)).map((tab) => tab.document.document_id), canEdit);
     const viewers = useDocumentViewers();
     const [panelWidth, setPanelWidth] = useState(() =>
         typeof window !== "undefined"
@@ -307,9 +308,7 @@ export function AssistantSidePanel({
                 addLabel="Open Documents"
                 onReorder={onReorderTabs}
                 tabs={tabs.map((tab) => {
-                    const isLegalSource =
-                        tab.document.type === "case" ||
-                        tab.document.type === "legislation";
+                    const isLegalSource = isExternalSourceType(tab.document.type);
                     const actions = isLegalSource
                         ? undefined
                         : documentActions?.(tab.document);
@@ -317,20 +316,7 @@ export function AssistantSidePanel({
                         id: tab.id,
                         title: tab.document.title,
                         versionNumber: tab.document.version_number,
-                        icon: isLegalSource ? (
-                            <Image
-                                src={
-                                    tab.document.type === "case"
-                                        ? "/icons/legal-sources/case-law.svg"
-                                        : "/icons/legal-sources/legislation.svg"
-                                }
-                                alt=""
-                                aria-hidden="true"
-                                width={14}
-                                height={14}
-                                className="h-3.5 w-3.5 shrink-0 object-contain"
-                            />
-                        ) : undefined,
+                        icon: isLegalSource ? <SourceTypeIcon type={tab.document.type} /> : undefined,
                         actions: {
                             ...actions,
                             onRename: permissions(tab.document.document_id).canEdit ? actions?.onRename : undefined,

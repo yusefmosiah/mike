@@ -121,7 +121,7 @@ import type {
     Message,
     Project,
 } from "@/app/components/shared/types";
-import { panelDocumentFromCitation, panelDocumentFromCaseEvent, panelDocumentType } from "@/app/components/shared/types";
+import { isExternalSourceType, panelDocumentFromCitation, panelDocumentFromCaseEvent, panelDocumentType } from "@/app/components/shared/types";
 import { panelDocumentAtVersion } from "@/app/lib/panelDocumentAtVersion";
 import { resolvePanelDocumentVersionResult } from "@/app/components/assistant/panelDocumentVersion";
 import type { DocumentContentMode } from "@/app/components/shared/DocumentContent";
@@ -619,7 +619,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     const projectRole = roleFromLoaded(project);
     const canEditContent = can(projectRole, "content.edit");
     const documentPermissions = useDocumentPermissions(
-        tabs.filter((tab) => !["case", "legislation"].includes(tab.sourceDocument?.type ?? ""))
+        tabs.filter((tab) => !isExternalSourceType(tab.sourceDocument?.type))
             .map((tab) => tab.documentId),
         canEditContent,
     );
@@ -964,7 +964,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // ── Handlers ──────────────────────────────────────────────────────────────
     const handleSubmit = useCallback(
         (message: Message, options?: Parameters<typeof handleChat>[1]) => {
-            if (!activeTab || activeTab.sourceDocument?.type === "case")
+            if (!activeTab || isExternalSourceType(activeTab.sourceDocument?.type))
                 return handleChat(message, options);
             return handleChat(message, {
                 ...options,
@@ -1002,7 +1002,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         }
         const request = ++openRequest.current;
         const result = await resolvePanelDocumentVersionResult(
-            panelDocumentFromCitation(citation, showQuotes),
+            panelDocumentFromCitation(citation, showQuotes, {
+                chatId: activeChatId,
+            }),
         );
         if (request !== openRequest.current) return;
         if (result.status !== "resolved") {

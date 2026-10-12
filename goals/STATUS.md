@@ -124,8 +124,11 @@ collide. In the owner's words where quoted.
    and recorded by the backend; quotes checked against the fetched page, or
    against the search result's text when the page was only searched; the
    prompt tells the model to cite pages through `<CITATIONS>` and not as
-   Markdown links or a "Sources" list; in the web app the pill opens the page
-   in a new tab and the source list shows title, site and a globe icon.
+   Markdown links or a "Sources" list; the source list shows title, site
+   and a globe icon. Since 2026-10-12 the pill opens the page Mike saved for
+   the answer in a reader view in the document panel (the article as
+   Markdown, the quote highlighted), with "Open original" linking to the
+   live page at the quote; see the docket entry below.
    Receipt: on the isolated local stack in code mode
    (`opencode-go/deepseek-v4.1-flash`), "most recent Rockets vs Mavericks
    game, and who led the scoring?" came back with three web citations
@@ -283,6 +286,19 @@ collide. In the owner's words where quoted.
      (`X-Frame-Options` / CSP `frame-ancestors`); the approach to evaluate is
      rendering our own stored snapshot of the page (fetched server-side,
      sanitized, served from a sandboxed origin) with the quote highlighted.
+     **Built 2026-10-12 (not accepted), phases C1 and C2 of
+     `docs/reports/group-threads-and-citation-viewer-2026-10-10.md`:** a
+     fetched page is also reduced to its article as Markdown (Readability,
+     Turndown); at the end of a turn each web citation's page is saved to
+     `citation_snapshots` (`reader_markdown` beside the checked plain text)
+     and the citation carries `snapshot_id`. The pill opens a "web" document
+     in the panel, read through `GET /chat/:chatId/web-pages/:snapshotId`
+     (chat visibility, and only pages the chat's messages cite), rendered
+     like a Markdown file with the quote highlighted; images are dropped so
+     the reader loads nothing from the site. "Open original" links to the
+     live page with a text fragment. Older citations show their quotes and
+     the link. Receipt: `e2e/web-citation-reader.spec.ts` (mocked API).
+     Not yet seen against a live model turn.
 
 ## Where things stood (2026-10-09)
 

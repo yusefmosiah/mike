@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { FetchedPage, SearchOptions, SearchResult } from "./types";
 import { getProviderAdapter } from "./providers";
 import { assertSafeEgressUrl } from "./egress";
+import { htmlToReaderMarkdown } from "./reader";
 
 // In-memory snapshot cache for citation verification: url -> FetchedPage.
 // Bounded: the oldest entries go first once it holds MAX_SNAPSHOTS.
@@ -86,6 +87,7 @@ export async function fetchPage(
 
     const htmlOrText = await res.text();
     const cleanContent = stripHtmlToText(htmlOrText);
+    const reader = htmlToReaderMarkdown(htmlOrText, safeUrl.toString());
     const contentSha256 = crypto
       .createHash("sha256")
       .update(cleanContent)
@@ -93,10 +95,12 @@ export async function fetchPage(
 
     const snapshot: FetchedPage = {
       url: safeUrl.toString(),
+      ...(reader?.title ? { title: reader.title } : {}),
       content: cleanContent,
       contentSha256,
       fetchedAt: new Date().toISOString(),
       source: "fetch",
+      ...(reader ? { readerMarkdown: reader.markdown } : {}),
     };
 
     for (const key of snapshotKeys(safeUrl.toString())) remember(key, snapshot);
