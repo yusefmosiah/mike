@@ -235,6 +235,11 @@ export type ConfiguredModel = {
     provider: "openai-compatible";
     location: ModelLocation;
     label?: string;
+    /**
+     * Heading the model is listed under in the model pickers, normally the
+     * provider serving it ("Phala (encrypted)"). Defaults to "Configured".
+     */
+    group?: string;
     /** Model name to send upstream when it differs from the Mike-facing id. */
     apiModel?: string;
     baseUrl: string;

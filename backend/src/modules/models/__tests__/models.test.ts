@@ -53,6 +53,7 @@ describe("GET /models/configured", () => {
                     id: "cloud-user-key",
                     provider: "openai-compatible",
                     location: "cloud",
+                    group: "Example (encrypted)",
                     baseUrl: "https://models.example.test/v1",
                     apiKeyProvider: "openai",
                 },
@@ -94,7 +95,7 @@ describe("GET /models/configured", () => {
             {
                 id: "cloud-user-key",
                 label: "cloud-user-key",
-                group: "Configured",
+                group: "Example (encrypted)",
                 location: "cloud",
                 source: "Configured",
             },

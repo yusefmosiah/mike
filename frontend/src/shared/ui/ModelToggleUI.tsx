@@ -88,20 +88,23 @@ export function nearestReasoningLevelForModel(
   }, supported[0] ?? "high");
 }
 
+/**
+ * Models are grouped by the provider serving them: the direct providers,
+ * then the routers, then any provider a deployment declares (alphabetically),
+ * then the catch-all headings.
+ */
 export const MODEL_TOGGLE_GROUPS: readonly ModelToggleGroup[] = [
   "Anthropic",
   "Google",
   "OpenAI",
-  "Moonshot AI",
-  "Zhipu AI",
-  "MiniMax",
-  "Alibaba",
-  "DeepSeek",
-  "Xiaomi",
-  "Mistral AI",
+  "OpenCode Go",
+  "OpenRouter",
+  "Vercel AI Gateway",
+];
+
+const TRAILING_MODEL_TOGGLE_GROUPS: readonly ModelToggleGroup[] = [
   "Configured",
   "Local",
-  "Other providers",
 ];
 
 export function orderedModelGroups(
@@ -109,7 +112,14 @@ export function orderedModelGroups(
 ): ModelToggleGroup[] {
   const present = new Set(models.map((model) => model.group));
   const known = MODEL_TOGGLE_GROUPS.filter((group) => present.delete(group));
-  return [...known, ...[...present].sort((a, b) => a.localeCompare(b))];
+  const trailing = TRAILING_MODEL_TOGGLE_GROUPS.filter((group) =>
+    present.delete(group),
+  );
+  return [
+    ...known,
+    ...[...present].sort((a, b) => a.localeCompare(b)),
+    ...trailing,
+  ];
 }
 
 export interface ModelToggleUIProps {

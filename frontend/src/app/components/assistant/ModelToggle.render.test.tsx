@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     mergeConfiguredModelOptions,
     ModelToggle,
-    underlyingProviderGroup,
+    openCodeGoModelOptions,
+    openRouterModelOptions,
+    vercelModelOptions,
 } from "./ModelToggle";
 import type {
     ApiKeyState,
@@ -278,6 +280,46 @@ describe("ModelToggle availability states", () => {
         expect(screen.getByText("Configured")).toBeInTheDocument();
     });
 
+    it("lists a declared model under the provider the deployment names", async () => {
+        configuredModels.push(
+            {
+                id: "phala/glm-5.3",
+                label: "GLM 5.3",
+                group: "Phala (encrypted)",
+                location: "cloud",
+                source: "Configured",
+            },
+            {
+                id: "river/glm-5.3-flash",
+                label: "GLM 5.3 Flash",
+                group: "River",
+                location: "cloud",
+                source: "Configured",
+            },
+        );
+        render(
+            <ModelToggle
+                value="phala/glm-5.3"
+                onChange={vi.fn()}
+                apiKeys={keys({ claude: true })}
+            />,
+        );
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "Choose model" }),
+        );
+        const headings = screen
+            .getAllByRole("menuitem")
+            .map((item) => item.textContent ?? "");
+        const order = ["Anthropic", "Phala (encrypted)", "River"].map((name) =>
+            headings.findIndex((text) => text.startsWith(name)),
+        );
+        expect(order.every((index) => index >= 0)).toBe(true);
+        expect([...order].sort((a, b) => a - b)).toEqual(order);
+        // The trigger and the selected group's open row.
+        expect(screen.getAllByText("GLM 5.3")).toHaveLength(2);
+    });
+
     it("renders a neutral disabled trigger while keys are loading", () => {
         render(
             <ModelToggle
@@ -364,12 +406,15 @@ describe("ModelToggle availability states", () => {
 });
 
 describe("ModelToggle provider grouping", () => {
-    it("maps router catalog IDs to their underlying model providers", () => {
+    it("lists router models under the router, whoever made them", () => {
         expect(
-            underlyingProviderGroup("anthropic/claude-fable-5", "openrouter"),
-        ).toBe("Anthropic");
-        expect(underlyingProviderGroup("kimi-k3", "opencode-go")).toBe(
-            "Moonshot AI",
+            openCodeGoModelOptions(["kimi-k3", "glm-5"]).map((m) => m.group),
+        ).toEqual(["OpenCode Go", "OpenCode Go"]);
+        expect(
+            openRouterModelOptions(["anthropic/claude-fable-5"])[0]?.group,
+        ).toBe("OpenRouter");
+        expect(vercelModelOptions(["openai/gpt-5.5"])[0]?.group).toBe(
+            "Vercel AI Gateway",
         );
     });
 
@@ -380,15 +425,16 @@ describe("ModelToggle provider grouping", () => {
                 value="gemini-3-flash-preview"
                 onChange={vi.fn()}
                 apiKeys={keys({ gemini: true, "opencode-go": true })}
-                openCodeGoModels={["glm-5"]}
+                openCodeGoModels={["glm-5", "kimi-k3"]}
             />,
         );
 
         await user.click(screen.getByRole("button", { name: "Choose model" }));
-        await user.click(await screen.findByText("Zhipu AI"));
+        await user.click(await screen.findByText("OpenCode Go"));
 
         expect(await screen.findByText("Glm 5")).toBeInTheDocument();
-        expect(screen.queryByText("OpenCode Go")).not.toBeInTheDocument();
+        expect(screen.getByText("Kimi K3")).toBeInTheDocument();
+        expect(screen.queryByText("Zhipu AI")).not.toBeInTheDocument();
     });
 
     it("hides the group when the OpenCode Go key is missing", async () => {
@@ -407,7 +453,7 @@ describe("ModelToggle provider grouping", () => {
         expect(screen.queryByText("OpenCode Go")).not.toBeInTheDocument();
     });
 
-    it("shows route labels only when the same provider model has duplicates", async () => {
+    it("lists a model under each provider that serves it", async () => {
         const user = userEvent.setup();
         render(
             <ModelToggle
@@ -420,8 +466,10 @@ describe("ModelToggle provider grouping", () => {
 
         await user.click(screen.getByRole("button", { name: "Choose model" }));
 
-        expect(screen.getByText("Direct")).toBeInTheDocument();
+        expect(screen.getByText("Anthropic")).toBeInTheDocument();
         expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+        // Each heading already names the route, so no "Direct" tag.
+        expect(screen.queryByText("Direct")).not.toBeInTheDocument();
     });
 });
 

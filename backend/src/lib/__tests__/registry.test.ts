@@ -91,9 +91,20 @@ describe("loadModelRegistry", () => {
                     id: "bad-max-token-field",
                     maxTokensField: "output_tokens",
                 },
+                { ...CLOUD_DEEPSEEK, id: "blank-group", group: "  " },
+                { ...CLOUD_DEEPSEEK, id: "long-group", group: "x".repeat(81) },
             ],
         });
         expect(configuredModelIds()).toEqual(["local-qwen"]);
+    });
+
+    it("keeps a declared picker group", () => {
+        configure({
+            models: [{ ...CLOUD_DEEPSEEK, group: "  Phala (encrypted)  " }],
+        });
+        expect(getConfiguredModel("cloud-deepseek")?.group).toBe(
+            "Phala (encrypted)",
+        );
     });
 
     it("normalizes strings and trailing URL slashes", () => {
@@ -207,6 +218,7 @@ describe("configured endpoint availability", () => {
             {
                 id: "keyless-cloud",
                 label: "keyless-cloud",
+                group: "Configured",
                 location: "cloud",
                 available: true,
             },

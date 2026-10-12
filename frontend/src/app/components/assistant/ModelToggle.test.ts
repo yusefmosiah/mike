@@ -28,7 +28,7 @@ describe("model display names", () => {
         expect(vercelModelOptions(["openai/gpt-5.4"])[0]).toMatchObject({
             id: "vercel/openai/gpt-5.4",
             label: "GPT 5.4",
-            group: "OpenAI",
+            group: "Vercel AI Gateway",
             source: "Vercel AI Gateway",
         });
     });

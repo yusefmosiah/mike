@@ -140,9 +140,13 @@ export function configuredModelRequiresApiKey(model: ConfiguredModel): boolean {
 export type ConfiguredEndpointSummary = {
   id: string;
   label: string;
+  group: string;
   location: ConfiguredModel["location"];
   available: boolean;
 };
+
+/** Picker heading for declarations that name none. */
+export const DEFAULT_CONFIGURED_GROUP = "Configured";
 
 /** Public, secret-free catalog information for the requesting user. */
 export function configuredEndpointSummaries(
@@ -151,6 +155,7 @@ export function configuredEndpointSummaries(
   return loadModelRegistry().models.map((model) => ({
     id: model.id,
     label: model.label || model.id,
+    group: model.group || DEFAULT_CONFIGURED_GROUP,
     location: model.location,
     available:
       !configuredModelRequiresApiKey(model) ||
@@ -246,6 +251,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
   const record = value as Record<string, unknown>;
   const id = optionalString(record, "id");
   const label = optionalString(record, "label");
+  const group = optionalString(record, "group");
   const apiModel = optionalString(record, "apiModel");
   const baseUrl = optionalString(record, "baseUrl");
   const apiKeyEnv = optionalString(record, "apiKeyEnv");
@@ -263,6 +269,8 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     !baseUrl ||
     !validBaseUrl(baseUrl) ||
     label === null ||
+    group === null ||
+    (group !== undefined && group.length > 80) ||
     apiModel === null ||
     apiKeyEnv === null ||
     apiKey === null ||
@@ -290,6 +298,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     baseUrl: baseUrl.replace(/\/+$/, ""),
     ...(attestation ? { attestation } : {}),
     ...(label ? { label } : {}),
+    ...(group ? { group } : {}),
     ...(apiModel ? { apiModel } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
     ...(apiKey ? { apiKey } : {}),

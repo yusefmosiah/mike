@@ -14,6 +14,13 @@ export type ModelGroup = string;
 /** Kept in sync with frontend ModelToggle.tsx ROUTER_SLUGS. */
 export const ROUTER_SLUGS = ["openrouter", "vercel", "opencode-go"] as const;
 
+/** Kept in sync with frontend ModelToggle.tsx ROUTER_GROUPS. */
+export const ROUTER_GROUPS: Record<(typeof ROUTER_SLUGS)[number], string> = {
+  openrouter: "OpenRouter",
+  vercel: "Vercel AI Gateway",
+  "opencode-go": "OpenCode Go",
+};
+
 export interface ModelOption {
   id: string;
   label: string;
@@ -106,7 +113,7 @@ export function openRouterModelOptions(models: string[]): ModelOption[] {
   return models.map((model) => ({
     id: `openrouter/${model}`,
     label: modelDisplayName(model),
-    group: underlyingProviderGroup(model, "openrouter"),
+    group: ROUTER_GROUPS.openrouter,
     source: "OpenRouter",
   }));
 }
@@ -115,7 +122,7 @@ export function vercelModelOptions(models: string[]): ModelOption[] {
   return models.map((model) => ({
     id: `vercel/${model}`,
     label: modelDisplayName(model),
-    group: underlyingProviderGroup(model, "vercel"),
+    group: ROUTER_GROUPS.vercel,
     source: "Vercel AI Gateway",
   }));
 }
@@ -124,59 +131,9 @@ export function openCodeGoModelOptions(models: string[]): ModelOption[] {
   return models.map((model) => ({
     id: `opencode-go/${model}`,
     label: modelDisplayName(model),
-    group: underlyingProviderGroup(model, "opencode-go"),
+    group: ROUTER_GROUPS["opencode-go"],
     source: "OpenCode Go",
   }));
-}
-
-const ROUTER_VENDOR_GROUPS: Record<string, string> = {
-  anthropic: "Anthropic",
-  claude: "Anthropic",
-  google: "Google",
-  gemini: "Google",
-  openai: "OpenAI",
-  gpt: "OpenAI",
-  moonshot: "Moonshot AI",
-  moonshotai: "Moonshot AI",
-  kimi: "Moonshot AI",
-  zhipu: "Zhipu AI",
-  zhipuai: "Zhipu AI",
-  zai: "Zhipu AI",
-  minimax: "MiniMax",
-  qwen: "Alibaba",
-  alibaba: "Alibaba",
-  deepseek: "DeepSeek",
-  xiaomi: "Xiaomi",
-  mimo: "Xiaomi",
-  mistral: "Mistral AI",
-  mistralai: "Mistral AI",
-};
-
-export function underlyingProviderGroup(
-  catalogModelId: string,
-  router: (typeof ROUTER_SLUGS)[number],
-): string {
-  const vendor = catalogModelId.includes("/")
-    ? catalogModelId.split("/", 1)[0]!.toLowerCase()
-    : catalogModelId.toLowerCase().split(/[-_.]/, 1)[0]!;
-  const mapped = ROUTER_VENDOR_GROUPS[vendor];
-  if (mapped) return mapped;
-  if (catalogModelId.includes("/")) {
-    return vendor
-      .split(/[-_]/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  }
-  if (router === "opencode-go") {
-    if (/^glm-/i.test(catalogModelId)) return "Zhipu AI";
-    if (/^kimi-/i.test(catalogModelId)) return "Moonshot AI";
-    if (/^minimax-/i.test(catalogModelId)) return "MiniMax";
-    if (/^qwen/i.test(catalogModelId)) return "Alibaba";
-    if (/^deepseek-/i.test(catalogModelId)) return "DeepSeek";
-    if (/^mimo-/i.test(catalogModelId)) return "Xiaomi";
-  }
-  return "Other providers";
 }
 
 export function isAllowedModelId(id: string): boolean {

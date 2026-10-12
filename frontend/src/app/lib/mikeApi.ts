@@ -951,7 +951,8 @@ export interface OllamaModelOption {
 export interface ConfiguredModelOption {
     id: string;
     label: string;
-    group: "Configured";
+    /** The provider heading the deployment declared, or "Configured". */
+    group: string;
     location: "cloud" | "local";
     source: "Configured";
 }

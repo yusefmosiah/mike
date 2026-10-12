@@ -156,7 +156,7 @@ export async function listConfiguredModels(
                   {
                       id: model.id,
                       label: model.label,
-                      group: "Configured",
+                      group: model.group,
                       location: model.location,
                       source: "Configured" as const,
                   },

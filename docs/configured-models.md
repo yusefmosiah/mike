@@ -40,6 +40,7 @@ array:
 | `provider` | yes | Must be `openai-compatible`. Hosted providers are already covered by the static catalog and the router prefixes. |
 | `location` | yes | `local` or `cloud`. Also the default for tool-call tolerance (below). |
 | `label` | no | Display name. Defaults to the id. |
+| `group` | no | Heading the model is listed under in the pickers, normally the provider serving it (`"Phala (encrypted)"`, `"River"`). Defaults to `Configured`. At most 80 characters. |
 | `apiModel` | no | Model name to send upstream, when it differs from `id`. |
 | `baseUrl` | yes | The endpoint's OpenAI-compatible base URL. |
 | `apiKey` | no | Literal key. Prefer `apiKeyEnv`. |
@@ -64,7 +65,11 @@ accept the usual chat-completions requests; the public homepage of a model
 provider is not enough.
 
 Usable declarations are returned by `GET /models/configured` and appear in the
-chat, tabular-review, and model-preference selectors. The response contains
+chat, tabular-review, and model-preference selectors. The pickers group every
+model by the provider serving it: the direct providers (Anthropic, Google,
+OpenAI), each router (OpenCode Go, OpenRouter, Vercel AI Gateway) with all of
+the models chosen for it, then each declared `group` in alphabetical order, then
+`Configured` and `Local`. The response contains
 only display metadata; endpoint URLs and credentials remain server-side.
 
 Declared models are served through the same pi-ai provider layer as
@@ -88,6 +93,27 @@ configured model:
 }
 ```
 
+For example, River's hosted open models (https://docs.river.ai/guides/inference-models/),
+listed under their own heading:
+
+```json
+{
+  "models": [
+    {
+      "id": "river/deepseek-v4.1-flash",
+      "label": "DeepSeek V4.1 Flash",
+      "group": "River",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://api.river.ai/v1",
+      "apiModel": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "apiKeyEnv": "RIVER_API_KEY",
+      "supportsVision": true
+    }
+  ]
+}
+```
+
 ## Attested inference (Phala)
 
 `attestation` makes every request to the model verify the endpoint first and
@@ -99,7 +125,8 @@ Attested Confidential Inference (ACI, `aci/1`), declared with
 ```json
 {
   "id": "phala/glm-5.3",
-  "label": "GLM 5.3 · Phala attested",
+  "label": "GLM 5.3",
+  "group": "Phala (encrypted)",
   "provider": "openai-compatible",
   "location": "cloud",
   "baseUrl": "https://inference.phala.com/v1",
