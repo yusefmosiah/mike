@@ -72,6 +72,30 @@ environment variables as build settings, and a foreign `ld` fails with
 `ld: -objc_abi_version '-Xlinker' not supported`. For example, prefix
 `env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin`.
 
+### UI test (software keyboard, screenshots)
+
+`scripts/configure-ios.mjs` also adds an `AppUITests` XCUITest target
+(`ui-tests/AppUITests.swift`, written straight into `project.pbxproj`, no
+extra tools) and a shared `App` scheme that runs it. It launches the app,
+taps the composer (optionally after scrolling to the end of the page), waits
+for the keyboard, closes it with the Done button above it, and attaches a
+screenshot at each step. Serve a test page, or the real web app with its API
+stubbed, then:
+
+```bash
+python3 -m http.server 8766 --bind 127.0.0.1 --directory <page-dir> &
+scripts/ui-test-ios.sh <screenshots-dir> [http://127.0.0.1:8766/]
+SIMULATOR="iPhone 17 Pro" scripts/ui-test-ios.sh ...   # name or UDID; default iPhone 17
+```
+
+The script builds, writes the page URL into the built app's
+`capacitor.config.json` (the source tree is untouched), runs the tests and
+exports `top-*.png` and `end-*.png` to the folder. The test taps a text view
+in the web view, or else the composer's place at the bottom of the screen. If
+no keyboard appears, the simulator has a hardware keyboard connected (I/O >
+Keyboard > Connect Hardware Keyboard, or
+`defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`).
+
 ### Scripts
 
 | Script | Runs | Purpose |

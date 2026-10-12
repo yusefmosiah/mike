@@ -14,8 +14,10 @@
 //     builds leave it unset.
 //   - AppDelegate: the app's Documents and Library excluded from iCloud and
 //     Finder backups.
+//   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
+//     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const app = new URL("../ios/App/App/", import.meta.url).pathname;
 const plist = `${app}Info.plist`;
@@ -136,4 +138,155 @@ patch("AppDelegate.swift", "MIKE_BACKUP_EXCLUSION", (source) =>
 `,
     ),
 );
+// MIKE_UI_TESTS: the UI-test target. Written into project.pbxproj directly
+// (no Ruby gem needed) with fixed ids, so a second run finds the marker and
+// changes nothing. The Swift source is copied in on every run.
+const iosApp = new URL("../ios/App/", import.meta.url).pathname;
+const testDir = `${iosApp}AppUITests/`;
+mkdirSync(testDir, { recursive: true });
+copyFileSync(new URL("../ui-tests/AppUITests.swift", import.meta.url).pathname, `${testDir}AppUITests.swift`);
+
+const pbxPath = `${iosApp}App.xcodeproj/project.pbxproj`;
+const pbx = readFileSync(pbxPath, "utf8");
+if (!pbx.includes("MIKE_UI_TESTS")) {
+  const appTarget = /(\w{24}) \/\* App \*\/ = \{\n\t*isa = PBXNativeTarget;/.exec(pbx)?.[1];
+  const project = /rootObject = (\w{24})/.exec(pbx)?.[1];
+  if (!appTarget || !project) throw new Error("could not find the App target in project.pbxproj");
+  const id = {
+    sourceRef: "A1B2C3D4E5F60718293A4B01", sourceBuild: "A1B2C3D4E5F60718293A4B02",
+    product: "A1B2C3D4E5F60718293A4B03", group: "A1B2C3D4E5F60718293A4B04",
+    target: "A1B2C3D4E5F60718293A4B05", sources: "A1B2C3D4E5F60718293A4B06",
+    frameworks: "A1B2C3D4E5F60718293A4B07", resources: "A1B2C3D4E5F60718293A4B08",
+    proxy: "A1B2C3D4E5F60718293A4B09", dependency: "A1B2C3D4E5F60718293A4B0A",
+    list: "A1B2C3D4E5F60718293A4B0B", debug: "A1B2C3D4E5F60718293A4B0C", release: "A1B2C3D4E5F60718293A4B0D",
+  };
+  const settings = (extra) => `{
+\t\t\t\tCODE_SIGN_STYLE = Automatic;
+\t\t\t\tCURRENT_PROJECT_VERSION = 1;
+\t\t\t\tGENERATE_INFOPLIST_FILE = YES;
+\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 15.0;
+\t\t\t\tMARKETING_VERSION = 1.0;
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.firm.mike.AppUITests;
+\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";
+\t\t\t\tSWIFT_VERSION = 5.0;
+\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";
+\t\t\t\tTEST_TARGET_NAME = App;${extra}
+\t\t\t}`;
+  const add = (name, text) => {
+    const end = `/* End ${name} section */`;
+    if (!pbxNext.includes(end)) throw new Error(`project.pbxproj has no ${name}`);
+    pbxNext = pbxNext.replace(end, `${text}${end}`);
+  };
+  let pbxNext = pbx;
+  // Sections the generated project lacks (cap add ios does not emit them).
+  const section = (name, body) => `\n/* Begin ${name} section */\n${body}/* End ${name} section */\n`;
+  add("PBXBuildFile", `\t\t${id.sourceBuild} /* AppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ${id.sourceRef} /* AppUITests.swift */; };\n`);
+  add(
+    "PBXFileReference",
+    `\t\t${id.sourceRef} /* AppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUITests.swift; sourceTree = "<group>"; };\n` +
+      `\t\t${id.product} /* AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };\n`,
+  );
+  pbxNext = pbxNext
+    .replace(/(504EC2FB1FED79650016851F = \{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = \(\n)/, `$1\t\t\t\t${id.group} /* AppUITests */,\n`)
+    .replace(/(\/\* Products \*\/ = \{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = \(\n)/, `$1\t\t\t\t${id.product} /* AppUITests.xctest */,\n`);
+  add(
+    "PBXGroup",
+    `\t\t${id.group} /* AppUITests */ = {\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n\t\t\t\t${id.sourceRef} /* AppUITests.swift */,\n\t\t\t);\n\t\t\tpath = AppUITests;\n\t\t\tsourceTree = "<group>";\n\t\t};\n`,
+  );
+  add(
+    "PBXNativeTarget",
+    `\t\t${id.target} /* AppUITests */ = {\n\t\t\tisa = PBXNativeTarget;\n\t\t\tbuildConfigurationList = ${id.list} /* Build configuration list for PBXNativeTarget "AppUITests" */;\n\t\t\tbuildPhases = (\n\t\t\t\t${id.sources} /* Sources */,\n\t\t\t\t${id.frameworks} /* Frameworks */,\n\t\t\t\t${id.resources} /* Resources */,\n\t\t\t);\n\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t\t${id.dependency} /* PBXTargetDependency */,\n\t\t\t);\n\t\t\tname = AppUITests;\n\t\t\tproductName = AppUITests;\n\t\t\tproductReference = ${id.product} /* AppUITests.xctest */;\n\t\t\tproductType = "com.apple.product-type.bundle.ui-testing";\n\t\t};\n`,
+  );
+  pbxNext = pbxNext
+    .replace(
+      /(TargetAttributes = \{\n)/,
+      `$1\t\t\t\t\t${id.target} = {\n\t\t\t\t\t\tCreatedOnToolsVersion = 16.0;\n\t\t\t\t\t\tTestTargetID = ${appTarget};\n\t\t\t\t\t};\n`,
+    )
+    .replace(/(targets = \(\n\t\t\t\t\w{24} \/\* App \*\/,\n)/, `$1\t\t\t\t${id.target} /* AppUITests */,\n`);
+  // PBXContainerItemProxy / PBXTargetDependency do not exist in the generated project.
+  pbxNext = pbxNext.replace(
+    "/* Begin PBXFileReference section */",
+    section(
+      "PBXContainerItemProxy",
+      `\t\t${id.proxy} /* PBXContainerItemProxy */ = {\n\t\t\tisa = PBXContainerItemProxy;\n\t\t\tcontainerPortal = ${project} /* Project object */;\n\t\t\tproxyType = 1;\n\t\t\tremoteGlobalIDString = ${appTarget};\n\t\t\tremoteInfo = App;\n\t\t};\n`,
+    ).trimStart() + "\n/* Begin PBXFileReference section */",
+  );
+  pbxNext = pbxNext.replace(
+    "/* Begin PBXResourcesBuildPhase section */",
+    section(
+      "PBXTargetDependency",
+      `\t\t${id.dependency} /* PBXTargetDependency */ = {\n\t\t\tisa = PBXTargetDependency;\n\t\t\ttarget = ${appTarget} /* App */;\n\t\t\ttargetProxy = ${id.proxy} /* PBXContainerItemProxy */;\n\t\t};\n`,
+    ).trimStart() + "\n/* Begin PBXResourcesBuildPhase section */",
+  );
+  add(
+    "PBXFrameworksBuildPhase",
+    `\t\t${id.frameworks} /* Frameworks */ = {\n\t\t\tisa = PBXFrameworksBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n`,
+  );
+  add(
+    "PBXResourcesBuildPhase",
+    `\t\t${id.resources} /* Resources */ = {\n\t\t\tisa = PBXResourcesBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n`,
+  );
+  add(
+    "PBXSourcesBuildPhase",
+    `\t\t${id.sources} /* Sources */ = {\n\t\t\tisa = PBXSourcesBuildPhase;\n\t\t\tbuildActionMask = 2147483647;\n\t\t\tfiles = (\n\t\t\t\t${id.sourceBuild} /* AppUITests.swift in Sources */,\n\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n`,
+  );
+  add(
+    "XCBuildConfiguration",
+    `\t\t${id.debug} /* Debug */ = {\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = ${settings("")};\n\t\t\tname = Debug;\n\t\t};\n` +
+      `\t\t${id.release} /* Release */ = {\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = ${settings("")};\n\t\t\tname = Release;\n\t\t};\n`,
+  );
+  add(
+    "XCConfigurationList",
+    `\t\t${id.list} /* Build configuration list for PBXNativeTarget "AppUITests" */ = {\n\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = (\n\t\t\t\t${id.debug} /* Debug */,\n\t\t\t\t${id.release} /* Release */,\n\t\t\t);\n\t\t\tdefaultConfigurationIsVisible = 0;\n\t\t\tdefaultConfigurationName = Release;\n\t\t};\n`,
+  );
+  pbxNext = pbxNext.replace("// !$*UTF8*$!\n", "// !$*UTF8*$!\n// MIKE_UI_TESTS: AppUITests target added by scripts/configure-ios.mjs\n");
+  if (pbxNext === pbx) throw new Error("could not patch project.pbxproj");
+  writeFileSync(pbxPath, pbxNext);
+}
+
+// The shared scheme: build App, and run AppUITests on `xcodebuild test`.
+const schemeDir = `${iosApp}App.xcodeproj/xcshareddata/xcschemes/`;
+const schemePath = `${schemeDir}App.xcscheme`;
+if (!existsSync(schemePath)) {
+  mkdirSync(schemeDir, { recursive: true });
+  const ref = (guid, name, product) => `<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="${guid}" BuildableName="${product}" BlueprintName="${name}" ReferencedContainer="container:App.xcodeproj"></BuildableReference>`;
+  const appGuid = /(\w{24}) \/\* App \*\/ = \{\n\t*isa = PBXNativeTarget;/.exec(readFileSync(pbxPath, "utf8"))[1];
+  const appRef = ref(appGuid, "App", "App.app");
+  const testRef = ref("A1B2C3D4E5F60718293A4B05", "AppUITests", "AppUITests.xctest");
+  writeFileSync(
+    schemePath,
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!-- MIKE_UI_TESTS: written by scripts/configure-ios.mjs -->
+<Scheme LastUpgradeVersion="0920" version="1.3">
+   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+      <BuildActionEntries>
+         <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+            ${appRef}
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
+      <Testables>
+         <TestableReference skipped="NO">
+            ${testRef}
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         ${appRef}
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction buildConfiguration="Release" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         ${appRef}
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction buildConfiguration="Debug"></AnalyzeAction>
+   <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"></ArchiveAction>
+</Scheme>
+`,
+  );
+}
+
 console.log("ios configured");

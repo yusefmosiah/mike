@@ -36,21 +36,28 @@ function inIosApp(): boolean {
     return capacitor?.getPlatform?.() === "ios";
 }
 
+const INSET_PROBE_STYLE =
+    "position:fixed;left:0;bottom:0;width:0;visibility:hidden;pointer-events:none;height:env(safe-area-inset-bottom,0px)";
+
 /** The bottom safe-area inset as laid out (0 when the page stops above it). */
 function bottomInset(): number {
     const probe = document.createElement("div");
-    probe.style.cssText =
-        "position:fixed;left:0;bottom:0;width:0;visibility:hidden;pointer-events:none;height:env(safe-area-inset-bottom,0px)";
+    probe.style.cssText = INSET_PROBE_STYLE;
     document.body.appendChild(probe);
     const height = probe.getBoundingClientRect().height;
     probe.remove();
     return height;
 }
 
-/** Marks or unmarks the document root for edge-to-edge layout. */
+/**
+ * Marks or unmarks the document root for edge-to-edge layout. Once marked,
+ * the page stays marked: an app build cannot change while it runs, so a
+ * later reading of 0 is not a reason to fall back to Safari's spacing.
+ */
 export function updateDisplayEdge(): void {
     const root = document.documentElement;
-    if (inIosApp() && bottomInset() > 0) {
+    const marked = root.dataset.displayEdge !== undefined;
+    if (inIosApp() && (marked || bottomInset() > 0)) {
         root.dataset.displayEdge = "";
         root.style.setProperty(
             "--display-corner-radius",
@@ -62,9 +69,27 @@ export function updateDisplayEdge(): void {
     }
 }
 
-/** Keeps the mark current through rotation and resizing; returns a cleanup. */
+/**
+ * Keeps the mark current; returns a cleanup. The app's web view often
+ * reports no inset when the page first runs and the real one a moment
+ * later, with no resize event between (measured in the simulator), so a
+ * probe sized to the inset is watched as well as the window.
+ */
 export function watchDisplayEdge(): () => void {
     updateDisplayEdge();
     window.addEventListener("resize", updateDisplayEdge);
-    return () => window.removeEventListener("resize", updateDisplayEdge);
+    const probe = document.createElement("div");
+    probe.style.cssText = INSET_PROBE_STYLE;
+    probe.setAttribute("aria-hidden", "true");
+    document.body.appendChild(probe);
+    const observer =
+        typeof ResizeObserver === "undefined"
+            ? null
+            : new ResizeObserver(() => updateDisplayEdge());
+    observer?.observe(probe);
+    return () => {
+        window.removeEventListener("resize", updateDisplayEdge);
+        observer?.disconnect();
+        probe.remove();
+    };
 }

@@ -54,25 +54,83 @@ describe("updateDisplayEdge", () => {
         expect(root().dataset.displayEdge).toBeUndefined();
     });
 
-    it("unmarks an app build whose web view stops at the safe area", () => {
-        updateDisplayEdge();
+    it("leaves an app build whose web view stops at the safe area unmarked", () => {
         inset = 0;
         updateDisplayEdge();
         expect(root().dataset.displayEdge).toBeUndefined();
         expect(root().style.getPropertyValue("--display-corner-radius")).toBe("");
     });
+
+    it("stays marked once marked, whatever the inset reads later", () => {
+        updateDisplayEdge();
+        inset = 0;
+        updateDisplayEdge();
+        expect(root().dataset.displayEdge).toBe("");
+        expect(root().style.getPropertyValue("--display-corner-radius")).toBe("55px");
+    });
 });
 
 describe("watchDisplayEdge", () => {
-    it("updates on resize until stopped", () => {
-        const stop = watchDisplayEdge();
-        expect(root().dataset.displayEdge).toBe("");
+    let observed: { callback: ResizeObserverCallback; target?: Element; disconnected: boolean }[] = [];
+
+    beforeEach(() => {
+        observed = [];
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                entry: (typeof observed)[number];
+                constructor(callback: ResizeObserverCallback) {
+                    this.entry = { callback, disconnected: false };
+                    observed.push(this.entry);
+                }
+                observe(target: Element) {
+                    this.entry.target = target;
+                }
+                disconnect() {
+                    this.entry.disconnected = true;
+                }
+            },
+        );
+    });
+
+    const insetChanges = () => observed[0].callback([], {} as ResizeObserver);
+
+    it("marks the page when the inset arrives after it first ran, with no resize event", () => {
         inset = 0;
-        window.dispatchEvent(new Event("resize"));
+        const stop = watchDisplayEdge();
         expect(root().dataset.displayEdge).toBeUndefined();
+        expect(observed[0].target?.getAttribute("aria-hidden")).toBe("true");
+
+        inset = 34;
+        insetChanges();
+        expect(root().dataset.displayEdge).toBe("");
         stop();
+    });
+
+    it("follows rotation on resize, and stops watching when asked", () => {
+        const stop = watchDisplayEdge();
+        expect(root().style.getPropertyValue("--display-corner-radius")).toBe("55px");
+        vi.spyOn(window.screen, "width", "get").mockReturnValue(390);
+        vi.spyOn(window.screen, "height", "get").mockReturnValue(844);
+        window.dispatchEvent(new Event("resize"));
+        expect(root().style.getPropertyValue("--display-corner-radius")).toBe("47.33px");
+
+        stop();
+        expect(observed[0].disconnected).toBe(true);
+        expect(observed[0].target?.isConnected).toBe(false);
+        vi.spyOn(window.screen, "width", "get").mockReturnValue(430);
+        vi.spyOn(window.screen, "height", "get").mockReturnValue(932);
+        window.dispatchEvent(new Event("resize"));
+        expect(root().style.getPropertyValue("--display-corner-radius")).toBe("47.33px");
+    });
+
+    it("still watches resizes where ResizeObserver is missing", () => {
+        vi.stubGlobal("ResizeObserver", undefined);
+        inset = 0;
+        const stop = watchDisplayEdge();
         inset = 34;
         window.dispatchEvent(new Event("resize"));
-        expect(root().dataset.displayEdge).toBeUndefined();
+        expect(root().dataset.displayEdge).toBe("");
+        stop();
     });
 });
