@@ -18,7 +18,9 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
   can't be reached", with a retry).
 - `scripts/configure-ios.mjs` applies the native hardening to the generated
   project: permission prompts, the `mike://` scheme, the app-switcher privacy
-  cover and backup exclusion (below).
+  cover and backup exclusion (below), and the keyboard: no form bar
+  (previous, next, Done) above it, and dragging the page down closes it. A
+  tap on the page closes it too (frontend `hooks/useBlurOnOutsideTap.ts`).
 - `plugins/speech/` is Mike's own plugin: dictation with Apple's on-device
   speech recognition (below).
 - Android has not been generated or built.
@@ -78,7 +80,7 @@ environment variables as build settings, and a foreign `ld` fails with
 (`ui-tests/AppUITests.swift`, written straight into `project.pbxproj`, no
 extra tools) and a shared `App` scheme that runs it. It launches the app,
 taps the composer (optionally after scrolling to the end of the page), waits
-for the keyboard, closes it with the Done button above it, and attaches a
+for the keyboard, closes it (a tap on the page; a drag down at the end), and attaches a
 screenshot at each step. Serve a test page, or the real web app with its API
 stubbed, then:
 

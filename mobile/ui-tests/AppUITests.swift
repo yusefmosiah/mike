@@ -1,8 +1,8 @@
 // Copied into the generated iOS project by scripts/configure-ios.mjs and run by
 // scripts/ui-test-ios.sh (README.md, "UI test"). Taps the chat composer, waits
-// for the software keyboard, closes it with the Done button above the keyboard
-// (as people do: tapping the page does not blur the field), and attaches a
-// screenshot of each state. The page is whatever the built app's
+// for the software keyboard, closes it the two ways the app offers (there is
+// no Done bar): a tap on the page at the top, a drag down at the end of a long
+// page. Attaches a screenshot of each state. The page is whatever the built app's
 // capacitor.config.json points at; the script rewrites that before the run.
 import XCTest
 
@@ -56,16 +56,28 @@ final class AppUITests: XCTestCase {
         sleep(1)
         attach("\(tag)-1-keyboard-up")
 
-        // Tap Done by position: the bar's buttons are re-created while the
-        // keyboard settles, so a held element reference can go stale.
-        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: 5), "no Done button above the keyboard")
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: done.frame.midX, dy: done.frame.midY)).tap()
+        if scrollToEnd {
+            // Drag the page down: the keyboard follows the finger away.
+            web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+                .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        } else {
+            // Tap an empty stretch of the page, clear of the header buttons.
+            web.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.32)).tap()
+        }
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: keyboard)
         let dismissed = XCTWaiter().wait(for: [gone], timeout: 5) == .completed
         sleep(2)
         attach("\(tag)-2-keyboard-" + (dismissed ? "dismissed" : "still-up"))
-        XCTAssertTrue(dismissed, "keyboard still up after Done")
+        XCTAssertTrue(dismissed, scrollToEnd ? "keyboard still up after dragging the page down" : "keyboard still up after tapping the page")
+
+        // The composer brings the keyboard back, however it was closed.
+        if field.exists {
+            field.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.88)).tap()
+        }
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "keyboard did not come back when the composer was tapped again")
+        sleep(1)
+        attach("\(tag)-3-keyboard-again")
     }
 }

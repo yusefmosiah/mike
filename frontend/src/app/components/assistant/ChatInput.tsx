@@ -53,6 +53,7 @@ import {
     useSelectedReasoning,
 } from "@/app/hooks/useSelectedModel";
 import { useModelVision } from "@/app/hooks/useModelVision";
+import { useBlurOnOutsideTap } from "@/app/hooks/useBlurOnOutsideTap";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import {
     getModelProvider,
@@ -246,6 +247,9 @@ function ChatInputForChatImpl(
     // treating "we couldn't ask" as "no keys configured".
     const apiKeys = apiKeysDegraded ? undefined : profile?.apiKeys;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const surfaceRef = useRef<HTMLDivElement>(null);
+    // A tap on the page closes the phone's keyboard (iOS will not by itself).
+    useBlurOnOutsideTap(textareaRef, surfaceRef);
     const controlsRef = useRef<HTMLDivElement>(null);
     // Capture and transcription live in the hook; this composer only inserts
     // the finished transcript and shows the recording state. `disabled`
@@ -790,6 +794,7 @@ function ChatInputForChatImpl(
                     />
                 )}
                 <div
+                    ref={surfaceRef}
                     data-slot="chat-input-surface"
                     className={cn(
                         "rounded-[21px]",

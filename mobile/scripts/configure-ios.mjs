@@ -13,7 +13,13 @@
 //     sets Info.plist's MikeAppSwitcherPreview, which the cover checks. Firm
 //     builds leave it unset.
 //   - AppDelegate: the app's Documents and Library excluded from iCloud and
-//     Finder backups.
+//     Finder backups, and no form bar (previous, next, Done) above the
+//     keyboard: the chat composer is one field with its own send button.
+//     Only that view changes; the web view handles the keyboard as before
+//     (Capacitor's Keyboard plugin would also take over resizing).
+//   - SceneDelegate: dragging the page down pulls the keyboard away with it,
+//     as in Messages. With the form bar gone this and a tap on the page
+//     (frontend hooks/useBlurOnOutsideTap.ts) are how the keyboard closes.
 //   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
 //     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
@@ -137,6 +143,49 @@ patch("AppDelegate.swift", "MIKE_BACKUP_EXCLUSION", (source) =>
 }
 `,
     ),
+);
+
+patch("AppDelegate.swift", "MIKE_NO_FORM_ACCESSORY_BAR", (source) =>
+  source
+    .replace(
+      "        excludeAppDataFromBackup()\n        return true",
+      "        excludeAppDataFromBackup()\n        hideFormAccessoryBar()\n        return true",
+    )
+    .replace(
+      /\n}\s*$/,
+      `
+
+    // MIKE_NO_FORM_ACCESSORY_BAR: WebKit's text input view offers no
+    // accessory view, so the keyboard comes up without the previous, next
+    // and Done bar. The override is added to that class alone.
+    private func hideFormAccessoryBar() {
+        guard let contentView = NSClassFromString("WKContentView") else { return }
+        let selector = #selector(getter: UIResponder.inputAccessoryView)
+        guard let method = class_getInstanceMethod(contentView, selector) else { return }
+        let noBar: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+        let implementation = imp_implementationWithBlock(noBar)
+        let types = method_getTypeEncoding(method)
+        if !class_addMethod(contentView, selector, implementation, types) {
+            class_replaceMethod(contentView, selector, implementation, types)
+        }
+    }
+}
+`,
+    ),
+);
+
+patch("SceneDelegate.swift", "MIKE_KEYBOARD_DISMISS", (source) =>
+  source.replace("window?.rootViewController = CAPBridgeViewController()", "window?.rootViewController = MikeBridgeViewController()") +
+    `
+// MIKE_KEYBOARD_DISMISS: dragging the page down pulls the keyboard away with
+// it, as in Messages.
+class MikeBridgeViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        webView?.scrollView.keyboardDismissMode = .interactive
+    }
+}
+`,
 );
 // MIKE_UI_TESTS: the UI-test target. Written into project.pbxproj directly
 // (no Ruby gem needed) with fixed ids, so a second run finds the marker and
