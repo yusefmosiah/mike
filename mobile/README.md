@@ -19,8 +19,13 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
 - `scripts/configure-ios.mjs` applies the native hardening to the generated
   project: permission prompts, the `mike://` scheme, the app-switcher privacy
   cover and backup exclusion (below), and the keyboard: no form bar
-  (previous, next, Done) above it, and dragging the page down closes it. A
+  (previous, next, Done) above it, and dragging the page closes it. A
   tap on the page closes it too (frontend `hooks/useBlurOnOutsideTap.ts`).
+  On iOS 17 and later the app, not WebKit, makes room for the keyboard: the
+  web view ends at the keyboard's top edge, so the page's viewport is simply
+  the space above it. WebKit's own handling shrank the page's viewport and,
+  on iOS 27, could leave it short after the keyboard closed, which floated
+  the chat composer above the bottom of the screen.
 - `plugins/speech/` is Mike's own plugin: dictation with Apple's on-device
   speech recognition (below).
 - Android has not been generated or built.

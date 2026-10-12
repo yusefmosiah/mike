@@ -49,7 +49,7 @@ final class AppUITests: XCTestCase {
         if field.exists {
             field.tap()
         } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.88)).tap()
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.9)).tap()
         }
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "software keyboard did not appear (hardware keyboard connected?)")
@@ -57,9 +57,10 @@ final class AppUITests: XCTestCase {
         attach("\(tag)-1-keyboard-up")
 
         if scrollToEnd {
-            // Drag the page down: the keyboard follows the finger away.
+            // Drag the page down: a drag on the page closes the keyboard.
             web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
-                .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+                .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)),
+                       withVelocity: .slow, thenHoldForDuration: 0.2)
         } else {
             // Tap an empty stretch of the page, clear of the header buttons.
             web.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.32)).tap()
@@ -74,7 +75,7 @@ final class AppUITests: XCTestCase {
         if field.exists {
             field.tap()
         } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.88)).tap()
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.9)).tap()
         }
         XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "keyboard did not come back when the composer was tapped again")
         sleep(1)

@@ -15,11 +15,13 @@
 //   - AppDelegate: the app's Documents and Library excluded from iCloud and
 //     Finder backups, and no form bar (previous, next, Done) above the
 //     keyboard: the chat composer is one field with its own send button.
-//     Only that view changes; the web view handles the keyboard as before
-//     (Capacitor's Keyboard plugin would also take over resizing).
-//   - SceneDelegate: dragging the page down pulls the keyboard away with it,
-//     as in Messages. With the form bar gone this and a tap on the page
-//     (frontend hooks/useBlurOnOutsideTap.ts) are how the keyboard closes.
+//     Only that view changes.
+//   - SceneDelegate: dragging the page closes the keyboard. With the form
+//     bar gone this and a tap on the page (frontend
+//     hooks/useBlurOnOutsideTap.ts) are how the keyboard closes.
+//   - SceneDelegate: on iOS 17 and later the web view ends at the keyboard's
+//     top edge and WebKit is not told about the keyboard, so the page's
+//     viewport is just the space above it (MIKE_KEYBOARD_LAYOUT).
 //   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
 //     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
@@ -177,12 +179,82 @@ patch("AppDelegate.swift", "MIKE_NO_FORM_ACCESSORY_BAR", (source) =>
 patch("SceneDelegate.swift", "MIKE_KEYBOARD_DISMISS", (source) =>
   source.replace("window?.rootViewController = CAPBridgeViewController()", "window?.rootViewController = MikeBridgeViewController()") +
     `
-// MIKE_KEYBOARD_DISMISS: dragging the page down pulls the keyboard away with
-// it, as in Messages.
+// MIKE_KEYBOARD_DISMISS: dragging the page closes the keyboard.
 class MikeBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
-        webView?.scrollView.keyboardDismissMode = .interactive
+        webView?.scrollView.keyboardDismissMode = .onDrag
+    }
+}
+`,
+);
+patch("SceneDelegate.swift", "MIKE_KEYBOARD_LAYOUT", (source) =>
+  source
+    .replace(
+      "window?.rootViewController = MikeBridgeViewController()",
+      "window?.rootViewController = MikeKeyboardLayoutController(MikeBridgeViewController())",
+    )
+    // Projects patched before this change let a drag pull the keyboard down
+    // with the finger, which needs the page to reach under the keyboard.
+    .replace(
+      "// MIKE_KEYBOARD_DISMISS: dragging the page down pulls the keyboard away with\n// it, as in Messages.",
+      "// MIKE_KEYBOARD_DISMISS: dragging the page closes the keyboard.",
+    )
+    .replace("keyboardDismissMode = .interactive", "keyboardDismissMode = .onDrag") +
+    `
+// MIKE_KEYBOARD_LAYOUT: the app, not WebKit, makes room for the keyboard. The
+// web view ends at the keyboard's top edge and follows it, also while it is
+// dragged away, and WebKit is not told about the keyboard at all. WebKit's own
+// handling shrinks the page's viewport while the keyboard is up and, on iOS
+// 27, can leave it short after the keyboard closes, which floats the chat
+// composer above the bottom of the screen. Before iOS 17 the keyboard guide
+// stops at the safe area, which would cut the edge-to-edge page short, so
+// WebKit keeps handling the keyboard there.
+class MikeKeyboardLayoutController: UIViewController {
+    private let bridgeController: CAPBridgeViewController
+
+    init(_ bridgeController: CAPBridgeViewController) {
+        self.bridgeController = bridgeController
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        addChild(bridgeController)
+        let webView: UIView = bridgeController.view
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(webView)
+        var bottom = webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        if #available(iOS 17.0, *) {
+            view.keyboardLayoutGuide.usesBottomSafeArea = false
+            bottom = webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
+            let center = NotificationCenter.default
+            for name in [
+                UIResponder.keyboardWillShowNotification, UIResponder.keyboardDidShowNotification,
+                UIResponder.keyboardWillHideNotification, UIResponder.keyboardDidHideNotification,
+                UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardDidChangeFrameNotification,
+            ] {
+                center.removeObserver(webView, name: name, object: nil)
+            }
+        }
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottom,
+        ])
+        bridgeController.didMove(toParent: self)
+    }
+
+    override var childForStatusBarStyle: UIViewController? { bridgeController }
+    override var childForStatusBarHidden: UIViewController? { bridgeController }
+    override var childForHomeIndicatorAutoHidden: UIViewController? { bridgeController }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        bridgeController.supportedInterfaceOrientations
     }
 }
 `,
