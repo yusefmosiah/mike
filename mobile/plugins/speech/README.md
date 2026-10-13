@@ -5,8 +5,11 @@ transcribes a recording with Apple's speech recognition on the phone, and
 renders text to audio with Apple's voices. The web app's "This iPhone"
 engines (`frontend/src/app/lib/voice/deviceSpeech.ts`) use it: dictation
 records the clip as it does for every engine and hands it over; read-aloud
-gets a WAV for each chunk of an answer and plays the joined file in its own
-player, so it can be sought and keeps playing in the background.
+gets a WAV for each chunk of an answer and plays the chunks in turn in its own
+player, so it can be sought and keeps playing in the background. A chunk's
+audio ends at the synthesizer's `didFinish`, not at its first empty buffer:
+`AVSpeechSynthesizer.write` also sends empty buffers between phrases, and
+stopping there cut every chunk off after about 13 seconds.
 
 - iOS 26 and later: `SpeechAnalyzer` with `SpeechTranscriber`, or
   `DictationTranscriber` on hardware without it. These never send audio off

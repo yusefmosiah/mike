@@ -75,8 +75,18 @@ enum OnDeviceVoice {
     }
 
     /// Writes one utterance's buffers to a file. The synthesizer must stay
-    /// alive until the last (empty) buffer arrives, so this object holds it.
+    /// alive until the utterance is finished, so this object holds it.
+    ///
+    /// The end is `didFinish`. An empty buffer is not: the synthesizer sends
+    /// one at phrase boundaries in the middle of a long utterance too (seen
+    /// on iOS 27: six in a 76-second chunk), and stopping at the first one
+    /// cut every reading off after a sentence or two. An empty buffer
+    /// followed by a second with nothing more is taken as the end only for a
+    /// system that never calls the delegate; rendering runs far faster than
+    /// real time, so that quiet means the synthesizer is done.
     private final class Renderer: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+        private static let quietEnd: TimeInterval = 1
+
         private let synthesizer = AVSpeechSynthesizer()
         private let url: URL
         private let lock = NSLock()
@@ -84,6 +94,9 @@ enum OnDeviceVoice {
         private var continuation: CheckedContinuation<Void, Error>?
         private var failed = false
         private var done = false
+        /// Bumped by every buffer, so a pending quiet-end check can tell
+        /// whether anything arrived after its empty buffer.
+        private var received = 0
 
         init(url: URL) {
             self.url = url
@@ -99,7 +112,7 @@ enum OnDeviceVoice {
                 synthesizer.write(utterance) { [self] buffer in
                     guard let pcm = buffer as? AVAudioPCMBuffer else { return }
                     if pcm.frameLength == 0 {
-                        finish()
+                        finishIfQuiet()
                         return
                     }
                     append(pcm)
@@ -107,9 +120,23 @@ enum OnDeviceVoice {
             }
         }
 
+        private func finishIfQuiet() {
+            lock.lock()
+            received += 1
+            let mark = received
+            lock.unlock()
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.quietEnd) { [self] in
+                lock.lock()
+                let quiet = received == mark
+                lock.unlock()
+                if quiet { finish() }
+            }
+        }
+
         private func append(_ buffer: AVAudioPCMBuffer) {
             lock.lock()
             defer { lock.unlock() }
+            received += 1
             guard !failed, !done else { return }
             do {
                 if file == nil {
@@ -150,7 +177,6 @@ enum OnDeviceVoice {
             if wrote { continuation?.resume() } else { continuation?.resume(throwing: Failure.failed) }
         }
 
-        // Some iOS versions end with this instead of an empty buffer.
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
             finish()
         }

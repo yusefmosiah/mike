@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     chunkSentences,
     decodeToMono,
     encodeWav,
     RENDER_SAMPLE_RATE,
-    renderSpeech,
+    segmentSeconds,
+    segmentWav,
     silentWav,
-    SpeechRenderCancelled,
 } from "./speechAudio";
 
 /** An OfflineAudioContext whose decode returns `channels` of `length` samples, each filled with its channel number + 1 over 10. */
@@ -54,6 +54,24 @@ describe("chunkSentences", () => {
 
     it("returns nothing for no sentences", () => {
         expect(chunkSentences([], 10)).toEqual([]);
+    });
+
+    it("keeps the first chunk short, so the reading starts sooner", () => {
+        expect(chunkSentences(["One two.", "Three four.", "Five six.", "Seven."], 30, 10)).toEqual([
+            "One two.",
+            "Three four. Five six. Seven.",
+        ]);
+        // A first sentence longer than the first limit is cut between words.
+        expect(chunkSentences(["alpha beta gamma delta epsilon"], 30, 11)).toEqual([
+            "alpha beta",
+            "gamma delta epsilon",
+        ]);
+    });
+
+    it("loses no text, however it cuts", () => {
+        const sentences = ["a".repeat(25), "b c d e f g h i j k l m n o p", "q.", "r".repeat(7)];
+        const joined = chunkSentences(sentences, 12, 5).join(" ").replace(/\s+/g, "");
+        expect(joined).toBe(sentences.join("").replace(/\s+/g, ""));
     });
 });
 
@@ -126,66 +144,14 @@ describe("silentWav", () => {
     });
 });
 
-describe("renderSpeech", () => {
-    beforeEach(() => {
-        vi.stubGlobal("OfflineAudioContext", stubContext({ length: 2 }).Context);
-    });
-
-    it("synthesizes every chunk, a few at a time, and joins them in order", async () => {
-        const order: string[] = [];
-        let running = 0;
-        let most = 0;
-        const progress: string[] = [];
-        const synthesize = vi.fn(async (text: string) => {
-            running += 1;
-            most = Math.max(most, running);
-            await new Promise((resolve) => setTimeout(resolve, text === "a" ? 5 : 1));
-            running -= 1;
-            order.push(text);
-            return new Blob([text]);
-        });
-        const blob = await renderSpeech(["a", "b", "c"], synthesize, {
-            concurrency: 2,
-            onProgress: (done, total) => progress.push(`${done}/${total}`),
-        });
-        expect(synthesize.mock.calls.map(([text]) => text)).toEqual(["a", "b", "c"]);
-        expect(most).toBe(2);
-        expect(order[0]).not.toBe("a");
-        expect(progress).toEqual(["1/3", "2/3", "3/3"]);
-        // Three pieces of two samples and two gaps of 0.15 s.
-        const view = await bytesOf(blob);
-        expect(view.getUint32(40, true)).toBe((3 * 2 + 2 * Math.round(0.15 * RENDER_SAMPLE_RATE)) * 2);
-    });
-
-    it("runs one at a time by default and without a progress callback", async () => {
-        const synthesize = vi.fn(async (text: string) => new Blob([text]));
-        await renderSpeech(["a", "b"], synthesize);
-        expect(synthesize).toHaveBeenCalledTimes(2);
-    });
-
-    it("stops starting chunks after one fails", async () => {
-        const synthesize = vi.fn(async (text: string) => {
-            if (text === "a") throw new Error("engine down");
-            return new Blob([text]);
-        });
-        await expect(renderSpeech(["a", "b", "c"], synthesize)).rejects.toThrow("engine down");
-        expect(synthesize).toHaveBeenCalledTimes(1);
-    });
-
-    it("stops when cancelled, before a chunk or at the end", async () => {
-        let cancel = false;
-        const synthesize = vi.fn(async (text: string) => {
-            cancel = true;
-            return new Blob([text]);
-        });
-        await expect(renderSpeech(["a", "b"], synthesize, { cancelled: () => cancel })).rejects.toBeInstanceOf(
-            SpeechRenderCancelled,
-        );
-        expect(synthesize).toHaveBeenCalledTimes(1);
-
-        cancel = false;
-        await expect(renderSpeech(["a"], synthesize, { cancelled: () => cancel })).rejects.toThrow(
-            "Read-aloud was stopped.",
-        );
+describe("segmentWav", () => {
+    it("is the chunk's samples and then the pause before the next", async () => {
+        const samples = new Float32Array(RENDER_SAMPLE_RATE / 2).fill(0.5);
+        const view = await bytesOf(segmentWav(samples));
+        const gap = Math.round(0.15 * RENDER_SAMPLE_RATE);
+        expect(view.getUint32(40, true)).toBe((samples.length + gap) * 2);
+        expect(view.getInt16(44, true)).toBe(Math.trunc(0.5 * 0x7fff));
+        expect(view.getInt16(44 + (samples.length + gap - 1) * 2, true)).toBe(0);
+        expect(segmentSeconds(samples)).toBeCloseTo(0.65);
     });
 });

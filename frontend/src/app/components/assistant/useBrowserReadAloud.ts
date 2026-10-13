@@ -21,16 +21,24 @@ const RESTART_DELAY_MS = 120;
  * inside the tap, because iOS speaks only what a tap queued. Nothing leaves
  * the browser.
  */
-export function useBrowserReadAloud(text: string, voiceURI?: string): UseReadAloud {
+export function useBrowserReadAloud(
+    text: string,
+    voiceURI: string | undefined,
+    speed: number,
+    rememberSpeed: (speed: number) => void,
+): UseReadAloud {
     const sentences = useMemo(() => splitIntoReadAloudSentences(text), [text]);
     const [status, setStatus] = useState<ReadAloudStatus>("idle");
     const [position, setPosition] = useState(0);
-    const [speed, setSpeedState] = useState(1);
     const [error, setError] = useState<string | null>(null);
     const generationRef = useRef(0);
-    const speedRef = useRef(1);
+    const speedRef = useRef(speed);
     const positionRef = useRef(0);
     const activeRef = useRef(false);
+    // Another message may change the remembered speed; the next queue uses it.
+    useEffect(() => {
+        speedRef.current = speed;
+    }, [speed]);
     const latest = useRef({ sentences, voiceURI });
     useEffect(() => {
         latest.current = { sentences, voiceURI };
@@ -152,10 +160,10 @@ export function useBrowserReadAloud(text: string, voiceURI?: string): UseReadAlo
     const setSpeed = useCallback(
         (next: number) => {
             speedRef.current = next;
-            setSpeedState(next);
+            rememberSpeed(next);
             if (activeRef.current) startAt(positionRef.current);
         },
-        [startAt],
+        [rememberSpeed, startAt],
     );
 
     return {

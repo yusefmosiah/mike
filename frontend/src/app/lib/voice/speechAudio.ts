@@ -1,11 +1,10 @@
 /**
- * Turns a response into one audio file for read-aloud: the text is
- * synthesized in chunks (each engine has a length limit), each chunk is
- * decoded to mono samples at one rate, and the samples are joined, with a
- * short pause between chunks, into a single WAV. One file plays in one
- * audio element, so it can be sought, paused, sped up and kept playing
- * while the page is in the background.
- */
+ * Audio for read-aloud: the text is synthesized in chunks (each engine has a
+ * length limit, and a short first chunk starts the reading sooner), each
+ * chunk is decoded to mono samples at one rate and written as its own WAV
+ * segment, ending in a short pause. The segments play one after another in
+ * one audio element, so it can be paused, sped up and kept playing while the
+ * page is in the background (components/assistant/useReadAloud.ts).
 
 /** The rate every chunk is resampled to; Kokoro and most TTS voices are 24 kHz. */
 export const RENDER_SAMPLE_RATE = 24_000;
@@ -13,35 +12,38 @@ export const RENDER_SAMPLE_RATE = 24_000;
 const GAP_SECONDS = 0.15;
 
 /**
- * Joins sentences into chunks of at most `maxChars`. A sentence longer than
- * that is cut between words (or, failing that, at `maxChars`).
+ * Joins sentences into chunks of at most `maxChars`, the first of at most
+ * `firstMaxChars`. A sentence longer than its chunk's limit is cut between
+ * words (or, failing that, at the limit).
  */
-export function chunkSentences(sentences: string[], maxChars: number): string[] {
+export function chunkSentences(sentences: string[], maxChars: number, firstMaxChars = maxChars): string[] {
     const chunks: string[] = [];
     let current = "";
-    const push = (piece: string) => {
-        if (!current) current = piece;
-        else if (current.length + 1 + piece.length <= maxChars) current += ` ${piece}`;
-        else {
-            chunks.push(current);
-            current = piece;
-        }
+    const limit = () => (chunks.length === 0 ? Math.min(firstMaxChars, maxChars) : maxChars);
+    const flush = () => {
+        if (current) chunks.push(current);
+        current = "";
     };
     for (const sentence of sentences) {
-        if (sentence.length <= maxChars) {
-            push(sentence);
-            continue;
-        }
         let rest = sentence;
-        while (rest.length > maxChars) {
-            const space = rest.lastIndexOf(" ", maxChars);
-            const cut = space > 0 ? space : maxChars;
-            push(rest.slice(0, cut).trim());
+        while (rest) {
+            if (current && current.length + 1 + rest.length <= limit()) {
+                current += ` ${rest}`;
+                break;
+            }
+            flush();
+            const max = limit();
+            if (rest.length <= max) {
+                current = rest;
+                break;
+            }
+            const space = rest.lastIndexOf(" ", max);
+            const cut = space > 0 ? space : max;
+            chunks.push(rest.slice(0, cut).trim());
             rest = rest.slice(cut).trim();
         }
-        push(rest);
     }
-    if (current) chunks.push(current);
+    flush();
     return chunks;
 }
 
@@ -112,47 +114,12 @@ export function silentWav(): Blob {
     return encodeWav([new Float32Array(RENDER_SAMPLE_RATE / 10)]);
 }
 
-/** Thrown by renderSpeech when `cancelled()` turned true while it ran. */
-export class SpeechRenderCancelled extends Error {
-    constructor() {
-        super("Read-aloud was stopped.");
-    }
+/** One segment of a reading: the chunk's samples, then the pause before the next. */
+export function segmentWav(samples: Float32Array, sampleRate = RENDER_SAMPLE_RATE): Blob {
+    return encodeWav([samples, new Float32Array(Math.round(GAP_SECONDS * sampleRate))], sampleRate);
 }
 
-export interface RenderSpeechOptions {
-    /** Chunks synthesized at once. */
-    concurrency?: number;
-    onProgress?: (done: number, total: number) => void;
-    /** Checked before each chunk starts and at the end. */
-    cancelled?: () => boolean;
-}
-
-/** Synthesizes every chunk and returns them as one WAV, in order. */
-export async function renderSpeech(
-    chunks: string[],
-    synthesize: (text: string) => Promise<Blob>,
-    options: RenderSpeechOptions = {},
-): Promise<Blob> {
-    const { concurrency = 1, onProgress, cancelled = () => false } = options;
-    const pieces: Float32Array[] = new Array(chunks.length);
-    let next = 0;
-    let done = 0;
-    let failed = false;
-    const worker = async () => {
-        while (next < chunks.length && !failed) {
-            if (cancelled()) throw new SpeechRenderCancelled();
-            const index = next++;
-            try {
-                pieces[index] = await decodeToMono(await synthesize(chunks[index]));
-            } catch (error) {
-                failed = true;
-                throw error;
-            }
-            done += 1;
-            onProgress?.(done, chunks.length);
-        }
-    };
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, chunks.length)) }, worker));
-    if (cancelled()) throw new SpeechRenderCancelled();
-    return encodeWav(pieces, RENDER_SAMPLE_RATE, Math.round(GAP_SECONDS * RENDER_SAMPLE_RATE));
+/** Seconds a segment of `samples` plays for, its closing pause included. */
+export function segmentSeconds(samples: Float32Array, sampleRate = RENDER_SAMPLE_RATE): number {
+    return samples.length / sampleRate + GAP_SECONDS;
 }

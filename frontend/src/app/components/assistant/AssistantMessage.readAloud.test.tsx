@@ -62,7 +62,9 @@ describe("AssistantMessage read aloud", () => {
             "OfflineAudioContext",
             class {
                 decodeAudioData(_bytes: ArrayBuffer, ok: (buffer: AudioBuffer) => void) {
-                    ok({ numberOfChannels: 1, length: 10, getChannelData: () => new Float32Array(10) } as unknown as AudioBuffer);
+                    // 74.85 s of audio: with the 0.15 s pause after it, a 75 s reading.
+                    const length = Math.round(24_000 * 74.85);
+                    ok({ numberOfChannels: 1, length, getChannelData: () => new Float32Array(length) } as unknown as AudioBuffer);
                 }
             },
         );
@@ -80,7 +82,7 @@ describe("AssistantMessage read aloud", () => {
         vi.unstubAllGlobals();
     });
 
-    it("prepares one audio file, then plays it with a seekable player", async () => {
+    it("prepares the audio, then plays it with a seekable player", async () => {
         const user = userEvent.setup();
         render(<AssistantMessage events={events} />);
 
@@ -99,12 +101,8 @@ describe("AssistantMessage read aloud", () => {
         ).toBeInTheDocument();
 
         const element = audioInstances[0]!;
-        element.duration = 75;
         element.currentTime = 12;
-        act(() => {
-            element.ondurationchange?.();
-            element.ontimeupdate?.();
-        });
+        act(() => element.ontimeupdate?.());
         const bar = screen.getByRole("slider", { name: "Reading position" });
         expect(bar).toHaveAttribute("aria-valuetext", "0:12 of 1:15");
         expect(screen.getByText("0:12 / 1:15")).toBeInTheDocument();
@@ -143,7 +141,7 @@ describe("AssistantMessage read aloud", () => {
             screen.getByRole("button", { name: "Read response aloud" }),
         );
         expect(await screen.findByRole("status")).toHaveTextContent(
-            "Preparing audio… 0%",
+            "Preparing audio…",
         );
         await user.click(screen.getByRole("button", { name: "Stop reading" }));
         await act(async () => finish(new Blob(["x"])));

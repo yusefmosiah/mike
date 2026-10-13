@@ -1,39 +1,78 @@
 /** Shared by the read-aloud engines (useReadAloud, useBrowserReadAloud). */
 
 /**
- * Sentence boundary: a run of non-terminator characters followed by one or
- * more `.` / `!` / `?`. Text after the last terminator (terse answers, or a
- * stream that ended mid-sentence) is kept as its own sentence by the
- * splitter below, so no prose is silently dropped.
+ * The end of a sentence: `.`, `!` or `?` (and any closing quote or bracket)
+ * followed by whitespace or the end of the text. A full stop inside a word
+ * ("3.5", "index.ts", "example.com/a.html") is not one.
  */
-const SENTENCE_PATTERN = /[^.!?]+[.!?]+/g;
+const SENTENCE_END = /[.!?]+["'\u201d\u2019)\]]*(?=\s|$)/g;
+
+/** A line that starts a list item, heading, quote or table row. */
+const BLOCK_START = /^[ \t]*(?:[-*+>#|]|\d+[.)][ \t])/;
+/** A heading or table row: a block of one line. */
+const ONE_LINE_BLOCK = /^[ \t]*[#|]/;
 
 /**
- * Hard cap on how much of one response will be spoken: a pathological reply
- * (say, a giant table dump) must not queue hundreds of synthesis calls.
+ * The text's blocks: paragraphs (split at blank lines), list items, headings,
+ * quotes and table rows. A line break inside a paragraph or list item is
+ * only wrapping, so its lines are joined.
  */
-export const MAX_READ_ALOUD_SENTENCES = 200;
+function textBlocks(text: string): string[] {
+    const blocks: string[] = [];
+    let current: string[] = [];
+    const flush = () => {
+        if (current.length) blocks.push(current.join(" "));
+        current = [];
+    };
+    for (const line of text.split("\n")) {
+        if (!line.trim()) {
+            flush();
+            continue;
+        }
+        if (BLOCK_START.test(line)) flush();
+        current.push(line);
+        if (ONE_LINE_BLOCK.test(line)) flush();
+    }
+    flush();
+    return blocks;
+}
 
 /** Playback rates offered by the read-aloud control; 1 is engine default. */
 export const READ_ALOUD_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
+export const DEFAULT_READ_ALOUD_SPEED = 1;
 
+/** A saved speed, or the default when it is not one the control offers. */
+export function readAloudSpeed(value: number | undefined): number {
+    return (READ_ALOUD_SPEEDS as readonly number[]).includes(value ?? Number.NaN)
+        ? (value as number)
+        : DEFAULT_READ_ALOUD_SPEED;
+}
+
+/**
+ * The whole text as sentences, in order. Nothing is dropped: every
+ * character but whitespace lands in exactly one sentence, however long the
+ * response.
+ */
 export function splitIntoReadAloudSentences(text: string): string[] {
-    const trimmed = text.trim();
-    if (!trimmed) return [];
-
     const sentences: string[] = [];
-    SENTENCE_PATTERN.lastIndex = 0;
-    let consumed = 0;
-    let match: RegExpExecArray | null;
-    while ((match = SENTENCE_PATTERN.exec(trimmed)) !== null) {
-        const sentence = match[0].trim();
-        if (sentence) sentences.push(sentence);
-        consumed = match.index + match[0].length;
+    for (const block of textBlocks(text)) {
+        const flat = block.replace(/\s+/g, " ").trim();
+        if (!flat) continue;
+        let start = 0;
+        SENTENCE_END.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = SENTENCE_END.exec(flat)) !== null) {
+            const end = match.index + match[0].length;
+            const sentence = flat.slice(start, end).trim();
+            // A list item's own number ("1.") is not a sentence.
+            if (/^\d+[.)]$/.test(sentence)) continue;
+            if (sentence) sentences.push(sentence);
+            start = end;
+        }
+        const tail = flat.slice(start).trim();
+        if (tail) sentences.push(tail);
     }
-    const tail = trimmed.slice(consumed).trim();
-    if (tail) sentences.push(tail);
-    if (sentences.length === 0) sentences.push(trimmed);
-    return sentences.slice(0, MAX_READ_ALOUD_SENTENCES);
+    return sentences;
 }
 
 /**

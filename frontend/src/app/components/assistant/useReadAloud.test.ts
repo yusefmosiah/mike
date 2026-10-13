@@ -4,11 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { synthesizeSpeech } from "@/app/lib/mikeApi";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { saveVoicePreferences } from "@/app/lib/voice/preferences";
-import {
-    MAX_READ_ALOUD_SENTENCES,
-    splitIntoReadAloudSentences,
-    useReadAloud,
-} from "./useReadAloud";
+import { splitIntoReadAloudSentences, useReadAloud } from "./useReadAloud";
 import { readAloudTitle } from "./readAloudShared";
 
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
@@ -93,9 +89,23 @@ describe("splitIntoReadAloudSentences", () => {
         expect(splitIntoReadAloudSentences("   ")).toEqual([]);
     });
 
-    it("caps the queue at the sentence limit", () => {
-        const text = Array.from({ length: MAX_READ_ALOUD_SENTENCES + 5 }, (_, i) => `S${i}.`).join(" ");
-        expect(splitIntoReadAloudSentences(text)).toHaveLength(MAX_READ_ALOUD_SENTENCES);
+    it("does not end a sentence inside a number, file name or address", () => {
+        expect(
+            splitIntoReadAloudSentences("Rates rose 3.5% (see index.ts and example.com/a.html). Then \"they fell.\" Done"),
+        ).toEqual(['Rates rose 3.5% (see index.ts and example.com/a.html).', 'Then "they fell."', "Done"]);
+    });
+
+    it("ends a sentence at a paragraph, list item or heading, but not at a wrapped line", () => {
+        expect(
+            splitIntoReadAloudSentences("# Summary\nThe answer is\nyes\n\n- first point\n- second point\n1. numbered"),
+        ).toEqual(["# Summary", "The answer is yes", "- first point", "- second point", "1. numbered"]);
+    });
+
+    it("keeps every sentence of a very long response", () => {
+        const text = Array.from({ length: 1_000 }, (_, i) => `Sentence ${i} costs $${i}.50 in v2.${i}.`).join(" ");
+        const sentences = splitIntoReadAloudSentences(text);
+        expect(sentences).toHaveLength(1_000);
+        expect(sentences.join(" ")).toBe(text);
     });
 });
 
@@ -107,8 +117,27 @@ describe("readAloudTitle", () => {
     });
 });
 
+/** A synthesis call the test answers when it likes. */
+function deferredSynthesis() {
+    const calls: { text: string; finish: () => void; reject: (cause: unknown) => void }[] = [];
+    synthesizeMock.mockImplementation(
+        (text: string) =>
+            new Promise<Blob>((resolve, reject) =>
+                calls.push({ text, finish: () => resolve(new Blob([text])), reject }),
+            ),
+    );
+    return calls;
+}
+
+/** Sentences of about 300 characters: one long answer is many segments. */
+const longAnswer = (sentences: number) =>
+    Array.from({ length: sentences }, (_, i) => `Sentence ${i} ${"word ".repeat(58).trim()}.`).join(" ");
+
+/** One second of decoded audio and the 0.15 s pause after it. */
+const SEGMENT_SECONDS = 1.15;
+
 describe("useReadAloud with synthesized audio", () => {
-    it("renders the whole response into one file and plays it", async () => {
+    it("synthesizes a short response once and plays it", async () => {
         const { result } = renderHook(() => useReadAloud("First sentence. Second sentence."));
         expect(result.current.available).toBe(true);
         expect(result.current.unit).toBe("seconds");
@@ -120,33 +149,74 @@ describe("useReadAloud with synthesized audio", () => {
         expect(audio().play).toHaveBeenCalledTimes(1);
 
         await waitFor(() => expect(result.current.status).toBe("playing"));
-        // One synthesis call for the whole short response, not one per sentence.
         expect(synthesizeMock).toHaveBeenCalledTimes(1);
         expect(synthesizeMock).toHaveBeenCalledWith("First sentence. Second sentence.");
         expect(createObjectURLMock.mock.calls[1]?.[0].type).toBe("audio/wav");
         expect(audio().src).toBe("blob:test-2");
         expect(audio().play).toHaveBeenCalledTimes(2);
+        expect(result.current.length).toBeCloseTo(SEGMENT_SECONDS);
     });
 
-    it("splits a long response into chunks synthesized a few at a time", async () => {
-        const sentence = `${"word ".repeat(60).trim()}.`;
-        await startReading(Array.from({ length: 10 }, () => sentence).join(" "));
-        // 300 characters a sentence, at most 1,200 a chunk: three sentences per call.
-        expect(synthesizeMock).toHaveBeenCalledTimes(4);
+    it("starts reading a long answer as soon as its short first segment is ready", async () => {
+        const calls = deferredSynthesis();
+        const { result } = renderHook(() => useReadAloud(longAnswer(20)));
+        act(() => result.current.play());
+        // A short first segment, and only a few synthesized ahead.
+        expect(calls[0]!.text.length).toBeLessThanOrEqual(200);
+        expect(calls).toHaveLength(3);
+
+        await act(async () => calls[0]!.finish());
+        expect(result.current.status).toBe("playing");
+        expect(audio().src).toBe("blob:test-2");
+        // The rest are still being synthesized behind it.
+        expect(calls.length).toBeLessThan(10);
+        // The length is estimated from the text until every segment exists.
+        expect(result.current.length).toBeGreaterThan(SEGMENT_SECONDS * 5);
     });
 
-    it("follows the element: position, length, pause, resume and the end", async () => {
+    it("reads every segment in order, synthesizing a few ahead, and ends after the last", async () => {
+        const calls = deferredSynthesis();
+        const text = longAnswer(12);
+        const { result } = renderHook(() => useReadAloud(text));
+        act(() => result.current.play());
+        for (let index = 0; ; index++) {
+            await act(async () => {
+                for (const call of calls) call.finish();
+            });
+            expect(result.current.status).toBe("playing");
+            expect(result.current.position).toBeCloseTo(index * SEGMENT_SECONDS);
+            const before = calls.length;
+            audio().ended = true;
+            act(() => audio().onended?.());
+            audio().ended = false;
+            if (result.current.status === "idle") break;
+            expect(calls.length).toBeGreaterThanOrEqual(before);
+        }
+        // Every word of the answer went to the engine, once each.
+        const spoken = calls.map((call) => call.text).join(" ");
+        expect(spoken.replace(/\s+/g, " ")).toBe(text);
+        expect(result.current.position).toBe(0);
+    });
+
+    it("waits for a segment the reading reaches before it is ready", async () => {
+        const calls = deferredSynthesis();
+        const { result } = renderHook(() => useReadAloud(longAnswer(6)));
+        act(() => result.current.play());
+        await act(async () => calls[0]!.finish());
+        act(() => audio().onended?.());
+        expect(result.current.status).toBe("preparing");
+        await act(async () => calls[1]!.finish());
+        expect(result.current.status).toBe("playing");
+        expect(result.current.position).toBeCloseTo(SEGMENT_SECONDS);
+    });
+
+    it("follows the element: position, pause, resume and the end", async () => {
         const { result } = await startReading();
         const element = audio();
 
-        element.duration = 10;
-        element.currentTime = 3;
-        act(() => {
-            element.ondurationchange?.();
-            element.ontimeupdate?.();
-        });
-        expect(result.current.length).toBe(10);
-        expect(result.current.position).toBe(3);
+        element.currentTime = 0.5;
+        act(() => element.ontimeupdate?.());
+        expect(result.current.position).toBe(0.5);
 
         act(() => result.current.pause());
         expect(element.pause).toHaveBeenCalled();
@@ -166,28 +236,32 @@ describe("useReadAloud with synthesized audio", () => {
         expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:test-2");
     });
 
-    it("ignores a length the element does not know yet", async () => {
+    it("seeks within the audio that exists, clamped to it", async () => {
         const { result } = await startReading();
-        act(() => audio().ondurationchange?.());
-        expect(result.current.length).toBe(0);
-    });
-
-    it("seeks within the file, clamped to its length", async () => {
-        const { result } = await startReading();
-        audio().duration = 10;
-        act(() => result.current.seek(4));
-        expect(audio().currentTime).toBe(4);
-        expect(result.current.position).toBe(4);
+        act(() => result.current.seek(0.4));
+        expect(audio().currentTime).toBe(0.4);
+        expect(result.current.position).toBe(0.4);
         act(() => result.current.seek(99));
-        expect(audio().currentTime).toBe(10);
+        expect(audio().currentTime).toBeCloseTo(SEGMENT_SECONDS);
         act(() => result.current.seek(-1));
         expect(audio().currentTime).toBe(0);
     });
 
-    it("seeks to where it was asked while the length is unknown", async () => {
-        const { result } = await startReading();
-        act(() => result.current.seek(7));
-        expect(audio().currentTime).toBe(7);
+    it("seeks into another segment, keeping a pause", async () => {
+        const calls = deferredSynthesis();
+        const { result } = renderHook(() => useReadAloud(longAnswer(6)));
+        act(() => result.current.play());
+        await act(async () => {
+            for (const call of calls) call.finish();
+        });
+        act(() => result.current.pause());
+        const plays = audio().play.mock.calls.length;
+        act(() => result.current.seek(SEGMENT_SECONDS + 0.25));
+        expect(audio().src).toBe("blob:test-3");
+        expect(audio().currentTime).toBeCloseTo(0.25);
+        expect(result.current.position).toBeCloseTo(SEGMENT_SECONDS + 0.25);
+        expect(result.current.status).toBe("paused");
+        expect(audio().play.mock.calls.length).toBe(plays);
     });
 
     it("does nothing to pause, resume or seek before anything plays", () => {
@@ -201,14 +275,21 @@ describe("useReadAloud with synthesized audio", () => {
         expect(audioInstances).toHaveLength(0);
     });
 
-    it("applies the speed to the element now and on the next play", async () => {
+    it("applies the speed now, and remembers it for every later reading", async () => {
         const { result } = await startReading();
+        expect(result.current.speed).toBe(1);
         act(() => result.current.setSpeed(1.5));
         expect(result.current.speed).toBe(1.5);
         expect(audio().playbackRate).toBe(1.5);
+
+        const other = renderHook(() => useReadAloud("Another answer."));
+        expect(other.result.current.speed).toBe(1.5);
+        act(() => other.result.current.play());
+        await waitFor(() => expect(other.result.current.status).toBe("playing"));
+        expect(audioInstances[1]!.playbackRate).toBe(1.5);
     });
 
-    it("keeps the file, so playing again does not synthesize again", async () => {
+    it("keeps the segments, so playing again does not synthesize again", async () => {
         const { result } = await startReading();
         act(() => result.current.stop());
         expect(result.current.status).toBe("idle");
@@ -230,6 +311,20 @@ describe("useReadAloud with synthesized audio", () => {
         expect(result.current.status).toBe("idle");
         expect(result.current.error).toBeNull();
         expect(createObjectURLMock).toHaveBeenCalledTimes(1); // the silence only
+    });
+
+    it("stopping early stops synthesizing the rest", async () => {
+        const calls = deferredSynthesis();
+        const { result } = renderHook(() => useReadAloud(longAnswer(30)));
+        act(() => result.current.play());
+        await act(async () => calls[0]!.finish());
+        act(() => result.current.stop());
+        const made = calls.length;
+        await act(async () => {
+            for (const call of calls) call.finish();
+        });
+        expect(calls).toHaveLength(made);
+        expect(made).toBeLessThan(10);
     });
 
     it("shows a plain message when synthesis fails", async () => {
@@ -285,16 +380,14 @@ describe("useReadAloud with synthesized audio", () => {
 
         const run = (action: string, details: Partial<MediaSessionActionDetails> = {}) =>
             act(() => handlers.get(action)?.({ action, ...details } as MediaSessionActionDetails));
-        audio().duration = 60;
-        run("seekto", { seekTime: 20 });
-        expect(audio().currentTime).toBe(20);
+        run("seekto", { seekTime: 0.5 });
+        expect(audio().currentTime).toBe(0.5);
         run("seekto");
         expect(audio().currentTime).toBe(0);
-        audio().currentTime = 20;
         run("seekforward");
-        expect(audio().currentTime).toBe(30);
+        expect(audio().currentTime).toBeCloseTo(SEGMENT_SECONDS);
         run("seekbackward");
-        expect(audio().currentTime).toBe(20);
+        expect(audio().currentTime).toBe(0);
         run("pause");
         expect(result.current.status).toBe("paused");
         run("play");
@@ -326,7 +419,7 @@ describe("useReadAloud with synthesized audio", () => {
         expect(synthesizeMock).not.toHaveBeenCalled();
     });
 
-    it("stops and drops the file when the prose changes", async () => {
+    it("stops and drops the audio when the prose changes", async () => {
         const { result, rerender } = await startReading("One. Two.");
         rerender({ text: "Three. Four." });
         await waitFor(() => expect(result.current.status).toBe("idle"));
@@ -465,6 +558,7 @@ describe("useReadAloud with the browser's voices", () => {
             const { spoken } = stubSpeech();
             const { result } = renderHook(() => useReadAloud("One. Two."));
             act(() => result.current.setSpeed(1.25));
+            expect(result.current.speed).toBe(1.25);
             act(() => result.current.play());
             expect(spoken[0].rate).toBe(1.25);
             act(() => result.current.setSpeed(1.5));

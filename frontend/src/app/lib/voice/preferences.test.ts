@@ -48,6 +48,16 @@ describe("parseVoicePreferences", () => {
         expect(parseVoicePreferences(null)).toEqual(DEFAULT_VOICE_PREFERENCES);
         expect(parseVoicePreferences("nonsense")).toEqual(DEFAULT_VOICE_PREFERENCES);
     });
+
+    it("keeps the read-aloud speed apart from the engine, so choosing another keeps it", () => {
+        const saved = parseVoicePreferences({ speech: { engine: "operator" }, readAloudRate: 1.5 });
+        expect(saved.readAloudRate).toBe(1.5);
+        // Settings replace the speech choice whole; the speed stays.
+        expect(parseVoicePreferences({ ...saved, speech: { engine: "browser" } }).readAloudRate).toBe(1.5);
+        for (const junk of [0, -1, 99, Number.NaN, "2", null]) {
+            expect(parseVoicePreferences({ readAloudRate: junk })).not.toHaveProperty("readAloudRate");
+        }
+    });
 });
 
 describe("load and save", () => {

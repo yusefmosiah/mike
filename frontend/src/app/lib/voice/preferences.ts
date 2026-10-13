@@ -34,6 +34,11 @@ export const VOICE_ENGINES: readonly VoiceEngine[] = [
 export interface VoicePreferences {
     transcription: { engine: VoiceEngine; model?: string; language?: string };
     speech: { engine: VoiceEngine; model?: string; voice?: string };
+    /**
+     * The read-aloud speed last chosen, kept for every reading whichever
+     * engine speaks it (so choosing another engine or voice keeps it).
+     */
+    readAloudRate?: number;
 }
 
 export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
@@ -63,6 +68,10 @@ const isEngine = (value: unknown): value is VoiceEngine =>
 const text = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : undefined;
 
+/** A playback rate worth keeping; the player offers 0.75x to 3x. */
+const rate = (value: unknown): boolean =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0.5 && value <= 4;
+
 /** Anything malformed falls back to the defaults, field by field. */
 export function parseVoicePreferences(raw: unknown): VoicePreferences {
     const defaults = defaultVoicePreferences();
@@ -80,6 +89,7 @@ export function parseVoicePreferences(raw: unknown): VoicePreferences {
             ...(text(s.model) ? { model: text(s.model) } : {}),
             ...(text(s.voice) ? { voice: text(s.voice) } : {}),
         },
+        ...(rate(root.readAloudRate) ? { readAloudRate: root.readAloudRate as number } : {}),
     };
 }
 

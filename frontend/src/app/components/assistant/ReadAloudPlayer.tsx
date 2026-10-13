@@ -11,8 +11,8 @@ export function formatReadAloudTime(seconds: number): string {
 
 /**
  * The player under a response while it is read aloud: play and pause, a
- * position bar that seeks, the time, the speed and stop. While the audio is
- * being synthesized it shows how far that has got.
+ * position bar that seeks, the time, the speed and stop. While the next
+ * stretch of audio is being synthesized it says so.
  */
 export function ReadAloudPlayer({ readAloud }: { readAloud: UseReadAloud }) {
     const stopButton = (
@@ -26,7 +26,7 @@ export function ReadAloudPlayer({ readAloud }: { readAloud: UseReadAloud }) {
             <div className="flex flex-wrap items-center gap-2 pb-2 font-sans" role="group" aria-label="Read aloud">
                 <Loader2 className="h-3 w-3 animate-spin text-gray-400" aria-hidden="true" />
                 <span className="text-xs text-gray-500" role="status">
-                    {`Preparing audio… ${Math.round(readAloud.prepared * 100)}%`}
+                    Preparing audio…
                 </span>
                 {stopButton}
             </div>
