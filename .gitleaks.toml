@@ -57,3 +57,10 @@ regexes = [
     '''^svc_7Qk2Lm9Xw4Rt1Nb$''',
     '''^xK7pQ2mZ9vR4tY8wE1nB5cL3$''',
 ]
+
+[[allowlists]]
+description = "Vault test fixtures: invented GitLab-token-shaped values used to prove a stored secret never reaches the chat, the VM or a response (infra/vault/test/vault.test.ts, frontend/src/app/components/assistant/AskInputPopup.secret.test.tsx)"
+regexes = [
+    '''^glpat-abcdefghijklmnop1234$''',
+    '''^glpat-very-secret-token-12$''',
+]
