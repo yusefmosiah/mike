@@ -18,6 +18,7 @@
  */
 import type { Db } from "../db";
 import { safeError } from "../safeError";
+import { clearVaultVmMark, fenceVaultVm, unfenceVaultVm, vaultEnabled, VaultRequestError } from "../vault/client";
 import { isTemporaryEmail, staticWorkstationVm, targetForVm, temporaryPolicy, workstationPool } from "./config";
 import type { WorkstationTarget } from "./exec";
 import { requestWipe, type SnapshotResult } from "./snapshot";
@@ -73,7 +74,36 @@ export async function releaseTemporaryVm(db: Db, vm: string, cutoff: Date, wipe:
   if (error) throw new Error("workstation release failed");
   const row = ((claimed ?? []) as Row[])[0];
   if (!row) return false;
+  // Nothing lent to the outgoing account may outlive it into the next one's:
+  // the vault revokes the VM's leases and lends it nothing during the wipe.
+  // A VM the vault has no socket for has nothing to revoke.
+  let fenced = false;
+  if (vaultEnabled()) {
+    try {
+      await fenceVaultVm(vm, false);
+      fenced = true;
+    } catch (error) {
+      if (!(error instanceof VaultRequestError && error.status === 400)) {
+        console.error("[workstation] fencing a VM in the vault failed; it stays with its account", safeError(error));
+        await db.from("workstation_assignments").update({ wiping: false }).eq("vm", vm).eq("user_id", row.user_id);
+        return false;
+      }
+    }
+  }
+  const unfence = async (wiped: boolean) => {
+    if (!fenced) return;
+    try {
+      await unfenceVaultVm(vm);
+      // A wiped VM is a fresh one: whatever a guest left behind is gone. No
+      // account holds it while it is marked as wiping, so nothing is lent
+      // between these two calls.
+      if (wiped) await clearVaultVmMark(vm, row.user_id);
+    } catch (error) {
+      console.error("[workstation] ending a VM's vault fence failed", safeError(error));
+    }
+  };
   const result = await wipe(vm);
+  await unfence(result.ok);
   if (!result.ok) {
     console.error("[workstation] wiping a temporary VM failed; it stays with its account", { vm, error: result.error });
     await db.from("workstation_assignments").update({ wiping: false }).eq("vm", vm).eq("user_id", row.user_id);

@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const vault = vi.hoisted(() => ({ enabled: vi.fn(() => false), fence: vi.fn(), unfence: vi.fn(), clear: vi.fn() }));
+vi.mock("../../vault/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../vault/client")>()),
+  vaultEnabled: vault.enabled,
+  fenceVaultVm: vault.fence,
+  unfenceVaultVm: vault.unfence,
+  clearVaultVmMark: vault.clear,
+}));
+
 import {
   clearAssignmentCache,
   poolVmFor,
@@ -179,6 +188,52 @@ describe("temporary VMs for test accounts", () => {
     expect(wipe).toHaveBeenCalledTimes(1);
     expect(db.rows.map((row) => row.vm)).toEqual(["ws-01", "Bad Name"]);
     expect(await releaseIdleTemporaryWorkstations(db as never, env, null)).toBe(0);
+  });
+
+  it("fences the VM in the vault around the wipe, and keeps it with its account when fencing fails", async () => {
+    vault.enabled.mockReturnValue(true);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { VaultRequestError } = await import("../../vault/client");
+    try {
+      const db = fakeDb([{ vm: "ws-02", user_id: "t1", temporary: true, last_used_at: ago(180) }]);
+      const wipe = wipeOk();
+      vault.fence.mockRejectedValueOnce(new Error("vault down"));
+      expect(await releaseIdleTemporaryWorkstations(db as never, env, wipe)).toBe(0);
+      expect(wipe).not.toHaveBeenCalled();
+      expect(db.rows[0]).toMatchObject({ user_id: "t1", wiping: false });
+
+      vault.fence.mockResolvedValueOnce(undefined);
+      expect(await releaseIdleTemporaryWorkstations(db as never, env, wipe)).toBe(1);
+      expect(vault.fence).toHaveBeenLastCalledWith("ws-02", false);
+      expect(vault.fence.mock.invocationCallOrder.at(-1)!).toBeLessThan(wipe.mock.invocationCallOrder[0]);
+      // Unfenced, then the mark of any guest cleared: the VM is fresh.
+      expect(vault.unfence.mock.invocationCallOrder[0]).toBeLessThan(vault.clear.mock.invocationCallOrder[0]);
+      expect(vault.clear).toHaveBeenCalledWith("ws-02", "t1");
+
+      // A VM the vault has no socket for has nothing to fence.
+      const other = fakeDb([{ vm: "ws-02", user_id: "t2", temporary: true, last_used_at: ago(180) }]);
+      vault.fence.mockRejectedValueOnce(new VaultRequestError(400, "unknown vm"));
+      expect(await releaseIdleTemporaryWorkstations(other as never, env, wipeOk())).toBe(1);
+    } finally {
+      vault.enabled.mockReturnValue(false);
+    }
+  });
+
+  it("unfences without clearing the mark when the wipe fails", async () => {
+    vault.enabled.mockReturnValue(true);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      vault.fence.mockResolvedValue(undefined);
+      vault.clear.mockClear();
+      vault.unfence.mockClear();
+      const db = fakeDb([{ vm: "ws-02", user_id: "t1", temporary: true, last_used_at: ago(180) }]);
+      const failing = vi.fn(async () => ({ ok: false as const, error: "wipe failed" }));
+      expect(await releaseIdleTemporaryWorkstations(db as never, env, failing)).toBe(0);
+      expect(vault.unfence).toHaveBeenCalledWith("ws-02");
+      expect(vault.clear).not.toHaveBeenCalled();
+    } finally {
+      vault.enabled.mockReturnValue(false);
+    }
   });
 
   it("leaves the VM with its account when the wipe fails, and gives nothing mid-wipe", async () => {

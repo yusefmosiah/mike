@@ -11,7 +11,9 @@ import {
     type VaultInjection,
     type VaultSecret,
 } from "@/app/lib/mikeApi";
+import { useAuth } from "@/app/contexts/AuthContext";
 import { userFacingApiError } from "@/app/lib/userFacingError";
+import { VaultKeyMismatchError } from "@/app/lib/vault/seal";
 
 /** What the assistant suggested; every field stays the user's to change. */
 export type VaultSecretDraft = {
@@ -42,15 +44,25 @@ const AUTH_OPTIONS: { value: AuthKind; label: string }[] = [
     { value: "header", label: "Custom header" },
 ];
 
+/** As the vault stores a host: lowercase, no scheme, path or trailing dot. */
+const canonicalHost = (host: string) =>
+    host
+        .trim()
+        .toLowerCase()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
+        .replace(/[/?#].*$/, "")
+        .replace(/\.+$/, "");
+
 const parseHosts = (text: string) =>
     text
         .split(/[\s,]+/)
-        .map((host) => host.trim())
+        .map(canonicalHost)
         .filter(Boolean);
 
 function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProps) {
     const id = useId();
     const formId = `${id}-form`;
+    const { user } = useAuth();
     const [name, setName] = useState(draft?.name ?? "");
     const [value, setValue] = useState("");
     const [showValue, setShowValue] = useState(false);
@@ -63,6 +75,7 @@ function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProp
         draft?.injection.type === "header" ? draft.injection.name : "",
     );
     const [allowWrites, setAllowWrites] = useState(false);
+    const [hostsChecked, setHostsChecked] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -77,11 +90,21 @@ function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProp
               : header.trim()
                 ? { type: "header", name: header.trim() }
                 : null;
+    // Hosts the assistant proposed, still in the list: a prompt-injected
+    // assistant would propose its own, so the user confirms them explicitly.
+    const suggested = new Set(draft?.hosts.map(canonicalHost) ?? []);
+    const suggestedHosts = hostList.filter((host) => suggested.has(host));
     const ready =
-        !!name.trim() && value.length >= 8 && hostList.length > 0 && !!injection && !saving;
+        !!user &&
+        !!name.trim() &&
+        value.length >= 8 &&
+        hostList.length > 0 &&
+        !!injection &&
+        (suggestedHosts.length === 0 || hostsChecked) &&
+        !saving;
 
     const save = async () => {
-        if (!ready || !injection) return;
+        if (!ready || !injection || !user) return;
         setSaving(true);
         setError(null);
         try {
@@ -93,12 +116,15 @@ function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProp
                     writes: allowWrites ? "allow" : "ask",
                 },
                 value,
+                user.id,
             );
             setValue("");
             onSaved(secret);
         } catch (failure) {
             setError(
-                userFacingApiError(failure, "The secret could not be stored. Try again."),
+                failure instanceof VaultKeyMismatchError
+                    ? "The vault could not be verified, so nothing was sent. Contact your administrator."
+                    : userFacingApiError(failure, "The secret could not be stored. Try again."),
             );
             setSaving(false);
         }
@@ -196,10 +222,27 @@ function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProp
                         aria-describedby={`${id}-hosts-help`}
                     />
                     <p id={`${id}-hosts-help`} className="mt-1.5 text-xs text-gray-500">
-                        Host names, separated by commas; *.example.com covers its subdomains.
-                        HTTPS only. It can never be sent anywhere else: to change this, store
-                        it again.
+                        Exact host names, separated by commas. HTTPS only. It can never be
+                        sent anywhere else: to change this, store it again.
                     </p>
+                    {suggestedHosts.length > 0 && (
+                        <label className="mt-3 flex items-start text-sm text-gray-700">
+                            <input
+                                type="checkbox"
+                                checked={hostsChecked}
+                                onChange={(event) => setHostsChecked(event.target.checked)}
+                                className={`${TABLE_CHECKBOX_CLASS} mt-1.5`}
+                            />
+                            <span>
+                                The assistant suggested{" "}
+                                <span className="font-medium break-all">
+                                    {suggestedHosts.join(", ")}
+                                </span>
+                                . I checked that {suggestedHosts.length === 1 ? "it belongs" : "they belong"}{" "}
+                                to the service this secret is for.
+                            </span>
+                        </label>
+                    )}
                 </div>
                 <div>
                     <FieldLabel as="p" id={`${id}-auth`}>How the service takes it</FieldLabel>
@@ -240,8 +283,9 @@ function VaultSecretForm({ open, onClose, onSaved, draft }: VaultSecretModalProp
                     <span>
                         Let the assistant make changes with it without asking each time
                         <span className="block text-xs text-gray-500">
-                            Reading is always allowed. Changes (sending, pushing, deleting) ask
-                            for your approval unless this is on.
+                            Reading (GET requests) is always allowed. Changes (sending, pushing,
+                            deleting) ask for your approval unless this is on. A service that
+                            changes things on a read is not stopped by this.
                         </span>
                     </span>
                 </label>

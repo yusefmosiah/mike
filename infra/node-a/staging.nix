@@ -108,6 +108,17 @@ let
         write_backend_env
         GIT_SHA=$(cat ${root}/src/.git-sha 2>/dev/null || echo unknown)
         export GIT_SHA
+        # The vault's sealing key, read from the vault itself (not the
+        # backend) and pinned into the web app's build: a backend that hands
+        # browsers another key is refused there, and a production build
+        # without a pin stores nothing (docs/vault.md). A build argument, so
+        # it is exported for compose rather than written to src/.env.
+        VAULT_SEAL_KEY_SHA256=$(curl -fsS -m 10 --unix-socket /run/mike-vault/control.sock http://vault/v1/seal-key | jq -r '.sha256 // empty' || true)
+        if ! grep -Eqx '[0-9a-f]{64}' <<<"$VAULT_SEAL_KEY_SHA256"; then
+          echo "deploy: could not read the vault's key fingerprint; is mike-vault running?" >&2
+          return 1
+        fi
+        export VAULT_SEAL_KEY_SHA256
         compose build
         compose up -d --remove-orphans
       }

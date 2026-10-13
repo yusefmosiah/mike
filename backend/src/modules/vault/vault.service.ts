@@ -1,7 +1,10 @@
 // The vault module: the signed-in user's own secrets, through the vault's
 // control API (lib/vault). Every call is scoped to the caller's user id,
 // which comes from the session, never from the request.
+import type { Db } from "../../lib/db";
+import { resolveWorkstation } from "../../lib/workstation";
 import {
+  clearVaultVmMark,
   createVaultSecret,
   deleteVaultSecret,
   listVaultSecrets,
@@ -10,6 +13,7 @@ import {
   vaultEnabled,
   VaultRequestError,
   vaultSealKey,
+  vaultVmState,
   VaultUnavailableError,
   type SealedValue,
   type VaultAuditEvent,
@@ -56,7 +60,30 @@ function asInjection(value: unknown): VaultInjection | null {
   return null;
 }
 
-export function getSealKey(): Promise<ServiceResult<{ kid: string; public_key: string; alg: string }>> {
+/** Whether credentials are paused for the user's own workstation, because someone else worked in it. */
+export type WorkstationVaultState = { paused_since: string | null; guest_working: boolean };
+
+export async function workstationVaultState(db: Db, userId: string): Promise<ServiceResult<WorkstationVaultState | null>> {
+  return guarded(async () => {
+    const vm = (await resolveWorkstation(db, userId))?.vm;
+    if (!vm) return null;
+    const state = await vaultVmState(vm);
+    return { paused_since: state.guested_since, guest_working: state.guests > 0 };
+  });
+}
+
+/** The owner allows credentials in their workstation again after a guest worked in it. */
+export async function allowWorkstationVault(db: Db, userId: string): Promise<ServiceResult<WorkstationVaultState>> {
+  if (!vaultEnabled()) return failure("unavailable", "The vault is not set up on this server.", "vault_disabled");
+  const vm = (await resolveWorkstation(db, userId))?.vm;
+  if (!vm) return failure("not_found", "You have no workstation.");
+  return guarded(async () => {
+    const state = await clearVaultVmMark(vm, userId);
+    return { paused_since: state.guested_since, guest_working: state.guests > 0 };
+  });
+}
+
+export function getSealKey(): Promise<ServiceResult<{ kid: string; public_key: string; sha256: string; epoch: string; alg: string }>> {
   return guarded(vaultSealKey);
 }
 

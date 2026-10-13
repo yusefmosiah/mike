@@ -2,8 +2,9 @@
 //
 // A lease names the VM it was issued for, and the forwarding path checks it
 // against the socket the request arrived on (one per VM), so a lease that
-// leaves its VM is useless anywhere else. Leases live in memory only: a
-// restart revokes all of them.
+// leaves its VM is useless anywhere else. The backend revokes a turn's
+// leases when the turn ends, and a VM's before someone else works in it or
+// it is wiped. Leases live in memory only: a restart revokes all of them.
 import { randomBytes } from "node:crypto";
 import type { Access } from "./policy.ts";
 
@@ -19,7 +20,7 @@ export type Lease = {
 };
 
 export const DEFAULT_TTL_SECONDS = 15 * 60;
-export const MAX_TTL_SECONDS = 60 * 60;
+export const MAX_TTL_SECONDS = DEFAULT_TTL_SECONDS;
 const MAX_LEASES_PER_USER = 50;
 
 export class Leases {
@@ -63,9 +64,12 @@ export class Leases {
     return lease.vm === vm ? lease : null;
   }
 
-  revoke(filter: { token?: string; userId?: string; secretId?: string; chatId?: string }): number {
+  /** Revokes the leases matching every given field; at least one is required. */
+  revoke(filter: { token?: string; userId?: string; secretId?: string; chatId?: string; vm?: string }): number {
+    if (!filter.token && !filter.userId && !filter.secretId && !filter.chatId && !filter.vm) return 0;
     let count = 0;
     for (const lease of this.byToken.values()) {
+      if (filter.vm && lease.vm !== filter.vm) continue;
       if (filter.token && lease.token !== filter.token) continue;
       if (filter.userId && lease.userId !== filter.userId) continue;
       if (filter.secretId && lease.secretId !== filter.secretId) continue;

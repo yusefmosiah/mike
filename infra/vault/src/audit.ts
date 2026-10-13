@@ -7,7 +7,7 @@ import path from "node:path";
 export type AuditEvent = {
   at: string;
   user: string;
-  event: "created" | "updated" | "deleted" | "lease" | "request" | "denied";
+  event: "created" | "updated" | "deleted" | "purged" | "allowed" | "lease" | "request" | "denied";
   secret?: string;
   secret_name?: string;
   vm?: string;
@@ -21,24 +21,59 @@ export type AuditEvent = {
 };
 
 const ROTATE_BYTES = 20 * 1024 * 1024;
+/** Lines waiting for the disk; beyond this, events are counted and dropped. */
+const MAX_PENDING = 10_000;
 
 export class AuditLog {
   private readonly file: string;
   private queue: Promise<unknown> = Promise.resolve();
+  private pending = 0;
+  private dropped = 0;
+  private failedAt = 0;
+  private readonly now: () => number;
 
-  constructor(dir: string) {
+  constructor(dir: string, now: () => number = Date.now) {
     this.file = path.join(dir, "audit.jsonl");
+    this.now = now;
   }
 
-  record(event: Omit<AuditEvent, "at">): void {
+  /**
+   * True while the backlog is full, or for a minute after a write failed:
+   * callers refuse work rather than let it go unlogged.
+   */
+  saturated(): boolean {
+    return this.pending >= MAX_PENDING || (this.failedAt > 0 && this.now() - this.failedAt < 60_000);
+  }
+
+  /**
+   * Appends one event. Resolves true once it is on disk, false if it could
+   * not be written (never rejects): a caller that must not act unlogged
+   * awaits it first.
+   */
+  record(event: Omit<AuditEvent, "at">): Promise<boolean> {
+    if (this.pending >= MAX_PENDING) {
+      if (this.dropped++ % 1000 === 0) console.error(`audit backlog full; ${this.dropped} event(s) dropped`);
+      return Promise.resolve(false);
+    }
+    this.pending++;
     const line = `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`;
-    this.queue = this.queue
+    const written = this.queue
       .then(async () => {
         const size = await stat(this.file).then((s) => s.size, () => 0);
         if (size > ROTATE_BYTES) await rename(this.file, `${this.file}.1`);
         await appendFile(this.file, line, { mode: 0o600 });
+        return true;
       })
-      .catch((error) => console.error("audit write failed:", (error as Error).message));
+      .catch((error) => {
+        this.failedAt = this.now();
+        console.error("audit write failed:", (error as Error).message);
+        return false;
+      })
+      .finally(() => {
+        this.pending--;
+      });
+    this.queue = written;
+    return written;
   }
 
   /** The user's most recent events, newest first. */

@@ -10,14 +10,17 @@ import { VaultSecretModal } from "@/app/components/vault/VaultSecretModal";
 import { TABLE_CHECKBOX_CLASS } from "@/app/components/shared/TablePrimitive";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import {
+    allowVaultWorkstation,
     deleteVaultSecret,
     getVaultStatus,
+    getVaultWorkstation,
     listVaultActivity,
     listVaultSecrets,
     updateVaultSecret,
     type VaultActivityEvent,
     type VaultInjection,
     type VaultSecret,
+    type VaultWorkstation,
 } from "@/app/lib/mikeApi";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { settingsGlassIconButtonClassName } from "../settingsStyles";
@@ -26,6 +29,7 @@ type Loaded = {
     enabled: boolean;
     secrets: VaultSecret[];
     activity: VaultActivityEvent[];
+    workstation: VaultWorkstation | null;
 };
 
 function authLabel(injection: VaultInjection): string {
@@ -46,10 +50,12 @@ function activityText(event: VaultActivityEvent): string {
             return `Deleted ${name}`;
         case "updated":
             return `Changed the settings of ${name}`;
+        case "allowed":
+            return "Allowed credentials in your workstation again";
         case "lease":
             return `Lent ${name} to the assistant (${event.access === "write" ? "changes allowed" : "read only"})`;
         case "request":
-            return `${event.method} ${event.host}${event.path ?? ""} with ${name}: ${event.status}`;
+            return `${event.method} ${event.host}${event.path ?? ""} with ${name}${event.status ? `: ${event.status}` : ""}`;
         case "denied":
             return `Refused ${event.method ?? "a request"} to ${event.host ?? "a host"} with ${name}: ${event.reason ?? ""}`;
         default:
@@ -68,14 +74,16 @@ export default function VaultSettingsPage() {
         try {
             const { enabled } = await getVaultStatus();
             if (!enabled) {
-                setLoaded({ enabled, secrets: [], activity: [] });
+                setLoaded({ enabled, secrets: [], activity: [], workstation: null });
                 return;
             }
-            const [secrets, activity] = await Promise.all([
+            const [secrets, activity, workstation] = await Promise.all([
                 listVaultSecrets(),
                 listVaultActivity(30),
+                // Secondary: the page still works if this cannot be read.
+                getVaultWorkstation().catch(() => null),
             ]);
-            setLoaded({ enabled, secrets, activity });
+            setLoaded({ enabled, secrets, activity, workstation });
             setError(null);
         } catch (failure) {
             setError(userFacingApiError(failure, "The vault could not be loaded."));
@@ -94,6 +102,18 @@ export default function VaultSettingsPage() {
             await load();
         } catch (failure) {
             setError(userFacingApiError(failure, "The secret could not be deleted."));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const allowWorkstation = async () => {
+        setBusy("workstation");
+        try {
+            await allowVaultWorkstation();
+            await load();
+        } catch (failure) {
+            setError(userFacingApiError(failure, "Credentials could not be allowed again."));
         } finally {
             setBusy(null);
         }
@@ -135,6 +155,34 @@ export default function VaultSettingsPage() {
                     <p role="alert" className="text-sm text-red-600">
                         {error}
                     </p>
+                )}
+                {loaded?.workstation?.paused_since && (
+                    <SettingsCard>
+                        <SettingsRow layout="stacked">
+                            <div className="space-y-2 text-sm">
+                                <p className="font-medium text-gray-900">
+                                    Paused in your workstation
+                                </p>
+                                <p className="text-gray-600">
+                                    {loaded.workstation.guest_working
+                                        ? "Someone else is working in your workstation right now."
+                                        : `Someone else worked in your workstation (${when(loaded.workstation.paused_since)}).`}{" "}
+                                    Anything they ran there could still be running, so the
+                                    assistant cannot use your credentials in it until you allow
+                                    them again.
+                                </p>
+                                <PillButtonUI
+                                    tone="black"
+                                    size="xs"
+                                    onClick={() => void allowWorkstation()}
+                                    loading={busy === "workstation"}
+                                    disabled={loaded.workstation.guest_working}
+                                >
+                                    Allow again
+                                </PillButtonUI>
+                            </div>
+                        </SettingsRow>
+                    </SettingsCard>
                 )}
                 <SettingsCard>
                     {!loaded ? (

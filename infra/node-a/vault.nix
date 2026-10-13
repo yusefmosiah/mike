@@ -62,7 +62,7 @@ in
     wantedBy = [ "multi-user.target" ];
     environment.NODE_ENV = "production";
     serviceConfig = {
-      ExecStart = "${pkgs.nodejs_22}/bin/node ${src}/src/main.ts";
+      ExecStart = "${pkgs.nodejs_22}/bin/node --max-old-space-size=256 ${src}/src/main.ts";
       Sockets = socketUnits;
       Restart = "on-failure";
       RestartSec = 2;
@@ -74,7 +74,15 @@ in
       # public addresses; the kernel enforces the second half too, whatever
       # a name resolves to.
       RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" ];
-      IPAddressDeny = [ "localhost" "link-local" "multicast" "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "172.16.0.0/12" "192.168.0.0/16" "198.18.0.0/15" "240.0.0.0/4" ];
+      IPAddressDeny = [
+        "localhost" "link-local" "multicast" "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "172.16.0.0/12"
+        "192.0.0.0/24" "192.0.2.0/24" "192.168.0.0/16" "198.18.0.0/15" "198.51.100.0/24" "203.0.113.0/24" "240.0.0.0/4"
+      ];
+      # One VM's requests cannot take the host's memory, threads or file
+      # descriptors; the service caps each VM's share itself (data.ts).
+      MemoryMax = "512M";
+      TasksMax = 64;
+      LimitNOFILE = 4096;
       CapabilityBoundingSet = "";
       NoNewPrivileges = true;
       PrivateTmp = true;

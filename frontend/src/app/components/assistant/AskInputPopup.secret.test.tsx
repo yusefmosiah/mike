@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ store: vi.fn() }));
 
+vi.mock("@/app/contexts/AuthContext", () => ({
+    useAuth: () => ({ user: { id: "user-1" } }),
+}));
+
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/lib/mikeApi")>()),
     storeVaultSecret: api.store,
@@ -59,7 +63,11 @@ describe("AskInputPopup credential requests", () => {
         const secret = screen.getByLabelText("Secret");
         expect(secret).toHaveAttribute("type", "password");
         fireEvent.change(secret, { target: { value: SECRET } });
-        fireEvent.click(screen.getByRole("button", { name: "Store in vault" }));
+        // Hosts the assistant proposed must be confirmed before storing.
+        const store = screen.getByRole("button", { name: "Store in vault" });
+        expect(store).toBeDisabled();
+        fireEvent.click(screen.getByRole("checkbox", { name: /The assistant suggested gitlab\.com/ }));
+        fireEvent.click(store);
 
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
         expect(api.store).toHaveBeenCalledWith(
@@ -70,6 +78,7 @@ describe("AskInputPopup credential requests", () => {
                 writes: "ask",
             },
             SECRET,
+            "user-1",
         );
         const [response, content] = onSubmit.mock.calls[0];
         expect(response.responses).toEqual([
@@ -78,6 +87,29 @@ describe("AskInputPopup credential requests", () => {
         // Nothing that reaches the chat carries the value.
         expect(JSON.stringify(onSubmit.mock.calls[0])).not.toContain(SECRET);
         expect(content).toContain('Stored the credential in the vault as "blog-deploy"');
+    });
+
+    it("needs no confirmation for hosts the user typed", async () => {
+        const onSubmit = vi.fn();
+        render(<AskInputPopup assistantMessageId="m1" event={event} onSubmit={onSubmit} />);
+        fireEvent.click(screen.getByRole("button", { name: "Store in vault…" }));
+        fireEvent.change(screen.getByLabelText("Where it may be sent"), { target: { value: "gitlab.example.org" } });
+        fireEvent.change(screen.getByLabelText("Secret"), { target: { value: SECRET } });
+        expect(screen.queryByRole("checkbox", { name: /The assistant suggested/ })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Store in vault" }));
+        await waitFor(() => expect(api.store).toHaveBeenCalledTimes(1));
+        expect(api.store.mock.calls[0][0].hosts).toEqual(["gitlab.example.org"]);
+    });
+
+    it("says nothing was sent when the vault's key cannot be verified", async () => {
+        const { VaultKeyMismatchError } = await import("@/app/lib/vault/seal");
+        api.store.mockRejectedValueOnce(new VaultKeyMismatchError());
+        render(<AskInputPopup assistantMessageId="m1" event={event} onSubmit={vi.fn()} />);
+        fireEvent.click(screen.getByRole("button", { name: "Store in vault…" }));
+        fireEvent.change(screen.getByLabelText("Secret"), { target: { value: SECRET } });
+        fireEvent.click(screen.getByRole("checkbox", { name: /The assistant suggested/ }));
+        fireEvent.click(screen.getByRole("button", { name: "Store in vault" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("nothing was sent");
     });
 
     it("answers as not stored when skipped", async () => {
@@ -100,6 +132,7 @@ describe("AskInputPopup credential requests", () => {
         render(<AskInputPopup assistantMessageId="m1" event={event} onSubmit={onSubmit} />);
         fireEvent.click(screen.getByRole("button", { name: "Store in vault…" }));
         fireEvent.change(screen.getByLabelText("Secret"), { target: { value: SECRET } });
+        fireEvent.click(screen.getByRole("checkbox", { name: /The assistant suggested/ }));
         fireEvent.click(screen.getByRole("button", { name: "Store in vault" }));
         expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
         expect(onSubmit).not.toHaveBeenCalled();

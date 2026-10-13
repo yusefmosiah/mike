@@ -14,6 +14,7 @@ import { generateSealingKey, importSealingKey } from "./crypto.ts";
 import { dataHandler } from "./data.ts";
 import { Leases } from "./leases.ts";
 import { SecretStore } from "./store.ts";
+import { VmGuard } from "./vms.ts";
 
 const VM_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -58,6 +59,8 @@ async function main(): Promise<void> {
   await store.load();
   const leases = new Leases();
   const audit = new AuditLog(stateDir);
+  const guard = new VmGuard(stateDir);
+  await guard.load();
 
   const listeners: { listener: Listener; target: { fd: number } | { path: string } }[] = [];
   for (const [fd, listener] of systemdSockets()) listeners.push({ listener, target: { fd } });
@@ -77,7 +80,7 @@ async function main(): Promise<void> {
   const servers: Server[] = [];
   for (const { listener, target } of listeners) {
     const handler = listener.kind === "control"
-      ? controlHandler({ store, leases, audit, sealing, vms })
+      ? controlHandler({ store, leases, audit, sealing, vms, guard })
       : dataHandler(listener.vm, { store, leases, audit });
     const server = createServer((req, res) => {
       handler(req, res).catch((error) => {
@@ -86,8 +89,17 @@ async function main(): Promise<void> {
         else res.destroy();
       });
     });
-    // Large pushes take a while; requests are bounded by the upstream timeout.
-    server.requestTimeout = 0;
+    if (listener.kind === "control") {
+      server.requestTimeout = 30_000;
+    } else {
+      // Large pushes take a while; a request also ends when its lease does
+      // (data.ts), and no lease lasts longer than this.
+      server.requestTimeout = 16 * 60 * 1000;
+      server.headersTimeout = 30_000;
+      // One VM cannot hold every file descriptor: its in-flight requests are
+      // capped in data.ts, idle connections here.
+      server.maxConnections = 32;
+    }
     if ("path" in target) await rm(target.path, { force: true });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);

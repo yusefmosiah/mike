@@ -4042,15 +4042,27 @@ export async function listVaultSecrets(): Promise<
     ).secrets;
 }
 
-/** Seals `value` here, then stores it; the value itself is never sent. */
+/**
+ * Seals `value` here, with its settings and the signed-in account, then
+ * stores it; the value itself is never sent. The vault uses only what was
+ * sealed; the settings beside the envelope are for the backend's checks.
+ */
 export async function storeVaultSecret(
     input: NewVaultSecret,
     value: string,
+    userId: string,
 ): Promise<VaultSecret> {
-    const key = await apiRequest<{ kid: string; public_key: string }>(
+    const key = await apiRequest<{ kid: string; public_key: string; epoch: string }>(
         "/vault/seal-key",
     );
-    const sealed = await sealSecret(key, value);
+    const sealed = await sealSecret(
+        key,
+        { ...input, value, user: userId },
+        {
+            pinnedKeySha256: process.env.NEXT_PUBLIC_VAULT_SEAL_KEY_SHA256,
+            requirePin: process.env.NODE_ENV === "production",
+        },
+    );
     return (
         await apiRequest<{ secret: VaultSecret }>(
             "/vault/secrets",
@@ -4083,6 +4095,26 @@ export async function deleteVaultSecret(secretId: string): Promise<void> {
     await apiRequest(`/vault/secrets/${encodeURIComponent(secretId)}`, {
         method: "DELETE",
     });
+}
+
+/** Credentials paused in the user's workstation because someone else worked in it. */
+export type VaultWorkstation = { paused_since: string | null; guest_working: boolean };
+
+export async function getVaultWorkstation(): Promise<VaultWorkstation | null> {
+    return (
+        await apiRequest<{ workstation: VaultWorkstation | null }>(
+            "/vault/workstation",
+        )
+    ).workstation;
+}
+
+export async function allowVaultWorkstation(): Promise<VaultWorkstation> {
+    return (
+        await apiRequest<{ workstation: VaultWorkstation }>(
+            "/vault/workstation/allow",
+            { method: "POST" },
+        )
+    ).workstation;
 }
 
 export async function listVaultActivity(

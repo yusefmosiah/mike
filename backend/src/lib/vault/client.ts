@@ -106,7 +106,7 @@ function call<T>(method: string, path: string, body?: unknown, env: Env = proces
 
 const userPath = (userId: string) => `/v1/users/${encodeURIComponent(userId)}`;
 
-export async function vaultSealKey(): Promise<{ kid: string; public_key: string; alg: string }> {
+export async function vaultSealKey(): Promise<{ kid: string; public_key: string; sha256: string; epoch: string; alg: string }> {
   return call("GET", "/v1/seal-key");
 }
 
@@ -164,14 +164,55 @@ export async function issueVaultLease(input: {
 }
 
 /** How the agent uses a lease, returned with it. */
+/** Revokes leases: a user's (for one chat, or on one VM), or everything lent to one VM. */
+export async function revokeVaultLeases(
+  filter: { userId: string; chatId?: string | null; vm?: string } | { vm: string },
+): Promise<number> {
+  const body = "userId" in filter
+    ? { user: filter.userId, ...(filter.chatId ? { chat: filter.chatId } : {}), ...(filter.vm ? { vm: filter.vm } : {}) }
+    : { vm: filter.vm };
+  return (await call<{ revoked: number }>("DELETE", "/v1/leases", body)).revoked;
+}
+
+const vmPath = (vm: string) => `/v1/vms/${encodeURIComponent(vm)}`;
+
+/**
+ * Revokes everything lent to `vm` and lends it nothing until `unfenceVaultVm`.
+ * With `mark` (a guest is about to work in it), leases stay paused afterwards
+ * until the owner allows them again or the VM is wiped.
+ */
+export async function fenceVaultVm(vm: string, mark: boolean): Promise<void> {
+  await call("POST", `${vmPath(vm)}/fence`, { mark });
+}
+
+export async function unfenceVaultVm(vm: string): Promise<void> {
+  await call("POST", `${vmPath(vm)}/unfence`, {});
+}
+
+export type VaultVmState = { guests: number; guested_since: string | null };
+
+export async function vaultVmState(vm: string): Promise<VaultVmState> {
+  return call("GET", vmPath(vm));
+}
+
+/** Allows leases in `vm` again after a guest worked in it; logged for `userId`. */
+export async function clearVaultVmMark(vm: string, userId: string): Promise<VaultVmState> {
+  return call("DELETE", `${vmPath(vm)}/mark`, { user: userId });
+}
+
+/** Forgets a user in the vault: every secret, their key and their leases. */
+export async function purgeVaultUser(userId: string): Promise<void> {
+  await call("DELETE", userPath(userId));
+}
+
 export function leaseInstructions(lease: VaultLease): string {
   const base = `$MIKE_VAULT_URL/${lease.lease}`;
-  const host = lease.hosts.find((h) => !h.startsWith("*.")) ?? lease.hosts[0]?.slice(2) ?? "<host>";
+  const host = lease.hosts[0] ?? "<host>";
   return [
-    `Lease for "${lease.secret}" (${lease.access}), valid until ${lease.expires_at}, only from this workstation.`,
+    `Lease for "${lease.secret}" (${lease.access}), valid until ${lease.expires_at} or the end of this turn, whichever is first, only from this workstation.`,
     `Send requests to ${base}/<host>/<path> instead of https://<host>/<path>; the vault attaches the secret. Allowed hosts: ${lease.hosts.join(", ")}.`,
     `Example: curl -sS ${base}/${host}/<path>`,
-    `For git over HTTPS: git remote set-url origin ${base}/${host}/<owner>/<repo>.git (no username or token in the URL).`,
+    `For git over HTTPS, use the URL directly instead of saving it as a remote: git push ${base}/${host}/<owner>/<repo>.git <branch> (no username or token in the URL).`,
     lease.access === "read"
       ? "This lease allows GET, HEAD and OPTIONS only. Ask for a write lease to push or change anything."
       : "This lease also allows requests that change things (POST, PUT, PATCH, DELETE, git push).",

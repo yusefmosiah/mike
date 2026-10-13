@@ -8,6 +8,12 @@ import {
   issueVaultLease,
   leaseInstructions,
   listVaultSecrets,
+  clearVaultVmMark,
+  fenceVaultVm,
+  purgeVaultUser,
+  unfenceVaultVm,
+  vaultVmState,
+  revokeVaultLeases,
   VaultRequestError,
   VaultUnavailableError,
 } from "./client";
@@ -27,6 +33,12 @@ beforeAll(async () => {
         res.end(JSON.stringify({ secrets: [{ id: "sec_1", name: "blog" }] }));
       } else if (req.url === "/v1/users/u1/secrets" && req.method === "POST") {
         res.writeHead(409).end(JSON.stringify({ error: "a secret named blog already exists" }));
+      } else if (req.url?.startsWith("/v1/vms/ws-01")) {
+        res.end(JSON.stringify({ guests: 0, guested_since: null, revoked: 1 }));
+      } else if (req.url === "/v1/leases" && req.method === "DELETE") {
+        res.end(JSON.stringify({ revoked: 2 }));
+      } else if (req.url === "/v1/users/u1" && req.method === "DELETE") {
+        res.end(JSON.stringify({ purged: true, revoked: 0 }));
       } else if (req.url === "/v1/leases") {
         res.writeHead(201).end(JSON.stringify({ lease: "mvl_x", secret: "blog", hosts: ["gitlab.com"], access: "read", expires_at: "t" }));
       } else {
@@ -73,5 +85,27 @@ describe("vault client", () => {
     const text = leaseInstructions(lease);
     expect(text).toContain("$MIKE_VAULT_URL/mvl_x/gitlab.com/");
     expect(text).toContain("GET, HEAD and OPTIONS only");
+    expect(text).toContain("end of this turn");
+    expect(text).not.toContain("remote set-url");
+  });
+
+  it("revokes leases by chat, by user and VM, or by VM, and purges a user", async () => {
+    expect(await revokeVaultLeases({ userId: "u1", chatId: "c1" })).toBe(2);
+    expect(JSON.parse(seen.at(-1)!.body)).toEqual({ user: "u1", chat: "c1" });
+    await revokeVaultLeases({ userId: "u1", chatId: null, vm: "ws-01" });
+    expect(JSON.parse(seen.at(-1)!.body)).toEqual({ user: "u1", vm: "ws-01" });
+    await revokeVaultLeases({ vm: "ws-01" });
+    expect(JSON.parse(seen.at(-1)!.body)).toEqual({ vm: "ws-01" });
+    await fenceVaultVm("ws-01", true);
+    expect(seen.at(-1)).toMatchObject({ method: "POST", url: "/v1/vms/ws-01/fence" });
+    expect(JSON.parse(seen.at(-1)!.body)).toEqual({ mark: true });
+    await unfenceVaultVm("ws-01");
+    expect(seen.at(-1)).toMatchObject({ method: "POST", url: "/v1/vms/ws-01/unfence" });
+    expect(await vaultVmState("ws-01")).toMatchObject({ guests: 0, guested_since: null });
+    await clearVaultVmMark("ws-01", "u1");
+    expect(seen.at(-1)).toMatchObject({ method: "DELETE", url: "/v1/vms/ws-01/mark" });
+    expect(JSON.parse(seen.at(-1)!.body)).toEqual({ user: "u1" });
+    await purgeVaultUser("u1");
+    expect(seen.at(-1)).toMatchObject({ method: "DELETE", url: "/v1/users/u1" });
   });
 });

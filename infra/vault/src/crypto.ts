@@ -11,7 +11,11 @@
 //
 // In transit from the browser (sealed values): ECDH P-256 between an
 // ephemeral browser key and this service's sealing key, HKDF-SHA256, then
-// AES-256-GCM. The backend relays the envelope and cannot open it.
+// AES-256-GCM. The backend relays the envelope and cannot open it. What is
+// sealed is the value together with everything that decides where it may
+// go (owner, name, hosts, how it is attached, the write policy), a nonce and
+// the time, so whoever relays the envelope cannot store it for someone else,
+// send it to another host, or store it twice.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, webcrypto } from "node:crypto";
 
 const subtle = webcrypto.subtle;
@@ -49,7 +53,24 @@ export const secretAad = (userId: string, secretId: string) => `mike-vault/secre
 // ---------------------------------------------------------------------------
 // Sealed values from the browser
 
-export const SEAL_INFO = "mike-vault/seal/v1";
+export const SEAL_INFO = "mike-vault/seal/v2";
+
+/** What the browser seals: the value and the settings it was entered with. */
+export type SealedPayload = {
+  value: string;
+  user: string;
+  name: string;
+  description?: string;
+  hosts: string[];
+  injection: unknown;
+  writes: string;
+  /** Random, once per envelope. */
+  nonce: string;
+  /** The vault process the key was fetched from (/v1/seal-key). */
+  epoch: string;
+  /** When it was sealed, in milliseconds since the epoch. */
+  iat: number;
+};
 
 /** What a browser sends: its ephemeral public key and the ciphertext. */
 export type SealedValue = {
@@ -107,7 +128,7 @@ async function sealKey(shared: ArrayBuffer, epkRaw: Uint8Array, vaultRaw: Uint8A
   );
 }
 
-/** Opens a value the browser sealed to `key`. Throws on any mismatch. */
+/** Opens what the browser sealed to `key`. Throws on any mismatch. */
 export async function unsealValue(key: SealingKey, sealed: SealedValue): Promise<Buffer> {
   if (sealed.kid !== key.kid) throw new Error("sealed with an unknown key");
   const epkRaw = Buffer.from(sealed.epk, "base64url");
@@ -122,11 +143,25 @@ export async function unsealValue(key: SealingKey, sealed: SealedValue): Promise
   return Buffer.from(plain);
 }
 
+/** Opens a sealed payload and checks its shape; the caller checks what it says. */
+export async function unsealPayload(key: SealingKey, sealed: SealedValue): Promise<SealedPayload> {
+  const parsed = JSON.parse((await unsealValue(key, sealed)).toString("utf8")) as Record<string, unknown>;
+  const text = (field: string) => typeof parsed[field] === "string";
+  if (
+    !parsed || typeof parsed !== "object" || !text("value") || !text("user") || !text("name") || !text("writes") ||
+    !text("nonce") || !text("epoch") || !Array.isArray(parsed.hosts) || typeof parsed.iat !== "number" ||
+    (parsed.description !== undefined && !text("description"))
+  ) {
+    throw new Error("malformed sealed payload");
+  }
+  return parsed as unknown as SealedPayload;
+}
+
 /**
  * The browser's half, for tests and tools: the web app's
  * frontend/src/app/lib/vault/seal.ts does exactly this with WebCrypto.
  */
-export async function sealValue(publicKey: string, kid: string, value: string): Promise<SealedValue> {
+export async function sealValue(publicKey: string, kid: string, payload: SealedPayload): Promise<SealedValue> {
   const vaultRaw = Buffer.from(publicKey, "base64url");
   const vaultKey = await subtle.importKey("raw", u8(vaultRaw), { name: "ECDH", namedCurve: "P-256" }, false, []);
   const eph = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
@@ -137,7 +172,7 @@ export async function sealValue(publicKey: string, kid: string, value: string): 
   const ct = await subtle.encrypt(
     { name: "AES-GCM", iv: u8(iv), additionalData: u8(Buffer.from(`${SEAL_INFO}|${kid}`)) },
     aes,
-    u8(Buffer.from(value, "utf8")),
+    u8(Buffer.from(JSON.stringify(payload), "utf8")),
   );
   return { kid, epk: b64url(epkRaw), iv: b64url(iv), ct: b64url(new Uint8Array(ct)) };
 }

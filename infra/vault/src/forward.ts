@@ -4,12 +4,15 @@
 // vault: every address the name resolves to must be public, and the
 // connection goes to the address that was checked (no second lookup for a
 // rebinding answer to slip into). The certificate is verified against the
-// name. The response comes back with the secret removed wherever it echoes.
+// name. The response comes back with the secret removed wherever it echoes,
+// which only works on bytes as sent: a compressed response is refused, and a
+// request cannot ask for part of one.
 import { lookup as dnsLookup } from "node:dns/promises";
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import type { Readable } from "node:stream";
+import { METHOD_OVERRIDE_HEADERS, type ScrubSpec } from "./policy.ts";
 import { scrubText } from "./scrub.ts";
 
 const blocked = new BlockList();
@@ -61,6 +64,14 @@ const HOP_BY_HOP = new Set([
   "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection",
   "te", "trailer", "transfer-encoding", "upgrade", "host",
 ]);
+/**
+ * Request headers never forwarded: a range could split an echoed secret into
+ * pieces too short to recognise, and a method override could make a read a
+ * write.
+ */
+const DROPPED_REQUEST = new Set(["range", "if-range", "accept-encoding", ...METHOD_OVERRIDE_HEADERS]);
+/** Response headers never returned: a session cookie is a credential of its own. */
+const DROPPED_RESPONSE = new Set(["set-cookie", "set-cookie2"]);
 
 export type UpstreamRequest = {
   method: string;
@@ -70,7 +81,7 @@ export type UpstreamRequest = {
   headers: IncomingHttpHeaders;
   body: Readable;
   inject: [string, string];
-  patterns: string[];
+  scrub: ScrubSpec;
 };
 
 export async function forward(upstream: UpstreamRequest, options: ForwardOptions = {}): Promise<IncomingMessage> {
@@ -78,7 +89,8 @@ export async function forward(upstream: UpstreamRequest, options: ForwardOptions
   const headers: OutgoingHttpHeaders = {};
   for (const [name, value] of Object.entries(upstream.headers)) {
     const key = name.toLowerCase();
-    if (HOP_BY_HOP.has(key) || key.startsWith("x-forwarded-") || key === "forwarded" || key === "x-real-ip") continue;
+    if (HOP_BY_HOP.has(key) || DROPPED_REQUEST.has(key)) continue;
+    if (key.startsWith("x-forwarded-") || key === "forwarded" || key === "x-real-ip") continue;
     if (value !== undefined) headers[key] = value;
   }
   // The secret replaces whatever the caller put in its header.
@@ -105,11 +117,21 @@ export async function forward(upstream: UpstreamRequest, options: ForwardOptions
         // One connection per request: an agent's keep-alive cannot outlive its lease.
         agent: false,
       },
-      resolve,
+      (response) => {
+        // `identity` was asked for; a server that compresses anyway would
+        // hide an echoed secret from the scrubber.
+        const encoding = String(response.headers["content-encoding"] ?? "identity").trim().toLowerCase();
+        if (encoding !== "identity" && encoding !== "") {
+          response.destroy();
+          reject(new ForwardError(502, `${upstream.host} sent a compressed response, which the vault cannot check`));
+          return;
+        }
+        resolve(response);
+      },
     );
     request.on("timeout", () => request.destroy(new ForwardError(504, `${upstream.host} did not answer in time`)));
     request.on("error", (error) =>
-      reject(error instanceof ForwardError ? error : new ForwardError(502, `could not reach ${upstream.host}: ${scrubText(error.message, upstream.patterns)}`)),
+      reject(error instanceof ForwardError ? error : new ForwardError(502, `could not reach ${upstream.host}: ${scrubText(error.message, upstream.scrub)}`)),
     );
     upstream.body.on("error", (error) => request.destroy(error));
     upstream.body.pipe(request);
@@ -118,14 +140,15 @@ export async function forward(upstream: UpstreamRequest, options: ForwardOptions
 
 export function responseHeaders(
   headers: IncomingHttpHeaders,
-  patterns: string[],
+  scrub: ScrubSpec,
   rewriteLocation: (location: string) => string,
 ): OutgoingHttpHeaders {
   const out: OutgoingHttpHeaders = {};
+  // Node reads header bytes as latin1, the same view the scrub spec uses.
   for (const [name, value] of Object.entries(headers)) {
     const key = name.toLowerCase();
-    if (HOP_BY_HOP.has(key) || key === "content-length" || value === undefined) continue;
-    const clean = (text: string) => scrubText(text, patterns);
+    if (HOP_BY_HOP.has(key) || DROPPED_RESPONSE.has(key) || key === "content-length" || value === undefined) continue;
+    const clean = (text: string) => scrubText(text, scrub);
     out[key] = Array.isArray(value) ? value.map(clean) : clean(value);
   }
   if (typeof out.location === "string") out.location = rewriteLocation(out.location);

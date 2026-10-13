@@ -533,6 +533,7 @@ export async function runToolCalls(
 
     if (VAULT_TOOL_NAMES.has(tc.function.name)) {
       const outcome = await runVaultTool({
+        db,
         name: tc.function.name,
         args,
         userId,

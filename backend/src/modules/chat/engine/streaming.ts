@@ -72,6 +72,7 @@ import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
 import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
+import { endOwnerTurn, startGuestTurn } from "../../../lib/vault/occupancy";
 import {
   cellResultContent,
   DEFAULT_CELL_TIMEOUT_MS,
@@ -873,6 +874,7 @@ export async function runLLMStream(params: {
         (event.type === "code_cell" && event.status === "running") ||
         (event.type === "code_approval" && event.status === "waiting"),
     );
+  let endGuestTurn: (() => Promise<void>) | null = null;
   const keepAlive = setInterval(() => {
     if (working()) unsafeWrite(": working\n\n");
   }, KEEP_ALIVE_MS);
@@ -881,6 +883,12 @@ export async function runLLMStream(params: {
   let turnUsage: StreamChatResult["usage"];
   try {
     throwIfAborted(signal);
+    // A guest working in the host's VM could read anything lent to it: the
+    // vault revokes the VM's leases now, lends it nothing until this turn
+    // finishes, and keeps them paused until the host allows them again. If
+    // the vault cannot confirm that, the turn does not run (a user-facing
+    // error, below).
+    if (isGuest && workstation?.vm) endGuestTurn = await startGuestTurn(workstation.vm);
     // Single request-time choke point for every runLLMStream caller (chat,
     // project chat, Word chat, tabular): router-prefixed models must be in the
     // user's saved selection.
@@ -1653,6 +1661,11 @@ export async function runLLMStream(params: {
     }
   } finally {
     clearInterval(keepAlive);
+    await endGuestTurn?.();
+    // Leases last one turn: whatever this turn was lent ends with it.
+    if (!isGuest && workstation?.vm && vaultEnabled()) {
+      await endOwnerTurn({ userId, vm: workstation.vm, chatId: conversationId ?? null });
+    }
   }
 
   flushText();

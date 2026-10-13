@@ -338,6 +338,8 @@ services:
         # Opt-out and install kind reach the browser bundle at build time.
         NEXT_PUBLIC_SENTRY_DISABLED: ${SENTRY_DISABLED:-}
         NEXT_PUBLIC_SENTRY_INSTALL: ${SENTRY_INSTALL:-}
+        # The vault's key fingerprint, pinned into the browser bundle (docs/vault.md).
+        NEXT_PUBLIC_VAULT_SEAL_KEY_SHA256: ${VAULT_SEAL_KEY_SHA256:-}
         GIT_SHA: ${GIT_SHA:-}
     environment:
       - API_BASE_URL=${API_BASE_URL:-http://backend:3001}

@@ -16,11 +16,18 @@ import {
   VaultRequestError,
   type VaultSecret,
 } from "../../../../lib/vault/client";
-import type { WorkstationTarget } from "../../../../lib/workstation";
+import type { Db } from "../../../../lib/db";
+import { resolveWorkstation, type WorkstationTarget } from "../../../../lib/workstation";
 
 export const VAULT_TOOL_NAMES = new Set(["vault_secrets", "vault_request_secret", "vault_lease"]);
 const CONNECTOR_NAME = "Vault";
 const NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+const MOVED = "The workstation this turn started in is no longer this user's. Ask again in a new message.";
+
+/** The user's own VM now: a temporary one can be wiped and reassigned mid-turn. */
+async function stillTheirs(db: Db, userId: string, vm: string): Promise<boolean> {
+  return (await resolveWorkstation(db, userId))?.vm === vm;
+}
 const MAX_HOSTS = 10;
 
 export type VaultToolOutcome = {
@@ -79,6 +86,7 @@ function injectionFrom(args: Record<string, unknown>): VaultInjection | string {
 }
 
 export async function runVaultTool(input: {
+  db: Db;
   name: string;
   args: Record<string, unknown>;
   userId: string;
@@ -121,6 +129,7 @@ export async function runVaultTool(input: {
       .map((host) => host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))
       .slice(0, MAX_HOSTS);
     if (hosts.length === 0) return fail("hosts must name at least one host");
+    if (hosts.some((host) => host.includes("*"))) return fail("hosts must be exact host names; wildcards are not allowed");
     const injection = injectionFrom(args);
     if (typeof injection === "string") return fail(injection);
     const purpose = typeof args.purpose === "string" ? args.purpose.trim().slice(0, 300) : "";
@@ -167,7 +176,7 @@ export async function runVaultTool(input: {
       arguments: {
         credential: secret.name,
         hosts: secret.hosts.join(", "),
-        for: "15 minutes, from this conversation's workstation",
+        for: "this turn (at most 15 minutes), from this conversation's workstation",
         ...(reason ? { reason } : {}),
       },
       binding: { type: "vault", secret_id: secret.id, vm, chat_id: input.chatId },
@@ -181,7 +190,10 @@ export async function runVaultTool(input: {
       item,
     };
   }
+  if (!(await stillTheirs(input.db, userId, vm))) return { ...fail(MOVED), event: activity(name, "error", MOVED) };
   try {
+    // The vault refuses, with its own reason, a VM someone else is working
+    // in or has worked in (infra/vault/src/vms.ts).
     const lease = await issueVaultLease({ userId, vm, secret: secret.id, access, chatId: input.chatId });
     return { content: leaseInstructions(lease), event: activity(name, "ok") };
   } catch (error) {
@@ -190,13 +202,25 @@ export async function runVaultTool(input: {
   }
 }
 
-/** Issues the write lease the user just approved, from the persisted item. */
+/**
+ * Issues the write lease the user just approved, from the persisted item, if
+ * the VM it names is still the user's own. The vault refuses it if someone
+ * else is working, or has worked, in that VM.
+ */
 export async function executeApprovedVaultLease(
+  db: Db,
   userId: string,
   item: ConnectorApprovalItem,
 ): Promise<{ content: string; event: McpToolEvent }> {
   const binding = item.binding;
   if (binding.type !== "vault") throw new Error("not a vault approval");
+  const refuse = (message: string) => ({
+    content: json({ ok: false, error: message }),
+    event: activity("vault_lease", "error", message),
+  });
+  if (!(await stillTheirs(db, userId, binding.vm))) {
+    return refuse("The workstation this was approved for is no longer yours. Ask for the lease again.");
+  }
   try {
     const lease = await issueVaultLease({
       userId,

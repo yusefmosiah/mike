@@ -4,7 +4,9 @@ const seal = vi.hoisted(() => vi.fn());
 vi.mock("@/app/lib/vault/seal", () => ({ sealSecret: seal }));
 
 import {
+    allowVaultWorkstation,
     deleteVaultSecret,
+    getVaultWorkstation,
     getVaultStatus,
     listVaultActivity,
     listVaultSecrets,
@@ -52,7 +54,7 @@ describe("vault API", () => {
         const sealed = { kid: "k", epk: "e", iv: "i", ct: "c" };
         seal.mockResolvedValueOnce(sealed);
         fetchMock
-            .mockResolvedValueOnce(json({ kid: "k", public_key: "pub" }))
+            .mockResolvedValueOnce(json({ kid: "k", public_key: "pub", epoch: "e1" }))
             .mockResolvedValueOnce(json({ secret: SECRET }, 201));
         const input = {
             name: "deploy",
@@ -60,11 +62,30 @@ describe("vault API", () => {
             injection: { type: "bearer" as const },
             writes: "ask" as const,
         };
-        await expect(storeVaultSecret(input, "the-plain-value")).resolves.toEqual(SECRET);
-        expect(seal).toHaveBeenCalledWith({ kid: "k", public_key: "pub" }, "the-plain-value");
+        vi.stubEnv("NEXT_PUBLIC_VAULT_SEAL_KEY_SHA256", "ab".repeat(32));
+        await expect(storeVaultSecret(input, "the-plain-value", "user-1")).resolves.toEqual(SECRET);
+        expect(seal).toHaveBeenCalledWith(
+            { kid: "k", public_key: "pub", epoch: "e1" },
+            { ...input, value: "the-plain-value", user: "user-1" },
+            { pinnedKeySha256: "ab".repeat(32), requirePin: false },
+        );
+        vi.unstubAllEnvs();
         const [, store] = calls();
         expect(store).toMatchObject({ method: "POST", body: { ...input, sealed } });
         expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("the-plain-value");
+    });
+
+    it("reads and lifts a pause on the user's workstation", async () => {
+        const paused = { paused_since: "2026-10-13T00:00:00Z", guest_working: false };
+        fetchMock
+            .mockResolvedValueOnce(json({ workstation: paused }))
+            .mockResolvedValueOnce(json({ workstation: { paused_since: null, guest_working: false } }));
+        await expect(getVaultWorkstation()).resolves.toEqual(paused);
+        await expect(allowVaultWorkstation()).resolves.toEqual({ paused_since: null, guest_working: false });
+        const [read, allow] = calls();
+        expect(read.url).toMatch(/\/vault\/workstation$/);
+        expect(allow).toMatchObject({ method: "POST" });
+        expect(allow.url).toMatch(/\/vault\/workstation\/allow$/);
     });
 
     it("updates and deletes by an encoded id", async () => {

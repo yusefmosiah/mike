@@ -17,6 +17,9 @@ vi.mock("../storage", () => {
     };
 });
 
+const vault = vi.hoisted(() => ({ enabled: vi.fn(() => false), purge: vi.fn() }));
+vi.mock("../vault/client", () => ({ vaultEnabled: vault.enabled, purgeVaultUser: vault.purge }));
+
 import { deleteFile, listFiles } from "../storage";
 import {
     deleteAllUserChats,
@@ -751,6 +754,24 @@ describe("deleteUserAccountData", () => {
     // cascade before them: that combination leaves the content erased and the
     // login still working. The trigger's db_jobs rows stay pending, so the
     // bytes are still owned by a retryable record.
+    it("forgets the account's vault secrets first, and retries rather than leave them", async () => {
+        vault.enabled.mockReturnValue(true);
+        try {
+            const { db, tables } = fixture();
+            vault.purge.mockRejectedValueOnce(new Error("vault unavailable"));
+            await expect(
+                deleteUserAccountData(db, "u1", "u1@example.com"),
+            ).rejects.toThrow("vault unavailable");
+            // Nothing else was touched, so the retry starts from the top.
+            expect(ids(tables.projects)).toEqual(["p1", "p-other"]);
+            vault.purge.mockResolvedValueOnce(undefined);
+            await deleteUserAccountData(db, "u1", "u1@example.com");
+            expect(vault.purge).toHaveBeenLastCalledWith("u1");
+        } finally {
+            vault.enabled.mockReturnValue(false);
+        }
+    });
+
     it("finishes the cascade when the object store refuses a delete", async () => {
         const { db, tables } = fixture();
         deleteFileMock.mockRejectedValue(new Error("storage unavailable"));

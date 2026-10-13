@@ -1,4 +1,5 @@
 import { captureInlineDocumentCleanup, completeInlineDocumentCleanup } from "../documents/documents.service";
+import { purgeVaultUser, vaultEnabled } from "../../lib/vault/client";
 import { type Db } from "../../lib/db";
 import { assertStorageConfigured, deleteFile, deleteFileBestEffort, listFiles } from "../../lib/storage";
 import { NonRetryableJobError } from "../../lib/dbq/runner";
@@ -889,6 +890,11 @@ export async function deleteUserAccountData(
         );
     }
     if (process.env.DB_JOBS_ENABLED === "false") assertStorageConfigured();
+
+    // Stored credentials live in the vault, not the database. Forget them
+    // first: a failure here fails the job, which retries, rather than leaving
+    // a deleted account's secrets behind.
+    if (vaultEnabled()) await purgeVaultUser(userId);
 
     const { personal: personalProjectIds, org: createdOrgProjectIds } =
         await partitionOwnedProjects(db, userId);

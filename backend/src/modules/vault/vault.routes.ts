@@ -4,8 +4,10 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
+import { createDb } from "../../lib/db";
 import { sendServiceFailure } from "../../lib/serviceResult";
 import {
+  allowWorkstationVault,
   createSecret,
   deleteSecret,
   getSealKey,
@@ -13,6 +15,7 @@ import {
   secretActivity,
   updateSecret,
   vaultEnabled,
+  workstationVaultState,
 } from "./vault.service";
 
 export const vaultRouter = Router();
@@ -83,6 +86,24 @@ vaultRouter.get(
     const result = await secretActivity(res.locals.userId as string, limit);
     if (!result.ok) return sendServiceFailure(res, result);
     res.json({ events: result.data });
+  }),
+);
+
+vaultRouter.get(
+  "/workstation",
+  asyncRoute(async (_req, res) => {
+    const result = await workstationVaultState(createDb(), res.locals.userId as string);
+    if (!result.ok) return sendServiceFailure(res, result);
+    res.json({ workstation: result.data });
+  }),
+);
+
+vaultRouter.post(
+  "/workstation/allow",
+  asyncRoute(async (_req, res) => {
+    const result = await allowWorkstationVault(createDb(), res.locals.userId as string);
+    if (!result.ok) return sendServiceFailure(res, result);
+    res.json({ workstation: result.data });
   }),
 );
 

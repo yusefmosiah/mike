@@ -44,7 +44,8 @@ export const MAX_SECRETS_PER_USER = 100;
 export class NotFound extends Error {}
 export class Conflict extends Error {}
 
-const metaOf = ({ value: _value, ...meta }: StoredSecret): SecretMeta => meta;
+// No part of a value is returned, including hints stored by earlier versions.
+const metaOf = ({ value: _value, ...meta }: StoredSecret): SecretMeta => ({ ...meta, hint: "" });
 
 export class SecretStore {
   private data: StoreFile = { version: 1, users: {} };
@@ -135,7 +136,32 @@ export class SecretStore {
     return open(key, secret.value, secretAad(userId, secretId)).toString("utf8");
   }
 
-  async create(userId: string, input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown }, value: string): Promise<SecretMeta> {
+  /** A new secret's id: the audit record names it before the secret exists. */
+  newId(): string {
+    return `sec_${randomBytes(12).toString("base64url")}`;
+  }
+
+  /** Checks a new secret as `create` would, without storing it. Throws PolicyError or Conflict. */
+  checkCreate(userId: string, input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown }, value: string): string {
+    const name = normalizeName(input.name);
+    normalizeDescription(input.description);
+    normalizeHosts(input.hosts);
+    normalizeInjection(input.injection);
+    checkValue(value);
+    const user = this.data.users[userId];
+    if (user && Object.values(user.secrets).some((secret) => secret.name === name)) {
+      throw new Conflict(`a secret named ${name} already exists`);
+    }
+    if (user && Object.keys(user.secrets).length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
+    return name;
+  }
+
+  async create(
+    userId: string,
+    input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown },
+    value: string,
+    id: string = this.newId(),
+  ): Promise<SecretMeta> {
     const name = normalizeName(input.name);
     const description = normalizeDescription(input.description);
     const hosts = normalizeHosts(input.hosts);
@@ -149,7 +175,7 @@ export class SecretStore {
         throw new Conflict(`a secret named ${name} already exists`);
       }
       if (Object.keys(user.secrets).length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
-      const id = `sec_${randomBytes(12).toString("base64url")}`;
+      if (user.secrets[id]) throw new Conflict("secret id in use");
       const now = new Date().toISOString();
       const secret: StoredSecret = {
         id,
@@ -167,6 +193,19 @@ export class SecretStore {
       user.secrets[id] = secret;
       return metaOf(secret);
     });
+  }
+
+  /** Checks an update as `update` would, without applying it. Throws PolicyError or NotFound. */
+  checkUpdate(userId: string, secretId: string, input: { description?: unknown; writes?: unknown }): SecretMeta {
+    if (input.description !== undefined) normalizeDescription(input.description);
+    if (input.writes !== undefined) normalizeWrites(input.writes);
+    const current = this.get(userId, secretId);
+    if (!current) throw new NotFound("no such secret");
+    return current;
+  }
+
+  hasUser(userId: string): boolean {
+    return !!this.data.users[userId];
   }
 
   /**
@@ -191,6 +230,15 @@ export class SecretStore {
       const user = this.data.users[userId];
       if (!user?.secrets[secretId]) throw new NotFound("no such secret");
       delete user.secrets[secretId];
+    });
+  }
+
+  /** Forgets a user: their key and every secret. True when there was anything. */
+  purgeUser(userId: string): Promise<boolean> {
+    return this.mutate(() => {
+      if (!this.data.users[userId]) return false;
+      delete this.data.users[userId];
+      return true;
     });
   }
 

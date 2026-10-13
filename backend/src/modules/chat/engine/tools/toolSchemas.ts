@@ -297,7 +297,7 @@ export const VAULT_TOOLS = [
           hosts: {
             type: "array",
             items: { type: "string" },
-            description: "Host names it will be sent to, e.g. [\"api.example.com\"]. HTTPS only. The user confirms these, and the secret can never go anywhere else.",
+            description: "Exact host names it will be sent to, e.g. [\"api.example.com\"]; no wildcards. HTTPS only. The user confirms these, and the secret can never go anywhere else.",
           },
           auth: {
             type: "string",
@@ -322,7 +322,7 @@ export const VAULT_TOOLS = [
     function: {
       name: "vault_lease",
       description:
-        "Get a short-lived lease to use one stored credential from the workstation. With it, a request to $MIKE_VAULT_URL/<lease>/<host>/<path> in the workstation goes to https://<host>/<path> with the credential attached by the vault; the response tells you how, including for git. Leases work only from this user's workstation and only for the credential's hosts. A read lease allows GET, HEAD and OPTIONS. A write lease also allows changes (POST, PUT, PATCH, DELETE, git push); unless the user has allowed changes for that credential, a write lease waits for their approval.",
+        "Get a short-lived lease to use one stored credential from the workstation. With it, a request to $MIKE_VAULT_URL/<lease>/<host>/<path> in the workstation goes to https://<host>/<path> with the credential attached by the vault; the response tells you how, including for git. Leases work only from this user's workstation, only for the credential's hosts, and only until this turn ends: get a new one in a later turn. A read lease allows GET, HEAD and OPTIONS. A write lease also allows changes (POST, PUT, PATCH, DELETE, git push); unless the user has allowed changes for that credential, a write lease waits for their approval.",
       parameters: {
         type: "object",
         properties: {

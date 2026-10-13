@@ -5,6 +5,15 @@ const vault = vi.hoisted(() => ({
   enabled: vi.fn(() => true),
   list: vi.fn(),
   lease: vi.fn(),
+  workstationVm: vi.fn<() => string | null>(() => "ws-01"),
+}));
+
+vi.mock("../../../../../lib/workstation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../../lib/workstation")>()),
+  resolveWorkstation: async () => {
+    const vm = vault.workstationVm();
+    return vm ? { host: "workstation", user: "agent", identityFile: "/key", vm } : null;
+  },
 }));
 
 vi.mock("../../../../../lib/vault/client", async (importOriginal) => {
@@ -18,6 +27,8 @@ vi.mock("../../../../../lib/vault/client", async (importOriginal) => {
 });
 
 import { executeApprovedVaultLease, runVaultTool } from "../vaultTools";
+
+const db = {} as never;
 
 const workstation = { host: "workstation", user: "agent", identityFile: "/key", vm: "ws-01" };
 const secret = (overrides: Record<string, unknown> = {}) => ({
@@ -37,6 +48,7 @@ const run = (name: string, args: Record<string, unknown>, extra: Record<string, 
   runVaultTool({
     name,
     args,
+    db: {} as never,
     userId: "user-1",
     workstation,
     workspaceOwned: true,
@@ -48,6 +60,7 @@ const run = (name: string, args: Record<string, unknown>, extra: Record<string, 
 beforeEach(() => {
   vi.clearAllMocks();
   vault.enabled.mockReturnValue(true);
+  vault.workstationVm.mockReturnValue("ws-01");
   vault.list.mockResolvedValue([secret()]);
   vault.lease.mockResolvedValue({
     lease: "mvl_token",
@@ -135,6 +148,40 @@ describe("vault tools", () => {
     expect(JSON.parse(basic.content).error).toMatch(/username/);
   });
 
+  it("pass on the vault's refusal for a VM someone else works in, and lend nothing to a VM no longer theirs", async () => {
+    const { VaultRequestError } = await import("../../../../../lib/vault/client");
+    vault.lease.mockRejectedValueOnce(new VaultRequestError(409, "Someone else is working in this workstation right now."));
+    const busy = await run("vault_lease", { secret: "blog", access: "read" });
+    expect(JSON.parse(busy.content).error).toContain("Someone else is working");
+    vault.workstationVm.mockReturnValue("ws-02");
+    const moved = await run("vault_lease", { secret: "blog", access: "read" });
+    expect(JSON.parse(moved.content).error).toContain("no longer");
+    expect(vault.lease).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuse wildcard hosts in a credential request", async () => {
+    const out = await run("vault_request_secret", { name: "pages", purpose: "x", hosts: ["*.github.io"], auth: "bearer" });
+    expect(JSON.parse(out.content).ok).toBe(false);
+    expect(out.item).toBeUndefined();
+  });
+
+  it("issue an approved lease only to the user's current workstation", async () => {
+    const item = {
+      id: "a1",
+      kind: "approval",
+      connector_name: "Vault",
+      tool_name: "vault_lease",
+      title: "",
+      arguments: {},
+      binding: { type: "vault", secret_id: "sec_1", vm: "ws-01", chat_id: "chat-1" },
+    } as ConnectorApprovalItem;
+    vault.workstationVm.mockReturnValue("ws-02");
+    expect((await executeApprovedVaultLease(db, "user-1", item)).event.status).toBe("error");
+    vault.workstationVm.mockReturnValue(null);
+    expect((await executeApprovedVaultLease(db, "user-1", item)).event.status).toBe("error");
+    expect(vault.lease).not.toHaveBeenCalled();
+  });
+
   it("issue the approved write lease from the persisted binding", async () => {
     const item = {
       id: "a1",
@@ -146,7 +193,7 @@ describe("vault tools", () => {
       binding: { type: "vault", secret_id: "sec_1", vm: "ws-01", chat_id: "chat-1" },
     } as ConnectorApprovalItem;
     vault.lease.mockResolvedValue({ lease: "mvl_w", secret: "blog", hosts: ["gitlab.com"], access: "write", expires_at: "t" });
-    const out = await executeApprovedVaultLease("user-1", item);
+    const out = await executeApprovedVaultLease(db, "user-1", item);
     expect(vault.lease).toHaveBeenCalledWith({ userId: "user-1", vm: "ws-01", secret: "sec_1", access: "write", chatId: "chat-1" });
     expect(out.content).toContain("mvl_w");
     expect(out.event.status).toBe("ok");

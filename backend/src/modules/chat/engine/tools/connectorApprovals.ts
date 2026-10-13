@@ -100,7 +100,7 @@ export async function runApprovedConnectorActions(args: {
     if (!approved.has(item.id)) continue;
     const { content: result, event } =
       item.binding.type === "vault"
-        ? await executeApprovedVaultLease(userId, item)
+        ? await executeApprovedVaultLease(db, userId, item)
         : item.binding.type === "google"
           ? item.binding.provider === "google-drive"
             ? await executeApprovedGoogleDriveCall(userId, item, db)
