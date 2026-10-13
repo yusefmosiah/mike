@@ -262,6 +262,87 @@ export const WORKSTATION_TOOLS = [
   },
 ];
 
+/**
+ * Offered with the workstation when the host runs the secrets vault
+ * (infra/vault): the agent uses a stored credential through the vault,
+ * which attaches it on the host, so neither the model nor the VM sees it.
+ */
+export const VAULT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "vault_secrets",
+      description:
+        "List the credentials (API keys, tokens, passwords) the user has stored in their vault: each one's name, the hosts it may be sent to, how it is attached and whether changes need the user's approval. Never the values. Check here before asking the user for a credential.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "vault_request_secret",
+      description:
+        "Ask the user to store a credential in their vault, when a task needs one they have not stored. The user enters it in a secure form that sends it straight to the vault; it never appears in the chat, and you never see it. The turn pauses until they save it or decline. Never ask for a credential in the conversation itself, and tell the user not to paste one there.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Short name to store it under: lowercase letters, digits, '.', '_' or '-' (e.g. \"github-deploy\").",
+          },
+          purpose: {
+            type: "string",
+            description: "One sentence: what you will use it for.",
+          },
+          hosts: {
+            type: "array",
+            items: { type: "string" },
+            description: "Host names it will be sent to, e.g. [\"api.example.com\"]. HTTPS only. The user confirms these, and the secret can never go anywhere else.",
+          },
+          auth: {
+            type: "string",
+            enum: ["bearer", "basic", "header"],
+            description: "How the service takes it: bearer (Authorization: Bearer <secret>), basic (username plus secret, as git over HTTPS uses), or header (a custom header such as X-API-Key).",
+          },
+          username: {
+            type: "string",
+            description: "For basic: the username to pair with the secret.",
+          },
+          header: {
+            type: "string",
+            description: "For header: the header's name.",
+          },
+        },
+        required: ["name", "purpose", "hosts", "auth"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "vault_lease",
+      description:
+        "Get a short-lived lease to use one stored credential from the workstation. With it, a request to $MIKE_VAULT_URL/<lease>/<host>/<path> in the workstation goes to https://<host>/<path> with the credential attached by the vault; the response tells you how, including for git. Leases work only from this user's workstation and only for the credential's hosts. A read lease allows GET, HEAD and OPTIONS. A write lease also allows changes (POST, PUT, PATCH, DELETE, git push); unless the user has allowed changes for that credential, a write lease waits for their approval.",
+      parameters: {
+        type: "object",
+        properties: {
+          secret: { type: "string", description: "The stored credential's name." },
+          access: {
+            type: "string",
+            enum: ["read", "write"],
+            description: "read, or write to change something.",
+          },
+          reason: {
+            type: "string",
+            description: "For a write lease: what you will change, shown to the user when they approve.",
+          },
+        },
+        required: ["secret", "access"],
+      },
+    },
+  },
+];
+
 export const TOOLS = [
   {
     type: "function",

@@ -39,6 +39,7 @@ import {
   APPROVAL_UNAVAILABLE_MESSAGE,
   planConnectorToolCall,
 } from "./connectorApprovals";
+import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
 import {
   GOOGLE_DRIVE_TOOL_PREFIX,
   executeGoogleDriveToolCall,
@@ -366,6 +367,8 @@ export async function runToolCalls(
      * shared thread): resolves with why it may not run, or null when it may.
      */
     workstationGate?: (callId: string, summary: string) => Promise<string | null>;
+    /** The conversation, which vault leases are issued for (audit only). */
+    chatId?: string | null;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -526,6 +529,36 @@ export async function runToolCalls(
       args = JSON.parse(tc.function.arguments || "{}");
     } catch {
       /* ignore */
+    }
+
+    if (VAULT_TOOL_NAMES.has(tc.function.name)) {
+      const outcome = await runVaultTool({
+        name: tc.function.name,
+        args,
+        userId,
+        workstation: options.workstation ?? null,
+        workspaceOwned: !!options.workspaceOwned,
+        chatId: options.chatId ?? null,
+        canAsk: !!options.connectorApprovals,
+      });
+      // A form or an approval pauses the turn with the other pending items.
+      if (outcome.item) approvalItems.push(outcome.item);
+      if (outcome.event) {
+        write(`data: ${JSON.stringify({ type: "mcp_tool_start", name: tc.function.name })}\n\n`);
+        mcpEvents.push(outcome.event);
+        write(
+          `data: ${JSON.stringify({
+            type: "mcp_tool_result",
+            name: tc.function.name,
+            connector_name: outcome.event.connector_name,
+            tool_name: outcome.event.tool_name,
+            status: outcome.event.status,
+            error: outcome.event.error,
+          })}\n\n`,
+        );
+      }
+      toolResults.push({ role: "tool", tool_call_id: tc.id, content: outcome.content });
+      continue;
     }
 
     const isConnectorTool =

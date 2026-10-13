@@ -111,7 +111,45 @@ export type AskInputItem =
       document_types: string[];
       response_prefix?: string;
     }
-  | ConnectorApprovalItem;
+  | ConnectorApprovalItem
+  | SecretRequestItem;
+
+/**
+ * The assistant asks the user to store a credential in the vault. The value
+ * goes from a dedicated form straight to the vault, sealed in the browser;
+ * the response carries only the stored secret's name.
+ */
+export type SecretRequestItem = {
+  id: string;
+  kind: "secret";
+  /** Suggested name, e.g. "gitlab-blog". */
+  name: string;
+  /** Why the assistant needs it, in its words; shown as untrusted text. */
+  purpose: string;
+  /** Hosts the assistant expects to use it with; the user confirms or changes them. */
+  hosts: string[];
+  /** How it is attached to requests, suggested by the assistant. */
+  injection: VaultInjection;
+};
+
+export type VaultInjection =
+  | { type: "bearer" }
+  | { type: "basic"; username: string }
+  | { type: "header"; name: string };
+
+/** A stored secret as the vault describes it: never its value. */
+export type VaultSecret = {
+  id: string;
+  name: string;
+  description: string;
+  hosts: string[];
+  injection: VaultInjection;
+  writes: "ask" | "allow";
+  hint: string;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+};
 
 /**
  * A connector write the server paused for the user's approval. The server
@@ -150,6 +188,13 @@ export type ConnectorApprovalBinding =
       provider: GoogleWorkspaceProvider | "google-drive";
       grant_id: string;
       etag?: string;
+    }
+  | {
+      /** A write lease on a vault secret, for the VM and chat it was asked from. */
+      type: "vault";
+      secret_id: string;
+      vm: string;
+      chat_id: string | null;
     };
 
 export type AskInputsEvent = {
@@ -191,6 +236,13 @@ export type AskInputResponseItem =
       id: string;
       kind: "approval";
       decision: "approve" | "reject";
+    }
+  | {
+      id: string;
+      kind: "secret";
+      /** The name the secret was stored under. */
+      secret_name?: string;
+      skipped?: boolean;
     };
 
 export type AskInputsResponseRequest = {

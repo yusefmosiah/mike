@@ -1,6 +1,7 @@
 # The employee workstation guest: a full NixOS userland for Mike's agent to
 # work in (bash, Python, git, Node, office-file libraries). It holds no
-# secrets: the harness stays on the host and reaches the guest over ssh.
+# secrets: the harness stays on the host and reaches the guest over ssh, and
+# a stored secret is used through the host's vault, which attaches it there.
 #
 # /home lives on the VM's data disk, which the host snapshots. Everything
 # else is rebuilt from this file: the Nix store is a read-only disk image
@@ -93,6 +94,28 @@ in
         AllowUsers = [ "agent" ];
       };
     };
+
+    # The host's secrets vault (infra/node-a/vault.nix) on a local port: a
+    # request to $MIKE_VAULT_URL/<lease>/<host>/<path> goes to <host> with a
+    # secret attached on the host, so this machine never holds the secret.
+    # Each connection is relayed to host port 8200 over vsock, which tells
+    # the vault which VM is asking.
+    systemd.sockets.mike-vault = {
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ "127.0.0.1:8200" ];
+      socketConfig.Accept = true;
+    };
+    systemd.services."mike-vault@" = {
+      description = "Relay to the host's secrets vault";
+      serviceConfig = {
+        ExecStart = "${pkgs.socat}/bin/socat STDIO VSOCK-CONNECT:2:8200";
+        StandardInput = "socket";
+        StandardOutput = "socket";
+        StandardError = "journal";
+        DynamicUser = true;
+      };
+    };
+    environment.variables.MIKE_VAULT_URL = "http://127.0.0.1:8200";
 
     environment.systemPackages = with pkgs; [
       bashInteractive

@@ -3,6 +3,7 @@
  * Authentication is carried only by the backend-managed HttpOnly cookie.
  */
 
+import { sealSecret } from "@/app/lib/vault/seal";
 import { isPanelDocument } from "@/app/components/shared/types";
 import { authenticatedFetch } from "@/app/lib/authEvents";
 import {
@@ -3997,4 +3998,99 @@ export async function revokeCodeApproval(
     await apiRequest(`/chat/${chatId}/code-approvals/guests/${guestUserId}`, {
         method: "DELETE",
     });
+}
+
+// ---------------------------------------------------------------------------
+// Vault: credentials the assistant uses without seeing (infra/vault). A value
+// is sealed in this page to the vault's key; the backend only relays it.
+
+export type VaultInjection = import("@mike/contracts").VaultInjection;
+export type VaultSecret = import("@mike/contracts").VaultSecret;
+
+export type VaultActivityEvent = {
+    at: string;
+    event: string;
+    secret_name?: string;
+    vm?: string;
+    access?: string;
+    method?: string;
+    host?: string;
+    path?: string;
+    status?: number;
+    reason?: string;
+};
+
+export type NewVaultSecret = {
+    name: string;
+    description?: string;
+    hosts: string[];
+    injection: VaultInjection;
+    writes: "ask" | "allow";
+};
+
+export async function getVaultStatus(): Promise<{ enabled: boolean }> {
+    return apiRequest<{ enabled: boolean }>("/vault/status");
+}
+
+export async function listVaultSecrets(): Promise<
+    VaultSecret[]
+> {
+    return (
+        await apiRequest<{ secrets: VaultSecret[] }>(
+            "/vault/secrets",
+        )
+    ).secrets;
+}
+
+/** Seals `value` here, then stores it; the value itself is never sent. */
+export async function storeVaultSecret(
+    input: NewVaultSecret,
+    value: string,
+): Promise<VaultSecret> {
+    const key = await apiRequest<{ kid: string; public_key: string }>(
+        "/vault/seal-key",
+    );
+    const sealed = await sealSecret(key, value);
+    return (
+        await apiRequest<{ secret: VaultSecret }>(
+            "/vault/secrets",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...input, sealed }),
+            },
+        )
+    ).secret;
+}
+
+export async function updateVaultSecret(
+    secretId: string,
+    input: { description?: string; writes?: "ask" | "allow" },
+): Promise<VaultSecret> {
+    return (
+        await apiRequest<{ secret: VaultSecret }>(
+            `/vault/secrets/${encodeURIComponent(secretId)}`,
+            {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(input),
+            },
+        )
+    ).secret;
+}
+
+export async function deleteVaultSecret(secretId: string): Promise<void> {
+    await apiRequest(`/vault/secrets/${encodeURIComponent(secretId)}`, {
+        method: "DELETE",
+    });
+}
+
+export async function listVaultActivity(
+    limit = 50,
+): Promise<VaultActivityEvent[]> {
+    return (
+        await apiRequest<{ events: VaultActivityEvent[] }>(
+            `/vault/activity?limit=${limit}`,
+        )
+    ).events;
 }

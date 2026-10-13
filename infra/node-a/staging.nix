@@ -96,6 +96,7 @@ let
           echo "WORKSTATION_SSH_PROXY_COMMAND=node /app/dist/lib/workstation/vsockProxy.js /run/mike-workstations/{vm}.sock 22"
           echo "WORKSTATION_SSH_IDENTITY_FILE=/run/workstation-key/harness_ed25519"
           echo "WORKSTATION_SNAPSHOT_SOCKET=/run/mike-workstations/control.sock"
+          echo "VAULT_CONTROL_SOCKET=/run/mike-vault/control.sock"
         } > ${root}/src/.env
         # A private stack reports errors to no one.
         echo "SENTRY_DISABLED=true" >> ${root}/src/.env

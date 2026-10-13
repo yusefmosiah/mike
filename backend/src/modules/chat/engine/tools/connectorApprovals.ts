@@ -34,6 +34,7 @@ import {
   loadAssistantMessage,
 } from "../contextBuilders";
 import { TOOL_ERROR_MESSAGE } from "../types";
+import { executeApprovedVaultLease } from "./vaultTools";
 
 /** Tool output replayed to the model after an approved call, per call. */
 export const MAX_APPROVAL_RESULT_CHARS = 4_000;
@@ -98,11 +99,13 @@ export async function runApprovedConnectorActions(args: {
   for (const item of ask.items.filter(isApprovalItem)) {
     if (!approved.has(item.id)) continue;
     const { content: result, event } =
-      item.binding.type === "google"
-        ? item.binding.provider === "google-drive"
-          ? await executeApprovedGoogleDriveCall(userId, item, db)
-          : await executeApprovedGoogleWorkspaceCall(userId, item, db)
-        : await executeApprovedMcpToolCall(userId, item, db);
+      item.binding.type === "vault"
+        ? await executeApprovedVaultLease(userId, item)
+        : item.binding.type === "google"
+          ? item.binding.provider === "google-drive"
+            ? await executeApprovedGoogleDriveCall(userId, item, db)
+            : await executeApprovedGoogleWorkspaceCall(userId, item, db)
+          : await executeApprovedMcpToolCall(userId, item, db);
     // These events are stored and streamed outside runLLMStream, so apply its
     // rule here: the user never sees a connector's raw error text.
     events.push({

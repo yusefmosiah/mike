@@ -37,6 +37,7 @@ import {
 import {
   TOOLS,
   WORKFLOW_TOOLS,
+  VAULT_TOOLS,
   WORKSTATION_TOOLS,
   toolName,
   isDocumentMutatingTool,
@@ -70,6 +71,7 @@ import { getWebSnapshot } from "../../../lib/search/engine";
 import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
 import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
+import { vaultEnabled } from "../../../lib/vault/client";
 import {
   cellResultContent,
   DEFAULT_CELL_TIMEOUT_MS,
@@ -604,7 +606,7 @@ export async function runLLMStream(params: {
     ? []
     : isGuest
       ? WORKSTATION_TOOLS.filter((tool) => tool.function.name === "run_command")
-      : WORKSTATION_TOOLS;
+      : [...WORKSTATION_TOOLS, ...(vaultEnabled() ? VAULT_TOOLS : [])];
   const baseTools = [
     ...conversationTools,
     ...researchTools,
@@ -1395,6 +1397,7 @@ export async function runLLMStream(params: {
           workstation,
           workspaceOwned: !!workstation && !isGuest,
           workstationGate,
+          chatId: conversationId ?? null,
         },
       );
       throwIfAborted(signal);

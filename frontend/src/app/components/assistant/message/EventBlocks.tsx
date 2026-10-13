@@ -612,6 +612,11 @@ export function AskInputsBlock({
                                 return itemResponse.decision === "approve"
                                     ? "Approved"
                                     : "Rejected";
+                            if (itemResponse.kind === "secret")
+                                return itemResponse.skipped ||
+                                    !itemResponse.secret_name
+                                    ? "Not stored"
+                                    : `Stored as ${itemResponse.secret_name}`;
                             if (itemResponse.skipped) return "Skipped";
                             if (itemResponse.kind === "multi_choice") {
                                 return itemResponse.answers?.join(", ") ?? "";
@@ -632,7 +637,9 @@ export function AskInputsBlock({
                                         ? "Documents"
                                         : item.kind === "approval"
                                           ? "Approval"
-                                          : "Question"}
+                                          : item.kind === "secret"
+                                            ? "Credential"
+                                            : "Question"}
                                 </p>
                                 <p className="mt-0.5 [overflow-wrap:anywhere]">
                                     {item.kind === "documents"
@@ -640,7 +647,9 @@ export function AskInputsBlock({
                                           "Documents requested"
                                         : item.kind === "approval"
                                           ? `${item.connector_name}: ${item.title}`
-                                          : item.question}
+                                          : item.kind === "secret"
+                                            ? `${item.name}, for ${item.hosts.join(", ")}`
+                                            : item.question}
                                 </p>
                                 {responseText !== null && (
                                     <p className="mt-0.5 text-gray-600">

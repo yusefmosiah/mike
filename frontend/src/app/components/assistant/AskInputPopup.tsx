@@ -9,6 +9,7 @@ import type { AssistantEvent, Document, MessageFile } from "../shared/types";
 import { FileTypeIcon } from "../shared/FileTypeIcon";
 import { ConnectorActionCard } from "../shared/ConnectorActionCard";
 import { AddDocumentsModal } from "../modals/AddDocumentsModal";
+import { VaultSecretModal } from "../vault/VaultSecretModal";
 import {
     LIQUID_GLASS_SUBTLE_CLASS,
     LIQUID_GLASS_TRANSLUCENT_CLASS,
@@ -27,6 +28,9 @@ type AskInputsResponse = Extract<
 type ApprovalDecision = "approve" | "reject";
 /** A decision made by the handler that is about to submit, before its state lands. */
 type PendingDecision = { id: string; decision: ApprovalDecision };
+type SecretAskInputItem = Extract<AskInputItem, { kind: "secret" }>;
+/** A secret stored by the handler that is about to submit, before its state lands. */
+type PendingSecret = { id: string; name: string };
 
 const OPEN_TEXT_MAX_LENGTH = 5_000;
 
@@ -65,6 +69,11 @@ export function AskInputPopup({
     const [activeInputId, setActiveInputId] = useState(
         () => event.items[0]?.id ?? "",
     );
+    // The vault form for a credential request. The value goes from it to the
+    // vault; only the stored name comes back here.
+    const [secretTarget, setSecretTarget] = useState<SecretAskInputItem | null>(
+        null,
+    );
 
     const docsForItem = useCallback(
         (inputId: string) => {
@@ -91,7 +100,8 @@ export function AskInputPopup({
 
     const itemAnswered = useCallback(
         (item: AskInputItem) => {
-            if (item.kind === "approval") return !!answers[item.id];
+            if (item.kind === "approval" || item.kind === "secret")
+                return !!answers[item.id];
             if (item.kind === "multi_choice") {
                 return (
                     (multiAnswers[item.id]?.length ?? 0) > 0 ||
@@ -233,8 +243,20 @@ export function AskInputPopup({
     const buildResponse = (
         pendingSkipId?: string,
         pendingDecision?: PendingDecision,
+        pendingSecret?: PendingSecret,
     ): AskInputsResponse => {
         const responses = event.items.map((item) => {
+            if (item.kind === "secret") {
+                const name =
+                    pendingSecret?.id === item.id
+                        ? pendingSecret.name
+                        : answers[item.id];
+                return name &&
+                    !skipped.has(item.id) &&
+                    item.id !== pendingSkipId
+                    ? { id: item.id, kind: "secret" as const, secret_name: name }
+                    : { id: item.id, kind: "secret" as const, skipped: true };
+            }
             if (item.kind === "approval") {
                 const decision =
                     pendingDecision?.id === item.id
@@ -340,6 +362,13 @@ export function AskInputPopup({
     const buildContent = (response: AskInputsResponse) => {
         const itemsById = new Map(event.items.map((item) => [item.id, item]));
         const lines = response.responses.map((item, index) => {
+            if (item.kind === "secret") {
+                const asked = itemsById.get(item.id);
+                const requested = asked?.kind === "secret" ? asked.name : "credential";
+                return item.skipped || !item.secret_name
+                    ? `${index + 1}. Did not store the credential "${requested}".`
+                    : `${index + 1}. Stored the credential in the vault as "${item.secret_name}".`;
+            }
             if (item.kind === "approval") {
                 const asked = itemsById.get(item.id);
                 const action =
@@ -373,9 +402,14 @@ export function AskInputPopup({
     const submit = (
         pendingSkipId?: string,
         pendingDecision?: PendingDecision,
+        pendingSecret?: PendingSecret,
     ) => {
         if (submitted || !onSubmit) return;
-        const response = buildResponse(pendingSkipId, pendingDecision);
+        const response = buildResponse(
+            pendingSkipId,
+            pendingDecision,
+            pendingSecret,
+        );
         setSubmitted(true);
         onSubmit(response, buildContent(response), responseFiles(response));
     };
@@ -386,6 +420,16 @@ export function AskInputPopup({
         setConfirmed((prev) => new Set(prev).add(id));
         goToNextUnresolved(id);
         if (!firstUnresolvedId(id)) submit(undefined, { id, decision });
+    };
+
+    const secretStored = (id: string, name: string) => {
+        setSecretTarget(null);
+        if (submitted) return;
+        setAnswers((prev) => ({ ...prev, [id]: name }));
+        setSkippedFor(id, false);
+        setConfirmed((prev) => new Set(prev).add(id));
+        goToNextUnresolved(id);
+        if (!firstUnresolvedId(id)) submit(undefined, undefined, { id, name });
     };
 
     const dismiss = useCallback(() => {
@@ -429,7 +473,9 @@ export function AskInputPopup({
                                                 ? "Documents"
                                                 : item.kind === "approval"
                                                   ? "Approval"
-                                                  : "Question";
+                                                  : item.kind === "secret"
+                                                    ? "Credential"
+                                                    : "Question";
                                         return (
                                             <TabPillButtonUI
                                                 key={item.id}
@@ -474,6 +520,13 @@ export function AskInputPopup({
                                             <p className="text-sm text-gray-800">
                                                 This action is waiting for your
                                                 approval. Approve it to run it now.
+                                            </p>
+                                        ) : activeItem.kind === "secret" ? (
+                                            <p className="text-sm text-gray-800">
+                                                The assistant needs a credential.
+                                                Store it in your vault: it goes
+                                                there directly, never into this
+                                                chat.
                                             </p>
                                         ) : (
                                             <p className="text-sm text-gray-800">
@@ -585,6 +638,18 @@ export function AskInputPopup({
                                                 item={activeItem}
                                             />
                                         </div>
+                                    ) : activeItem.kind === "secret" ? (
+                                        <SecretRequest
+                                            item={activeItem}
+                                            storedName={answers[activeItem.id]}
+                                            disabled={
+                                                submitted ||
+                                                skipped.has(activeItem.id)
+                                            }
+                                            onOpen={() =>
+                                                setSecretTarget(activeItem)
+                                            }
+                                        />
                                     ) : activeItem.kind === "text" ? (
                                         <OpenTextInput
                                             item={activeItem}
@@ -692,6 +757,7 @@ export function AskInputPopup({
                                             ? "Unskip"
                                             : "Skip"}
                                     </button>
+                                    {activeItem.kind !== "secret" && (
                                     <PillButtonUI
                                         tone="black"
                                         size="xs"
@@ -715,6 +781,7 @@ export function AskInputPopup({
                                             "Confirm"
                                         )}
                                     </PillButtonUI>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -722,6 +789,23 @@ export function AskInputPopup({
                 </div>
             </div>
 
+            <VaultSecretModal
+                open={!!secretTarget}
+                onClose={() => setSecretTarget(null)}
+                onSaved={(secret) =>
+                    secretTarget && secretStored(secretTarget.id, secret.name)
+                }
+                draft={
+                    secretTarget
+                        ? {
+                              name: secretTarget.name,
+                              hosts: secretTarget.hosts,
+                              injection: secretTarget.injection,
+                              purpose: secretTarget.purpose,
+                          }
+                        : undefined
+                }
+            />
             <AddDocumentsModal
                 open={!!docSelectorTarget}
                 keepMounted
@@ -1003,6 +1087,66 @@ function DocumentInput({
                     </div>
                 );
             })}
+        </div>
+    );
+}
+
+function SecretRequest({
+    item,
+    storedName,
+    disabled,
+    onOpen,
+}: {
+    item: SecretAskInputItem;
+    storedName?: string;
+    disabled: boolean;
+    onOpen: () => void;
+}) {
+    const auth =
+        item.injection.type === "basic"
+            ? `Username ${item.injection.username} with the secret`
+            : item.injection.type === "header"
+              ? `In the ${item.injection.name} header`
+              : "As a bearer token";
+    return (
+        <div className="space-y-3 font-sans text-sm">
+            <dl className="space-y-1.5 rounded-lg bg-gray-100/70 px-3 py-2 text-gray-700">
+                <div>
+                    <dt className="text-xs text-gray-500">Name</dt>
+                    <dd className="break-words">{item.name}</dd>
+                </div>
+                {item.purpose && (
+                    <div>
+                        <dt className="text-xs text-gray-500">For</dt>
+                        <dd className="whitespace-pre-wrap break-words">{item.purpose}</dd>
+                    </div>
+                )}
+                <div>
+                    <dt className="text-xs text-gray-500">Sent only to</dt>
+                    <dd className="break-words">{item.hosts.join(", ")}</dd>
+                </div>
+                <div>
+                    <dt className="text-xs text-gray-500">How</dt>
+                    <dd className="break-words">{auth}</dd>
+                </div>
+            </dl>
+            {storedName ? (
+                <p className="flex items-center gap-1.5 text-gray-700">
+                    <Check className="h-3.5 w-3.5" aria-hidden />
+                    Stored as {storedName}
+                </p>
+            ) : (
+                <PillButtonUI
+                    tone="black"
+                    size="xs"
+                    type="button"
+                    disabled={disabled}
+                    onClick={onOpen}
+                    className="font-sans"
+                >
+                    Store in vault…
+                </PillButtonUI>
+            )}
         </div>
     );
 }

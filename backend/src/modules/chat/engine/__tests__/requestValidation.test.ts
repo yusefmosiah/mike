@@ -336,7 +336,7 @@ describe("chat request validation", () => {
         ...ASK_RESPONSE_IDS,
         responses: [{ id: "choice-1", kind: "other" }],
       },
-      'ask_inputs_response.responses[0].kind must be "choice", "multi_choice", "text", "documents", or "approval"',
+      'ask_inputs_response.responses[0].kind must be "choice", "multi_choice", "text", "documents", "approval", or "secret"',
     ],
     [
       {

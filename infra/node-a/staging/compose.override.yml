@@ -44,6 +44,8 @@ services:
       # the snapshot socket, and the harness's ssh key, read-only.
       - /run/mike-workstations:/run/mike-workstations
       - /var/lib/mike-workstations/harness_ed25519:/run/workstation-key/harness_ed25519:ro
+      # The secrets vault's control socket (infra/node-a/vault.nix).
+      - /run/mike-vault:/run/mike-vault
   frontend:
     environment:
       - API_BASE_URL=http://backend:3001

@@ -260,10 +260,16 @@ export async function enrichWithPriorEvents(
         string,
         unknown
       >[];
-      const count = items.filter((item) => item?.kind !== "approval").length;
+      const count = items.filter(
+        (item) => item?.kind !== "approval" && item?.kind !== "secret",
+      ).length;
       if (count > 0)
         lines.push(`- asked user for ${count} input${count === 1 ? "" : "s"}`);
       for (const item of items) {
+        if (item?.kind === "secret") {
+          lines.push(`- asked user to store a credential named ${untrustedRef(item.name)} in their vault`);
+          continue;
+        }
         if (item?.kind !== "approval") continue;
         const label = `${untrustedRef(item.tool_name)} on ${untrustedRef(item.connector_name)}`;
         approvalLabels.set(String(item.id), label);
@@ -298,6 +304,14 @@ export async function enrichWithPriorEvents(
       for (const response of responses) {
         if (!response || typeof response !== "object") continue;
         const row = response as Record<string, unknown>;
+        if (row.kind === "secret") {
+          lines.push(
+            row.skipped || typeof row.secret_name !== "string"
+              ? "- user did not store the credential"
+              : `- user stored the credential in their vault as ${untrustedRef(row.secret_name)}; use vault_lease with that name`,
+          );
+          continue;
+        }
         if (row.kind === "approval") {
           const label = approvalLabels.get(String(row.id)) ?? "an action";
           if (row.decision === "approve") {
@@ -706,6 +720,9 @@ export function isMeaningfulTextlessAssistantOutput(
   );
 }
 
+/** A vault secret's name (infra/vault/src/policy.ts). */
+const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+
 function cleanAskInputResponseId(value: unknown) {
   const id = typeof value === "string" ? value.trim() : "";
   return id.slice(0, 80);
@@ -733,9 +750,15 @@ export function parseAskInputsResponsePayload(
           kind !== "multi_choice" &&
           kind !== "text" &&
           kind !== "documents" &&
-          kind !== "approval")
+          kind !== "approval" &&
+          kind !== "secret")
       )
         return null;
+      if (kind === "secret") {
+        const name = typeof current.secret_name === "string" ? current.secret_name.trim() : "";
+        if (skipped || !SECRET_NAME.test(name)) return { id, kind, skipped: true };
+        return { id, kind, secret_name: name };
+      }
       if (kind === "approval") {
         // Only the decision travels from the client; what runs is the
         // server-persisted approval item.
@@ -898,6 +921,16 @@ function canonicalAskInputsResponses(
       continue;
     }
     if (answer.kind === "approval" || item.kind === "approval") return null;
+    if (item.kind === "secret" && answer.kind === "secret") {
+      // The value went to the vault from the browser; only its name is here.
+      canonical.push(
+        !answer.skipped && answer.secret_name && SECRET_NAME.test(answer.secret_name)
+          ? { id: item.id, kind: "secret", secret_name: answer.secret_name }
+          : { id: item.id, kind: "secret", skipped: true },
+      );
+      continue;
+    }
+    if (answer.kind === "secret" || item.kind === "secret") return null;
     if (answer.skipped) {
       canonical.push(
         item.kind === "documents"

@@ -14,6 +14,7 @@ import { libraryRouter } from "./modules/library/library.routes";
 import { tabularRouter } from "./modules/tabular/tabular.routes";
 import { workflowsRouter } from "./modules/workflows/workflows.routes";
 import { quickActionsRouter } from "./modules/quick-actions/quickActions.routes";
+import { vaultRouter } from "./modules/vault/vault.routes";
 import { workflowAddonsRouter } from "./modules/workflows/workflowAddons.routes";
 import { userRouter } from "./modules/user/user.routes";
 import { modelsRouter } from "./modules/models/models.routes";
@@ -332,6 +333,7 @@ app.use("/documents", sourceDocumentsRouter);
 app.use("/audit", auditRouter);
 app.use("/upload-sessions", uploadSessionsRouter);
 app.use("/audio", audioRouter);
+app.use("/vault", vaultRouter);
 // /diligence (RLM deep runs) is not mounted: the work is tabled until its
 // sandbox and model lane are redone (goals/STATUS.md).
 

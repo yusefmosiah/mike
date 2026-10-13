@@ -27,6 +27,8 @@ export type WorkstationTarget = {
   knownHostsFile?: string;
   /** Host snapshot service for this VM (see ./snapshot.ts). */
   snapshot?: { socketPath: string; vm: string };
+  /** The VM's name on its host, when it has one: what the host's vault knows it by. */
+  vm?: string;
 };
 
 export type RunCommandInput = {

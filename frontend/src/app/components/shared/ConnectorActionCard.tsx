@@ -34,6 +34,10 @@ const labels: Record<string, string> = {
   dateTime: "Date and time",
   timeZone: "Time zone",
   email: "Email",
+  credential: "Credential",
+  hosts: "Hosts",
+  for: "For",
+  reason: "Reason",
 };
 
 function display(value: unknown): string {
@@ -47,6 +51,8 @@ function display(value: unknown): string {
 }
 
 function consequenceNote(item: ConnectorApprovalItem): string | null {
+  if (item.binding.type === "vault")
+    return "Approving lets the assistant send changes (posts, pushes, deletions) with this credential to these hosts for the next 15 minutes. It still cannot see the credential.";
   if (item.tool_name === "google_drive_replace_file_content")
     return "This replaces all file contents with the text shown below. Existing Google Doc formatting is replaced.";
   if (item.tool_name === "google_drive_trash_file")

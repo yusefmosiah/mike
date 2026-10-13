@@ -97,6 +97,7 @@ export function targetForVm(vm: string, env: Env = process.env): WorkstationTarg
     proxyCommand,
     knownHostsFile: env.WORKSTATION_SSH_KNOWN_HOSTS?.trim() || undefined,
     snapshot: snapshotSocket && VM_NAME.test(vm) ? { socketPath: snapshotSocket, vm } : undefined,
+    vm: VM_NAME.test(vm) ? vm : undefined,
   };
 }
 

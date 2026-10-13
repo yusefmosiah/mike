@@ -327,11 +327,12 @@ export function parseOptionalAskInputsResponse(
       response.kind !== "multi_choice" &&
       response.kind !== "text" &&
       response.kind !== "documents" &&
-      response.kind !== "approval"
+      response.kind !== "approval" &&
+      response.kind !== "secret"
     ) {
       return {
         ok: false,
-        detail: `${field}.kind must be "choice", "multi_choice", "text", "documents", or "approval"`,
+        detail: `${field}.kind must be "choice", "multi_choice", "text", "documents", "approval", or "secret"`,
       };
     }
     if (
@@ -339,6 +340,16 @@ export function parseOptionalAskInputsResponse(
       typeof response.skipped !== "boolean"
     ) {
       return { ok: false, detail: `${field}.skipped must be a boolean` };
+    }
+
+    if (response.kind === "secret") {
+      if (
+        response.secret_name !== undefined &&
+        typeof response.secret_name !== "string"
+      ) {
+        return { ok: false, detail: `${field}.secret_name must be a string` };
+      }
+      continue;
     }
 
     if (response.kind === "approval") {

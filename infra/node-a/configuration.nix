@@ -10,6 +10,7 @@
     ./disks.nix
     ./choir-builder.nix
     ./workstations.nix
+    ./vault.nix
     ./staging.nix
     ./gate.nix
   ];

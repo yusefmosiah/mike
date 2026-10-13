@@ -1,0 +1,17 @@
+{
+  // Type checking only: Node runs the .ts files directly (type stripping),
+  // so the code uses erasable syntax only and imports with .ts extensions.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "typeRoots": ["../../backend/node_modules/@types"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

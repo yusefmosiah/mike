@@ -1,0 +1,15 @@
+{
+  "name": "mike-vault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Per-user secrets vault on the VM host: VMs use secrets through it without ever holding them.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
