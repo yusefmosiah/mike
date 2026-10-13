@@ -80,7 +80,7 @@ describe("ChatInput with an image attached", () => {
         expect(screen.getByRole("status")).toHaveTextContent(/can.t see images/);
         expect(screen.getByRole("status")).toHaveTextContent(/Sees images/);
         expect(sendButton()).toBeDisabled();
-        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+        fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter", metaKey: true });
         expect(onSubmit).not.toHaveBeenCalled();
     });
 

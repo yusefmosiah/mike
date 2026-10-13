@@ -232,6 +232,10 @@
     background: linear-gradient(to bottom, transparent, var(--content-fade-color));
 }
 
+.content-top-fade {
+    background: linear-gradient(to top, transparent, var(--content-fade-color));
+}
+
 .assistant-chat-input-fade {
     background: linear-gradient(
         to bottom,

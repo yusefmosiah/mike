@@ -264,7 +264,7 @@ describe("ChatInput canSend gating", () => {
         ).toBeDisabled();
     });
 
-    it("does not submit on Enter while the chat is still loading", () => {
+    it("does not submit on Cmd+Enter while the chat is still loading", () => {
         const onSubmit = vi.fn();
         render(
             <ChatInput
@@ -279,15 +279,15 @@ describe("ChatInput canSend gating", () => {
         const textarea = screen.getByRole("combobox");
         expect(textarea).toBeDisabled();
         fireEvent.change(textarea, { target: { value: "second question" } });
-        fireEvent.keyDown(textarea, { key: "Enter" });
+        fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
-    it("does not submit on Enter when canSend is false", () => {
+    it("does not submit on Cmd+Enter when canSend is false", () => {
         const onSubmit = renderInput(false);
         const textarea = screen.getByRole("combobox");
 
-        fireEvent.keyDown(textarea, { key: "Enter" });
+        fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
@@ -352,11 +352,11 @@ describe("ChatInput canSend gating", () => {
         ).toBeDisabled();
     });
 
-    it("does not submit on Enter while the standing is unknown", () => {
+    it("does not submit on Cmd+Enter while the standing is unknown", () => {
         const onSubmit = renderInput(null);
         const textarea = screen.getByRole("combobox");
 
-        fireEvent.keyDown(textarea, { key: "Enter" });
+        fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
         expect(onSubmit).not.toHaveBeenCalled();
     });
 

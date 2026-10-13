@@ -245,7 +245,7 @@ for (const liveConnector of [false, "calendar", "drive"] as const) {
             ? "Rename the draft to Final agreement."
             : "Move the client meeting to 3 pm.",
         );
-        await input.press("Enter");
+        await input.press("ControlOrMeta+Enter");
       }
       const card = page.getByRole("article", {
         name: liveConnector

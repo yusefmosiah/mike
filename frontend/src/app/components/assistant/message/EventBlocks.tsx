@@ -91,6 +91,9 @@ export function ReasoningBlock({
         isOverflowing,
         setIsExpanded,
         toggleContent,
+        windowRef,
+        onWindowScroll,
+        windowScroll,
     } = useReasoningDisclosure(isStreaming);
     const [thinkingIndex, setThinkingIndex] = useState(0);
 
@@ -121,36 +124,50 @@ export function ReasoningBlock({
             />
             {isContentOpen && (
                 <div className="mt-2">
-                    <div
-                        className={`relative ${isCollapsed ? "overflow-hidden" : ""}`}
-                        style={
-                            isCollapsed
-                                ? {
-                                      maxHeight: `${REASONING_COLLAPSED_MAX_HEIGHT_REM}rem`,
-                                  }
-                                : undefined
-                        }
-                    >
+                    <div className="relative">
                         <div
-                            ref={contentRef}
-                            className="text-sm font-serif text-gray-400 prose prose-sm max-w-none [&>*]:text-gray-400 [&>*]:text-sm"
+                            ref={windowRef}
+                            onScroll={onWindowScroll}
+                            // Collapsed, the window scrolls: the bottom padding
+                            // lifts the newest line clear of the fade and the
+                            // expand button.
+                            className={
+                                isCollapsed
+                                    ? "overflow-y-auto pb-8 [scrollbar-width:none]"
+                                    : undefined
+                            }
+                            style={
+                                isCollapsed
+                                    ? {
+                                          maxHeight: `${REASONING_COLLAPSED_MAX_HEIGHT_REM}rem`,
+                                      }
+                                    : undefined
+                            }
                         >
-                            <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                    code: (props) => (
-                                        <code
-                                            className="font-serif text-gray-600"
-                                            {...withoutMarkdownNode(props)}
-                                        />
-                                    ),
-                                }}
+                            <div
+                                ref={contentRef}
+                                className="text-sm font-serif text-gray-400 prose prose-sm max-w-none [&>*]:text-gray-400 [&>*]:text-sm"
                             >
-                                {text}
-                            </ReactMarkdown>
+                                <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                        code: (props) => (
+                                            <code
+                                                className="font-serif text-gray-600"
+                                                {...withoutMarkdownNode(props)}
+                                            />
+                                        ),
+                                    }}
+                                >
+                                    {text}
+                                </ReactMarkdown>
+                            </div>
                         </div>
                         {isCollapsed && (
                             <>
+                                {windowScroll !== "start" && (
+                                    <div className="content-top-fade pointer-events-none absolute inset-x-0 top-0 h-10" />
+                                )}
                                 <div className="content-bottom-fade pointer-events-none absolute inset-x-0 bottom-0 h-10" />
                                 <button
                                     type="button"

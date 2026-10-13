@@ -23,6 +23,16 @@ function Harness({ streaming = true, text = "Reasoning" }) {
     </>;
 }
 
+function WindowHarness({ streaming = true }) {
+    const { contentRef, windowRef, onWindowScroll, windowScroll } = useReasoningDisclosure(streaming);
+    return (
+        <div data-testid="window" ref={windowRef} onScroll={onWindowScroll}>
+            <div ref={contentRef}>Reasoning</div>
+            <output>{windowScroll}</output>
+        </div>
+    );
+}
+
 function flushFrame() {
     act(() => {
         const pending = [...frames.values()];
@@ -104,6 +114,42 @@ describe("reasoning disclosure", () => {
         fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
         view.rerender(<Harness />);
         expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
+    });
+
+    it("keeps the collapsed window on the newest lines until the reader scrolls up in it", () => {
+        // A window 100px tall over content of `height`.
+        vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+        const view = render(<WindowHarness />);
+        const element = screen.getByTestId("window");
+        height = 300;
+        act(() => observers[0].resize());
+        expect(element.scrollTop).toBe(300);
+        fireEvent.scroll(element);
+        expect(screen.getByText("end")).toBeInTheDocument();
+
+        // The reader scrolls up inside it: new lines no longer move it.
+        element.scrollTop = 120;
+        fireEvent.scroll(element);
+        expect(screen.getByText("middle")).toBeInTheDocument();
+        height = 400;
+        act(() => observers[0].resize());
+        expect(element.scrollTop).toBe(120);
+
+        // Back at its end, it follows again.
+        element.scrollTop = 300;
+        fireEvent.scroll(element);
+        height = 500;
+        act(() => observers[0].resize());
+        expect(element.scrollTop).toBe(500);
+
+        // A finished thought stays where it is.
+        view.rerender(<WindowHarness streaming={false} />);
+        element.scrollTop = 0;
+        fireEvent.scroll(element);
+        expect(screen.getByText("start")).toBeInTheDocument();
+        height = 600;
+        act(() => observers[0].resize());
+        expect(element.scrollTop).toBe(0);
     });
 
     it("remeasures after reopening and cleans up pending work in Strict Mode", () => {

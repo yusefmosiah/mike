@@ -25,6 +25,12 @@ interface Props {
      * row is never rewritten). When absent, no edit control renders.
      */
     onEditBranch?: (content: string) => void | Promise<void>;
+    /**
+     * Keeps the edit control on screen but unusable, while an answer
+     * streams: taking it away and bringing it back would shift everything
+     * below it when the answer ends.
+     */
+    editDisabled?: boolean;
     /** Steps to the previous (-1) or next (1) sibling branch. */
     onNavigateSibling?: (dir: -1 | 1) => void;
     /** Who sent this prompt, shown when more than one person carries the thread. */
@@ -50,6 +56,7 @@ export function UserMessage({
     messageId,
     sibling,
     onEditBranch,
+    editDisabled = false,
     onNavigateSibling,
     authorLabel,
     error,
@@ -65,7 +72,7 @@ export function UserMessage({
     };
 
     const handleSave = async () => {
-        if (!onEditBranch || saving) return;
+        if (!onEditBranch || editDisabled || saving) return;
         const edited = draft.trim();
         if (!edited) return;
         setSaving(true);
@@ -227,7 +234,8 @@ export function UserMessage({
                                     type="button"
                                     aria-label="Edit prompt"
                                     onClick={openEditor}
-                                    className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-200/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                                    disabled={editDisabled}
+                                    className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-200/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 disabled:pointer-events-none disabled:opacity-40"
                                 >
                                     <Pencil className="h-3 w-3" />
                                 </button>

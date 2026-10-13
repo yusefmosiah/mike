@@ -129,7 +129,7 @@ test.describe("firm thread handoff", () => {
             await modelTrigger.click();
             await page.getByRole("menuitem", { name: STUB_MODEL_LABEL }).click();
             await firstInput.fill(opening);
-            await firstInput.press("Enter");
+            await firstInput.press("ControlOrMeta+Enter");
             await page.waitForURL(/\/assistant\/chat\/[^/]+$/, { timeout: 45_000 });
             await expect(answerTo(page, opening)).toBeVisible({ timeout: 30_000 });
             const chatId = new URL(page.url()).pathname.split("/").pop()!;
@@ -151,7 +151,7 @@ test.describe("firm thread handoff", () => {
             const reply = associatePage.getByPlaceholder("How can I help?");
             await expect(reply).toBeEnabled();
             await reply.fill(continuation);
-            await reply.press("Enter");
+            await reply.press("ControlOrMeta+Enter");
             await expect(associatePage.getByText(continuation, { exact: true })).toBeVisible();
             // The answer is streaming and the turn is held open: the associate
             // holds the thread. (The view keeps the last chunk back until the
@@ -164,7 +164,7 @@ test.describe("firm thread handoff", () => {
             // send is refused rather than run a second time.
             const partnerInput = page.getByPlaceholder("How can I help?");
             await partnerInput.fill(interjection);
-            await partnerInput.press("Enter");
+            await partnerInput.press("ControlOrMeta+Enter");
             await expect(page.getByText(REFUSED)).toBeVisible({ timeout: 15_000 });
 
             // Reopened, the thread says who is generating and streams it live.

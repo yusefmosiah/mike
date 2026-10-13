@@ -77,8 +77,8 @@ test("create project, upload PDF, ask a question and receive a response", async 
        actually streams a response. */
     await selectClaudeModel(page);
     await chatInput.fill("What is this document about?");
-    /* This ChatInput submits on Enter (Shift+Enter inserts a newline). */
-    await chatInput.press("Enter");
+    /* The composer sends on Cmd/Ctrl+Enter; Enter starts a new line. */
+    await chatInput.press("ControlOrMeta+Enter");
 
     /* ── Step 8: verify the assistant streams a response ─────────────────── */
     /* With a real Claude model the reply content is nondeterministic, so assert

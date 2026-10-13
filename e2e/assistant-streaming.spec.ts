@@ -121,7 +121,7 @@ for (const scope of ["assistant", "project", "tabular"] as const) {
             for (let turn = 1; turn <= (streamKind === "reasoning" ? 8 : 4); turn++) {
                 await test.step(`Stream follow-up ${turn} in the same conversation`, async () => {
                     await input.fill(`Synthetic follow-up ${turn}`);
-                    await input.press("Enter");
+                    await input.press("ControlOrMeta+Enter");
                     if (streamKind === "reasoning" && turn === 2) {
                         await page.waitForFunction(() => Boolean((window as Window & { finishReasoning?: () => void }).finishReasoning), undefined, { timeout: 180_000 });
                         await page.getByRole("button", { name: "Expand thought process", exact: true }).last().click();

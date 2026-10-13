@@ -251,7 +251,7 @@ describe("ChatView streaming scroll controls", () => {
         });
     }
 
-    function view(chunk = "Answer", initial = false) {
+    function view(chunk = "Answer", initial = false, streaming = true) {
         return (
             <PageChromeContext.Provider value={{ mobileActionsContainer: null }}>
                 <ChatView
@@ -261,7 +261,7 @@ describe("ChatView streaming scroll controls", () => {
                         { id: "user", role: "user", content: "Question" },
                         { id: "answer", role: "assistant", content: chunk },
                     ]}
-                    isResponseLoading
+                    isResponseLoading={streaming}
                     handleChat={vi.fn()}
                     cancel={vi.fn()}
                     onNewChat={vi.fn()}
@@ -356,7 +356,9 @@ describe("ChatView streaming scroll controls", () => {
     });
 
     it("coalesces layout notifications and cleans up pending measurements", () => {
-        const { unmount } = render(view());
+        // No answer streaming, so nothing follows it: only the scroll
+        // button measures.
+        const { unmount } = render(view("Answer", false, false));
         const { content, viewport, readHeight } = geometry();
         flushFrame();
         readHeight.mockClear();
@@ -376,6 +378,55 @@ describe("ChatView streaming scroll controls", () => {
         expect(readHeight).not.toHaveBeenCalled();
         expect(observers.has(content)).toBe(false);
         expect(observers.has(viewport)).toBe(false);
+    });
+
+    it("keeps the newest text in view until the reader scrolls up, and moves nothing when the answer ends", () => {
+        const { rerender } = render(view());
+        const { content, viewport, size } = geometry();
+        const scrollTo = vi.fn((options: ScrollToOptions) => {
+            viewport.scrollTop = options.top ?? viewport.scrollTop;
+        });
+        Object.defineProperty(viewport, "scrollTo", { configurable: true, value: scrollTo });
+        flushFrame();
+
+        // The answer grows past the screen: the view follows, before paint.
+        size.content = 1000;
+        act(() => observers.get(content)?.());
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 400, behavior: "auto" });
+        fireEvent.scroll(viewport);
+        flushFrame();
+
+        // The reader scrolls up: the view stays where they put it.
+        viewport.scrollTop = 200;
+        fireEvent.scroll(viewport);
+        flushFrame();
+        scrollTo.mockClear();
+        size.content = 1400;
+        act(() => observers.get(content)?.());
+        expect(scrollTo).not.toHaveBeenCalled();
+
+        // Back at the end, following resumes.
+        viewport.scrollTop = 790;
+        fireEvent.scroll(viewport);
+        flushFrame();
+        size.content = 1600;
+        act(() => observers.get(content)?.());
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: "auto" });
+        fireEvent.scroll(viewport);
+        flushFrame();
+
+        // The answer ends with the reader scrolled up: nothing moves, then or
+        // as the finished answer settles.
+        viewport.scrollTop = 600;
+        fireEvent.scroll(viewport);
+        flushFrame();
+        scrollTo.mockClear();
+        size.content = 1700;
+        rerender(view("Answer", false, false));
+        act(() => observers.get(content)?.());
+        flushFrame();
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(viewport.scrollTop).toBe(600);
     });
 
     it("starts observing when the initial screen becomes a conversation", () => {

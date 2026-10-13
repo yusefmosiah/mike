@@ -103,6 +103,35 @@ describe("ChatInput workflow slash commands", () => {
         },
     );
 
+    it("starts a new line on Enter and sends on Cmd+Enter or Ctrl+Enter", async () => {
+        const onSubmit = vi.fn();
+        const user = userEvent.setup();
+        render(
+            <ChatInput
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+                isLoading={false}
+            />,
+        );
+        const input = screen.getByRole("combobox");
+
+        await user.type(input, "First line{Enter}Second line");
+        expect(input).toHaveValue("First line\nSecond line");
+        expect(onSubmit).not.toHaveBeenCalled();
+
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
+        expect(onSubmit).toHaveBeenCalledWith(
+            expect.objectContaining({ content: "First line\nSecond line" }),
+        );
+        expect(input).toHaveValue("");
+
+        await user.type(input, "Another");
+        await user.keyboard("{Control>}{Enter}{/Control}");
+        expect(onSubmit).toHaveBeenLastCalledWith(
+            expect.objectContaining({ content: "Another" }),
+        );
+    });
+
     it("submits the attached document's current version", async () => {
         const ref = createRef<ChatInputHandle>();
         const onSubmit = vi.fn();
@@ -126,7 +155,7 @@ describe("ChatInput workflow slash commands", () => {
 
         act(() => ref.current?.addDoc(document));
         await user.type(screen.getByRole("combobox"), "Review this");
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
 
         expect(onSubmit).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -166,7 +195,7 @@ describe("ChatInput workflow slash commands", () => {
         expect(screen.getByText("Contract Intake")).toBeInTheDocument();
 
         await user.type(input, "Review this agreement");
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
 
         await waitFor(() =>
             expect(onSubmit).toHaveBeenCalledWith(
@@ -285,7 +314,7 @@ describe("ChatInput workflow slash commands", () => {
         expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
         expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
 
         await waitFor(() =>
             expect(onSubmit).toHaveBeenCalledWith(
@@ -320,7 +349,7 @@ describe("ChatInput workflow slash commands", () => {
         expect(onSubmit).not.toHaveBeenCalled();
 
         await user.type(input, "Client called; wants the draft Friday");
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
         expect(onSubmit).toHaveBeenCalledWith({
             role: "user",
             content: "Client called; wants the draft Friday",
@@ -329,7 +358,7 @@ describe("ChatInput workflow slash commands", () => {
         expect(input).toHaveValue("");
 
         await user.type(input, "/NO-RESPONSE  second note");
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
         expect(onSubmit).toHaveBeenLastCalledWith({
             role: "user",
             content: "second note",
@@ -359,7 +388,7 @@ describe("ChatInput workflow slash commands", () => {
             } as Document),
         );
         await user.type(screen.getByRole("combobox"), "/nr The signed lease");
-        await user.keyboard("{Enter}");
+        await user.keyboard("{Meta>}{Enter}{/Meta}");
 
         expect(onSubmit).toHaveBeenCalledWith({
             role: "user",

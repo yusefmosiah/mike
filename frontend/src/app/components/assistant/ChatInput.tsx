@@ -775,7 +775,8 @@ function ChatInputForChatImpl(
             setSlashMenuDismissed(true);
             return;
         }
-        if (e.key === "Enter" && !e.shiftKey) {
+        // Enter starts a new line; Cmd+Enter (Ctrl+Enter off a Mac) sends.
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             handleSubmit();
         }

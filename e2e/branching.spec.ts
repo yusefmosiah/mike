@@ -51,7 +51,7 @@ async function startAssistantChat(page: Page, prompt: string) {
     await expect(input).toBeVisible();
     await selectStubModel(page);
     await input.fill(prompt);
-    await input.press("Enter");
+    await input.press("ControlOrMeta+Enter");
     await page.waitForURL(/\/assistant\/chat\/[^/]+$/, { timeout: 45_000 });
     await expect(answerTo(page, prompt)).toBeVisible({ timeout: 30_000 });
 }
@@ -134,7 +134,7 @@ test.describe("branching", () => {
 
         const input = page.getByPlaceholder("How can I help?");
         await input.fill(followUp);
-        await input.press("Enter");
+        await input.press("ControlOrMeta+Enter");
         await expect(answerTo(page, followUp)).toBeVisible({ timeout: 30_000 });
 
         await page.goto(originalUrl);
@@ -156,7 +156,7 @@ test.describe("branching", () => {
         await expect(input).toBeVisible();
         await selectStubModel(page);
         await input.fill(original);
-        await input.press("Enter");
+        await input.press("ControlOrMeta+Enter");
         await page.waitForURL(/\/projects\/[^/]+\/assistant\/chat\/[^/]+$/, { timeout: 45_000 });
         await expect(answerTo(page, original)).toBeVisible({ timeout: 30_000 });
 

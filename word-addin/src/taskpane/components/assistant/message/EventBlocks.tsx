@@ -72,6 +72,9 @@ export function ReasoningBlock({
     isOverflowing,
     setIsExpanded,
     toggleContent,
+    windowRef,
+    onWindowScroll,
+    windowScroll,
   } = useReasoningDisclosure(isStreaming);
   const [thinkingIndex, setThinkingIndex] = useState(0);
 
@@ -108,21 +111,34 @@ export function ReasoningBlock({
       </button>
       {isContentOpen && (
         <div className="mt-2">
-          <div
-            className={`relative ${isCollapsed ? "overflow-hidden" : ""}`}
-            style={
-              isCollapsed
-                ? { maxHeight: `${REASONING_COLLAPSED_MAX_HEIGHT_REM}rem` }
-                : undefined
-            }
-          >
-            <div ref={contentRef}>
-              <Markdown className="font-serif text-sm leading-6 text-gray-400 [&_*]:text-gray-400">
-                {text}
-              </Markdown>
+          <div className="relative">
+            <div
+              ref={windowRef}
+              onScroll={onWindowScroll}
+              // Collapsed, the window scrolls: the bottom padding lifts the
+              // newest line clear of the fade and the expand button.
+              className={
+                isCollapsed
+                  ? "overflow-y-auto pb-8 [scrollbar-width:none]"
+                  : undefined
+              }
+              style={
+                isCollapsed
+                  ? { maxHeight: `${REASONING_COLLAPSED_MAX_HEIGHT_REM}rem` }
+                  : undefined
+              }
+            >
+              <div ref={contentRef}>
+                <Markdown className="font-serif text-sm leading-6 text-gray-400 [&_*]:text-gray-400">
+                  {text}
+                </Markdown>
+              </div>
             </div>
             {isCollapsed && (
               <>
+                {windowScroll !== "start" && (
+                  <div className="content-top-fade pointer-events-none absolute inset-x-0 top-0 h-10" />
+                )}
                 <div className="content-bottom-fade pointer-events-none absolute inset-x-0 bottom-0 h-10" />
                 <button
                   type="button"

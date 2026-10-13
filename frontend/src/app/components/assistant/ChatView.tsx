@@ -1,7 +1,14 @@
 "use client";
 
 import { findPendingAskInput } from "@/app/lib/pendingAskInput";
-import { useCallback, useMemo, useState, useRef, useEffect } from "react";
+import {
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
@@ -196,6 +203,8 @@ const ASSISTANT_PANEL_TRANSITION_MS = 500;
 const MOBILE_BREAKPOINT_PX = 768;
 const DEFAULT_ASSISTANT_BOTTOM_PADDING = 116;
 const CHAT_MESSAGE_TOP_PADDING = 76;
+/** How close to the end of the thread counts as reading the end. */
+const FOLLOW_STREAM_THRESHOLD_PX = 24;
 const SCROLL_BUTTON_INPUT_GAP = 16;
 const CHAT_INPUT_BOTTOM_OFFSET = 12;
 
@@ -983,18 +992,43 @@ export function ChatView({
         };
     }, [messages.length]);
 
+    // While an answer streams, keep its newest text in view, as long as the
+    // reader is at the end of the thread. Scrolling up stops following and
+    // scrolling back to the end resumes it; the answer finishing moves
+    // nothing. Our own scrolls only ever move down, so any upward scroll is
+    // the reader's.
+    const followRef = useRef(true);
+    const followStreamRef = useRef(isResponseLoading);
+    const scrollToEnd = useCallback(() => {
+        const c = messagesContainerRef.current;
+        if (!c) return;
+        const viewport = scrollViewportOf(c);
+        const end = viewport.scrollHeight - viewport.height;
+        if (end > viewport.scrollTop) viewport.scrollTo({ top: end, behavior: "auto" });
+    }, []);
+    useLayoutEffect(() => {
+        const wasStreaming = followStreamRef.current;
+        followStreamRef.current = isResponseLoading;
+        // The answer's last words and its actions arrive with the end of the
+        // stream, in this commit: a reader following it sees them too.
+        if (wasStreaming && !isResponseLoading && followRef.current) scrollToEnd();
+    }, [isResponseLoading, scrollToEnd]);
+
     const isInitialView = Boolean(onInitialSubmit);
     useEffect(() => {
         const c = messagesContainerRef.current;
         const content = messagesContentRef.current;
         if (!c || !content) return;
         let frame: number | null = null;
+        let lastTop = scrollViewportOf(c).scrollTop;
         const measure = () => {
             frame = null;
             const viewport = scrollViewportOf(c);
-            const visible =
-                viewport.scrollHeight > viewport.height &&
-                viewport.scrollHeight - viewport.scrollTop - viewport.height > 10;
+            const { scrollHeight, height } = viewport;
+            const fromEnd = scrollHeight - viewport.scrollTop - height;
+            // Back at the end of the thread: follow the answer again.
+            if (fromEnd <= FOLLOW_STREAM_THRESHOLD_PX) followRef.current = true;
+            const visible = scrollHeight > height && fromEnd > 10;
             // Avoid dispatching even an unchanged value during a busy stream:
             // React cannot always bail out eagerly while other work is queued.
             if (visible !== scrollButtonVisibleRef.current) {
@@ -1005,13 +1039,25 @@ export function ChatView({
         const scheduleMeasure = () => {
             if (frame === null) frame = requestAnimationFrame(measure);
         };
+        const onScroll = () => {
+            const top = scrollViewportOf(c).scrollTop;
+            if (top < lastTop - 1) followRef.current = false;
+            lastTop = top;
+            scheduleMeasure();
+        };
         // Measure actual layout changes, including smoothed text reveal.
         // Depending on `messages` dispatches state from an effect on every
         // streamed chunk and can exceed React's nested passive-update limit.
-        const observer = new ResizeObserver(scheduleMeasure);
+        // Following runs here rather than in the frame: the observer fires
+        // after layout and before paint, so new text never shows below the
+        // fold first.
+        const observer = new ResizeObserver(() => {
+            if (followStreamRef.current && followRef.current) scrollToEnd();
+            scheduleMeasure();
+        });
         observer.observe(c);
         observer.observe(content);
-        const stopListening = onScrollViewportChange(c, scheduleMeasure);
+        const stopListening = onScrollViewportChange(c, onScroll);
         scheduleMeasure();
         return () => {
             observer.disconnect();
@@ -1019,9 +1065,10 @@ export function ChatView({
             if (frame !== null) cancelAnimationFrame(frame);
         };
         // The container mounts when the initial screen becomes a conversation.
-    }, [isInitialView]);
+    }, [isInitialView, scrollToEnd]);
 
     const scrollToBottom = () => {
+        followRef.current = true;
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
@@ -1066,7 +1113,10 @@ export function ChatView({
     useEffect(() => {
         if (chatLoading) return;
         const last = messages[messages.length - 1];
-        if (last?.role === "user") return scrollLatestUserToTop();
+        if (last?.role !== "user") return;
+        // A new prompt: show it at the top, with its answer following below.
+        followRef.current = true;
+        return scrollLatestUserToTop();
     }, [chatLoading, messages, scrollLatestUserToTop]);
 
     useEffect(() => {
@@ -1074,8 +1124,9 @@ export function ChatView({
         // that history so the ref points at the latest user message in the
         // complete transcript, rather than the turn's temporary one-message
         // overlay.
-        if (isResponseLoading && !chatLoading)
-            return scrollLatestUserToTop();
+        if (!isResponseLoading || chatLoading) return;
+        followRef.current = true;
+        return scrollLatestUserToTop();
     }, [chatLoading, isResponseLoading, scrollLatestUserToTop]);
 
     const hasMessages = messages.length > 0;
@@ -1403,7 +1454,6 @@ export function ChatView({
                                                                     : null
                                                             }
                                                             onEditBranch={
-                                                                branchActionsEnabled &&
                                                                 chatId &&
                                                                 msg.id
                                                                     ? (content) =>
@@ -1412,6 +1462,9 @@ export function ChatView({
                                                                               content,
                                                                           )
                                                                     : undefined
+                                                            }
+                                                            editDisabled={
+                                                                !branchActionsEnabled
                                                             }
                                                             onNavigateSibling={
                                                                 branchActionsEnabled &&

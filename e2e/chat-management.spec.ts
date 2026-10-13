@@ -115,7 +115,7 @@ test("rename chat: sidebar rename interaction updates the title", async ({ page 
             { timeout: 30_000 },
         )
         .catch(() => null);
-    await textarea.press("Enter");
+    await textarea.press("ControlOrMeta+Enter");
 
     // ── Step 2: wait for navigation to the new chat page ─────────────────────────
     await page.waitForURL(/\/assistant\/chat\/.+/, { timeout: 45_000 });
@@ -211,7 +211,7 @@ test("delete chat: sidebar delete action removes the chat from history", async (
     // message.
     await selectClaudeModel(page);
     await textarea.fill(message);
-    await textarea.press("Enter");
+    await textarea.press("ControlOrMeta+Enter");
     await page.waitForURL(newChatUrl, { timeout: 20_000 });
 
     // Let auto title-generation land before renaming, so it cannot clobber the
@@ -342,8 +342,8 @@ test("project assistant: create a new chat and submit a question", async ({ page
         // Re-assert the Claude model as the active (available) model after any remount.
         await selectClaudeModel(page);
         await chatInput.fill(question);
-        // ChatInput.handleKeyDown: Enter (no Shift) → handleSubmit().
-        await chatInput.press("Enter");
+        // ChatInput.handleKeyDown: Cmd/Ctrl+Enter → handleSubmit().
+        await chatInput.press("ControlOrMeta+Enter");
         // setValue("") runs synchronously on a successful send.
         cleared = await expect(chatInput)
             .toHaveValue("", { timeout: 5_000 })

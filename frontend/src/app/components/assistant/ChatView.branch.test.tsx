@@ -63,12 +63,14 @@ vi.mock("./UserMessage", () => ({
         messageId,
         sibling,
         onEditBranch,
+        editDisabled,
         onNavigateSibling,
     }: {
         content: string;
         messageId?: string;
         sibling?: { index: number; total: number } | null;
         onEditBranch?: (content: string) => void | Promise<void>;
+        editDisabled?: boolean;
         onNavigateSibling?: (dir: -1 | 1) => void;
     }) => (
         <div data-testid={`user-${messageId}`}>
@@ -81,6 +83,7 @@ vi.mock("./UserMessage", () => ({
             {onEditBranch && (
                 <button
                     type="button"
+                    disabled={editDisabled}
                     onClick={() => {
                         const save = onEditBranch("edited content");
                         editSaves.push(save);
@@ -477,7 +480,7 @@ describe("ChatView branch controls", () => {
         );
     });
 
-    it("hides branch controls while an answer streams", () => {
+    it("disables prompt editing and hides answer branch controls while an answer streams", () => {
         renderView(
             [
                 {
@@ -491,9 +494,11 @@ describe("ChatView branch controls", () => {
             { isResponseLoading: true },
         );
 
+        // Kept on screen, so the prompts above do not change height when the
+        // answer ends and move the thread under the reader.
         expect(
-            screen.queryByRole("button", { name: "edit user-1" }),
-        ).not.toBeInTheDocument();
+            screen.getByRole("button", { name: "edit user-1" }),
+        ).toBeDisabled();
         expect(
             screen.queryByRole("button", { name: "regenerate answer-1" }),
         ).not.toBeInTheDocument();
