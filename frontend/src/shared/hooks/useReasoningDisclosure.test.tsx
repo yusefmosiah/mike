@@ -99,21 +99,28 @@ describe("reasoning disclosure", () => {
         expect(screen.getByText("overflow")).toBeInTheDocument();
     });
 
-    it("follows streaming until explicitly toggled, including completion and restart", () => {
+    it("opens while streaming and stays open after, until the reader closes it", () => {
+        // A thought loaded already finished starts closed.
         const view = render(<Harness streaming={false} />);
         expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
         expect(observers).toHaveLength(0);
+        // It opens when it streams, and does not close when the segment or
+        // the answer ends.
         view.rerender(<Harness />);
         expect(screen.getByText("Reasoning")).toBeInTheDocument();
+        view.rerender(<Harness streaming={false} />);
+        expect(screen.getByText("Reasoning")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Thought process" })).toHaveAttribute("aria-expanded", "true");
+        // The reader's choice wins, through later streaming and completion.
+        fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
+        expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
+        view.rerender(<Harness />);
         view.rerender(<Harness streaming={false} />);
         expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
         view.rerender(<Harness />);
         view.rerender(<Harness streaming={false} />);
         expect(screen.getByText("Reasoning")).toBeInTheDocument();
-        fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
-        view.rerender(<Harness />);
-        expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
     });
 
     it("keeps the collapsed window on the newest lines until the reader scrolls up in it", () => {

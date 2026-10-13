@@ -4,11 +4,16 @@ type WindowScroll = "start" | "middle" | "end";
 
 /** Disclosure behavior shared by web and Word reasoning blocks. */
 export function useReasoningDisclosure(isStreaming: boolean) {
-    // Follow stream status until the user explicitly chooses a disclosure state.
-    // Derive this default: syncing it in an effect on every text chunk can
-    // enqueue passive updates even when React receives the same boolean.
+    // Open while the thought streams, and stay open once it has: closing it
+    // when the segment or the answer ends takes away what the reader was
+    // reading. Only the reader closes it. A thought loaded already finished
+    // starts closed. Derive this default: syncing it in an effect on every
+    // text chunk can enqueue passive updates even when React receives the
+    // same boolean.
     const [openOverride, setOpenOverride] = useState<boolean | null>(null);
-    const isContentOpen = openOverride ?? isStreaming;
+    const [streamedHere, setStreamedHere] = useState(isStreaming);
+    if (isStreaming && !streamedHere) setStreamedHere(true);
+    const isContentOpen = openOverride ?? (isStreaming || streamedHere);
     const [isExpanded, setIsExpanded] = useState(false);
     const [isOverflowing, setIsOverflowing] = useState(false);
     const overflowingRef = useRef(false);
@@ -135,6 +140,6 @@ export function useReasoningDisclosure(isStreaming: boolean) {
         isOverflowing,
         setIsExpanded,
         toggleContent: () =>
-            setOpenOverride((previous) => !(previous ?? isStreaming)),
+            setOpenOverride((previous) => !(previous ?? (isStreaming || streamedHere))),
     };
 }
