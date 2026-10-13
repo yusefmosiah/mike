@@ -9,7 +9,7 @@ import type { AssistantEvent, Document, MessageFile } from "../shared/types";
 import { FileTypeIcon } from "../shared/FileTypeIcon";
 import { ConnectorActionCard } from "../shared/ConnectorActionCard";
 import { AddDocumentsModal } from "../modals/AddDocumentsModal";
-import { VaultSecretModal } from "../vault/VaultSecretModal";
+import { SecretRequestField } from "../vault/SecretRequestField";
 import {
     LIQUID_GLASS_SUBTLE_CLASS,
     LIQUID_GLASS_TRANSLUCENT_CLASS,
@@ -28,7 +28,6 @@ type AskInputsResponse = Extract<
 type ApprovalDecision = "approve" | "reject";
 /** A decision made by the handler that is about to submit, before its state lands. */
 type PendingDecision = { id: string; decision: ApprovalDecision };
-type SecretAskInputItem = Extract<AskInputItem, { kind: "secret" }>;
 /** A secret stored by the handler that is about to submit, before its state lands. */
 type PendingSecret = { id: string; name: string };
 
@@ -71,10 +70,6 @@ export function AskInputPopup({
     );
     // The vault form for a credential request. The value goes from it to the
     // vault; only the stored name comes back here.
-    const [secretTarget, setSecretTarget] = useState<SecretAskInputItem | null>(
-        null,
-    );
-
     const docsForItem = useCallback(
         (inputId: string) => {
             const seen = new Set<string>();
@@ -423,7 +418,6 @@ export function AskInputPopup({
     };
 
     const secretStored = (id: string, name: string) => {
-        setSecretTarget(null);
         if (submitted) return;
         setAnswers((prev) => ({ ...prev, [id]: name }));
         setSkippedFor(id, false);
@@ -639,15 +633,18 @@ export function AskInputPopup({
                                             />
                                         </div>
                                     ) : activeItem.kind === "secret" ? (
-                                        <SecretRequest
+                                        <SecretRequestField
                                             item={activeItem}
                                             storedName={answers[activeItem.id]}
                                             disabled={
                                                 submitted ||
                                                 skipped.has(activeItem.id)
                                             }
-                                            onOpen={() =>
-                                                setSecretTarget(activeItem)
+                                            onStored={(secret) =>
+                                                secretStored(
+                                                    activeItem.id,
+                                                    secret.name,
+                                                )
                                             }
                                         />
                                     ) : activeItem.kind === "text" ? (
@@ -789,23 +786,6 @@ export function AskInputPopup({
                 </div>
             </div>
 
-            <VaultSecretModal
-                open={!!secretTarget}
-                onClose={() => setSecretTarget(null)}
-                onSaved={(secret) =>
-                    secretTarget && secretStored(secretTarget.id, secret.name)
-                }
-                draft={
-                    secretTarget
-                        ? {
-                              name: secretTarget.name,
-                              hosts: secretTarget.hosts,
-                              injection: secretTarget.injection,
-                              purpose: secretTarget.purpose,
-                          }
-                        : undefined
-                }
-            />
             <AddDocumentsModal
                 open={!!docSelectorTarget}
                 keepMounted
@@ -1087,66 +1067,6 @@ function DocumentInput({
                     </div>
                 );
             })}
-        </div>
-    );
-}
-
-function SecretRequest({
-    item,
-    storedName,
-    disabled,
-    onOpen,
-}: {
-    item: SecretAskInputItem;
-    storedName?: string;
-    disabled: boolean;
-    onOpen: () => void;
-}) {
-    const auth =
-        item.injection.type === "basic"
-            ? `Username ${item.injection.username} with the secret`
-            : item.injection.type === "header"
-              ? `In the ${item.injection.name} header`
-              : "As a bearer token";
-    return (
-        <div className="space-y-3 font-sans text-sm">
-            <dl className="space-y-1.5 rounded-lg bg-gray-100/70 px-3 py-2 text-gray-700">
-                <div>
-                    <dt className="text-xs text-gray-500">Name</dt>
-                    <dd className="break-words">{item.name}</dd>
-                </div>
-                {item.purpose && (
-                    <div>
-                        <dt className="text-xs text-gray-500">For</dt>
-                        <dd className="whitespace-pre-wrap break-words">{item.purpose}</dd>
-                    </div>
-                )}
-                <div>
-                    <dt className="text-xs text-gray-500">Sent only to</dt>
-                    <dd className="break-words">{item.hosts.join(", ")}</dd>
-                </div>
-                <div>
-                    <dt className="text-xs text-gray-500">How</dt>
-                    <dd className="break-words">{auth}</dd>
-                </div>
-            </dl>
-            {storedName ? (
-                <p className="flex items-center gap-1.5 text-gray-700">
-                    <Check className="h-3.5 w-3.5" aria-hidden />
-                    Stored as {storedName}
-                </p>
-            ) : (
-                <PillButtonUI
-                    tone="black"
-                    size="xs"
-                    type="button"
-                    disabled={disabled}
-                    onClick={onOpen}
-                    className="font-sans"
-                >
-                    Store in vault…
-                </PillButtonUI>
-            )}
         </div>
     );
 }

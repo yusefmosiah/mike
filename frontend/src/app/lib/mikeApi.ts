@@ -4026,6 +4026,8 @@ export type NewVaultSecret = {
     hosts: string[];
     injection: VaultInjection;
     writes: "ask" | "allow";
+    /** A stored secret's id this one takes the place of (same name, new value). */
+    replaces?: string;
 };
 
 export async function getVaultStatus(): Promise<{ enabled: boolean }> {

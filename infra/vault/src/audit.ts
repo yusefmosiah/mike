@@ -7,12 +7,14 @@ import path from "node:path";
 export type AuditEvent = {
   at: string;
   user: string;
-  event: "created" | "updated" | "deleted" | "purged" | "allowed" | "lease" | "request" | "denied";
+  event: "created" | "replaced" | "updated" | "deleted" | "purged" | "allowed" | "lease" | "request" | "denied";
   secret?: string;
   secret_name?: string;
   vm?: string;
   chat?: string | null;
   access?: string;
+  /** How the secret was attached, for a lease. */
+  auth?: string;
   method?: string;
   host?: string;
   path?: string;

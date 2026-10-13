@@ -128,8 +128,10 @@ export type SecretRequestItem = {
   purpose: string;
   /** Hosts the assistant expects to use it with; the user confirms or changes them. */
   hosts: string[];
-  /** How it is attached to requests, suggested by the assistant. */
+  /** How it is usually attached to requests; each lease can attach it differently. */
   injection: VaultInjection;
+  /** A stored secret (its id) this one replaces: same name, new value and settings. */
+  replaces?: string;
 };
 
 export type VaultInjection =
@@ -195,6 +197,8 @@ export type ConnectorApprovalBinding =
       secret_id: string;
       vm: string;
       chat_id: string | null;
+      /** How the lease attaches the secret, when not the way it was stored. */
+      injection?: VaultInjection | null;
     };
 
 export type AskInputsEvent = {

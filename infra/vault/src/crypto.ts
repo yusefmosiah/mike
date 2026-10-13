@@ -68,6 +68,8 @@ export type SealedPayload = {
   nonce: string;
   /** The vault process the key was fetched from (/v1/seal-key). */
   epoch: string;
+  /** A stored secret (its id) this one takes the place of, with the user's new value. */
+  replaces?: string;
   /** When it was sealed, in milliseconds since the epoch. */
   iat: number;
 };
@@ -150,7 +152,8 @@ export async function unsealPayload(key: SealingKey, sealed: SealedValue): Promi
   if (
     !parsed || typeof parsed !== "object" || !text("value") || !text("user") || !text("name") || !text("writes") ||
     !text("nonce") || !text("epoch") || !Array.isArray(parsed.hosts) || typeof parsed.iat !== "number" ||
-    (parsed.description !== undefined && !text("description"))
+    (parsed.description !== undefined && !text("description")) ||
+    (parsed.replaces !== undefined && !text("replaces"))
   ) {
     throw new Error("malformed sealed payload");
   }

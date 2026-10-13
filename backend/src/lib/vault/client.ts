@@ -16,6 +16,8 @@ export type VaultLease = {
   secret: string;
   hosts: string[];
   access: VaultAccess;
+  /** How this lease attaches the secret. */
+  injection?: VaultInjection;
   expires_at: string;
 };
 
@@ -152,6 +154,8 @@ export async function issueVaultLease(input: {
   access: VaultAccess;
   chatId?: string | null;
   ttlSeconds?: number;
+  /** How to attach it for this lease; the stored way when absent. */
+  injection?: VaultInjection | null;
 }): Promise<VaultLease> {
   return call("POST", "/v1/leases", {
     user: input.userId,
@@ -160,10 +164,10 @@ export async function issueVaultLease(input: {
     access: input.access,
     chat: input.chatId ?? undefined,
     ttl_seconds: input.ttlSeconds,
+    ...(input.injection ? { injection: input.injection } : {}),
   });
 }
 
-/** How the agent uses a lease, returned with it. */
 /** Revokes leases: a user's (for one chat, or on one VM), or everything lent to one VM. */
 export async function revokeVaultLeases(
   filter: { userId: string; chatId?: string | null; vm?: string } | { vm: string },
@@ -205,12 +209,20 @@ export async function purgeVaultUser(userId: string): Promise<void> {
   await call("DELETE", userPath(userId));
 }
 
+const attachment = (injection: VaultInjection) =>
+  injection.type === "basic"
+    ? `HTTP basic auth, username ${injection.username}`
+    : injection.type === "header"
+      ? `the ${injection.name} header`
+      : "Authorization: Bearer";
+
+/** How the agent uses a lease, returned with it. */
 export function leaseInstructions(lease: VaultLease): string {
   const base = `$MIKE_VAULT_URL/${lease.lease}`;
   const host = lease.hosts[0] ?? "<host>";
   return [
     `Lease for "${lease.secret}" (${lease.access}), valid until ${lease.expires_at} or the end of this turn, whichever is first, only from this workstation.`,
-    `Send requests to ${base}/<host>/<path> instead of https://<host>/<path>; the vault attaches the secret. Allowed hosts: ${lease.hosts.join(", ")}.`,
+    `Send requests to ${base}/<host>/<path> instead of https://<host>/<path>; the vault attaches the secret${lease.injection ? ` as ${attachment(lease.injection)}` : ""}. Allowed hosts: ${lease.hosts.join(", ")}.`,
     `Example: curl -sS ${base}/${host}/<path>`,
     `For git over HTTPS, use the URL directly instead of saving it as a remote: git push ${base}/${host}/<owner>/<repo>.git <branch> (no username or token in the URL).`,
     lease.access === "read"

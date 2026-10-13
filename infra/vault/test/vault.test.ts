@@ -815,6 +815,59 @@ describe("vault end to end", () => {
     assert.ok(reply === 403 || reply === -1, String(reply));
   });
 
+  it("attaches the secret the way the lease asks, never anywhere else", async () => {
+    seen = [];
+    const leased = await unixRequest(control, "POST", "/v1/leases", {
+      user: "user-a", vm: "ws-a", secret: "api", access: "read", injection: { type: "header", name: "PRIVATE-TOKEN" },
+    });
+    assert.equal(leased.status, 201);
+    assert.deepEqual(JSON.parse(leased.body).injection, { type: "header", name: "PRIVATE-TOKEN" });
+    const token = JSON.parse(leased.body).lease;
+    // The caller's own credentials never travel with the secret.
+    const reply = await unixRequest(vmA, "GET", `/${token}/api.example.com/x`, undefined, {
+      authorization: "Bearer attacker", cookie: "session=attacker", "x-api-key": "attacker", "user-agent": "agent",
+    });
+    assert.equal(seen.at(-1)!.headers["private-token"], TOKEN);
+    assert.equal(seen.at(-1)!.headers.authorization, undefined);
+    assert.equal(seen.at(-1)!.headers.cookie, undefined);
+    assert.equal(seen.at(-1)!.headers["x-api-key"], undefined);
+    assert.equal(seen.at(-1)!.headers["user-agent"], "agent");
+    assert.ok(!reply.body.includes(TOKEN));
+    // The stored way, when the lease names none.
+    const plain = JSON.parse((await unixRequest(control, "POST", "/v1/leases", { user: "user-a", vm: "ws-a", secret: "api", access: "read" })).body);
+    assert.deepEqual(plain.injection, { type: "basic", username: "oauth2" });
+    for (const injection of [
+      { type: "header", name: "Host" }, { type: "header", name: "Cookie" }, { type: "basic", username: "a:b" }, { type: "nope" },
+      // Headers servers log or store where the caller can read them back.
+      { type: "header", name: "User-Agent" }, { type: "header", name: "Referer" }, { type: "header", name: "X-Request-Id" },
+      { type: "header", name: "x-amz-meta-token" }, { type: "header", name: "x-goog-meta-api-key" },
+    ]) {
+      const refused = await unixRequest(control, "POST", "/v1/leases", { user: "user-a", vm: "ws-a", secret: "api", access: "read", injection });
+      assert.equal(refused.status, 400, JSON.stringify(injection));
+    }
+  });
+
+  it("replaces a secret with a new value and settings, as one change", async () => {
+    const first = JSON.parse((await createSecret("user-r", "deploy")).body).secret;
+    await createSecret("user-r", "other");
+    const { lease: old } = await lease("user-r", "ws-a", "deploy");
+    const replaced = await createSecret("user-r", "deploy", { replaces: first.id, hosts: ["other.example.com"], injection: { type: "bearer" } });
+    assert.equal(replaced.status, 201);
+    const secrets = JSON.parse((await unixRequest(control, "GET", "/v1/users/user-r/secrets")).body).secrets;
+    assert.deepEqual(secrets.map((s: { name: string }) => s.name).sort(), ["deploy", "other"]);
+    const now = secrets.find((s: { name: string }) => s.name === "deploy");
+    assert.notEqual(now.id, first.id);
+    assert.deepEqual(now.hosts, ["other.example.com"]);
+    assert.equal((await unixRequest(vmA, "GET", `/${old}/api.example.com/x`)).status, 401);
+    // Not someone else's secret, not a missing one, and not onto another's name.
+    assert.equal((await createSecret("user-x", "deploy", { replaces: now.id })).status, 404);
+    assert.equal((await createSecret("user-r", "deploy", { replaces: "sec_missing" })).status, 404);
+    // Only under its own name: the one the person was shown.
+    assert.equal((await createSecret("user-r", "other", { replaces: now.id })).status, 400);
+    const events = JSON.parse((await unixRequest(control, "GET", "/v1/users/user-r/audit?limit=10")).body).events;
+    assert.ok(events.some((e: { event: string }) => e.event === "replaced"));
+  });
+
   it("lets a write lease change things, and keeps redirects inside the vault only for allowed hosts", async () => {
     seen = [];
     const { lease: token } = await lease("user-a", "ws-a", "api", "write");

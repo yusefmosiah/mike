@@ -24,6 +24,18 @@ const RESERVED_HEADERS = new Set([
 ]);
 export const MAX_HOSTS = 10;
 
+/**
+ * Headers a secret may be put in: named for a credential. Servers log and
+ * store other headers (User-Agent, Referer, object metadata) where whoever
+ * makes the request can read them back, which would carry the secret past
+ * the scrubber.
+ */
+const CREDENTIAL_WORD = /token|key|auth|secret|passw|session/i;
+const STORED_HEADER_PREFIX = /^x-(amz|goog|ms|object|container|account|oss|cos|bz)-meta-|^x-(amz|goog)-/i;
+export function isCredentialHeader(name: string): boolean {
+  return CREDENTIAL_WORD.test(name) && !STORED_HEADER_PREFIX.test(name);
+}
+
 export class PolicyError extends Error {}
 
 /**
@@ -73,6 +85,9 @@ export function normalizeInjection(input: unknown): Injection {
       const name = typeof value.name === "string" ? value.name.trim() : "";
       if (!HEADER_NAME.test(name) || RESERVED_HEADERS.has(name.toLowerCase())) {
         throw new PolicyError("header injection needs a valid, unreserved header name");
+      }
+      if (!isCredentialHeader(name)) {
+        throw new PolicyError("a secret goes only in a header named for a credential (with token, key, auth, secret, password or session in its name)");
       }
       return { type: "header", name };
     }

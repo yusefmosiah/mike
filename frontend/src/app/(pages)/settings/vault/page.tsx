@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { SettingsCard } from "@/app/components/settings/SettingsCard";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
 import { SettingsDescription } from "@/app/components/settings/SettingsText";
-import { VaultSecretModal } from "@/app/components/vault/VaultSecretModal";
 import { TABLE_CHECKBOX_CLASS } from "@/app/components/shared/TablePrimitive";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import {
@@ -18,7 +17,6 @@ import {
     listVaultSecrets,
     updateVaultSecret,
     type VaultActivityEvent,
-    type VaultInjection,
     type VaultSecret,
     type VaultWorkstation,
 } from "@/app/lib/mikeApi";
@@ -32,11 +30,6 @@ type Loaded = {
     workstation: VaultWorkstation | null;
 };
 
-function authLabel(injection: VaultInjection): string {
-    if (injection.type === "basic") return `Username ${injection.username} with the secret`;
-    if (injection.type === "header") return `In the ${injection.name} header`;
-    return "Bearer token";
-}
 
 const when = (iso: string) =>
     new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -66,7 +59,6 @@ function activityText(event: VaultActivityEvent): string {
 export default function VaultSettingsPage() {
     const [loaded, setLoaded] = useState<Loaded | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [adding, setAdding] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
     const [busy, setBusy] = useState<string | null>(null);
 
@@ -136,20 +128,14 @@ export default function VaultSettingsPage() {
     return (
         <div className="space-y-8">
             <section className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                    <SettingsHeading>Vault</SettingsHeading>
-                    {loaded?.enabled && (
-                        <PillButtonUI tone="black" size="xs" onClick={() => setAdding(true)}>
-                            <Plus className="h-3 w-3" aria-hidden />
-                            Store a secret
-                        </PillButtonUI>
-                    )}
-                </div>
+                <SettingsHeading>Vault</SettingsHeading>
                 <SettingsDescription>
                     API keys, tokens and passwords the assistant can use without
-                    seeing them. When it needs one, the vault on the server adds
-                    it to the request, and only for the hosts you allowed. The
-                    assistant&apos;s workstation never holds it.
+                    seeing them. When a task needs one, the assistant asks for
+                    it in the chat: you paste it into a secure field there, and
+                    it goes straight to the vault on the server, which adds it
+                    to requests only for the hosts shown. The assistant&apos;s
+                    workstation never holds it.
                 </SettingsDescription>
                 {error && (
                     <p role="alert" className="text-sm text-red-600">
@@ -204,7 +190,7 @@ export default function VaultSettingsPage() {
                         <SettingsRow layout="stacked">
                             <p className="text-sm text-gray-500">
                                 No secrets stored. The assistant asks for one
-                                when a task needs it, or you can store one here.
+                                in the chat when a task needs it.
                             </p>
                         </SettingsRow>
                     ) : (
@@ -226,7 +212,6 @@ export default function VaultSettingsPage() {
                                         <p className="break-words text-gray-600">
                                             Sent only to {secret.hosts.join(", ")}
                                         </p>
-                                        <p className="text-gray-600">{authLabel(secret.injection)}</p>
                                         <p className="text-gray-500">
                                             {secret.last_used_at
                                                 ? `Last used ${when(secret.last_used_at)}`
@@ -297,14 +282,6 @@ export default function VaultSettingsPage() {
                 </section>
             )}
 
-            <VaultSecretModal
-                open={adding}
-                onClose={() => setAdding(false)}
-                onSaved={() => {
-                    setAdding(false);
-                    void load();
-                }}
-            />
         </div>
     );
 }

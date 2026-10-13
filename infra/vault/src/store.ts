@@ -141,18 +141,24 @@ export class SecretStore {
     return `sec_${randomBytes(12).toString("base64url")}`;
   }
 
-  /** Checks a new secret as `create` would, without storing it. Throws PolicyError or Conflict. */
-  checkCreate(userId: string, input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown }, value: string): string {
+  /**
+   * Checks a new secret as `create` would, without storing it; `replacing`
+   * is a secret it will take the place of. Throws PolicyError or Conflict.
+   */
+  checkCreate(
+    userId: string,
+    input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown },
+    value: string,
+    replacing?: string,
+  ): string {
     const name = normalizeName(input.name);
     normalizeDescription(input.description);
     normalizeHosts(input.hosts);
     normalizeInjection(input.injection);
     checkValue(value);
-    const user = this.data.users[userId];
-    if (user && Object.values(user.secrets).some((secret) => secret.name === name)) {
-      throw new Conflict(`a secret named ${name} already exists`);
-    }
-    if (user && Object.keys(user.secrets).length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
+    const others = Object.values(this.data.users[userId]?.secrets ?? {}).filter((secret) => secret.id !== replacing);
+    if (others.some((secret) => secret.name === name)) throw new Conflict(`a secret named ${name} already exists`);
+    if (others.length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
     return name;
   }
 
@@ -161,6 +167,7 @@ export class SecretStore {
     input: { name: unknown; description?: unknown; hosts: unknown; injection: unknown; writes?: unknown },
     value: string,
     id: string = this.newId(),
+    replacing?: string,
   ): Promise<SecretMeta> {
     const name = normalizeName(input.name);
     const description = normalizeDescription(input.description);
@@ -171,11 +178,13 @@ export class SecretStore {
     return this.mutate(() => {
       const key = this.userKey(userId, true)!;
       const user = this.data.users[userId];
-      if (Object.values(user.secrets).some((secret) => secret.name === name)) {
-        throw new Conflict(`a secret named ${name} already exists`);
-      }
-      if (Object.keys(user.secrets).length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
+      if (replacing !== undefined && !user.secrets[replacing]) throw new NotFound("no such secret");
+      const others = Object.values(user.secrets).filter((secret) => secret.id !== replacing);
+      if (others.some((secret) => secret.name === name)) throw new Conflict(`a secret named ${name} already exists`);
+      if (others.length >= MAX_SECRETS_PER_USER) throw new PolicyError("too many secrets");
       if (user.secrets[id]) throw new Conflict("secret id in use");
+      // Replacing is one change: the old secret goes as the new one arrives.
+      if (replacing !== undefined) delete user.secrets[replacing];
       const now = new Date().toISOString();
       const secret: StoredSecret = {
         id,

@@ -49,22 +49,27 @@ VM: curl $MIKE_VAULT_URL/<lease>/api.example.com/...  │ vsock port 8200, one s
 - **Backend** (`backend/src/lib/vault`, `backend/src/modules/vault`, the
   `vault_*` chat tools): the user's secrets by metadata, and leases for turns
   in the user's own workstation.
-- **Web app**: Settings → Vault, the vault form, and the credential request
+- **Web app**: the credential request in the chat (one secret field), and
+  Settings → Vault (what is stored, delete, changes without asking, activity)
   in the chat.
 
 ## Flows
 
-**Storing a credential.** The user opens the form from Settings → Vault, or
-from the card the assistant shows when it calls `vault_request_secret` (the
-turn pauses like a question). The form seals the value in the browser
-(ECDH P-256 with the vault's sealing key, HKDF-SHA256, AES-256-GCM) and sends
-the envelope with the name, the allowed hosts, how the value is attached
-(bearer, basic with a username, or a named header) and whether changes need
-approval. The value is never in the chat; the assistant's answer is the name
-it was stored under.
+**Storing a credential.** Only in the chat: when a task needs a credential,
+the assistant calls `vault_request_secret` with everything but the value (its
+name, why, the hosts, how it is usually attached) and the turn pauses like a
+question. The person sees why, where it may be sent, and one secret field;
+the button names the hosts, which is what they confirm. The browser seals the
+value with those settings (ECDH P-256 with the vault's sealing key,
+HKDF-SHA256, AES-256-GCM). The value is never in the chat; the assistant's
+answer is the name it was stored under. Asking with a name already stored
+replaces that credential: the person enters the value again, and the old one
+goes in the same change.
 
 **Using one.** The assistant calls `vault_lease` with the name and `read` or
-`write`. A read lease is issued at once. Every lease ends when the turn does. A write lease is issued at once only
+`write`, and, when the service needs it, how to attach it this time (bearer,
+basic with a username, or a named header): one token often goes in a header
+for an API and as basic auth for git. A read lease is issued at once. Every lease ends when the turn does. A write lease is issued at once only
 if the user allowed changes for that secret; otherwise it becomes an approval
 card, and the lease is issued when the user approves. The tool result tells
 the agent to send requests to `$MIKE_VAULT_URL/<lease>/<host>/<path>`. The
@@ -87,9 +92,16 @@ need no credential.
   open ports and a sandboxed systemd unit. Splitting them is what makes "the
   backend cannot read secrets" true.
 - **Destinations fixed at entry.** Updating a secret can change its
-  description and write policy, never its hosts or how it is attached.
-  Otherwise anyone who could call the control API could redirect a secret to
-  a host they own and read it from the incoming request.
+  description and write policy, never its hosts; new hosts mean entering the
+  value again (replacing it). Otherwise anyone who could call the control API
+  could redirect a secret to a host they own and read it from the incoming
+  request. How it is attached is chosen per lease: that changes nothing about
+  where it goes; a custom header must be named for a credential (token, key,
+  auth, secret, password or session, never object metadata), since servers
+  log and store other headers where the caller could read them back; the
+  caller's own Authorization, Cookie and credential headers are always
+  dropped; and responses are scrubbed of every attached form. The person sees
+  how it will be attached when they enter it, and on a write approval.
 - **Leases in memory, VM-bound, one turn long.** A lease is useless outside
   its VM, so it can appear in the conversation. The backend revokes a turn's
   leases when it ends, a VM's when a guest starts working in it or before it

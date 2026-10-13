@@ -4,12 +4,14 @@
 //   GET    /v1/seal-key                     the key browsers seal values to
 //   GET    /v1/users/:user/secrets          metadata, never values
 //   POST   /v1/users/:user/secrets          { sealed }: the browser sealed the value with its
-//                                           settings (crypto.ts); only those are used
+//                                           settings (crypto.ts); only those are used. With
+//                                           `replaces` sealed in, it takes that secret's place.
 //   PATCH  /v1/users/:user/secrets/:id      { description?, writes? }
 //   DELETE /v1/users/:user/secrets/:id      also revokes its leases
 //   DELETE /v1/users/:user                  forgets the user: every secret, their key, their leases
 //   GET    /v1/users/:user/audit?limit=n
-//   POST   /v1/leases                       { user, vm, secret (id or name), access, ttl_seconds?, chat? }
+//   POST   /v1/leases                       { user, vm, secret (id or name), access, ttl_seconds?, chat?,
+//                                             injection? (how to attach it for this lease) }
 //   DELETE /v1/leases                       { user, chat?, token?, vm? } or { vm }
 //   GET    /v1/vms/:vm                      { guests, guested_since }
 //   POST   /v1/vms/:vm/fence                { mark }: revoke everything lent to the VM and lend
@@ -22,7 +24,7 @@ import type { AuditLog } from "./audit.ts";
 import { unsealPayload, type SealedPayload, type SealedValue, type SealingKey } from "./crypto.ts";
 import type { Leases } from "./leases.ts";
 import type { VmGuard } from "./vms.ts";
-import { PolicyError } from "./policy.ts";
+import { normalizeInjection, normalizeName, PolicyError } from "./policy.ts";
 import { Conflict, NotFound, USER_ID, type SecretStore } from "./store.ts";
 
 export type ControlPlane = {
@@ -156,11 +158,21 @@ export function controlHandler(plane: ControlPlane) {
           // browser that sealed it could have written.
           if (payload.user !== userId) throw new HttpError(400, "the value was sealed for another account");
           if (!replay.accept(payload)) throw new HttpError(400, "this sealed value is stale or was already used; enter it again");
+          // Replacing takes a new value from the user, sealed with its new
+          // settings: an existing value is never given new hosts.
+          // It must be the secret the person was shown: the same name.
+          const replacing = payload.replaces;
+          if (replacing !== undefined) {
+            const old = store.get(userId, replacing);
+            if (!old) throw new NotFound("no such secret");
+            if (old.name !== normalizeName(payload.name)) throw new HttpError(400, "a secret can be replaced only under its own name");
+          }
           // Logged before it happens: a change that cannot be logged is not made.
-          const name = store.checkCreate(userId, payload, payload.value);
+          const name = store.checkCreate(userId, payload, payload.value, replacing);
           const id = store.newId();
-          await logFirst({ user: userId, event: "created", secret: id, secret_name: name });
-          const meta = await store.create(userId, payload, payload.value, id);
+          await logFirst({ user: userId, event: replacing ? "replaced" : "created", secret: id, secret_name: name });
+          if (replacing) leases.revoke({ userId, secretId: replacing });
+          const meta = await store.create(userId, payload, payload.value, id, replacing);
           return [201, { secret: meta }];
         }
       }
@@ -254,7 +266,10 @@ export function controlHandler(plane: ControlPlane) {
         if (!secret) throw new HttpError(404, "no such secret");
         const access = body.access === "write" ? "write" : "read";
         const chatId = typeof body.chat === "string" ? body.chat.slice(0, 128) : null;
+        // How to attach it this time; where it may go stays the secret's own.
+        const injection = body.injection === undefined || body.injection === null ? null : normalizeInjection(body.injection);
         const lease = leases.issue({
+          injection,
           userId,
           vm,
           secretId: secret.id,
@@ -262,7 +277,7 @@ export function controlHandler(plane: ControlPlane) {
           ttlSeconds: typeof body.ttl_seconds === "number" ? body.ttl_seconds : undefined,
           chatId,
         });
-        if (!(await audit.record({ user: userId, event: "lease", secret: secret.id, secret_name: secret.name, vm, chat: chatId, access }))) {
+        if (!(await audit.record({ user: userId, event: "lease", secret: secret.id, secret_name: secret.name, vm, chat: chatId, access, auth: (injection ?? secret.injection).type }))) {
           leases.revoke({ token: lease.token });
           throw new HttpError(503, "the vault is busy; try again shortly");
         }
@@ -271,6 +286,7 @@ export function controlHandler(plane: ControlPlane) {
           secret: secret.name,
           hosts: secret.hosts,
           access,
+          injection: injection ?? secret.injection,
           expires_at: new Date(lease.expiresAt).toISOString(),
         }];
       }

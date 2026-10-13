@@ -282,7 +282,7 @@ export const VAULT_TOOLS = [
     function: {
       name: "vault_request_secret",
       description:
-        "Ask the user to store a credential in their vault, when a task needs one they have not stored. The user enters it in a secure form that sends it straight to the vault; it never appears in the chat, and you never see it. The turn pauses until they save it or decline. Never ask for a credential in the conversation itself, and tell the user not to paste one there.",
+        "Ask the user to store a credential in their vault, when a task needs one they have not stored, or to replace one that does not work (same name: they enter a new value). The user only pastes the value into a secure field in the chat; you choose everything else here, so choose well. It goes straight to the vault; it never appears in the chat, and you never see it. The turn pauses until they save it or decline. Never ask for a credential in the conversation itself, and tell the user not to paste one there.",
       parameters: {
         type: "object",
         properties: {
@@ -302,7 +302,7 @@ export const VAULT_TOOLS = [
           auth: {
             type: "string",
             enum: ["bearer", "basic", "header"],
-            description: "How the service takes it: bearer (Authorization: Bearer <secret>), basic (username plus secret, as git over HTTPS uses), or header (a custom header such as X-API-Key).",
+            description: "How it is usually attached (default bearer); each vault_lease can attach it differently. bearer (Authorization: Bearer <secret>), basic (username plus secret), or header (a named header such as PRIVATE-TOKEN).",
           },
           username: {
             type: "string",
@@ -313,7 +313,7 @@ export const VAULT_TOOLS = [
             description: "For header: the header's name.",
           },
         },
-        required: ["name", "purpose", "hosts", "auth"],
+        required: ["name", "purpose", "hosts"],
       },
     },
   },
@@ -322,7 +322,7 @@ export const VAULT_TOOLS = [
     function: {
       name: "vault_lease",
       description:
-        "Get a short-lived lease to use one stored credential from the workstation. With it, a request to $MIKE_VAULT_URL/<lease>/<host>/<path> in the workstation goes to https://<host>/<path> with the credential attached by the vault; the response tells you how, including for git. Leases work only from this user's workstation, only for the credential's hosts, and only until this turn ends: get a new one in a later turn. A read lease allows GET, HEAD and OPTIONS. A write lease also allows changes (POST, PUT, PATCH, DELETE, git push); unless the user has allowed changes for that credential, a write lease waits for their approval.",
+        "Get a short-lived lease to use one stored credential from the workstation. With it, a request to $MIKE_VAULT_URL/<lease>/<host>/<path> in the workstation goes to https://<host>/<path> with the credential attached by the vault; the response tells you how, including for git. Leases work only from this user's workstation, only for the credential's hosts, and only until this turn ends: get a new one in a later turn. If the service rejects the credential (401), try the other ways it accepts it before asking the user to replace it. A read lease allows GET, HEAD and OPTIONS. A write lease also allows changes (POST, PUT, PATCH, DELETE, git push); unless the user has allowed changes for that credential, a write lease waits for their approval.",
       parameters: {
         type: "object",
         properties: {
@@ -336,6 +336,13 @@ export const VAULT_TOOLS = [
             type: "string",
             description: "For a write lease: what you will change, shown to the user when they approve.",
           },
+          auth: {
+            type: "string",
+            enum: ["bearer", "basic", "header"],
+            description: "How to attach the credential for this lease, when not the way it was stored. Services often take one token differently in different places: e.g. a GitLab personal access token goes in the PRIVATE-TOKEN header (or as bearer) for the API, and as basic auth with username oauth2 for git over HTTPS.",
+          },
+          username: { type: "string", description: "For basic: the username to pair with the secret." },
+          header: { type: "string", description: "For header: the header's name." },
         },
         required: ["secret", "access"],
       },

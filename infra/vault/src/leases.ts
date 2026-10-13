@@ -6,7 +6,7 @@
 // leases when the turn ends, and a VM's before someone else works in it or
 // it is wiped. Leases live in memory only: a restart revokes all of them.
 import { randomBytes } from "node:crypto";
-import type { Access } from "./policy.ts";
+import type { Access, Injection } from "./policy.ts";
 
 export type Lease = {
   token: string;
@@ -17,6 +17,12 @@ export type Lease = {
   expiresAt: number;
   /** The conversation it was issued for, for the audit log. */
   chatId: string | null;
+  /**
+   * How the secret is attached for this lease, when not the way it was
+   * stored: one service can take the same token in different ways (an API
+   * header, git's basic auth). The hosts never change.
+   */
+  injection: Injection | null;
 };
 
 export const DEFAULT_TTL_SECONDS = 15 * 60;
@@ -31,7 +37,7 @@ export class Leases {
     this.now = now;
   }
 
-  issue(input: { userId: string; vm: string; secretId: string; access: Access; ttlSeconds?: number; chatId?: string | null }): Lease {
+  issue(input: { userId: string; vm: string; secretId: string; access: Access; ttlSeconds?: number; chatId?: string | null; injection?: Injection | null }): Lease {
     this.sweep();
     const ttl = Math.min(MAX_TTL_SECONDS, Math.max(30, Math.floor(input.ttlSeconds ?? DEFAULT_TTL_SECONDS)));
     const mine = [...this.byToken.values()].filter((lease) => lease.userId === input.userId);
@@ -48,6 +54,7 @@ export class Leases {
       access: input.access,
       expiresAt: this.now() + ttl * 1000,
       chatId: input.chatId ?? null,
+      injection: input.injection ?? null,
     };
     this.byToken.set(lease.token, lease);
     return lease;

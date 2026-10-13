@@ -162,7 +162,8 @@ export function dataHandler(vm: string, plane: DataPlane) {
       deny(410, "this secret was deleted");
       return;
     }
-    const scrub = scrubSpec(secret.injection, value);
+    const injection = lease.injection ?? secret.injection;
+    const scrub = scrubSpec(injection, value);
     const path = `/${rest.join("/")}${query}`;
     const base = `/${token}`;
     const rewriteLocation = (location: string) => {
@@ -190,7 +191,7 @@ export function dataHandler(vm: string, plane: DataPlane) {
     }
     try {
       const upstream = await forward(
-        { method, host, path, headers: req.headers, body: req, inject: injectedHeader(secret.injection, value), scrub },
+        { method, host, path, headers: req.headers, body: req, inject: injectedHeader(injection, value), scrub },
         plane.forward,
       );
       plane.store.touch(lease.userId, secret.id);

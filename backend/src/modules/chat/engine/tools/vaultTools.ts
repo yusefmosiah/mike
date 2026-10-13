@@ -66,13 +66,14 @@ function describe(secret: VaultSecret) {
     name: secret.name,
     description: secret.description || undefined,
     hosts: secret.hosts,
-    auth: authOf(secret.injection),
+    auth: `${authOf(secret.injection)} (as stored; a lease can attach it another way)`,
     changes: secret.writes === "allow" ? "allowed without asking" : "need the user's approval",
   };
 }
 
+/** How the model asked for it to be attached; bearer when it did not say. */
 function injectionFrom(args: Record<string, unknown>): VaultInjection | string {
-  const auth = args.auth;
+  const auth = args.auth ?? "bearer";
   if (auth === "bearer") return { type: "bearer" };
   if (auth === "basic") {
     const username = typeof args.username === "string" ? args.username.trim() : "";
@@ -80,7 +81,12 @@ function injectionFrom(args: Record<string, unknown>): VaultInjection | string {
   }
   if (auth === "header") {
     const header = typeof args.header === "string" ? args.header.trim() : "";
-    return /^[A-Za-z0-9-]{1,64}$/.test(header) ? { type: "header", name: header } : "header needs a header name";
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(header)) return "header needs a header name";
+    // The vault puts a secret only in a header named for a credential.
+    if (!/token|key|auth|secret|passw|session/i.test(header) || /^x-(amz|goog)-/i.test(header)) {
+      return "header must be one named for a credential (with token, key, auth, secret, password or session in its name)";
+    }
+    return { type: "header", name: header };
   }
   return "auth must be bearer, basic or header";
 }
@@ -121,9 +127,9 @@ export async function runVaultTool(input: {
     }
     const secretName = typeof args.name === "string" ? args.name.trim().toLowerCase() : "";
     if (!NAME.test(secretName)) return fail("name must be lowercase letters, digits, '.', '_' or '-'");
-    if (secrets.some((secret) => secret.name === secretName)) {
-      return fail(`A credential named ${secretName} is already stored. Use vault_lease with it, or pick another name.`);
-    }
+    // An existing name is a request to replace that credential: the user
+    // enters a new value, with these settings, in its place.
+    const existing = secrets.find((secret) => secret.name === secretName);
     const hosts = (Array.isArray(args.hosts) ? args.hosts : [])
       .filter((host): host is string => typeof host === "string" && !!host.trim())
       .map((host) => host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))
@@ -140,12 +146,15 @@ export async function runVaultTool(input: {
       purpose,
       hosts: [...new Set(hosts)],
       injection,
+      ...(existing ? { replaces: existing.id } : {}),
     };
     return {
       content: json({
         ok: false,
         status: "awaiting_user",
-        message: "The user has been asked to store the credential in a secure form. Nothing is stored yet; their answer arrives in the next message.",
+        message: existing
+          ? `The user has been asked to replace the stored ${secretName} in a secure field. Nothing is changed yet; their answer arrives in the next message.`
+          : "The user has been asked to store the credential in a secure field. Nothing is stored yet; their answer arrives in the next message.",
       }),
       item,
     };
@@ -162,6 +171,13 @@ export async function runVaultTool(input: {
     );
   }
   const access = args.access === "write" ? "write" : "read";
+  // How to attach it this time, if the model asked for a particular way.
+  let leaseInjection: VaultInjection | null = null;
+  if (args.auth !== undefined) {
+    const parsed = injectionFrom(args);
+    if (typeof parsed === "string") return fail(parsed);
+    leaseInjection = parsed;
+  }
   if (access === "write" && secret.writes !== "allow") {
     if (!input.canAsk) {
       return fail(`Changes with ${secret.name} need the user's approval, which this conversation cannot ask for.`);
@@ -177,9 +193,10 @@ export async function runVaultTool(input: {
         credential: secret.name,
         hosts: secret.hosts.join(", "),
         for: "this turn (at most 15 minutes), from this conversation's workstation",
+        attached: authOf(leaseInjection ?? secret.injection),
         ...(reason ? { reason } : {}),
       },
-      binding: { type: "vault", secret_id: secret.id, vm, chat_id: input.chatId },
+      binding: { type: "vault", secret_id: secret.id, vm, chat_id: input.chatId, injection: leaseInjection },
     };
     return {
       content: json({
@@ -194,7 +211,7 @@ export async function runVaultTool(input: {
   try {
     // The vault refuses, with its own reason, a VM someone else is working
     // in or has worked in (infra/vault/src/vms.ts).
-    const lease = await issueVaultLease({ userId, vm, secret: secret.id, access, chatId: input.chatId });
+    const lease = await issueVaultLease({ userId, vm, secret: secret.id, access, chatId: input.chatId, injection: leaseInjection });
     return { content: leaseInstructions(lease), event: activity(name, "ok") };
   } catch (error) {
     const message = error instanceof VaultRequestError ? error.message : "The vault is not available right now.";
@@ -228,6 +245,7 @@ export async function executeApprovedVaultLease(
       secret: binding.secret_id,
       access: "write",
       chatId: binding.chat_id,
+      injection: binding.injection ?? null,
     });
     return { content: leaseInstructions(lease), event: activity("vault_lease", "ok") };
   } catch (error) {

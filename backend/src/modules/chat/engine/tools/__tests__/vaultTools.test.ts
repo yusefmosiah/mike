@@ -85,7 +85,12 @@ describe("vault tools", () => {
     const out = await run("vault_secrets", {});
     const body = JSON.parse(out.content);
     expect(body.secrets).toEqual([
-      { name: "blog", hosts: ["gitlab.com"], auth: "basic (username oauth2)", changes: "need the user's approval" },
+      {
+        name: "blog",
+        hosts: ["gitlab.com"],
+        auth: "basic (username oauth2) (as stored; a lease can attach it another way)",
+        changes: "need the user's approval",
+      },
     ]);
     expect(out.content).not.toContain("abcd");
     expect(out.event).toMatchObject({ connector_name: "Vault", status: "ok" });
@@ -93,9 +98,23 @@ describe("vault tools", () => {
 
   it("issue a read lease for this user's VM and chat", async () => {
     const out = await run("vault_lease", { secret: "Blog", access: "read" });
-    expect(vault.lease).toHaveBeenCalledWith({ userId: "user-1", vm: "ws-01", secret: "sec_1", access: "read", chatId: "chat-1" });
+    expect(vault.lease).toHaveBeenCalledWith({ userId: "user-1", vm: "ws-01", secret: "sec_1", access: "read", chatId: "chat-1", injection: null });
     expect(out.content).toContain("$MIKE_VAULT_URL/mvl_token/gitlab.com/");
     expect(out.item).toBeUndefined();
+  });
+
+  it("attach the secret the way the lease asks, for reads and approved writes", async () => {
+    await run("vault_lease", { secret: "blog", access: "read", auth: "header", header: "PRIVATE-TOKEN" });
+    expect(vault.lease).toHaveBeenLastCalledWith(expect.objectContaining({ injection: { type: "header", name: "PRIVATE-TOKEN" } }));
+    const write = await run("vault_lease", { secret: "blog", access: "write", auth: "basic", username: "oauth2" });
+    expect((write.item as ConnectorApprovalItem).binding).toMatchObject({ injection: { type: "basic", username: "oauth2" } });
+    const bad = await run("vault_lease", { secret: "blog", access: "read", auth: "header" });
+    expect(JSON.parse(bad.content).error).toMatch(/header name/);
+    for (const header of ["User-Agent", "Referer", "x-amz-meta-token"]) {
+      const logged = await run("vault_lease", { secret: "blog", access: "read", auth: "header", header });
+      expect(JSON.parse(logged.content).error, header).toMatch(/named for a credential/);
+    }
+    expect((write.item as ConnectorApprovalItem).arguments).toMatchObject({ attached: "basic (username oauth2)" });
   });
 
   it("turn a write lease into an approval unless changes are allowed", async () => {
@@ -143,8 +162,10 @@ describe("vault tools", () => {
       hosts: ["api.example.com"],
       injection: { type: "header", name: "X-API-Key" },
     });
-    const duplicate = await run("vault_request_secret", { name: "blog", purpose: "", hosts: ["a.com"], auth: "bearer" });
-    expect(JSON.parse(duplicate.content).error).toMatch(/already stored/);
+    // A stored name asks the user to replace that credential.
+    const replace = await run("vault_request_secret", { name: "blog", purpose: "", hosts: ["gitlab.com"] });
+    expect(replace.item).toMatchObject({ kind: "secret", name: "blog", replaces: "sec_1", injection: { type: "bearer" } });
+    expect(JSON.parse(replace.content).message).toMatch(/replace the stored blog/);
     const basic = await run("vault_request_secret", { name: "git", purpose: "", hosts: ["a.com"], auth: "basic" });
     expect(JSON.parse(basic.content).error).toMatch(/username/);
   });
@@ -194,7 +215,7 @@ describe("vault tools", () => {
     } as ConnectorApprovalItem;
     vault.lease.mockResolvedValue({ lease: "mvl_w", secret: "blog", hosts: ["gitlab.com"], access: "write", expires_at: "t" });
     const out = await executeApprovedVaultLease(db, "user-1", item);
-    expect(vault.lease).toHaveBeenCalledWith({ userId: "user-1", vm: "ws-01", secret: "sec_1", access: "write", chatId: "chat-1" });
+    expect(vault.lease).toHaveBeenCalledWith({ userId: "user-1", vm: "ws-01", secret: "sec_1", access: "write", chatId: "chat-1", injection: null });
     expect(out.content).toContain("mvl_w");
     expect(out.event.status).toBe("ok");
   });

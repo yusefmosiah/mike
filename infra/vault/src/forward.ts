@@ -12,7 +12,7 @@ import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders } from "
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
 import type { Readable } from "node:stream";
-import { METHOD_OVERRIDE_HEADERS, type ScrubSpec } from "./policy.ts";
+import { isCredentialHeader, METHOD_OVERRIDE_HEADERS, type ScrubSpec } from "./policy.ts";
 import { scrubText } from "./scrub.ts";
 
 const blocked = new BlockList();
@@ -90,6 +90,10 @@ export async function forward(upstream: UpstreamRequest, options: ForwardOptions
   for (const [name, value] of Object.entries(upstream.headers)) {
     const key = name.toLowerCase();
     if (HOP_BY_HOP.has(key) || DROPPED_REQUEST.has(key)) continue;
+    // The secret is the only credential on the request: a caller's own
+    // login could make the service file the request (and a secret put in
+    // some other header) where the caller can read it.
+    if (key === "authorization" || key === "cookie" || isCredentialHeader(key)) continue;
     if (key.startsWith("x-forwarded-") || key === "forwarded" || key === "x-real-ip") continue;
     if (value !== undefined) headers[key] = value;
   }

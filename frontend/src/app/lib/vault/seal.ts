@@ -26,6 +26,8 @@ export type SealInput = {
     hosts: string[];
     injection: unknown;
     writes: "ask" | "allow";
+    /** A stored secret's id this one replaces, with this new value. */
+    replaces?: string;
 };
 
 /** The backend offered a key other than the vault's: nothing was sealed. */
