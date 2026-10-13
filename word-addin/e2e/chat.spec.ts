@@ -403,9 +403,13 @@ test("shows a scroll-to-bottom control while the transcript is scrolled up", asy
     }))
     .toBeLessThan(2);
   await messagesContainer.hover();
-  await page.mouse.wheel(0, -10_000);
+  // A user scrolls up until the top. One large wheel event does not always
+  // get there in WebKit on a loaded CI runner, so keep scrolling.
   await expect
-    .poll(() => messagesContainer.evaluate((container) => container.scrollTop))
+    .poll(async () => {
+      await page.mouse.wheel(0, -10_000);
+      return messagesContainer.evaluate((container) => container.scrollTop);
+    })
     .toBeLessThan(2);
 
   const scrollButton = page.getByRole("button", { name: "Scroll to bottom" });
