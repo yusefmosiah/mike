@@ -16,6 +16,7 @@ import {
   resolveWorkstation,
 } from "../assignments";
 import { isTemporaryEmail, targetForVm, workstationPool } from "../config";
+import { VaultRequestError } from "../../vault/client";
 
 type Row = { vm: string; user_id: string; temporary?: boolean; last_used_at?: string; wiping?: boolean };
 
@@ -193,7 +194,6 @@ describe("temporary VMs for test accounts", () => {
   it("fences the VM in the vault around the wipe, and keeps it with its account when fencing fails", async () => {
     vault.enabled.mockReturnValue(true);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { VaultRequestError } = await import("../../vault/client");
     try {
       const db = fakeDb([{ vm: "ws-02", user_id: "t1", temporary: true, last_used_at: ago(180) }]);
       const wipe = wipeOk();

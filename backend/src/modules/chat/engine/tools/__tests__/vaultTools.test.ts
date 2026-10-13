@@ -27,6 +27,7 @@ vi.mock("../../../../../lib/vault/client", async (importOriginal) => {
 });
 
 import { executeApprovedVaultLease, runVaultTool } from "../vaultTools";
+import { VaultRequestError } from "../../../../../lib/vault/client";
 
 const db = {} as never;
 
@@ -149,7 +150,6 @@ describe("vault tools", () => {
   });
 
   it("pass on the vault's refusal for a VM someone else works in, and lend nothing to a VM no longer theirs", async () => {
-    const { VaultRequestError } = await import("../../../../../lib/vault/client");
     vault.lease.mockRejectedValueOnce(new VaultRequestError(409, "Someone else is working in this workstation right now."));
     const busy = await run("vault_lease", { secret: "blog", access: "read" });
     expect(JSON.parse(busy.content).error).toContain("Someone else is working");
