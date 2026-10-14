@@ -95,12 +95,6 @@ vi.mock("@/app/contexts/UserProfileContext", () => ({
 vi.mock("@/app/contexts/SidebarContext", () => ({
     useSidebar: () => ({ setSidebarOpen: vi.fn() }),
 }));
-vi.mock("@/app/hooks/useAssistantMessageLayout", () => ({
-    useAssistantMessageLayout: () => ({
-        minHeight: "100px",
-        scrollLatestUserToTop: vi.fn(),
-    }),
-}));
 vi.mock("@/app/components/projects/ProjectExplorer", () => ({
     ProjectExplorer: ({
         documents,
@@ -167,7 +161,43 @@ vi.mock("@/app/components/assistant/ChatInputPrompt", () => ({
     ChatInputPrompt: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/app/components/assistant/UserMessage", () => ({
-    UserMessage: ({ content }: { content: string }) => <p>{content}</p>,
+    UserMessage: ({
+        content,
+        workflow,
+        onWorkflowClick,
+    }: {
+        content: string;
+        workflow?: { id: string; title: string };
+        onWorkflowClick?: (workflow: { id: string; title: string }) => void;
+    }) => (
+        <>
+            <p>{content}</p>
+            {workflow && (
+                <button type="button" onClick={() => onWorkflowClick?.(workflow)}>
+                    Workflow {workflow.title}
+                </button>
+            )}
+        </>
+    ),
+}));
+vi.mock("@/app/components/assistant/AssistantWorkflowModal", () => ({
+    AssistantWorkflowModal: ({
+        open,
+        initialWorkflowId,
+        onClose,
+    }: {
+        open: boolean;
+        initialWorkflowId?: string;
+        onClose: () => void;
+    }) =>
+        open ? (
+            <div role="dialog" aria-label="Workflow">
+                Workflow {initialWorkflowId}
+                <button type="button" onClick={onClose}>
+                    Close workflow
+                </button>
+            </div>
+        ) : null,
 }));
 vi.mock("@/app/components/assistant/AssistantMessage", () => ({
     AssistantMessage: ({
@@ -227,7 +257,16 @@ vi.mock("@/app/components/projects/ProjectWorkspaceTips", () => ({
     ProjectWorkspaceTips: () => null,
 }));
 
+// ChatThread measures and scrolls its layout; jsdom does neither.
+class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+
 beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    Element.prototype.scrollTo = vi.fn();
     vi.clearAllMocks();
     state.getDocument.mockReset();
     state.deleteDocument.mockReset().mockResolvedValue(undefined);
@@ -816,6 +855,45 @@ describe("project chat workspace lifecycle", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Open draft" }));
         expect(pill).toHaveAttribute("data-active", "false");
+    });
+
+    it("opens a prompt's workflow chip in the workflow modal", async () => {
+        state.getChat.mockResolvedValueOnce({
+            chat: {
+                id: "c1",
+                project_id: "p1",
+                title: "Existing chat",
+                user_id: "u1",
+                created_at: "2026-09-15T00:00:00Z",
+            },
+            messages: [
+                {
+                    id: "m1",
+                    role: "user",
+                    content: "Review this",
+                    workflow: { id: "wf-1", title: "Review" },
+                },
+            ],
+        });
+        window.history.replaceState(null, "", "/projects/p1/assistant/chat/c1");
+        await act(async () => {
+            render(
+                <Suspense fallback="Loading">
+                    <ProjectAssistantChatPage
+                        params={Promise.resolve({ id: "p1", chatId: "c1" })}
+                    />
+                </Suspense>,
+            );
+        });
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Workflow Review" }),
+        );
+        expect(screen.getByRole("dialog", { name: "Workflow" })).toHaveTextContent(
+            "Workflow wf-1",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Close workflow" }));
+        expect(screen.queryByRole("dialog", { name: "Workflow" })).toBeNull();
     });
 
     it("hides the composer until the chat and project access both resolve", async () => {

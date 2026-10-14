@@ -141,7 +141,8 @@ for (const scope of ["assistant", "project", "tabular"] as const) {
                 });
             }
 
-            if (scope === "assistant") {
+            // The project assistant renders the same thread (ChatThread).
+            if (scope !== "tabular") {
                 const content = page.locator('[data-slot="chat-messages-content"]');
                 await content.evaluate((element) => {
                     const viewport = element.parentElement!;

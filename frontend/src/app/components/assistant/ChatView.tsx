@@ -1,10 +1,8 @@
 "use client";
 
-import { findPendingAskInput } from "@/app/lib/pendingAskInput";
 import {
     useCallback,
     useEffect,
-    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -12,7 +10,6 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-    ArrowDown,
     PanelRight,
     Pencil,
     Plus,
@@ -20,22 +17,13 @@ import {
     Users,
     Zap,
 } from "lucide-react";
-import { UserMessage } from "./UserMessage";
-import { AssistantMessage } from "./AssistantMessage";
-import { CodeApprovalRequests } from "./CodeApprovalRequests";
-import { ChatInput } from "./ChatInput";
-import {
-    computedPadding,
-    onScrollViewportChange,
-    scrollViewportOf,
-} from "@/app/lib/scrollViewport";
+import { ChatThread } from "./ChatThread";
 import { InitialView } from "./InitialView";
 import { QuickActionsModal } from "./QuickActionsModal";
 import { AddDocumentsModal } from "@/app/components/modals/AddDocumentsModal";
 import { useQuickActions } from "@/app/hooks/useQuickActions";
 import { resolveDocumentViewType } from "@/app/lib/documentViewType";
 import type { ChatInputHandle } from "./ChatInput";
-import { ChatInputPrompt } from "./ChatInputPrompt";
 import {
     AssistantSidePanel,
     assistantSidePanelTabId,
@@ -68,7 +56,6 @@ import { usePageChrome } from "@/app/contexts/PageChromeContext";
 import { invalidateDocxBytes } from "@/app/hooks/useFetchDocxBytes";
 import { panelDocumentAtVersion } from "@/app/lib/panelDocumentAtVersion";
 import { resolvePanelDocumentVersionResult } from "./panelDocumentVersion";
-import { LIQUID_GLASS_TRANSLUCENT_ACTION_CLASS } from "@/app/components/ui/liquid-surface";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import {
     HeaderActionsMenu,
@@ -85,7 +72,6 @@ import {
 } from "@/app/lib/modelAvailability";
 import { can, roleFrom } from "@/app/lib/permissions";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { generatingNotice, threadHasOtherAuthors, threadPersonLabel } from "./threadAuthors";
 import {
     createBranch,
     deleteDocument,
@@ -201,12 +187,6 @@ interface Props {
 
 const ASSISTANT_PANEL_TRANSITION_MS = 500;
 const MOBILE_BREAKPOINT_PX = 768;
-const DEFAULT_ASSISTANT_BOTTOM_PADDING = 116;
-const CHAT_MESSAGE_TOP_PADDING = 76;
-/** How close to the end of the thread counts as reading the end. */
-const FOLLOW_STREAM_THRESHOLD_PX = 24;
-const SCROLL_BUTTON_INPUT_GAP = 16;
-const CHAT_INPUT_BOTTOM_OFFSET = 12;
 
 function isSmallScreen() {
     return (
@@ -241,8 +221,6 @@ export function ChatView({
     const router = useRouter();
     const { user } = useAuth();
     const viewerId = user?.id ?? null;
-    // Prompts name their sender once someone besides the reader has written.
-    const showAuthors = threadHasOtherAuthors(messages, viewerId);
     // The model is what we asked for, so it identifies whose key was rejected.
     const rejectedKeyProvider = useMemo(
         () =>
@@ -309,9 +287,6 @@ export function ChatView({
     const activeTab = tabs.find((tab) => tab.id === activeTabId);
     const activeCitation =
         activeTab?.kind === "citation" ? activeTab.citation : null;
-    // Branch controls mutate stored rows; acting while an answer streams
-    // would race the turn writing into this chat.
-    const branchActionsEnabled = !isResponseLoading;
 
     const showPanel = useCallback(() => {
         if (panelCloseTimerRef.current !== null) {
@@ -920,260 +895,7 @@ export function ChatView({
         [patchTab],
     );
 
-    const messagesContainerRef = useRef<HTMLDivElement>(null);
-    const messagesContentRef = useRef<HTMLDivElement>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const latestUserMessageRef = useRef<HTMLDivElement>(null);
     const chatInputRef = useRef<ChatInputHandle | null>(null);
-    const measuredInputRef = useRef<HTMLDivElement>(null);
-    // Seed "already in place" when messages exist at mount (a freshly created
-    // chat arrives with its first message in hand). Otherwise the skeleton +
-    // opacity-0 gate would flash the message out and fade it back in on every
-    // remount. Existing chats mount with messages === [] and fetch async, so
-    // they still start hidden and reveal once loaded.
-    const hasScrolledRef = useRef(messages.length > 0 && !chatLoading);
-    const positionedChatRef = useRef<string | undefined>(
-        messages.length > 0 && !chatLoading ? chatId : undefined,
-    );
-    const [messagesVisible, setMessagesVisible] = useState(
-        () => messages.length > 0 && !chatLoading,
-    );
-    const [showScrollButton, setShowScrollButton] = useState(false);
-    const scrollButtonVisibleRef = useRef(false);
-    const [inputHeight, setInputHeight] = useState(0);
-    const [minHeight, setMinHeight] = useState("0px");
-
-    useEffect(() => {
-        const el = measuredInputRef.current;
-        if (!el) return;
-        const update = () => setInputHeight(el.offsetHeight);
-        const observer = new ResizeObserver(update);
-        observer.observe(el);
-        update();
-        return () => observer.disconnect();
-        // Re-runs when the composer mounts: it is absent until access
-        // resolves, and the scroll button is positioned from its height.
-    }, [accessResolved]);
-
-    useEffect(() => {
-        const container = messagesContainerRef.current;
-        const content = messagesContentRef.current;
-        const userMessage = latestUserMessageRef.current;
-        if (!container || !content || !userMessage) return;
-        // Size the latest response so that, scrolled to the bottom, the latest
-        // user message sits CHAT_MESSAGE_TOP_PADDING below the viewport top —
-        // the same place scrollLatestUserToTop puts it. Measure the real
-        // scroll viewport: it is not the full dynamic viewport height.
-        const update = () => {
-            const messageGap =
-                window.innerWidth < MOBILE_BREAKPOINT_PX ? 24 : 32;
-            setMinHeight(
-                `${Math.max(
-                    0,
-                    scrollViewportOf(container).height -
-                        computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING) -
-                        userMessage.offsetHeight -
-                        // One list gap before the response and one before
-                        // the trailing scroll anchor (messagesEndRef).
-                        messageGap * 2 -
-                        computedPadding(content, "bottom", DEFAULT_ASSISTANT_BOTTOM_PADDING),
-                )}px`,
-            );
-        };
-        update();
-        const observer = new ResizeObserver(update);
-        observer.observe(container);
-        observer.observe(userMessage);
-        // On a phone the page scrolls, and its height changes with Safari's bars.
-        window.addEventListener("resize", update);
-        return () => {
-            observer.disconnect();
-            window.removeEventListener("resize", update);
-        };
-    }, [messages.length]);
-
-    // While an answer streams, keep its newest text in view, as long as the
-    // reader is at the end of the thread. Scrolling up stops following and
-    // scrolling back to the end resumes it; the answer finishing moves
-    // nothing. Our own scrolls only ever move down, so any upward scroll is
-    // the reader's.
-    const followRef = useRef(true);
-    const followStreamRef = useRef(isResponseLoading);
-    const scrollToEnd = useCallback(() => {
-        const c = messagesContainerRef.current;
-        if (!c) return;
-        const viewport = scrollViewportOf(c);
-        const end = viewport.scrollHeight - viewport.height;
-        if (end > viewport.scrollTop) viewport.scrollTo({ top: end, behavior: "auto" });
-    }, []);
-    useLayoutEffect(() => {
-        const wasStreaming = followStreamRef.current;
-        followStreamRef.current = isResponseLoading;
-        // The answer's last words and its actions arrive with the end of the
-        // stream, in this commit: a reader following it sees them too.
-        if (wasStreaming && !isResponseLoading && followRef.current) scrollToEnd();
-    }, [isResponseLoading, scrollToEnd]);
-
-    const isInitialView = Boolean(onInitialSubmit);
-    useEffect(() => {
-        const c = messagesContainerRef.current;
-        const content = messagesContentRef.current;
-        if (!c || !content) return;
-        let frame: number | null = null;
-        let lastTop = scrollViewportOf(c).scrollTop;
-        const measure = () => {
-            frame = null;
-            const viewport = scrollViewportOf(c);
-            const { scrollHeight, height } = viewport;
-            const fromEnd = scrollHeight - viewport.scrollTop - height;
-            // Back at the end of the thread: follow the answer again.
-            if (fromEnd <= FOLLOW_STREAM_THRESHOLD_PX) followRef.current = true;
-            const visible = scrollHeight > height && fromEnd > 10;
-            // Avoid dispatching even an unchanged value during a busy stream:
-            // React cannot always bail out eagerly while other work is queued.
-            if (visible !== scrollButtonVisibleRef.current) {
-                scrollButtonVisibleRef.current = visible;
-                setShowScrollButton(visible);
-            }
-        };
-        const scheduleMeasure = () => {
-            if (frame === null) frame = requestAnimationFrame(measure);
-        };
-        const onScroll = () => {
-            const top = scrollViewportOf(c).scrollTop;
-            if (top < lastTop - 1) followRef.current = false;
-            lastTop = top;
-            scheduleMeasure();
-        };
-        // Measure actual layout changes, including smoothed text reveal.
-        // Depending on `messages` dispatches state from an effect on every
-        // streamed chunk and can exceed React's nested passive-update limit.
-        // Following runs here rather than in the frame: the observer fires
-        // after layout and before paint, so new text never shows below the
-        // fold first.
-        const observer = new ResizeObserver(() => {
-            if (followStreamRef.current && followRef.current) scrollToEnd();
-            scheduleMeasure();
-        });
-        observer.observe(c);
-        observer.observe(content);
-        const stopListening = onScrollViewportChange(c, onScroll);
-        scheduleMeasure();
-        return () => {
-            observer.disconnect();
-            stopListening();
-            if (frame !== null) cancelAnimationFrame(frame);
-        };
-        // The container mounts when the initial screen becomes a conversation.
-    }, [isInitialView, scrollToEnd]);
-
-    const scrollToBottom = () => {
-        followRef.current = true;
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
-    const scrollLatestUserToTop = useCallback(
-        (
-            behavior: ScrollBehavior = "smooth",
-            onPositioned?: () => void,
-        ) => {
-            let frame = requestAnimationFrame(() => {
-                frame = requestAnimationFrame(() => {
-                    const container = messagesContainerRef.current;
-                    const element = latestUserMessageRef.current;
-                    if (!container || !element) return;
-                    const viewport = scrollViewportOf(container);
-                    const content = messagesContentRef.current;
-                    // Measure both nodes in viewport coordinates. `offsetTop`
-                    // can be relative to the centered inner column rather
-                    // than this scrolling element, which positions a
-                    // revisited thread at the wrong message.
-                    const messageTop =
-                        element.getBoundingClientRect().top -
-                        viewport.top +
-                        viewport.scrollTop;
-                    viewport.scrollTo({
-                        top: Math.max(
-                            0,
-                            messageTop -
-                                (content
-                                    ? computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING)
-                                    : CHAT_MESSAGE_TOP_PADDING),
-                        ),
-                        behavior,
-                    });
-                    onPositioned?.();
-                });
-            });
-            return () => cancelAnimationFrame(frame);
-        },
-        [],
-    );
-
-    useEffect(() => {
-        if (chatLoading) return;
-        const last = messages[messages.length - 1];
-        if (last?.role !== "user") return;
-        // A new prompt: show it at the top, with its answer following below.
-        followRef.current = true;
-        return scrollLatestUserToTop();
-    }, [chatLoading, messages, scrollLatestUserToTop]);
-
-    useEffect(() => {
-        // A detached turn attaches before its stored history arrives. Wait for
-        // that history so the ref points at the latest user message in the
-        // complete transcript, rather than the turn's temporary one-message
-        // overlay.
-        if (!isResponseLoading || chatLoading) return;
-        followRef.current = true;
-        return scrollLatestUserToTop();
-    }, [chatLoading, isResponseLoading, scrollLatestUserToTop]);
-
-    const hasMessages = messages.length > 0;
-    const userMessageCount = messages.filter(
-        (message) => message.role === "user",
-    ).length;
-    useEffect(() => {
-        const viewingUnpositionedChat = positionedChatRef.current !== chatId;
-        if (chatLoading) {
-            hasScrolledRef.current = false;
-            // A live detached turn keeps `messages` non-empty while history
-            // loads, so the chat id/loading state—not an empty transcript—is
-            // what resets the positioning gate.
-            setMessagesVisible(false);
-            return;
-        }
-        if (!hasMessages) {
-            hasScrolledRef.current = false;
-            positionedChatRef.current = undefined;
-            setMessagesVisible(false);
-        } else if (!hasScrolledRef.current || viewingUnpositionedChat) {
-            if (
-                userMessageCount >= 2 &&
-                latestUserMessageRef.current &&
-                messagesContainerRef.current
-            ) {
-                return scrollLatestUserToTop("auto", () => {
-                    hasScrolledRef.current = true;
-                    positionedChatRef.current = chatId;
-                    setMessagesVisible(true);
-                });
-            } else {
-                hasScrolledRef.current = true;
-                positionedChatRef.current = chatId;
-                setMessagesVisible(true);
-            }
-        }
-        // Keep the two-frame positioning operation alive while text streams.
-        // Depending on messages would cancel it before its reveal callback.
-    }, [
-        chatId,
-        chatLoading,
-        hasMessages,
-        userMessageCount,
-        scrollLatestUserToTop,
-    ]);
-    /* eslint-enable react-hooks/set-state-in-effect */
 
     useEffect(() => {
         if (panelMounted && window.innerWidth < 768) {
@@ -1326,7 +1048,11 @@ export function ChatView({
         </>
     );
 
-    const messagesBottomPadding = DEFAULT_ASSISTANT_BOTTOM_PADDING;
+    const openWorkflow = (workflowId: string) => {
+        setWorkflowModalInitialId(workflowId);
+        setWorkflowModalOpen(true);
+    };
+
     // Readers of a shared chat may view its documents but not change them.
     const canWrite =
         accessResolved && (canSend === undefined || canSend === true);
@@ -1347,382 +1073,55 @@ export function ChatView({
                         }
                     />
                 ) : (
-                    <>
-
-                        {/* Scrollable messages */}
-                        <div
-                            ref={messagesContainerRef}
-                            data-slot="chat-messages-scroller"
-                            className="flex-1 w-full overflow-y-auto"
-                            style={{ scrollbarGutter: "stable both-edges" }}
-                        >
-                            <div
-                                ref={messagesContentRef}
-                                data-slot="chat-messages-content"
-                                className="w-full max-w-4xl mx-auto px-6 md:px-8 min-h-full flex flex-col relative"
-                                style={{
-                                    // Clear the status bar when the page runs
-                                    // under it, and the composer's gap from
-                                    // the bottom of the screen.
-                                    paddingTop: `calc(${CHAT_MESSAGE_TOP_PADDING}px + env(safe-area-inset-top, 0px))`,
-                                    paddingBottom: `calc(${messagesBottomPadding}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px)`,
-                                }}
-                            >
-                                {!messagesVisible && (
-                                    <div className="space-y-6 md:space-y-8 w-full">
-                                        <div className="flex justify-end">
-                                            <div className="bg-gray-100 rounded-2xl p-4 w-2/5">
-                                                <div className="theme-shimmer h-4 bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded w-full" />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-3">
-                                            {[1, 2, 3, 4].map((i) => (
-                                                <div
-                                                    key={i}
-                                                    className={`theme-shimmer h-4 bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded ${i === 3 ? "w-5/6" : i === 4 ? "w-4/6" : "w-full"}`}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                                <div
-                                    className="space-y-6 md:space-y-8 transition-opacity duration-150"
-                                    style={{ opacity: messagesVisible ? 1 : 0 }}
-                                >
-                                    {(() => {
-                                        const lastUserIndex = messages
-                                            .map((m) => m.role)
-                                            .lastIndexOf("user");
-                                        const lastAssistantIndex = messages
-                                            .map((m) => m.role)
-                                            .lastIndexOf("assistant");
-                                        // The message still waiting on the
-                                        // user's input or approval, if any.
-                                        const pendingAskInputIndex =
-                                            findPendingAskInput(messages)
-                                                ?.messageIndex ?? -1;
-                                        return messages.map((msg, i) => {
-                                            const sibling =
-                                                msg.sibling ??
-                                                (msg.id
-                                                    ? siblingById?.[msg.id]
-                                                    : undefined) ??
-                                                null;
-                                            const siblingIds =
-                                                msg.sibling?.ids ??
-                                                (msg.id
-                                                    ? siblingById?.[msg.id]?.ids
-                                                    : undefined);
-                                            // Ordered sibling ids the view was
-                                            // handed, when it has them; the
-                                            // handler asks the branch API
-                                            // otherwise.
-                                            const knownSiblingIds =
-                                                siblingIds &&
-                                                msg.id &&
-                                                siblingIds.length > 1 &&
-                                                siblingIds.some(
-                                                    (id) =>
-                                                        String(id) === msg.id,
-                                                )
-                                                    ? siblingIds
-                                                    : null;
-                                            const previous =
-                                                i > 0 ? messages[i - 1] : null;
-                                            const parentUser =
-                                                msg.role === "assistant" &&
-                                                previous?.role === "user"
-                                                    ? previous
-                                                    : null;
-                                            return (
-                                                <div
-                                                    key={msg.id ?? i}
-                                                    ref={
-                                                        i === lastUserIndex
-                                                            ? latestUserMessageRef
-                                                            : null
-                                                    }
-                                                >
-                                                    {msg.role === "user" ? (
-                                                        <UserMessage
-                                                            messageId={msg.id}
-                                                            error={msg.error}
-                                                            sibling={sibling}
-                                                            authorLabel={
-                                                                showAuthors && msg.author
-                                                                    ? threadPersonLabel(msg.author, viewerId)
-                                                                    : null
-                                                            }
-                                                            onEditBranch={
-                                                                chatId &&
-                                                                msg.id
-                                                                    ? (content) =>
-                                                                          handleEditBranch(
-                                                                              msg,
-                                                                              content,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            editDisabled={
-                                                                !branchActionsEnabled
-                                                            }
-                                                            onNavigateSibling={
-                                                                branchActionsEnabled &&
-                                                                msg.id
-                                                                    ? (dir) =>
-                                                                          void handleNavigateSibling(
-                                                                              msg,
-                                                                              knownSiblingIds,
-                                                                              dir,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            content={msg.content ?? ""}
-                                                            files={msg.files}
-                                                            workflow={msg.workflow}
-                                                            onWorkflowClick={(wf) => {
-                                                                setWorkflowModalInitialId(
-                                                                    wf.id,
-                                                                );
-                                                                setWorkflowModalOpen(true);
-                                                            }}
-                                                            onFileClick={(file) => {
-                                                                if (!file.document_id)
-                                                                    return;
-                                                                openDocument({
-                                                                    documentId:
-                                                                        file.document_id,
-                                                                    filename:
-                                                                        file.filename,
-                                                                    versionId:
-                                                                        file.version_id ??
-                                                                        null,
-                                                                    versionNumber:
-                                                                        file.version_number ??
-                                                                        null,
-                                                                });
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <AssistantMessage
-                                                            messageId={msg.id}
-                                                            onLoadSubagentTranscript={
-                                                                chatId
-                                                                    ? loadSubagentTranscript
-                                                                    : undefined
-                                                            }
-                                                            sibling={sibling}
-                                                            onRegenerate={
-                                                                branchActionsEnabled &&
-                                                                onRegenerate &&
-                                                                parentUser?.id
-                                                                    ? () =>
-                                                                          void handleRegenerate(
-                                                                              msg,
-                                                                              parentUser,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            onNavigateSibling={
-                                                                branchActionsEnabled &&
-                                                                msg.id
-                                                                    ? (dir) =>
-                                                                          void handleNavigateSibling(
-                                                                              msg,
-                                                                              knownSiblingIds,
-                                                                              dir,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            onBranchIntoNewThread={
-                                                                branchActionsEnabled &&
-                                                                onBranchIntoNewThread &&
-                                                                msg.id
-                                                                    ? () =>
-                                                                          void handleBranchIntoNewThread(
-                                                                              msg,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            events={msg.events}
-                                                            isStreaming={
-                                                                i === messages.length - 1 &&
-                                                                isResponseLoading
-                                                            }
-                                                            awaitingInput={
-                                                                i === pendingAskInputIndex
-                                                            }
-                                                            isError={!!msg.error}
-                                                            errorMessage={
-                                                                typeof msg.error ===
-                                                                "string"
-                                                                    ? msg.error
-                                                                    : undefined
-                                                            }
-                                                            citations={msg.citations}
-                                                            citationStatus={
-                                                                msg.citationStatus
-                                                            }
-                                                            activeCitation={
-                                                                activeCitation
-                                                            }
-                                                            onCitationClick={(citation) => {
-                                                                if (activeCitation === citation && activeTab) {
-                                                                    handleCloseAnnotation(activeTab.id);
-                                                                } else {
-                                                                    void openCitation(citation);
-                                                                }
-                                                            }}
-                                                            onOpenCitationSource={(
-                                                                citation,
-                                                            ) =>
-                                                                void openCitation(
-                                                                    citation,
-                                                                    {
-                                                                        showQuotes: false,
-                                                                    },
-                                                                )
-                                                            }
-                                                            onCaseClick={(citation) =>
-                                                                openCase(citation)
-                                                            }
-                                                            minHeight={
-                                                                i === lastAssistantIndex
-                                                                    ? minHeight
-                                                                    : "0px"
-                                                            }
-                                                            onWorkflowClick={(id) => {
-                                                                setWorkflowModalInitialId(
-                                                                    id,
-                                                                );
-                                                                setWorkflowModalOpen(true);
-                                                            }}
-                                                            onEditViewClick={openEditor}
-                                                            onOpenDocument={openDocument}
-                                                            onEditResolveStart={
-                                                                handleEditResolveStart
-                                                            }
-                                                            onEditResolved={
-                                                                handleEditResolved
-                                                            }
-                                                            onEditError={handleEditError}
-                                                            isDocReloading={(docId) =>
-                                                                reloadingDocIds.has(docId)
-                                                            }
-                                                            isEditReloading={(editId) =>
-                                                                reloadingEditIds.has(editId)
-                                                            }
-                                                            resolvedEditStatuses={
-                                                                resolvedEditStatuses
-                                                            }
-                                                        />
-                                                    )}
-                                                </div>
-                                            );
-                                        });
-                                    })()}
-                                    <div ref={messagesEndRef} />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div
-                            data-slot="chat-composer-fade"
-                            className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
-                        >
-                            <div className="mx-auto h-28 w-full max-w-4xl px-4 md:px-6">
-                                <div className="assistant-chat-input-fade h-full w-full" />
-                            </div>
-                        </div>
-
-                        {/* Scroll to bottom button */}
-                        {showScrollButton && (
-                            <div
-                                data-slot="chat-scroll-button"
-                                className="absolute left-1/2 -translate-x-1/2 z-19"
-                                style={{
-                                    bottom: `calc(${inputHeight + SCROLL_BUTTON_INPUT_GAP}px + var(--chat-composer-gap))`,
-                                }}
-                            >
-                                <button
-                                    type="button"
-                                    aria-label="Scroll to bottom"
-                                    onClick={scrollToBottom}
-                                    className={`cursor-pointer rounded-full p-2 transition-all ${LIQUID_GLASS_TRANSLUCENT_ACTION_CLASS}`}
-                                >
-                                    <ArrowDown className="h-6 w-6 text-gray-500" />
-                                </button>
-                            </div>
-                        )}
-
-                        {/* Chat input */}
-                        {accessResolved && (
-                            <div
-                                data-slot="chat-composer-dock"
-                                className="absolute bottom-0 left-0 right-0 w-full z-30 pb-[var(--chat-composer-gap)]"
-                            >
-                                <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-0">
-                                    <div className="mx-auto h-[calc(var(--chat-composer-gap)+1rem)] w-full max-w-4xl px-4 md:px-6">
-                                        <div className="h-full rounded-t-[20px] bg-app-background" />
-                                    </div>
-                                </div>
-                                <div
-                                    ref={measuredInputRef}
-                                    data-slot="chat-composer"
-                                    className="relative z-20 w-full max-w-4xl mx-auto px-4 md:px-6"
-                                >
-                                    <div className="w-full rounded-t-[20px] bg-transparent">
-                                        <CodeApprovalRequests
-                                            chatId={chatId ?? null}
-                                            isHost={!!chat && !!viewerId && chat.user_id === viewerId}
-                                            watching={!!generatingBy && generatingBy.id !== viewerId}
-                                        />
-                                        {generatingBy &&
-                                            !(isResponseLoading && generatingBy.id === viewerId) && (
-                                            <p
-                                                role="status"
-                                                className="px-2 pb-2 text-sm text-gray-600 [overflow-wrap:anywhere]"
-                                            >
-                                                {generatingNotice(generatingBy, viewerId)}
-                                            </p>
-                                        )}
-                                        <ChatInputPrompt
-                                            messages={messages}
-                                            chatKey={chatId}
-                                            canSend={canSend}
-                                            chatLoading={chatLoading}
-                                            onSubmit={(response, content, files) => {
-                                                void handleChat(
-                                                    { role: "user", content, files },
-                                                    { askInputsResponse: response },
-                                                );
-                                            }}
-                                            onCancel={cancel}
-                                        >
-                                            <ChatInput
-                                                ref={chatInputRef}
-                                                canSend={canSend}
-                                                chatLoading={chatLoading}
-                                                onSubmit={handleChat}
-                                                onCancel={cancel}
-                                                isLoading={isResponseLoading}
-                                                canStop={
-                                                    !generatingBy ||
-                                                    generatingBy.id === viewerId
-                                                }
-                                                chatKey={chatId}
-                                                chatModel={chatModel}
-                                                chatReasoningLevel={chatReasoningLevel}
-                                                onDocumentClick={
-                                                    handleAttachedDocumentClick
-                                                }
-                                            />
-                                        </ChatInputPrompt>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </>
+                    <ChatThread
+                        variant="page"
+                        chatId={chatId}
+                        messages={messages}
+                        isResponseLoading={isResponseLoading}
+                        chatLoading={chatLoading}
+                        accessResolved={accessResolved}
+                        canSend={canSend}
+                        viewerId={viewerId}
+                        generatingBy={generatingBy}
+                        isHost={!!chat && !!viewerId && chat.user_id === viewerId}
+                        siblingById={siblingById}
+                        chatInputRef={chatInputRef}
+                        onSubmit={handleChat}
+                        onCancel={cancel}
+                        chatModel={chatModel}
+                        chatReasoningLevel={chatReasoningLevel}
+                        onDocumentClick={handleAttachedDocumentClick}
+                        onEditBranch={handleEditBranch}
+                        onNavigateSibling={handleNavigateSibling}
+                        onRegenerate={onRegenerate ? handleRegenerate : undefined}
+                        onBranchIntoNewThread={
+                            onBranchIntoNewThread
+                                ? handleBranchIntoNewThread
+                                : undefined
+                        }
+                        onLoadSubagentTranscript={loadSubagentTranscript}
+                        onWorkflowClick={openWorkflow}
+                        activeCitation={activeCitation}
+                        onCitationClick={(citation) => {
+                            if (activeCitation === citation && activeTab) {
+                                handleCloseAnnotation(activeTab.id);
+                            } else {
+                                void openCitation(citation);
+                            }
+                        }}
+                        onOpenCitationSource={(citation) =>
+                            void openCitation(citation, { showQuotes: false })
+                        }
+                        onCaseClick={openCase}
+                        onEditViewClick={openEditor}
+                        onOpenDocument={openDocument}
+                        onEditResolveStart={handleEditResolveStart}
+                        onEditResolved={handleEditResolved}
+                        onEditError={handleEditError}
+                        isDocReloading={(docId) => reloadingDocIds.has(docId)}
+                        isEditReloading={(editId) => reloadingEditIds.has(editId)}
+                        resolvedEditStatuses={resolvedEditStatuses}
+                    />
                 )}
             </div>
 

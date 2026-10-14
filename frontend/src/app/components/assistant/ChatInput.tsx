@@ -111,7 +111,7 @@ export interface ChatInputHandle {
     ) => void;
 }
 
-interface Props {
+export interface ChatInputProps {
     onSubmit: (message: Message) => void;
     onCancel: () => void;
     isLoading: boolean;
@@ -209,7 +209,7 @@ function ChatInputForChatImpl(
         chatModel,
         chatReasoningLevel,
         chatKey,
-    }: Props,
+    }: ChatInputProps,
     ref: ForwardedRef<ChatInputHandle>,
 ) {
     // Sending needs both a grant and a loaded thread; the placeholder below
@@ -1249,14 +1249,14 @@ function ChatInputForChatImpl(
     );
 }
 
-const ChatInputForChat = forwardRef<ChatInputHandle, Props>(ChatInputForChatImpl);
+const ChatInputForChat = forwardRef<ChatInputHandle, ChatInputProps>(ChatInputForChatImpl);
 
 /**
  * Chat composer whose draft and asynchronous uploads belong to one chat key.
  * Changing the key remounts the stateful implementation; its layout cleanup
  * invalidates callbacks before the replacement composer can be displayed.
  */
-export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
     props,
     ref,
 ) {

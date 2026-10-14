@@ -98,6 +98,10 @@ vi.mock("@/app/components/assistant/AssistantMessage", () => ({
 vi.mock("@/app/components/projects/ProjectExplorer", () => ({
     ProjectExplorer: () => null,
 }));
+vi.mock("@/app/components/assistant/ChatAccessModal", () => ({
+    ChatAccessModal: ({ open, chat }: { open: boolean; chat: { title: string } }) =>
+        open ? <div>Access for {chat.title}</div> : null,
+}));
 vi.mock("@/app/components/shared/views/PdfView", () => ({ PdfView: () => null }));
 vi.mock("@/app/components/shared/views/SpreadsheetView", () => ({
     SpreadsheetView: () => null,
@@ -192,7 +196,16 @@ async function renderPage() {
     await screen.findByText("Rename");
 }
 
+// ChatThread measures and scrolls its layout; jsdom does neither.
+class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+
 beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    Element.prototype.scrollTo = vi.fn();
     vi.clearAllMocks();
     deleteChat.mockResolvedValue(undefined);
     renameChatInHistory.mockResolvedValue(undefined);
@@ -300,6 +313,35 @@ describe("project chat page — the project ladder, not the creator", () => {
         await renderPage();
 
         expect(screen.queryByTestId("can-send")).not.toBeInTheDocument();
+    });
+});
+
+describe("project chat page — sharing", () => {
+    it("opens the chat's access for a project manager", async () => {
+        getProject.mockResolvedValue(project("owner"));
+        await renderPage();
+        await waitFor(() =>
+            expect(screen.getByRole("button", { name: "Share" })).toBeEnabled(),
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+        expect(
+            await screen.findByText("Access for Quarterly filing"),
+        ).toBeInTheDocument();
+    });
+
+    it("refuses an editor at the owner tier", async () => {
+        getProject.mockResolvedValue(project("editor"));
+        await renderPage();
+        await waitFor(() =>
+            expect(screen.getByRole("button", { name: "Share" })).toBeEnabled(),
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+        await screen.findByText("Owner-only action");
+        expect(screen.queryByText(/^Access for/)).not.toBeInTheDocument();
     });
 });
 

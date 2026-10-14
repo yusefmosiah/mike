@@ -1,6 +1,5 @@
 "use client";
 
-import { findPendingAskInput } from "@/app/lib/pendingAskInput";
 import { useDocumentViewers } from "@/app/hooks/useDocumentViewers";
 import { useDocumentPermissions } from "@/app/hooks/useDocumentPermissions";
 
@@ -26,6 +25,7 @@ import {
     FolderPlus,
     Pencil,
     Trash2,
+    Users,
 } from "lucide-react";
 import {
     UploadBatchError,
@@ -54,7 +54,6 @@ import {
 import { useAssistantHistoryStatuses } from "@/app/hooks/useAssistantHistoryStatuses";
 import { useAssistantChat } from "@/app/hooks/useAssistantChat";
 import { useChatRoute } from "@/app/hooks/useChatRoute";
-import { useAssistantMessageLayout } from "@/app/hooks/useAssistantMessageLayout";
 import { useProjectPicker } from "@/app/hooks/useProjectPicker";
 import {
     isChatAttachmentDrag,
@@ -67,18 +66,11 @@ import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { usePageChrome } from "@/app/contexts/PageChromeContext";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import { useIsDesktop } from "@/app/hooks/useIsDesktop";
-import { UserMessage } from "@/app/components/assistant/UserMessage";
-import { AssistantMessage } from "@/app/components/assistant/AssistantMessage";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
-import {
-    generatingNotice,
-    threadHasOtherAuthors,
-    threadPersonLabel,
-} from "@/app/components/assistant/threadAuthors";
 import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
-import { CodeApprovalRequests } from "@/app/components/assistant/CodeApprovalRequests";
-import { ChatInput } from "@/app/components/assistant/ChatInput";
-import { ChatInputPrompt } from "@/app/components/assistant/ChatInputPrompt";
+import { ChatThread } from "@/app/components/assistant/ChatThread";
+import { AssistantWorkflowModal } from "@/app/components/assistant/AssistantWorkflowModal";
+import { ChatAccessModal } from "@/app/components/assistant/ChatAccessModal";
 import type { ChatInputHandle } from "@/app/components/assistant/ChatInput";
 import {
     ProjectExplorer,
@@ -166,10 +158,6 @@ const CHAT_MIN = 320;
 const CHAT_DEFAULT = 420;
 const PANEL_DIVIDERS_WIDTH = 12;
 const COLLAPSED_EXPLORER_FOOTPRINT = 42;
-const DEFAULT_ASSISTANT_BOTTOM_PADDING = 116;
-const ASSISTANT_HEADER_HEIGHT = 48;
-/** Height of the floating mobile chrome bar the pane overlays must clear. */
-const MOBILE_CHROME_OFFSET = 48;
 
 type WorkspacePanelWidths = {
     explorer: number;
@@ -340,7 +328,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     const [projectChats, setProjectChats] = useState<Chat[] | null>(null);
     // Who started the open thread: its code runs in their workstation, and
     // only they answer other members' requests to run code there.
-    const [chatHostId, setChatHostId] = useState<{ chatId: string; userId: string | null } | null>(null);
+    const [loadedChat, setLoadedChat] = useState<{ chatId: string; chat: Chat } | null>(null);
     const [chatTitle, setChatTitle] = useState<string | null>(null);
     const [chatTitleEdit, setChatTitleEdit] = useState<{
         chatId: string;
@@ -360,6 +348,11 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     const [deletingChat, setDeletingChat] = useState(false);
     const [composerResetKey, setComposerResetKey] = useState(0);
     const [projectMemoryOpen, setProjectMemoryOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const [workflowModal, setWorkflowModal] = useState<{
+        open: boolean;
+        workflowId?: string;
+    }>({ open: false });
     const [folderDeleteDialog, dispatchFolderDeleteDialog] = useReducer(
         folderDeleteDialogReducer,
         INITIAL_FOLDER_DELETE_DIALOG_STATE,
@@ -415,8 +408,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             ? activeTab.annotation.citation
             : null;
     const chatInputRef = useRef<ChatInputHandle | null>(null);
-    const messagesContainerRef = useRef<HTMLDivElement>(null);
-    const latestUserMessageRef = useRef<HTMLDivElement>(null);
 
     const {
         setCurrentChatId,
@@ -458,8 +449,8 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // Branch navigation and re-answers (edit prompt / regenerate): leaf moves
     // happen server-side and the ancestry they select is this page's
     // transcript, so the reload plus the queued re-answer live here. While a
-    // turn streams the controls stay off — the mutation would race it.
-    const branchActionsEnabled = !isResponseLoading;
+    // turn streams ChatThread keeps the controls off — the mutation would
+    // race it.
 
     // A colleague's turn running in this thread: shown, and polled until it
     // ends, when their prompt and answer replace the transcript.
@@ -479,9 +470,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // The branch actions surface failures through the page's warning popup:
     // the message rows own no error surface of their own.
     const handleEditPrompt = useCallback(
-        async (args: { message: Message; content: string }) => {
+        async (message: Message, content: string) => {
             try {
-                await editPrompt(args);
+                await editPrompt({ message, content });
             } catch (error) {
                 setChatActionError({
                     title: "Could not save the edit",
@@ -498,9 +489,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     );
 
     const handleRegenerate = useCallback(
-        async (args: { assistant: Message; parentUser: Message | null }) => {
+        async (assistant: Message, parentUser: Message) => {
             try {
-                await regenerate(args);
+                await regenerate({ assistant, parentUser });
             } catch (error) {
                 setChatActionError({
                     title: "Could not regenerate",
@@ -548,13 +539,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     );
 
     const handleNavigateSibling = useCallback(
-        async (message: Message, dir: -1 | 1) => {
+        async (
+            message: Message,
+            knownIds: Array<string | number> | null,
+            dir: -1 | 1,
+        ) => {
             try {
-                await navigateSibling(
-                    message,
-                    message.sibling?.ids ?? null,
-                    dir,
-                );
+                await navigateSibling(message, knownIds, dir);
             } catch (error) {
                 setChatActionError({
                     title: "Could not open the branch",
@@ -656,18 +647,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     );
 
     const hasAutoSent = useRef(false);
-    const hasInitialScrolled = useRef(false);
-    const { minHeight, scrollLatestUserToTop } = useAssistantMessageLayout({
-        containerRef: messagesContainerRef,
-        userMessageRef: latestUserMessageRef,
-        ready: chatLoaded,
-        messageCount: messages.length,
-        chatKey: activeChatId,
-        bottomPadding: DEFAULT_ASSISTANT_BOTTOM_PADDING,
-        headerHeight: isDesktop
-            ? ASSISTANT_HEADER_HEIGHT
-            : ASSISTANT_HEADER_HEIGHT + MOBILE_CHROME_OFFSET,
-    });
 
     const clearFolderDeleteDismissTimer = useCallback(() => {
         if (folderDeleteDismissTimerRef.current === null) return;
@@ -804,7 +783,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         setChatModel(undefined);
         setChatReasoningLevel(undefined);
         setMessages([]);
-        hasInitialScrolled.current = false;
 
         if (!activeChatId) {
             setChatLoaded(true);
@@ -817,7 +795,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             .then(({ chat, messages: loaded, generating: holder }) => {
                 if (cancelled) return;
                 setGenerating(activeChatId, holder);
-                setChatHostId({ chatId: activeChatId, userId: chat.user_id ?? null });
+                setLoadedChat({ chatId: activeChatId, chat });
                 setChatTitle(chat.title);
                 setChatModel(chat.model ?? null);
                 setChatReasoningLevel(chat.reasoning_level ?? null);
@@ -866,26 +844,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             void handleChat(pendingMessage);
         }
     }, [messages.length, isResponseLoading, handleChat, setNewChatMessages]);
-
-    useEffect(() => {
-        const last = messages[messages.length - 1];
-        if (last?.role === "user") return scrollLatestUserToTop();
-    }, [messages, scrollLatestUserToTop]);
-
-    useEffect(() => {
-        if (!chatLoaded || hasInitialScrolled.current || messages.length === 0)
-            return;
-        const container = messagesContainerRef.current;
-        const el = latestUserMessageRef.current;
-        if (!container || !el) return;
-        return scrollLatestUserToTop("auto", () => {
-            hasInitialScrolled.current = true;
-        });
-    }, [activeChatId, chatLoaded, messages.length, scrollLatestUserToTop]);
-
-    useEffect(() => {
-        if (chatLoaded && isResponseLoading) return scrollLatestUserToTop();
-    }, [chatLoaded, isResponseLoading, scrollLatestUserToTop]);
 
     // ── Tabs ──────────────────────────────────────────────────────────────────
     function openTab(
@@ -1292,6 +1250,26 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 ),
             });
         }
+    }
+
+    // The open thread's row: from the project's chat list, or as loaded.
+    const activeChat =
+        availableProjectChats.find((chat) => chat.id === activeChatId) ??
+        (loadedChat?.chatId === activeChatId ? loadedChat.chat : null);
+
+    function handleShareChat() {
+        if (!activeChat) return;
+        // A project chat's access is the project's: who may manage it there
+        // may manage it here.
+        if (!canManageProject) {
+            if (projectRole) setOwnerOnlyAction("share this chat");
+            return;
+        }
+        setShareOpen(true);
+    }
+
+    function openWorkflow(workflowId: string) {
+        setWorkflowModal({ open: true, workflowId });
     }
 
     // ── Upload ────────────────────────────────────────────────────────────────
@@ -2409,6 +2387,15 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                                 }}
                                 items={[
                                     {
+                                        label: "Share",
+                                        icon: Users,
+                                        onSelect: handleShareChat,
+                                        disabled:
+                                            !chatLoaded ||
+                                            !activeChat ||
+                                            !roleKnown,
+                                    },
+                                    {
                                         label: "Rename",
                                         icon: Pencil,
                                         onSelect: () => void handleRenameChat(),
@@ -2450,258 +2437,61 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     aria-hidden="true"
                     className="pointer-events-none absolute left-0 right-3 top-0 z-30 h-16 bg-gradient-to-b from-app-surface/85 via-app-surface/60 via-50% to-transparent max-md:h-28"
                 />
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute bottom-0 left-0 right-3 z-20 h-28 bg-gradient-to-t from-app-surface to-transparent"
+                <ChatThread
+                    variant="pane"
+                    chatId={activeChatId}
+                    messages={messages}
+                    isResponseLoading={isResponseLoading}
+                    chatLoading={!chatLoaded}
+                    accessResolved={composerReady}
+                    canSend={canSendChat}
+                    viewerId={user?.id ?? null}
+                    generatingBy={generating}
+                    isHost={
+                        !!user?.id &&
+                        loadedChat?.chatId === activeChatId &&
+                        loadedChat.chat.user_id === user.id
+                    }
+                    emptyState={<AssistantGreeting username={username} />}
+                    chatInputRef={chatInputRef}
+                    chatInputKey={`${activeChatId || "new"}:${composerResetKey}`}
+                    onSubmit={handleSubmit}
+                    onCancel={cancel}
+                    chatModel={chatModel}
+                    chatReasoningLevel={chatReasoningLevel}
+                    onDocumentClick={handleDocClick}
+                    chatInputProps={{
+                        enableGlobalFileDrop: false,
+                        dropUploadsToProject: false,
+                        projectId,
+                        projectName: project?.name,
+                        projectCmNumber: project?.cm_number,
+                    }}
+                    onEditBranch={handleEditPrompt}
+                    onNavigateSibling={handleNavigateSibling}
+                    onRegenerate={handleRegenerate}
+                    onBranchIntoNewThread={handleBranchIntoNewThread}
+                    onLoadSubagentTranscript={loadSubagentTranscript}
+                    onWorkflowClick={openWorkflow}
+                    activeCitation={activeCitation}
+                    onCitationClick={(citation) =>
+                        void handleCitationClick(citation)
+                    }
+                    onOpenCitationSource={(citation) =>
+                        void handleCitationClick(citation, false)
+                    }
+                    onCaseClick={handleCaseClick}
+                    onEditViewClick={handleEditViewClick}
+                    onOpenDocument={handleOpenDocument}
+                    onEditResolveStart={handleEditResolveStart}
+                    onEditResolved={handleEditResolved}
+                    onEditError={handleEditError}
+                    isDocReloading={(documentId) =>
+                        Object.values(resolvingEdits).includes(documentId)
+                    }
+                    isEditReloading={(editId) => !!resolvingEdits[editId]}
+                    resolvedEditStatuses={resolvedEditStatuses}
                 />
-
-                {/* Messages / greeting / shimmer */}
-                {!chatLoaded ? (
-                    <div className="flex-1 space-y-4 px-4 pb-4 pt-16 max-md:pt-[104px]">
-                        <div className="flex justify-end">
-                            <div className="bg-gray-100 rounded-2xl p-4 w-3/4">
-                                <div className="theme-shimmer h-3 bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded w-full" />
-                            </div>
-                        </div>
-                        <div className="space-y-2">
-                            {[1, 2, 3].map((i) => (
-                                <div
-                                    key={i}
-                                    className={`theme-shimmer h-3 bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded ${i === 3 ? "w-4/6" : "w-full"}`}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                ) : messages.length === 0 ? (
-                    <div className="flex-1 flex flex-col min-h-0">
-                        <AssistantGreeting username={username} />
-                    </div>
-                ) : (
-                    <div
-                        ref={messagesContainerRef}
-                        className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pt-[120px] md:space-y-8 md:pt-20"
-                        style={{
-                            paddingBottom: DEFAULT_ASSISTANT_BOTTOM_PADDING,
-                            scrollbarGutter: "stable",
-                        }}
-                    >
-                        {(() => {
-                            const lastUserIdx = messages
-                                .map((m) => m.role)
-                                .lastIndexOf("user");
-                            const lastAssistantIdx = messages
-                                .map((m) => m.role)
-                                .lastIndexOf("assistant");
-                            const showAuthors = threadHasOtherAuthors(
-                                messages,
-                                user?.id,
-                            );
-                            // The message still waiting on the user's input
-                            // or approval, if any.
-                            const pendingAskInputIndex =
-                                findPendingAskInput(messages)?.messageIndex ??
-                                -1;
-                            return messages.map((msg, i) =>
-                                msg.role === "user" ? (
-                                    <div
-                                        key={i}
-                                        ref={
-                                            i === lastUserIdx
-                                                ? latestUserMessageRef
-                                                : null
-                                        }
-                                    >
-                                        <UserMessage
-                                            messageId={msg.id}
-                                            sibling={msg.sibling ?? null}
-                                            authorLabel={
-                                                showAuthors && msg.author
-                                                    ? threadPersonLabel(
-                                                          msg.author,
-                                                          user?.id,
-                                                      )
-                                                    : null
-                                            }
-                                            onEditBranch={
-                                                branchActionsEnabled && msg.id
-                                                    ? (content) =>
-                                                          handleEditPrompt({
-                                                              message: msg,
-                                                              content,
-                                                          })
-                                                    : undefined
-                                            }
-                                            onNavigateSibling={
-                                                branchActionsEnabled && msg.id
-                                                    ? (dir) =>
-                                                          void handleNavigateSibling(
-                                                              msg,
-                                                              dir,
-                                                          )
-                                                    : undefined
-                                            }
-                                            content={msg.content ?? ""}
-                                            files={msg.files}
-                                            workflow={msg.workflow}
-                                            onFileClick={(file) => {
-                                                if (!file.document_id) return;
-                                                handleOpenDocument({
-                                                    documentId:
-                                                        file.document_id,
-                                                    filename: file.filename,
-                                                    versionId: null,
-                                                    versionNumber: null,
-                                                });
-                                            }}
-                                        />
-                                    </div>
-                                ) : (
-                                    <AssistantMessage
-                                        key={i}
-                                        messageId={msg.id}
-                                        onLoadSubagentTranscript={
-                                            activeChatId
-                                                ? loadSubagentTranscript
-                                                : undefined
-                                        }
-                                        sibling={msg.sibling ?? null}
-                                        onRegenerate={
-                                            branchActionsEnabled &&
-                                            messages[i - 1]?.role === "user" &&
-                                            messages[i - 1]?.id
-                                                ? () =>
-                                                      void handleRegenerate({
-                                                          assistant: msg,
-                                                          parentUser:
-                                                              messages[i - 1],
-                                                      })
-                                                : undefined
-                                        }
-                                        onBranchIntoNewThread={
-                                            branchActionsEnabled && msg.id
-                                                ? () =>
-                                                      void handleBranchIntoNewThread(
-                                                          msg,
-                                                      )
-                                                : undefined
-                                        }
-                                        onNavigateSibling={
-                                            branchActionsEnabled && msg.id
-                                                ? (dir) =>
-                                                      void handleNavigateSibling(
-                                                          msg,
-                                                          dir,
-                                                      )
-                                                : undefined
-                                        }
-                                        events={msg.events}
-                                        isStreaming={
-                                            i === messages.length - 1 &&
-                                            isResponseLoading
-                                        }
-                                        awaitingInput={
-                                            i === pendingAskInputIndex
-                                        }
-                                        isError={!!msg.error}
-                                        citations={msg.citations}
-                                        citationStatus={msg.citationStatus}
-                                        activeCitation={activeCitation}
-                                        onCitationClick={handleCitationClick}
-                                        onCaseClick={handleCaseClick}
-                                        onOpenCitationSource={(citation) => {
-                                            void handleCitationClick(
-                                                citation,
-                                                false,
-                                            );
-                                        }}
-                                        minHeight={
-                                            i === lastAssistantIdx
-                                                ? minHeight
-                                                : "0px"
-                                        }
-                                        onEditViewClick={handleEditViewClick}
-                                        onEditResolveStart={
-                                            handleEditResolveStart
-                                        }
-                                        isEditReloading={(editId) =>
-                                            !!resolvingEdits[editId]
-                                        }
-                                        isDocReloading={(documentId) =>
-                                            Object.values(
-                                                resolvingEdits,
-                                            ).includes(documentId)
-                                        }
-                                        resolvedEditStatuses={
-                                            resolvedEditStatuses
-                                        }
-                                        onOpenDocument={handleOpenDocument}
-                                        onEditError={handleEditError}
-                                        onEditResolved={handleEditResolved}
-                                    />
-                                ),
-                            );
-                        })()}
-                    </div>
-                )}
-
-                {/* ChatInput */}
-                {composerReady && (
-                    <div className="absolute bottom-3 left-3 right-3 z-30">
-                        <div className="pointer-events-none absolute -bottom-3 inset-x-0 z-0 h-7 bg-app-surface" />
-                        <div className="relative z-20 w-full">
-                            <CodeApprovalRequests
-                                chatId={activeChatId ?? null}
-                                isHost={
-                                    !!user?.id &&
-                                    chatHostId?.chatId === activeChatId &&
-                                    chatHostId.userId === user.id
-                                }
-                                watching={!!generating && generating.id !== user?.id}
-                            />
-                            {generating &&
-                                !(isResponseLoading && generating.id === user?.id) && (
-                                <p
-                                    role="status"
-                                    className="px-2 pb-2 text-sm text-gray-600 [overflow-wrap:anywhere]"
-                                >
-                                    {generatingNotice(generating, user?.id)}
-                                </p>
-                            )}
-                            <ChatInputPrompt
-                                messages={messages}
-                                chatKey={activeChatId}
-                                canSend={canSendChat}
-                                chatLoading={!chatLoaded}
-                                onSubmit={(response, content, files) => {
-                                    void handleSubmit(
-                                        { role: "user", content, files },
-                                        { askInputsResponse: response },
-                                    );
-                                }}
-                                onCancel={cancel}
-                            >
-                                <ChatInput
-                                    key={`${activeChatId || "new"}:${composerResetKey}`}
-                                    ref={chatInputRef}
-                                    onSubmit={handleSubmit}
-                                    onCancel={cancel}
-                                    isLoading={isResponseLoading}
-                                    chatKey={activeChatId}
-                                    chatModel={chatModel}
-                                    chatReasoningLevel={chatReasoningLevel}
-                                    canSend={canSendChat}
-                                    chatLoading={!chatLoaded}
-                                    enableGlobalFileDrop={false}
-                                    dropUploadsToProject={false}
-                                    projectId={projectId}
-                                    onDocumentClick={handleDocClick}
-                                    projectName={project?.name}
-                                    projectCmNumber={project?.cm_number}
-                                />
-                            </ChatInputPrompt>
-                        </div>
-                    </div>
-                )}
             </div>
             {project && (
                 <AddDocumentsModal
@@ -2763,6 +2553,19 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     disabled: !projectPicker.selectedId,
                 }}
             />
+            <AssistantWorkflowModal
+                open={workflowModal.open}
+                onClose={() => setWorkflowModal({ open: false })}
+                onSelect={() => setWorkflowModal({ open: false })}
+                initialWorkflowId={workflowModal.workflowId}
+            />
+            {shareOpen && activeChat ? (
+                <ChatAccessModal
+                    open={shareOpen}
+                    chat={activeChat}
+                    onClose={() => setShareOpen(false)}
+                />
+            ) : null}
             <ProjectMemoryModal
                 key={projectId}
                 open={projectMemoryOpen}
