@@ -40,3 +40,22 @@ describe("section reads on a real contract", () => {
     expect(text).toContain("[End of section 5.3.]");
   });
 });
+
+describe("block-range reads", () => {
+  it("clamps a to past the end of the document instead of failing", async () => {
+    const doc = await DocxDocument.load(readCorpusFile(MSC));
+    const last = doc.blocks[doc.blocks.length - 1].id;
+    const nearEnd = doc.blocks[doc.blocks.length - 3].id;
+    const { text } = renderDocxRead(doc, { from: nearEnd, to: "p999999" });
+    expect(text).toContain('[Block "p999999" is not in this document; read to its end instead.');
+    expect(text).toContain(`[${last}]`);
+    expect(text).toContain("[End of document.]");
+    expect(text).not.toContain("Unknown block id");
+  });
+
+  it("still names an unknown from, with the document's first and last ids", async () => {
+    const doc = await DocxDocument.load(readCorpusFile(MSC));
+    const { text } = renderDocxRead(doc, { from: "nope" });
+    expect(text).toContain('Unknown block id "nope". Its blocks run from');
+  });
+});

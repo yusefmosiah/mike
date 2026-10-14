@@ -49,7 +49,50 @@ def _type_name(schema: dict[str, Any]) -> str:
         return " | ".join(_JSON_TYPES.get(k, str(k)) for k in kind)
     if "enum" in schema and isinstance(schema["enum"], list):
         return " | ".join(json.dumps(v) for v in schema["enum"][:8])
+    items = schema.get("items")
+    if kind == "array" and isinstance(items, dict) and isinstance(items.get("type"), str) and items["type"] in _JSON_TYPES:
+        return f"list[{_JSON_TYPES[items['type']]}]"
     return _JSON_TYPES.get(kind, "Any") if isinstance(kind, str) else "Any"
+
+
+class ResultKeyError(KeyError):
+    """A key a tool result does not have; the message lists the keys it does have."""
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else ""
+
+
+def _closest(name: str, names: list[str]) -> list[str]:
+    lowered = name.lower()
+    near = [n for n in names if lowered and (lowered in n.lower() or n.lower() in lowered)]
+    near += [n for n in difflib.get_close_matches(name, names, n=3, cutoff=0.5) if n not in near]
+    return near[:3]
+
+
+class Result(dict):
+    """A tool result object: a plain dict, except that a key it does not have says which keys it has.
+
+    ``r["hits"]`` and ``r.hits`` both work; ``r["matches"]`` raises a KeyError
+    naming the real keys (and the closest one) instead of a bare ``KeyError: 'matches'``.
+    """
+
+    __slots__ = ()
+
+    def _explain(self, key: Any) -> str:
+        keys = [str(k) for k in self]
+        close = _closest(str(key), keys)
+        hint = f" Did you mean {', '.join(repr(c) for c in close)}?" if close else ""
+        return f"{key!r} is not in this result.{hint} Its keys are: {', '.join(keys) or '(none)'}."
+
+    def __missing__(self, key: Any) -> Any:
+        raise ResultKeyError(self._explain(key))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in self:
+            return self[name]
+        raise AttributeError(self._explain(name))
 
 
 def _parse(content: Any) -> Any:
@@ -58,7 +101,7 @@ def _parse(content: Any) -> Any:
     text = content.strip()
     if text[:1] in ("{", "[", '"') or text in ("true", "false", "null") or text[:1].isdigit():
         try:
-            return json.loads(text)
+            return json.loads(text, object_hook=Result)
         except ValueError:
             pass
     return content
@@ -157,11 +200,14 @@ class Tool:
         return f"<tool {self.signature()}>"
 
     def _args(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-        if len(args) == 1 and not kwargs and isinstance(args[0], dict) and not (
-            len(self.order) == 1 and _type_name(self.parameters[self.order[0]]) != "dict"
-        ):
-            # tools.x({"a": 1}) reads as the arguments object, as in JavaScript.
-            return dict(args[0])
+        if len(args) == 1 and not kwargs and isinstance(args[0], dict):
+            # tools.x({"a": 1}) reads as the arguments object, as in JavaScript,
+            # unless the tool's one parameter is itself a dict and the keys are
+            # not its parameter names. It is checked like keyword arguments.
+            only_dict = len(self.order) == 1 and _type_name(self.parameters[self.order[0]]) == "dict"
+            keys = set(args[0])
+            if not only_dict or (keys and keys <= set(self.parameters)):
+                args, kwargs = (), {str(k): v for k, v in args[0].items()}
         if len(args) > len(self.order):
             raise TypeError(f"{self.signature()} takes at most {len(self.order)} positional arguments")
         merged = dict(zip(self.order, args))

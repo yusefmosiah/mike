@@ -3,7 +3,7 @@ import { buildSystemPrompt } from "../../modules/chat/engine/prompts";
 import { COURTLISTENER_SYSTEM_PROMPT } from "../../modules/chat/engine/tools/courtlistenerTools";
 import { buildWordChatSystemPrompt } from "../../modules/chat/engine/wordPrompt";
 import { buildTabularMessages } from "../../modules/tabular/tabular.chats";
-import { OPEN_SOURCE_NOTE } from "../agentIdentity";
+import { OPEN_SOURCE_NOTE, RESPONSE_LANGUAGE_RULE } from "../agentIdentity";
 import { BRAND } from "../brand";
 
 describe("buildSystemPrompt", () => {
@@ -173,5 +173,46 @@ describe("assistant identity", () => {
         const prompt = buildSystemPrompt(false);
         expect(prompt).toContain("sports scores");
         expect(prompt).toContain("rather than declining");
+    });
+
+    it.each(surfaces)("%s answers in the language of the user's latest message, never a hardcoded one", (_name, build) => {
+        const prompt = build();
+        expect(prompt).toContain(RESPONSE_LANGUAGE_RULE);
+        expect(RESPONSE_LANGUAGE_RULE).toContain("the language of the user's most recent message");
+        // Sources in another language do not switch it, and reasoning follows it too.
+        expect(RESPONSE_LANGUAGE_RULE).toContain("tool results, quoted text");
+        expect(RESPONSE_LANGUAGE_RULE).toContain("Reason in the user's language too");
+        expect(prompt).not.toMatch(/(respond|answer|reply|write) (only )?in English/i);
+    });
+
+    it.each(surfaces)("%s is the same text whatever the conversation holds", (_name, build) => {
+        // The varying facts (documents, review rows and columns) are turn
+        // context, so nothing a turn brings can reach the system prompt.
+        expect(build()).toBe(build());
+        expect(build()).not.toContain("AVAILABLE DOCUMENTS:\n");
+    });
+
+    it("keeps the tabular review's title, rows and columns out of the system prompt", () => {
+        const build = (title: string, files: string[], columns: string[]) =>
+            buildTabularMessages(
+                [],
+                {
+                    documents: files.map((filename) => ({ filename })),
+                    columns: columns.map((name) => ({ name })),
+                    cells: new Map(),
+                } as never,
+                title,
+            ) as { content: string; turnContext?: { key: string; text: string }[] }[];
+        const [first] = build("Leases", ["a.pdf"], ["Rent"]);
+        const [second] = build("Leases, renamed", ["a.pdf", "b.pdf"], ["Rent", "Term"]);
+        expect(second.content).toBe(first.content);
+        expect(second.turnContext).toEqual([
+            {
+                key: "tabular-review",
+                text: expect.stringContaining('- ROW:1 "b.pdf"'),
+            },
+        ]);
+        expect(second.turnContext![0].text).toContain('TABULAR REVIEW: "Leases, renamed"');
+        expect(second.turnContext![0].text).toContain('- COL:1 "Term"');
     });
 });

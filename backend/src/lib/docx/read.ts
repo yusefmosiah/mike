@@ -84,19 +84,29 @@ export function renderDocxRead(doc: DocxDocument, req: DocxReadRequest = {}): Do
   }
 
   if (req.from !== undefined || req.to !== undefined) {
+    const span = total ? ` Its blocks run from [${doc.blocks[0].id}] to [${doc.blocks[total - 1].id}].` : "";
     const start = req.from !== undefined ? blockIndex(doc, req.from) : 0;
-    const endInclusive = req.to !== undefined ? blockIndex(doc, req.to) : total - 1;
-    const unknown = [start === undefined ? req.from : undefined, endInclusive === undefined ? req.to : undefined].filter(Boolean);
-    if (unknown.length) {
+    if (start === undefined) {
       return {
-        text: `${summary}\nUnknown block id ${unknown.map((u) => `"${u}"`).join(" and ")}. Block ids come from read_document or find_in_document results for this document version.`,
+        text: `${summary}\nUnknown block id "${req.from}".${span} Block ids come from read_document or find_in_document results for this document version.`,
         complete: false,
       };
     }
-    const w = renderWindow(doc, { start, end: endInclusive! + 1, maxChars: req.maxChars });
-    const reachedEnd = w.next >= endInclusive! + 1;
+    const notes: string[] = [];
+    let endInclusive = req.to !== undefined ? blockIndex(doc, req.to) : total - 1;
+    if (endInclusive === undefined) {
+      // A `to` past the end (or otherwise unknown) clamps to the end of the
+      // document instead of failing the whole read.
+      endInclusive = total - 1;
+      notes.push(`[Block "${req.to}" is not in this document; read to its end instead.${span}]`);
+    } else if (endInclusive < start) {
+      notes.push(`[to: "${req.to}" comes before from: "${req.from}"; read from "${req.from}" onward instead.]`);
+      endInclusive = total - 1;
+    }
+    const w = renderWindow(doc, { start, end: endInclusive + 1, maxChars: req.maxChars });
+    const reachedEnd = w.next >= endInclusive + 1;
     return {
-      text: [summary, "", w.text, reachedEnd ? (w.next >= total ? "[End of document.]" : "") : continuation(doc, w)].filter((s) => s !== "").join("\n"),
+      text: [summary, ...notes, "", w.text, reachedEnd ? (w.next >= total ? "[End of document.]" : "") : continuation(doc, w)].filter((s) => s !== "").join("\n"),
       complete: start === 0 && w.next >= total,
     };
   }

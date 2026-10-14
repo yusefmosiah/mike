@@ -320,6 +320,37 @@ describe("null-content assistant reservations", () => {
     );
   });
 
+  it("treats a response that skipped every question as the user declining", async () => {
+    const { db } = makeFakeMessagesDb([
+      realAssistantRow([
+        { type: "ask_inputs", items: [] },
+        {
+          type: "ask_inputs_response",
+          responses: [
+            { id: "topic", kind: "text", question: "What topic?", skipped: true },
+            { id: "tone", kind: "choice", question: "Which tone?", skipped: true },
+            { id: "files", kind: "documents", filenames: [], skipped: true },
+          ],
+        },
+      ]),
+    ]);
+
+    const enriched = await enrichWithPriorEvents(
+      [
+        { role: "assistant", content: "I need your input." },
+        { role: "user", content: "Responses to your questions: skipped." },
+      ],
+      "chat-1",
+      db,
+      {},
+    );
+
+    const summary = String(enriched[0].content);
+    expect(summary).toContain("the user skipped every question");
+    expect(summary).toContain("do not start or draft the substantive task on assumed defaults");
+    expect(summary).not.toContain("placeholder in square brackets");
+  });
+
   it("ask-input responses append to their exact parent, never a reservation", async () => {
     const rows = [
       realAssistantRow([

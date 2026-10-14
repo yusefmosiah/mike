@@ -388,7 +388,20 @@ export function AskInputPopup({
         const onlyApprovals = response.responses.every(
             (item) => item.kind === "approval",
         );
-        return `${onlyApprovals ? "Decisions on the requested actions" : "Responses to your questions"}:\n${lines.join("\n\n")}`;
+        const questions = response.responses.filter(
+            (item) => item.kind !== "approval" && item.kind !== "secret",
+        );
+        // Skipping every question is declining them, not "go ahead with
+        // defaults"; say so plainly so the assistant does not start the task.
+        const skippedAll =
+            questions.length > 0 &&
+            questions.every((item) => "skipped" in item && item.skipped);
+        const heading = onlyApprovals
+            ? "Decisions on the requested actions"
+            : skippedAll
+              ? "I skipped all of your questions and did not give those details"
+              : "Responses to your questions";
+        return `${heading}:\n${lines.join("\n\n")}`;
     };
 
     // Called straight from the handler that resolves the last outstanding

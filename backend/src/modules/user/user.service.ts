@@ -121,6 +121,13 @@ export {
     type AutoModeDecisionSettings,
 } from "./user.decisionModel";
 
+export {
+    getAutocompactSetting,
+    getAutocompactTokensFor,
+    setAutocompactTokens,
+    type AutocompactSetting,
+} from "./user.autocompact";
+
 export { handleAccountDelete } from "./user.accountJobs";
 export { handleExportBuild } from "./user.exportJobs";
 export { handleMcpRefreshToken, MCP_TOKEN_REFRESH_WINDOW_MS } from "./user.mcpJobs";

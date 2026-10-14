@@ -387,7 +387,10 @@ describe("POST /projects/:projectId/chat", () => {
         });
         expect(messages[0].content).toContain("displayed.pdf");
         expect(messages[0].content).toContain("displayed-document");
-        expect(systemPromptExtra).toContain("attached.pdf");
+        // Attached documents belong to this message, not the system prompt,
+        // which stays the same for the life of the chat.
+        expect(messages[0].content).toContain("attached.pdf");
+        expect(systemPromptExtra).not.toContain("attached.pdf");
         expect(runLLMStream.mock.calls[0][0]).toMatchObject({
             model: "gemini-3-flash-preview",
         });
@@ -548,9 +551,10 @@ describe("POST /projects/:projectId/chat", () => {
         const fencedFilename = spotlight(canonicalFilename, nonce);
 
         expect(messages[0].content).toContain(fencedFilename);
-        expect(systemPromptExtra).toContain(fencedFilename);
+        expect(messages[0].content).toContain("USER-ATTACHED DOCUMENTS FOR THIS MESSAGE");
+        expect(systemPromptExtra).not.toContain(fencedFilename);
         expect(messages[0].content).not.toContain("spoofed displayed name");
-        expect(systemPromptExtra).not.toContain("spoofed attachment name");
+        expect(messages[0].content).not.toContain("spoofed attachment name");
     });
 
     it("refuses a viewer's message to a colleague's chat before any write lands", async () => {

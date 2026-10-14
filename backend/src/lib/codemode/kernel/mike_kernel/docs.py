@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import difflib
 import math
+import operator
 import re
 from collections import Counter
 from typing import Any, Iterable, Iterator
@@ -64,6 +65,34 @@ def _host(data: dict[str, Any]) -> Any:
 
 def _tokens(text: str) -> list[str]:
     return [w for w in _WORD.findall(text.lower()) if w not in _STOP]
+
+
+# Other names models give the result-count argument, read as ``limit`` (or ``k`` for search).
+_LIMIT_ALIASES = ("limit", "max_results", "max", "max_hits", "max_matches", "n", "top", "top_k", "k", "count")
+
+
+def _options(fn: str, kwargs: dict[str, Any], valid: str, count_name: str = "limit") -> dict[str, Any]:
+    """Read the aliases a search call may be given; anything else is a TypeError naming the real signature."""
+    out: dict[str, Any] = {}
+    for key in list(kwargs):
+        if key in _LIMIT_ALIASES and key != count_name:
+            out[count_name] = kwargs.pop(key)
+        elif key in ("ignore_case", "case_insensitive"):
+            out["case"] = not kwargs.pop(key)
+        elif key == "case_sensitive":
+            out["case"] = bool(kwargs.pop(key))
+        elif key in ("context_chars", "window"):
+            out["context"] = kwargs.pop(key)
+    if kwargs:
+        raise TypeError(f"{fn}() got unexpected argument(s) {', '.join(map(repr, kwargs))}; it takes {valid}")
+    return out
+
+
+def _no_attribute(obj: Any, name: str, what: str) -> AttributeError:
+    names = sorted(n for n in dir(obj) if not n.startswith("_"))
+    close = difflib.get_close_matches(name, names, n=2, cutoff=0.5)
+    hint = f" Did you mean {', '.join(close)}?" if close else ""
+    return AttributeError(f"{what} has no attribute {name!r}.{hint} It has: {', '.join(names)}.")
 
 
 # --------------------------------------------------------------------------
@@ -130,6 +159,16 @@ class Block:
         """The section this block sits in (its nearest heading)."""
         return self.doc._section_of(self.index)
 
+    @property
+    def block_id(self) -> str:
+        """The same as ``.id``: what read_document and edit_document call a block."""
+        return self.id
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        raise _no_attribute(self, name, "A block")
+
 
 def _render_rows(rows: list[list[str]], limit: int = 60) -> str:
     shown = rows[:limit]
@@ -140,7 +179,37 @@ def _render_rows(rows: list[list[str]], limit: int = 60) -> str:
 
 
 class Blocks(list):
-    """A run of blocks. Printing it shows each with its id, and page markers for paged documents."""
+    """A run of blocks. Printing it shows each with its id, and page markers for paged documents.
+
+    Index it by position (``blocks[0]``, ``blocks[2:5]``) or, like a document, by block id:
+    ``blocks["p12"]`` is one block and ``blocks["p12":"p20"]`` includes both ends.
+    """
+
+    def _position(self, block_id: str) -> int:
+        for i, block in enumerate(self):
+            if block.id == block_id:
+                return i
+        ids = [b.id for b in self]
+        close = difflib.get_close_matches(block_id, ids, n=3)
+        span = f" These blocks run from {ids[0]} to {ids[-1]}." if ids else ""
+        raise KeyError(f"No block {block_id!r} here.{span}" + (f" Did you mean {', '.join(close)}?" if close else ""))
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, str):
+            return list.__getitem__(self, self._position(key))
+        if isinstance(key, slice) and (isinstance(key.start, str) or isinstance(key.stop, str)):
+            start = self._position(key.start) if isinstance(key.start, str) else key.start
+            stop = self._position(key.stop) + 1 if isinstance(key.stop, str) else key.stop
+            return Blocks(list.__getitem__(self, slice(start, stop, key.step)))
+        if isinstance(key, slice):
+            return Blocks(list.__getitem__(self, key))
+        try:
+            position = operator.index(key)
+        except TypeError:
+            raise TypeError(
+                f"Index blocks by position (an int) or by block id (a str like 'p12'), not {type(key).__name__}."
+            ) from None
+        return list.__getitem__(self, position)
 
     def __str__(self) -> str:
         out: list[str] = []
@@ -279,7 +348,50 @@ class Section:
 
 
 class Hit:
-    """Where a search matched: the document, the block, and the context around it."""
+    """Where a search matched: the document, the block, and the context around it.
+
+    ``.block`` (and ``.block_id``), ``.doc`` (``.doc_id``), ``.page``, ``.label``, ``.section``,
+    ``.match`` (the matched words), ``.context`` (a snippet around them), ``.text`` (the
+    whole block's text) and ``.score`` (search only). ``hit["block_id"]`` works too.
+    """
+
+    @property
+    def block_id(self) -> str:
+        return self.block.id
+
+    @property
+    def doc_id(self) -> str:
+        return self.doc.id
+
+    @property
+    def text(self) -> str:
+        """The whole text of the block that matched; ``.context`` is the snippet around the match."""
+        return self.block.text
+
+    @property
+    def page(self) -> int | None:
+        return self.block.page
+
+    @property
+    def label(self) -> str | None:
+        return self.block.label
+
+    @property
+    def section(self) -> "Section | None":
+        return self.block.section
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        raise _no_attribute(self, name, "A search hit")
+
+    def __getitem__(self, key: str) -> Any:
+        if not isinstance(key, str):
+            raise TypeError("Read a hit's fields by name, e.g. hit['block_id'] or hit.block_id.")
+        try:
+            return getattr(self, key)
+        except AttributeError as exc:
+            raise KeyError(str(exc)) from None
 
     def __init__(self, block: Block, start: int, end: int, context: int, score: float | None = None) -> None:
         self.block = block
@@ -536,13 +648,17 @@ class Document:
     # -- search --------------------------------------------------------------
 
     def find(self, pattern: str, regex: bool = False, case: bool = False, context: int = 80,
-             limit: int = 50) -> Hits:
-        """Where ``pattern`` occurs. Literal and whitespace-tolerant unless ``regex=True``."""
-        return _find(self.blocks, pattern, regex, case, context, limit)
+             limit: int = 50, **aliases: Any) -> Hits:
+        """Where ``pattern`` occurs. Literal and whitespace-tolerant unless ``regex=True``. ``max_results`` = ``limit``."""
+        opts = {"case": case, "context": context, "limit": limit}
+        opts.update(_options("find", aliases, "(pattern, regex=False, case=False, context=80, limit=50)"))
+        return _find(self.blocks, pattern, regex, opts["case"], opts["context"], opts["limit"])
 
-    def grep(self, pattern: str, case: bool = False, context: int = 80, limit: int = 50) -> Hits:
-        """``find`` with a regular expression."""
-        return self.find(pattern, regex=True, case=case, context=context, limit=limit)
+    def grep(self, pattern: str, case: bool = False, context: int = 80, limit: int = 50, **aliases: Any) -> Hits:
+        """``find`` with a regular expression. ``max_results`` = ``limit``."""
+        opts = {"case": case, "context": context, "limit": limit}
+        opts.update(_options("grep", aliases, "(pattern, case=False, context=80, limit=50)"))
+        return self.find(pattern, regex=True, **opts)
 
     def _index_bm25(self) -> tuple[list[Counter[str]], list[int], Counter[str]]:
         if self._bm25 is None:
@@ -562,9 +678,17 @@ class Document:
             self._bm25 = (terms, lengths, df)
         return self._bm25
 
-    def search(self, query: str, k: int = 10, context: int = 120) -> Hits:
-        """Passages ranked by relevance to ``query`` (BM25 over blocks, weighted by section headings)."""
-        return _search([self], query, k, context)
+    def search(self, query: str, k: int = 10, context: int = 120, **aliases: Any) -> Hits:
+        """Passages ranked by relevance to ``query`` (BM25 over blocks, weighted by section headings). ``limit`` = ``k``."""
+        opts = {"k": k, "context": context}
+        opts.update(_options("search", aliases, "(query, k=10, context=120)", count_name="k"))
+        opts.pop("case", None)
+        return _search([self], query, opts["k"], opts["context"])
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        raise _no_attribute(self, name, f"Document {self.__dict__.get('id', '')}".rstrip())
 
     # -- citation ------------------------------------------------------------
 
@@ -701,13 +825,19 @@ class Documents:
         return list(self)
 
     def grep(self, pattern: str, case: bool = False, context: int = 80, limit: int = 200,
-             only: Iterable[str] | None = None) -> Hits:
-        """Where a regular expression occurs, across every document (or ``only`` these ids)."""
-        return self.find_text(pattern, regex=True, case=case, context=context, limit=limit, only=only)
+             only: Iterable[str] | None = None, **aliases: Any) -> Hits:
+        """Where a regular expression occurs, across every document (or ``only`` these ids). ``max_results`` = ``limit``."""
+        opts = {"case": case, "context": context, "limit": limit}
+        opts.update(_options("docs.grep", aliases, "(pattern, case=False, context=80, limit=200, only=None)"))
+        return self.find_text(pattern, regex=True, only=only, **opts)
 
     def find_text(self, pattern: str, regex: bool = False, case: bool = False, context: int = 80, limit: int = 200,
-                  only: Iterable[str] | None = None) -> Hits:
+                  only: Iterable[str] | None = None, **aliases: Any) -> Hits:
         """Where text occurs across documents. Literal and whitespace-tolerant unless ``regex=True``."""
+        opts = _options("docs.find_text", aliases, "(pattern, regex=False, case=False, context=80, limit=200, only=None)")
+        case, context, limit = opts.get("case", case), opts.get("context", context), opts.get("limit", limit)
+        if isinstance(only, str):
+            only = [only]
         chosen = set(only) if only is not None else None
         hits = Hits()
         for document in self:
@@ -718,8 +848,13 @@ class Documents:
                 break
         return hits
 
-    def search(self, query: str, k: int = 10, context: int = 120, only: Iterable[str] | None = None) -> Hits:
-        """Passages ranked by relevance to ``query`` across documents (BM25, weighted by section headings)."""
+    def search(self, query: str, k: int = 10, context: int = 120, only: Iterable[str] | None = None,
+               **aliases: Any) -> Hits:
+        """Passages ranked by relevance to ``query`` across documents (BM25, weighted by section headings). ``limit`` = ``k``."""
+        opts = _options("docs.search", aliases, "(query, k=10, context=120, only=None)", count_name="k")
+        k, context = opts.get("k", k), opts.get("context", context)
+        if isinstance(only, str):
+            only = [only]
         chosen = set(only) if only is not None else None
         return _search([d for d in self if chosen is None or d.id in chosen], query, k, context)
 

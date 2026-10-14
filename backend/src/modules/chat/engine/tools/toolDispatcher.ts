@@ -40,6 +40,7 @@ import {
   planConnectorToolCall,
 } from "./connectorApprovals";
 import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
+import { parseAskInputs } from "./askInputs";
 import {
   GOOGLE_DRIVE_TOOL_PREFIX,
   executeGoogleDriveToolCall,
@@ -51,7 +52,6 @@ import {
   type WorkflowStore,
   type ToolCall,
   type AskInputItem,
-  type AskInputOption,
   type AskInputsEvent,
   devLog,
   resolveDocLabel,
@@ -90,6 +90,7 @@ import {
 import {
   search as webSearch,
   fetchPage as webFetchPage,
+  getWebSnapshot,
   type SearchProvider,
 } from "../../../../lib/search/index";
 import {
@@ -121,110 +122,6 @@ function sourceMaterialNotice(
     return "Source type: Workflow asset (immutable). If this file will be used as a template — edited or filled in — call replicate_document with a new_filename and work from the returned copy; reading it for information needs no copy.";
   }
   return null;
-}
-
-function cleanAskInputString(value: unknown, fallback = ""): string {
-  const text = typeof value === "string" ? value.trim() : "";
-  return text || fallback;
-}
-
-function normalizeAskInputsEvent(
-  args: Record<string, unknown>,
-): AskInputsEvent {
-  const rawItems = Array.isArray(args.items) ? args.items : [];
-  const items = rawItems
-    .map((item, index): AskInputItem | null => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const row = item as Record<string, unknown>;
-      const id =
-        cleanAskInputString(row.id) ||
-        `${
-          row.kind === "documents"
-            ? "documents"
-            : row.kind === "text"
-              ? "text"
-              : row.kind === "multi_choice"
-                ? "multi-choice"
-                : "choice"
-        }-${index + 1}`;
-      const responsePrefix = cleanAskInputString(row.response_prefix);
-
-      if (row.kind === "documents") {
-        const rawDocumentTypes = Array.isArray(row.document_types)
-          ? row.document_types
-          : [];
-        const documentTypes = rawDocumentTypes
-          .filter((type): type is string => typeof type === "string")
-          .map((type) => type.trim())
-          .filter(Boolean)
-          .map((type) => type.slice(0, 300))
-          .slice(0, 8);
-        return {
-          id: id.slice(0, 80),
-          kind: "documents",
-          document_types: documentTypes,
-          ...(responsePrefix
-            ? { response_prefix: responsePrefix.slice(0, 200) }
-            : {}),
-        };
-      }
-
-      if (row.kind === "text") {
-        const question = cleanAskInputString(
-          row.question,
-          "Please provide the requested information.",
-        );
-        return {
-          id: id.slice(0, 80),
-          kind: "text",
-          question: question.slice(0, 500),
-          ...(responsePrefix
-            ? { response_prefix: responsePrefix.slice(0, 200) }
-            : {}),
-        };
-      }
-
-      const multiChoice = row.kind === "multi_choice";
-      const question = cleanAskInputString(
-        row.question,
-        multiChoice
-          ? "Please choose one or more options."
-          : "Please choose an option.",
-      );
-      const rawOptions = Array.isArray(row.options) ? row.options : [];
-      const options = rawOptions
-        .map((option): AskInputOption | null => {
-          if (!option || typeof option !== "object") return null;
-          const optionRow = option as Record<string, unknown>;
-          const value =
-            cleanAskInputString(optionRow.value) ||
-            cleanAskInputString(optionRow.label);
-          if (!value) return null;
-          return {
-            value: value.slice(0, 500),
-          };
-        })
-        .filter((option): option is AskInputOption => !!option)
-        .slice(0, 8);
-      const normalizedOptions =
-        options.length > 0 ? options : [{ value: "Continue" }];
-      const otherLabel = cleanAskInputString(row.other_label, "Other");
-      return {
-        id: id.slice(0, 80),
-        kind: multiChoice ? "multi_choice" : "choice",
-        question: question.slice(0, 500),
-        options: normalizedOptions,
-        allow_other: row.allow_other !== false,
-        other_label: otherLabel.slice(0, 80),
-        ...(responsePrefix
-          ? { response_prefix: responsePrefix.slice(0, 200) }
-          : {}),
-      };
-    })
-    .filter((item): item is AskInputItem => !!item)
-    .slice(0, 12);
-
-  return { type: "ask_inputs", event_id: crypto.randomUUID(), items };
 }
 
 function requestedCourtlistenerOpinionIds(args: Record<string, unknown>) {
@@ -315,6 +212,9 @@ function scheduleCitationCheck(db: Db, userId: string, documentId: string | unde
 
 /** Documents one find_in_documents call searches at most. */
 const MAX_FIND_DOCUMENTS = 50;
+/** fetch_web_page window: the default, and the most one call may return. */
+export const DEFAULT_WEB_PAGE_CHARS = 12_000;
+export const MAX_WEB_PAGE_CHARS = 40_000;
 
 /** Characters fetch_documents returns across all the documents of one call. */
 export const FETCH_DOCUMENTS_BUDGET_CHARS = 60_000;
@@ -650,8 +550,23 @@ export async function runToolCalls(
     }
 
     if (tc.function.name === "ask_inputs") {
-      const event = normalizeAskInputsEvent(args);
-      if (event.items.length > 0) askInputsEvents.push(event);
+      // Only real questions reach the user. An unusable call is answered
+      // with an error showing the expected shape, and the turn goes on so
+      // the model can ask again correctly.
+      const parsed = parseAskInputs(args);
+      if (parsed.ok) {
+        askInputsEvents.push({
+          type: "ask_inputs",
+          event_id: crypto.randomUUID(),
+          items: parsed.items,
+        });
+      } else {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ ok: false, error: parsed.error }),
+        });
+      }
       continue;
     }
 
@@ -1733,7 +1648,7 @@ export async function runToolCalls(
       });
     } else if (tc.function.name === "edit_document" && docIndex) {
       const rawDocId = args.doc_id as string;
-      const editsRaw = args.edits as unknown[] | undefined;
+      const parsedEdits = parseEditOps(args.edits);
       const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
       const docInfo = docStore.get(docId);
       const indexed = docIndex?.[docId];
@@ -1785,11 +1700,11 @@ export async function runToolCalls(
           tool_call_id: tc.id,
           content: JSON.stringify({ error: err }),
         });
-      } else if (
-        !Array.isArray(editsRaw) ||
-        editsRaw.length === 0
-      ) {
-        const err = "edits array is required and must not be empty.";
+      } else if (!parsedEdits.ok) {
+        // Wrong field names or ops are refused before anything is applied,
+        // with the valid ops and their fields, rather than read as a
+        // replace and failed with a misleading message.
+        const err = parsedEdits.error;
         emitEditError(docInfo.filename, indexed.document_id, err);
         toolResults.push({
           role: "tool",
@@ -1811,7 +1726,7 @@ export async function runToolCalls(
             filename: docInfo.filename,
           })}\n\n`,
         );
-        const edits = parseEditOps(editsRaw);
+        const edits = parsedEdits.ops;
         const reuseVersion = turnEditState?.get(indexed.document_id);
         const result = await runEditDocument({
           documentId: indexed.document_id,
@@ -2035,16 +1950,45 @@ export async function runToolCalls(
       }
     } else if (tc.function.name === "fetch_web_page") {
       const url = String(args.url ?? "").trim();
+      const offset =
+        typeof args.offset === "number" && Number.isFinite(args.offset)
+          ? Math.max(0, Math.floor(args.offset))
+          : 0;
+      const maxChars =
+        typeof args.max_chars === "number" && Number.isFinite(args.max_chars)
+          ? Math.max(1, Math.min(MAX_WEB_PAGE_CHARS, Math.floor(args.max_chars)))
+          : DEFAULT_WEB_PAGE_CHARS;
       try {
-        const page = await webFetchPage(url);
+        // A later window of a page fetched earlier reads the same snapshot,
+        // so the offsets the model was given still line up.
+        const cached = offset > 0 ? getWebSnapshot(url) : undefined;
+        const page = cached?.source === "fetch" ? cached : await webFetchPage(url);
+        const total = page.content.length;
+        const start = Math.min(offset, total);
+        const end = Math.min(total, start + maxChars);
+        const window = page.content.slice(start, end);
+        const truncated = start > 0 || end < total;
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
           content: JSON.stringify({
             url: page.url,
+            ...(page.title ? { title: page.title } : {}),
             // A web page is outside text: fenced like a document.
-            content: nonce ? spotlight(page.content.slice(0, 8000), nonce) : page.content.slice(0, 8000),
+            content: nonce ? spotlight(window, nonce) : window,
             sha256: page.contentSha256,
+            offset: start,
+            returned_chars: window.length,
+            total_chars: total,
+            truncated,
+            ...(end < total
+              ? {
+                  next_offset: end,
+                  note: `[Truncated: characters ${start.toLocaleString("en-US")}–${end.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}. Call fetch_web_page again with offset: ${end} for the rest.]`,
+                }
+              : start > 0
+                ? { note: `[Characters ${start.toLocaleString("en-US")}–${end.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}: the end of the page.]` }
+                : {}),
           }),
         });
       } catch (err) {

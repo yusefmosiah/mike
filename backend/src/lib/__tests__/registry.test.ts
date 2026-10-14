@@ -143,6 +143,95 @@ describe("loadModelRegistry", () => {
             "max_completion_tokens",
         );
     });
+
+    it("keeps declared limits, reasoning, cost and stream idle limit", () => {
+        configure({
+            models: [
+                {
+                    ...CLOUD_DEEPSEEK,
+                    contextWindow: 1_048_576,
+                    maxOutputTokens: 131_072,
+                    // Declared in any order; kept lightest first.
+                    reasoning: { efforts: ["max", "low", "high"], canDisable: false },
+                    cost: { input: 0.3, output: 1.2 },
+                    streamIdleTimeoutMs: 240_000,
+                },
+                {
+                    ...LOCAL_QWEN,
+                    reasoning: {
+                        efforts: ["high", "max"],
+                        default: "max",
+                        canDisable: true,
+                        offValue: "none",
+                        param: "reasoning.effort",
+                    },
+                },
+            ],
+        });
+        expect(getConfiguredModel("cloud-deepseek")).toMatchObject({
+            contextWindow: 1_048_576,
+            maxOutputTokens: 131_072,
+            reasoning: {
+                efforts: ["low", "high", "max"],
+                default: "high",
+                canDisable: false,
+                param: "reasoning_effort",
+            },
+            cost: { input: 0.3, output: 1.2, cacheRead: 0, cacheWrite: 0 },
+            streamIdleTimeoutMs: 240_000,
+        });
+        expect(getConfiguredModel("local-qwen")?.reasoning).toEqual({
+            efforts: ["high", "max"],
+            default: "max",
+            canDisable: true,
+            offValue: "none",
+            param: "reasoning.effort",
+        });
+    });
+
+    it("drops entries whose limits, reasoning or cost are malformed", () => {
+        configure({
+            models: [
+                LOCAL_QWEN,
+                { ...CLOUD_DEEPSEEK, id: "tiny-window", contextWindow: 10 },
+                { ...CLOUD_DEEPSEEK, id: "fraction", maxOutputTokens: 1.5 },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "output-over-window",
+                    contextWindow: 8_192,
+                    maxOutputTokens: 8_192,
+                },
+                { ...CLOUD_DEEPSEEK, id: "no-efforts", reasoning: { efforts: [] } },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "unknown-effort",
+                    reasoning: { efforts: ["turbo"] },
+                },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "default-not-listed",
+                    reasoning: { efforts: ["low"], default: "high" },
+                },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "off-value-without-disable",
+                    reasoning: { efforts: ["low"], offValue: "none" },
+                },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "unknown-param",
+                    reasoning: { efforts: ["low"], param: "thinking" },
+                },
+                { ...CLOUD_DEEPSEEK, id: "negative-cost", cost: { input: -1 } },
+                {
+                    ...CLOUD_DEEPSEEK,
+                    id: "too-short-idle",
+                    streamIdleTimeoutMs: 100,
+                },
+            ],
+        });
+        expect(configuredModelIds()).toEqual(["local-qwen"]);
+    });
 });
 
 describe("getConfiguredModel", () => {

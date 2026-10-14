@@ -1,8 +1,11 @@
-import type {
-  CommitteeModel,
-  ConfiguredModel,
-  Provider,
-  UserApiKeys,
+import {
+  CONFIGURED_REASONING_EFFORTS,
+  type CommitteeModel,
+  type ConfiguredModel,
+  type ConfiguredReasoning,
+  type ConfiguredReasoningEffort,
+  type Provider,
+  type UserApiKeys,
 } from "./types";
 import { PHALA_GATEWAY_REPO } from "./attestation/aci";
 
@@ -246,6 +249,109 @@ function parseAttestation(
   return { endpoint, expectedMeasurement };
 }
 
+/** A whole number in [min, max]; undefined when absent, null when malformed. */
+function optionalInteger(
+  record: Record<string, unknown>,
+  field: string,
+  min: number,
+  max: number,
+): number | undefined | null {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= min && value <= max ? value : null;
+}
+
+/** Context windows and output limits Mike accepts, in tokens. */
+const MIN_CONTEXT_WINDOW = 1_024;
+const MAX_TOKENS_LIMIT = 100_000_000;
+/** Stream idle limits Mike accepts, in ms (as STREAM_CHUNK_TIMEOUT_MS). */
+const MIN_STREAM_IDLE_MS = 5_000;
+const MAX_STREAM_IDLE_MS = 30 * 60_000;
+
+/**
+ * Reasoning declarations are all-or-nothing, like attestation: a malformed
+ * record rejects the model rather than quietly running a reasoning model
+ * without its reasoning.
+ */
+function parseReasoning(
+  value: unknown,
+): ConfiguredReasoning | undefined | null {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const known = new Set<string>(CONFIGURED_REASONING_EFFORTS);
+  const efforts = record.efforts;
+  if (
+    !Array.isArray(efforts) ||
+    efforts.length === 0 ||
+    !efforts.every((effort) => typeof effort === "string" && known.has(effort)) ||
+    new Set(efforts).size !== efforts.length
+  ) {
+    return null;
+  }
+  // Lightest first, whatever order the declaration used.
+  const ordered = CONFIGURED_REASONING_EFFORTS.filter((effort) =>
+    efforts.includes(effort),
+  );
+  const fallback: ConfiguredReasoningEffort = ordered.includes("high")
+    ? "high"
+    : ordered[ordered.length - 1];
+  const effortDefault = record.default ?? fallback;
+  if (
+    typeof effortDefault !== "string" ||
+    !ordered.includes(effortDefault as ConfiguredReasoningEffort)
+  ) {
+    return null;
+  }
+  if (record.canDisable !== undefined && typeof record.canDisable !== "boolean") {
+    return null;
+  }
+  const canDisable = record.canDisable === true;
+  const offValue = optionalString(record, "offValue");
+  // An off value only means something for a model that can be turned off.
+  if (offValue === null || (offValue !== undefined && !canDisable)) return null;
+  const param = record.param ?? "reasoning_effort";
+  if (
+    param !== "reasoning_effort" &&
+    param !== "reasoning.effort" &&
+    param !== "none"
+  ) {
+    return null;
+  }
+  return {
+    efforts: ordered,
+    default: effortDefault as ConfiguredReasoningEffort,
+    canDisable,
+    ...(offValue ? { offValue } : {}),
+    param,
+  };
+}
+
+/** Per-million-token prices; each rate a finite, non-negative number. */
+function parseCost(value: unknown): ConfiguredModel["cost"] | undefined | null {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const rate = (field: string): number | null => {
+    const rateValue = record[field];
+    if (rateValue === undefined) return 0;
+    return typeof rateValue === "number" &&
+      Number.isFinite(rateValue) &&
+      rateValue >= 0
+      ? rateValue
+      : null;
+  };
+  const input = rate("input");
+  const output = rate("output");
+  const cacheRead = rate("cacheRead");
+  const cacheWrite = rate("cacheWrite");
+  if (input === null || output === null || cacheRead === null || cacheWrite === null) {
+    return null;
+  }
+  return { input, output, cacheRead, cacheWrite };
+}
+
 function parseConfiguredModel(value: unknown): ConfiguredModel | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -259,6 +365,26 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
   const apiKeyProvider = record.apiKeyProvider;
   const maxTokensField = record.maxTokensField;
   const attestation = parseAttestation(record.attestation);
+  const contextWindow = optionalInteger(
+    record,
+    "contextWindow",
+    MIN_CONTEXT_WINDOW,
+    MAX_TOKENS_LIMIT,
+  );
+  const maxOutputTokens = optionalInteger(
+    record,
+    "maxOutputTokens",
+    1,
+    MAX_TOKENS_LIMIT,
+  );
+  const reasoning = parseReasoning(record.reasoning);
+  const cost = parseCost(record.cost);
+  const streamIdleTimeoutMs = optionalInteger(
+    record,
+    "streamIdleTimeoutMs",
+    MIN_STREAM_IDLE_MS,
+    MAX_STREAM_IDLE_MS,
+  );
 
   if (
     !id ||
@@ -286,7 +412,16 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
       typeof record.supportsVision !== "boolean") ||
     (maxTokensField !== undefined &&
       maxTokensField !== "max_tokens" &&
-      maxTokensField !== "max_completion_tokens")
+      maxTokensField !== "max_completion_tokens") ||
+    contextWindow === null ||
+    maxOutputTokens === null ||
+    // The answer has to fit in the window with at least some input.
+    (contextWindow !== undefined &&
+      maxOutputTokens !== undefined &&
+      maxOutputTokens >= contextWindow) ||
+    reasoning === null ||
+    cost === null ||
+    streamIdleTimeoutMs === null
   ) {
     return null;
   }
@@ -312,6 +447,11 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
       ? { supportsVision: record.supportsVision }
       : {}),
     ...(maxTokensField ? { maxTokensField } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    ...(reasoning ? { reasoning } : {}),
+    ...(cost ? { cost } : {}),
+    ...(streamIdleTimeoutMs !== undefined ? { streamIdleTimeoutMs } : {}),
   };
 }
 

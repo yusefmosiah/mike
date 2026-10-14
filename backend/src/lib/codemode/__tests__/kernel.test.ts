@@ -68,6 +68,47 @@ describe("kernel session", () => {
     expect(second).toMatchObject({ status: "ok", result: "(40, 'hi')", hostRequests: 1 });
   });
 
+  it("names a result's real keys when a cell guesses a wrong one", async () => {
+    const session = await startSession([{ name: "find_in_document", parameters: { type: "object", properties: { query: { type: "string" } } } }]);
+    const found = async (): Promise<HostReply> => ({
+      ok: true,
+      content: JSON.stringify({ ok: true, total_matches: 2, returned: 1, hits: [{ index: 0, block_id: "p3", context: "…" }] }),
+    });
+    const ok = await session.execute("r = await tools.find_in_document(query='x')\n(r['total_matches'], r.hits[0].block_id, isinstance(r, dict))", {
+      timeoutMs: 10_000,
+      onHostRequest: found,
+    });
+    expect(ok).toMatchObject({ status: "ok", result: "(2, 'p3', True)" });
+    const guessed = await session.execute("r['matches']", { timeoutMs: 10_000, onHostRequest: found });
+    expect(guessed.error).toMatchObject({ ename: "ResultKeyError" });
+    expect(guessed.error?.evalue).toBe(
+      "'matches' is not in this result. Did you mean 'total_matches'? Its keys are: ok, total_matches, returned, hits.",
+    );
+    const attr = await session.execute("r.total", { timeoutMs: 10_000, onHostRequest: found });
+    expect(attr.error?.evalue).toContain("Did you mean 'total_matches'?");
+  });
+
+  it("reads one dict as the arguments object, even for a tool whose one parameter is a list", async () => {
+    const session = await startSession([
+      { name: "ask_inputs", parameters: { type: "object", properties: { items: { type: "array", items: { type: "object" } } }, required: ["items"] } },
+    ]);
+    const seen: unknown[] = [];
+    const outcome = await session.execute(
+      "await tools.ask_inputs({'items': [{'id': 'a', 'kind': 'text', 'question': 'Q?'}]})\nprint(tools.ask_inputs.signature())",
+      {
+        timeoutMs: 10_000,
+        onHostRequest: async (data) => {
+          seen.push(data.args);
+          return { ok: true, content: "{}" };
+        },
+      },
+    );
+    expect(outcome).toMatchObject({ status: "ok", stdout: "ask_inputs(items: list[dict])\n" });
+    expect(seen).toEqual([{ items: [{ id: "a", kind: "text", question: "Q?" }] }]);
+    const wrong = await session.execute("await tools.ask_inputs({'questions': []})", { timeoutMs: 10_000, onHostRequest: echo });
+    expect(wrong.error?.evalue).toContain("unknown arguments 'questions'");
+  });
+
   it("takes a parameter named after a Python keyword with a trailing underscore", async () => {
     const session = await startSession([
       { name: "read", parameters: { type: "object", properties: { doc: { type: "string" }, from: { type: "string" } }, required: ["doc"] } },

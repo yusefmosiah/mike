@@ -91,7 +91,7 @@ describe("runLLMStream client-tool dispatch", () => {
     expect(buildMemoryTurn).toHaveBeenCalledWith({
       db: expect.anything(),
       userId: "u1",
-      systemPrompt: "BASE SYSTEM",
+      systemPrompt: expect.stringMatching(/^BASE SYSTEM\n\nTURN CONTEXT:/),
       include: true,
       projectId: "project-1",
       sharedAudience: true,

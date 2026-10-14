@@ -1,20 +1,28 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Context } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { queryReceipts } from "../attestation/index.js";
 import { resetModelRegistryCache } from "../registry.js";
 import { providerFailureStatus } from "../providerErrors.js";
-import { createMikeModels, providerError, tolerantMessage, useRequestKeys } from "./providers.mjs";
+import { asOverflow, createMikeModels, providerError, tolerantMessage, useRequestKeys } from "./providers.mjs";
 
 /** A local OpenAI-compatible endpoint: records each request and answers with the next scripted text. */
 type Seen = { path: string; authorization?: string; body: Record<string, unknown> };
 let server: Server;
 let baseUrl: string;
 let seen: Seen[] = [];
-let replies: string[] = [];
+/** A scripted answer: its text, or a function that writes the whole response. */
+type Reply = string | ((res: ServerResponse, req: IncomingMessage) => void | Promise<void>);
+let replies: Reply[] = [];
+
+/** One streamed chat-completion chunk. */
+const sse = (delta: Record<string, unknown>, finish: string | null = null, usage?: Record<string, number>) =>
+  `data: ${JSON.stringify({ id: "c1", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let verifierStatus = 503;
 let verifierBody: Record<string, unknown> = {};
 
@@ -32,6 +40,10 @@ beforeAll(async () => {
     }
     seen.push({ path: req.url ?? "", authorization: req.headers.authorization, body: await body(req) });
     const text = replies.shift() ?? "ok";
+    if (typeof text === "function") {
+      await text(res, req);
+      return;
+    }
     // A provider that accepts the request and then says nothing.
     if (text === "<silent>") {
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -252,6 +264,193 @@ describe("a provider that stops responding", () => {
     expect(answer.stopReason).toBe("error");
     expect(answer.errorMessage).toBe("first chunk timeout of 150ms exceeded");
     expect(providerError("quiet-llm", answer.errorMessage!).message).toContain("stopped responding");
+  });
+});
+
+/** River's GLM as docs/configured-models.md declares it. */
+const riverGlm = () => ({
+  id: "river/glm-5.3-flash",
+  provider: "openai-compatible",
+  location: "cloud",
+  baseUrl,
+  apiModel: "zai-org/GLM-5.3-Flash",
+  contextWindow: 1_048_576,
+  maxOutputTokens: 131_072,
+  reasoning: { efforts: ["low", "high", "max"], default: "high", canDisable: false },
+  cost: { input: 0.5, output: 2, cacheRead: 0.1 },
+});
+
+describe("configured model limits and reasoning", () => {
+  it("registers the declared window, output limit, reasoning efforts and prices", () => {
+    declare([riverGlm()]);
+    const base = createModels();
+    const ref = createMikeModels(base).resolve("river/glm-5.3-flash");
+    const model = base.getModel(ref.provider, ref.modelId)!;
+    expect(model).toMatchObject({
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+      reasoning: true,
+      cost: { input: 0.5, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+      thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
+    });
+  });
+
+  it("keeps the old assumptions for a model that declares no limits, leaving half the window for input", () => {
+    declare([{ id: "plain", provider: "openai-compatible", location: "cloud", baseUrl }]);
+    const base = createModels();
+    const ref = createMikeModels(base).resolve("plain");
+    expect(base.getModel(ref.provider, ref.modelId)).toMatchObject({ contextWindow: 128_000, maxTokens: 16_384, reasoning: false });
+    declare([{ id: "small", provider: "openai-compatible", location: "cloud", baseUrl, contextWindow: 8_192 }]);
+    const small = createMikeModels(base).resolve("small");
+    expect(base.getModel(small.provider, small.modelId)?.maxTokens).toBe(4_096);
+  });
+
+  it("never asks a model that cannot stop reasoning to stop: no effort becomes its lightest", async () => {
+    declare([riverGlm()]);
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base);
+    const ref = resolve("river/glm-5.3-flash");
+    const model = base.getModel(ref.provider, ref.modelId)!;
+    await models.completeSimple(model, context());
+    await models.completeSimple(model, context(), { reasoning: "medium" });
+    await models.completeSimple(model, context(), { reasoning: "max" });
+    expect(seen.map((request) => request.body.reasoning_effort)).toEqual(["low", "high", "max"]);
+    // Instructions stay a system message, which every compatible server accepts.
+    expect((seen[0].body.messages as { role: string }[])[0].role).toBe("system");
+  });
+
+  it("turns reasoning off only for a model that declares it can, with its off value", async () => {
+    declare([
+      {
+        id: "river/deepseek-v4.1-flash",
+        provider: "openai-compatible",
+        location: "cloud",
+        baseUrl,
+        contextWindow: 1_048_576,
+        maxOutputTokens: 384_000,
+        reasoning: { efforts: ["high", "max"], default: "high", canDisable: true, offValue: "none" },
+      },
+    ]);
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base);
+    const ref = resolve("river/deepseek-v4.1-flash");
+    const model = base.getModel(ref.provider, ref.modelId)!;
+    await models.completeSimple(model, context());
+    await models.completeSimple(model, context(), { reasoning: "low" });
+    expect(seen.map((request) => request.body.reasoning_effort)).toEqual(["none", "high"]);
+  });
+
+  it("registers every declared model at once, warning once about each that declares no window", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      declare([riverGlm(), { id: "no-window-model", provider: "openai-compatible", location: "cloud", baseUrl }]);
+      const base = createModels();
+      const catalog = createMikeModels(base);
+      catalog.registerConfigured();
+      catalog.registerConfigured();
+      expect(base.getModel("mike:river/glm-5.3-flash", "zai-org/GLM-5.3-Flash")).toBeDefined();
+      expect(base.getModel("mike:no-window-model", "no-window-model")).toBeDefined();
+      const warnings = warn.mock.calls.map((call) => String(call[0]));
+      expect(warnings.filter((text) => text.includes("no-window-model"))).toHaveLength(1);
+      expect(warnings.some((text) => text.includes("river/glm-5.3-flash"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("finds an endpoint model nothing has resolved yet in this process", () => {
+    declare([riverGlm()]);
+    const base = createModels();
+    const { models } = createMikeModels(base);
+    expect(base.getModel("mike:river/glm-5.3-flash", "zai-org/GLM-5.3-Flash")).toBeUndefined();
+    expect(models.getModel("mike:river/glm-5.3-flash", "zai-org/GLM-5.3-Flash")?.contextWindow).toBe(1_048_576);
+    expect(models.getModel("mike:not-declared", "x")).toBeUndefined();
+  });
+});
+
+describe("a request that overflows the context window", () => {
+  /** A response cut off by its output limit after `output` tokens. */
+  const cutOff = (text: string, output: number): Reply => (res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(sse({ role: "assistant", content: text }));
+    res.write(sse({}, "length", { prompt_tokens: 150_000, completion_tokens: output, total_tokens: 150_000 + output }));
+    res.end("data: [DONE]\n\n");
+  };
+
+  it("is reported as an overflow, not as a one-token answer", async () => {
+    declare([{ id: "cramped", provider: "openai-compatible", location: "cloud", baseUrl }]);
+    replies = [cutOff("I", 1)];
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base);
+    const ref = resolve("cramped");
+    const answer = await models.completeSimple(base.getModel(ref.provider, ref.modelId)!, context());
+    expect(answer.stopReason).toBe("error");
+    // What Pi Durable reads to compact and ask again.
+    expect(isContextOverflow(answer)).toBe(true);
+    expect(providerError("cramped", answer.errorMessage!).message).toContain("too long");
+  });
+
+  it("leaves a long answer that reached its output limit alone", async () => {
+    declare([{ id: "verbose", provider: "openai-compatible", location: "cloud", baseUrl }]);
+    replies = [cutOff("clause. ".repeat(200), 4_000)];
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base);
+    const ref = resolve("verbose");
+    const answer = await models.completeSimple(base.getModel(ref.provider, ref.modelId)!, context());
+    expect(answer.stopReason).toBe("length");
+  });
+
+  it("leaves a short answer alone when the caller asked for a short one", () => {
+    const message = fauxAssistantMessage([fauxText("Yes")], { stopReason: "length" });
+    message.usage.output = 3;
+    expect(asOverflow(message, 8)).toBeUndefined();
+    expect(asOverflow(message, 4_096)?.stopReason).toBe("error");
+  });
+});
+
+describe("a stream that goes quiet between chunks", () => {
+  /** Starts an answer, then sends only SSE comments (or nothing) for `gapMs` before finishing. */
+  const gap = (gapMs: number, keepAlive: boolean): Reply => async (res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(sse({ role: "assistant", content: "Drafting" }));
+    const until = Date.now() + gapMs;
+    while (Date.now() < until) {
+      await pause(40);
+      if (keepAlive) res.write(": still generating\n\n");
+    }
+    res.write(sse({ content: " the clause." }));
+    res.write(sse({}, "stop"));
+    res.end("data: [DONE]\n\n");
+  };
+  const ask = async (id: string, extra: Record<string, unknown>, timeouts: { firstChunkMs: number; chunkMs: number; configuredChunkMs?: number }) => {
+    declare([{ id, provider: "openai-compatible", location: "cloud", baseUrl, ...extra }]);
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base, { chunkTimeouts: timeouts });
+    const ref = resolve(id);
+    return models.completeSimple(base.getModel(ref.provider, ref.modelId)!, context());
+  };
+
+  it("ends the request when nothing at all arrives within the gap limit", async () => {
+    replies = [gap(500, false)];
+    const answer = await ask("quiet", {}, { firstChunkMs: 150, chunkMs: 150 });
+    expect(answer.stopReason).toBe("error");
+    expect(answer.errorMessage).toBe("chunk timeout of 150ms exceeded");
+  });
+
+  it("keeps waiting while the endpoint sends bytes, even ones that are no event yet", async () => {
+    replies = [gap(500, true)];
+    const answer = await ask("busy", {}, { firstChunkMs: 150, chunkMs: 150 });
+    expect(answer.errorMessage).toBeUndefined();
+    expect(answer.content).toEqual([{ type: "text", text: "Drafting the clause." }]);
+  });
+
+  it("gives configured models their own, longer gap limit, and a model its declared one", async () => {
+    replies = [gap(400, false)];
+    const configured = await ask("patient", {}, { firstChunkMs: 150, chunkMs: 150, configuredChunkMs: 5_000 });
+    expect(configured.stopReason).toBe("stop");
+    replies = [gap(400, false)];
+    const declared = await ask("declared", { streamIdleTimeoutMs: 5_000 }, { firstChunkMs: 150, chunkMs: 150, configuredChunkMs: 150 });
+    expect(declared.stopReason).toBe("stop");
   });
 });
 

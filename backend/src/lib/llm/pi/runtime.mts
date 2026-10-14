@@ -22,8 +22,16 @@ import type { JsonValue } from "@earendil-works/chord";
 import type { ImageContent, Message, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
 import { isParallelSafeTool, tierForTool } from "../../guardrails/policy.js";
 import { databaseUrl } from "../../runtimeConfig.js";
+import { safeError } from "../../safeError.js";
 import { getConfiguredModel, tolerateTextToolCalls } from "../registry.js";
-import { createMikeModels, providerError, tolerantMessage, useRequestKeys, type MikeModels } from "./providers.mjs";
+import {
+  createMikeModels,
+  lightestThinkingLevel,
+  providerError,
+  tolerantMessage,
+  useRequestKeys,
+  type MikeModels,
+} from "./providers.mjs";
 import {
   configure,
   createRegistry,
@@ -46,10 +54,13 @@ import {
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
+import { answerLanguageDrift, LANGUAGE_DRIFT_NOTE } from "./languageGuard.mjs";
+import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold } from "./compactionHooks.mjs";
 import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
 import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
 import pg from "pg";
 import { DELEGATE_TOOL_SUMMARY } from "../types.js";
+import { escapeTurnContextMarkup, planTurnContext, replayTurnContext, withoutTurnContext } from "../turnContext.js";
 import type {
   LlmMessage,
   LlmUserContent,
@@ -318,12 +329,27 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   };
   registry.install(defineExtension({ name: "mike-subagents", tools: [delegateTool(bindings, catalog.resolve, delegateDescription)] }));
 
+  // Every declared model is in the catalog before the Harness opens: a turn or
+  // compaction the last process left running resumes with its model at once,
+  // instead of failing `no_model` because nothing has resolved it yet.
+  try {
+    catalog.registerConfigured();
+  } catch (error) {
+    console.error("[pi] failed to register the configured models", safeError(error));
+  }
+
+  let opened: Harness | undefined;
+  registry.install(compactionExtension(() => opened));
+
   const harness = await Harness.open(
     storage,
     {
       models: catalog.models,
       registry,
       settings: {
+        // Mike writes the summary (compactionHooks.mts) and usually compacts at
+        // the owner's auto-compact threshold, well before these.
+        compaction: COMPACTION_SETTINGS,
         // Lookups in one round run at once; a tool that changes something
         // declares `executionMode: "sequential"` (see mikeTool), which runs
         // its whole round in call order.
@@ -333,6 +359,7 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
     },
     background,
   );
+  opened = harness;
   // Rebuild what the previous process offered before resuming its work: the
   // tools a resumed call needs, and the turns that may be driven again.
   installTools(
@@ -634,7 +661,7 @@ function delegateTool(bindings: Bindings, resolve: MikeModels["resolve"], descri
           const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
           await configure(tx, created.id, {
             model: ref,
-            thinkingLevel: thinkingLevel(spec.reasoning),
+            thinkingLevel: thinkingLevel(spec.reasoning, spec.model),
             instructions: spec.instructions,
             tools: spec.tools.map((name) => ({ name }) as ToolRegistration),
           });
@@ -848,7 +875,35 @@ function withoutThreadMemory(text: string): string {
 const STAMP = /^\[(?:Sent|Answered): [^\]\n]*\]\n/;
 
 function comparable(text: string): string {
-  return withoutThreadMemory(text).replace(STAMP, "").trim();
+  return escapeTurnContextMarkup(withoutTurnContext(withoutThreadMemory(text)).replace(STAMP, "").trim());
+}
+
+/**
+ * The turn context the model has not seen yet, in front of the user's own
+ * words (lib/llm/turnContext.ts). What it has seen is read from the
+ * conversation's model context, so a fork inherits it and a compaction that
+ * summarised a block away makes this turn send its sections again. Markup the
+ * user typed that looks like the block is neutralised first, so only the
+ * runtime's own blocks count.
+ */
+async function withTurnContext(
+  conversation: Conversation,
+  content: string | (TextContent | ImageContent)[],
+  sections: StreamChatParams["turnContext"],
+): Promise<string | (TextContent | ImageContent)[]> {
+  const escaped =
+    typeof content === "string"
+      ? escapeTurnContextMarkup(content)
+      : content.map((part) => (part.type === "text" ? { ...part, text: escapeTurnContextMarkup(part.text) } : part));
+  if (!sections?.length) return escaped;
+  const view = await conversation.context(background);
+  const shown = replayTurnContext(
+    view.messages.filter((message) => message.role === "user").map((message) => userText(message.content)),
+  );
+  const block = planTurnContext(shown, sections);
+  if (!block) return escaped;
+  if (typeof escaped === "string") return `${block}\n\n${escaped}`;
+  return [{ type: "text" as const, text: block }, ...escaped];
 }
 
 function withThreadMemory(content: string | (TextContent | ImageContent)[], memory: string) {
@@ -947,8 +1002,20 @@ async function conversationForTurn(
       background,
     );
   }
+  return conversationAfter(harness, chatKey, turn.parentMessageId);
+}
+
+/**
+ * The conversation that continues after a stored answer: the answer's own
+ * conversation when nothing was asked after it there, else a fork at it.
+ * Undefined when the answer was never mapped, for the text fallback.
+ */
+async function conversationAfter(harness: Harness, chatKey: string, messageId: string): Promise<Conversation | undefined> {
+  const remember = async (tx: Tx, id: ConversationId) => {
+    (await tx.doc(ChatLineage, chatKey, null)).conversations.push(id);
+  };
   const lineage = await harness.snapshot(ChatLineage, chatKey, background);
-  const place = lineage?.messages?.[turn.parentMessageId];
+  const place = lineage?.messages?.[messageId];
   if (!place) return undefined;
   const base = await harness.conversation(place.conversation as ConversationId, background);
   if (!base) return undefined;
@@ -960,6 +1027,28 @@ async function conversationForTurn(
     if (!later.items.some((entry) => entry.kind === "pi.user")) return base;
   }
   return base.fork(place.entry as EntryId, { ownership: { kind: "ownerless" }, init: remember }, background);
+}
+
+/** The visible text of a stored answer entry. */
+async function answerTextOf(conversation: Conversation, entry: EntryId): Promise<string> {
+  const stored = await conversation.commit((tx) => tx.entry(entry), background);
+  const message = stored?.model?.[0];
+  if (message?.role !== "assistant") return "";
+  return message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+}
+
+/**
+ * Move a stored answer's place to the conversation's newest entry: a turn that
+ * paused to ask, and the continuation that answered it, both end there.
+ */
+async function recordAnswerAtTail(conversation: Conversation, chatKey: string, assistantMessageId: string): Promise<void> {
+  const last = (await conversation.entries({ order: "descending" }, 1, undefined, background)).items[0];
+  if (!last) return;
+  await conversation.commit(async (tx) => {
+    const lineage = await tx.doc(ChatLineage, chatKey, null);
+    if (!lineage.conversations.includes(conversation.id)) lineage.conversations.push(conversation.id);
+    lineage.messages[assistantMessageId] = { conversation: conversation.id, entry: last.id };
+  }, background);
 }
 
 /** Record where this turn's stored user prompt and answer landed. */
@@ -1052,7 +1141,11 @@ async function conversationFor(
   );
 }
 
-function thinkingLevel(level: ReasoningLevel | undefined): ModelThinkingLevel {
+/**
+ * The effort a turn asks of its model. "Off" reaches a model that cannot turn
+ * reasoning off as its lightest effort (providers.mts), never as "off".
+ */
+export function thinkingLevel(level: ReasoningLevel | undefined, mikeModel: string): ModelThinkingLevel {
   switch (level) {
     case "none":
       return "off";
@@ -1064,8 +1157,9 @@ function thinkingLevel(level: ReasoningLevel | undefined): ModelThinkingLevel {
       return level;
     default:
       // Omitted: bulk work (extraction, the memory curator) saves the tokens
-      // and latency. Interactive chat always passes its level.
-      return "off";
+      // and latency. Interactive chat always passes its level. A configured
+      // reasoning model runs at the effort its declaration names instead.
+      return getConfiguredModel(mikeModel)?.reasoning?.default ?? "off";
   }
 }
 
@@ -1115,6 +1209,9 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     (params.turn && params.conversationId
       ? await conversationForTurn(harness, chatKey, params.turn, ref)
       : undefined) ??
+    (params.continuesAnswer && params.conversationId
+      ? await conversationAfter(harness, chatKey, params.continuesAnswer)
+      : undefined) ??
     (await conversationFor(harness, chatKey, history, ref, vision));
 
   // One commit fixes this turn's agent: model, effort, Mike's system prompt, and
@@ -1125,7 +1222,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     if (resumed) return;
     await configure(tx, conversation.id, {
       model: ref,
-      thinkingLevel: thinkingLevel(params.reasoning),
+      thinkingLevel: thinkingLevel(params.reasoning, params.model),
       instructions: params.systemPrompt || null,
       tools: [
         ...tools.map((tool: OpenAIToolSchema) => tool.function.name),
@@ -1155,6 +1252,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     }, background);
   }
   let halted: { error: unknown } | undefined;
+  setAutocompactThreshold(conversation.id, params.autocompactTokens);
   if (params.runTools) {
     bindings.set(conversation.id, {
       runTools: params.runTools,
@@ -1248,6 +1346,9 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   params.abortSignal?.addEventListener("abort", onAbort, { once: true });
   const releaseKeys = useRequestKeys(providerSession, params.apiKeys);
   let answered = false;
+  // The answer this turn writes to: its own, or the paused one it continues.
+  const answerId = params.conversationId ? (params.turn?.assistantMessageId ?? params.continuesAnswer) : undefined;
+  let userEntry = firstEntry;
   try {
     if (resumed) {
       // What the turn committed before the restart reaches the caller first,
@@ -1271,7 +1372,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       }
     }
     const freshThread = !resumed && history.length === 0 && (await userEntries(conversation)).length === 0;
-    const content = piUserContent(input.content, vision);
+    const content = await withTurnContext(conversation, piUserContent(input.content, vision), params.turnContext);
     // The same request id returns the submission already admitted, so driving
     // a resumed turn again never sends its input twice.
     const submission = await conversation.submit(
@@ -1283,19 +1384,42 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       },
       background,
     );
-    const settled = await submission.wait(background);
-    if (halted) throw halted.error;
-    if (settled.status !== "done" || settled.type !== "input") {
-      if (settled.reason === "model_error" && settled.detail !== undefined) {
-        throw providerError(params.model, typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail));
+    let settled = await submission.wait(background);
+    userEntry = settled.entry ?? firstEntry;
+    const settle = async () => {
+      if (halted) throw halted.error;
+      if (settled.status !== "done" || settled.type !== "input") {
+        if (settled.reason === "model_error" && settled.detail !== undefined) {
+          throw providerError(params.model, typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail));
+        }
+        throw new Error(`The answer could not be completed (${settled.reason ?? "unanswered"})`);
       }
-      throw new Error(`The answer could not be completed (${settled.reason ?? "unanswered"})`);
+      return settled.answer;
+    };
+    let answerEntry = await settle();
+    // An answer in another script than the person's message is asked for
+    // again, once, in the same turn. A continuation's input is the client's
+    // own wording of the person's answers, not their language, so it is not judged.
+    if (!params.continuesAnswer && answerLanguageDrift(userText(input.content), await answerTextOf(conversation, answerEntry))) {
+      const again = await conversation.submit(
+        {
+          type: "input",
+          ...(turnKey ? { requestId: `turn:${turnKey}:language` } : {}),
+          content: LANGUAGE_DRIFT_NOTE,
+          whenBusy: "reject",
+        },
+        background,
+      );
+      settled = await again.wait(background);
+      answerEntry = await settle();
     }
     if (params.turn && params.conversationId) {
-      await recordTurn(conversation, chatKey, params.turn, settled.entry, settled.answer);
+      await recordTurn(conversation, chatKey, params.turn, userEntry, answerEntry);
+    } else if (answerId) {
+      await recordAnswerAtTail(conversation, chatKey, answerId);
     }
     // The committed answer is authoritative; deltas may have been coalesced into a snapshot.
-    const answer = await conversation.commit((tx) => tx.entry(settled.answer), background);
+    const answer = await conversation.commit((tx) => tx.entry(answerEntry), background);
     const message = answer?.model?.[0];
     if (message?.role === "assistant") {
       const text = message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
@@ -1324,6 +1448,15 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     // recorded until the caller has stored it (`finishTurnOnPi`): a crash in
     // between drives it again, and the resubmission returns the same answer.
     if (turnKey && !answered) await forgetTurn(harness, turnKey).catch(() => undefined);
+    // A turn that paused to ask, failed or was stopped is still a place in the
+    // chat: the continuation that answers it, a retry, and any turn after it
+    // must find this conversation, not fall back to matching text.
+    if (!answered && answerId) {
+      await (async () => {
+        if (params.turn?.userMessageId) await recordTurn(conversation, chatKey, params.turn, userEntry, userEntry);
+        await recordAnswerAtTail(conversation, chatKey, answerId);
+      })().catch(() => undefined);
+    }
   }
 }
 
@@ -1422,11 +1555,8 @@ export async function completeTextOnPi(params: {
   const releaseKeys = useRequestKeys(sessionId, params.apiKeys);
   // Some models cannot stop thinking. Give them their lightest effort and room
   // to think on top of the answer budget, or a 64-token title comes back empty.
-  const levels = model.thinkingLevelMap;
-  const alwaysThinks = model.reasoning && levels?.off === null;
-  const lightest = alwaysThinks
-    ? (["minimal", "low", "medium", "high"] as const).find((level) => levels?.[level] !== null)
-    : undefined;
+  const lightest = lightestThinkingLevel(model);
+  const alwaysThinks = lightest !== undefined;
   const maxTokens = params.maxTokens ?? 512;
   try {
     let message = await catalog.models.completeSimple(
@@ -1449,5 +1579,17 @@ export async function completeTextOnPi(params: {
     return message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
   } finally {
     releaseKeys();
+  }
+}
+
+/** The context window, in tokens, of the catalog entry `mikeModel` runs on; undefined when it does not resolve. */
+export async function contextWindowOnPi(mikeModel: string): Promise<number | undefined> {
+  try {
+    const catalog = openModels();
+    const ref = catalog.resolve(mikeModel);
+    const window = catalog.models.getModel(ref.provider, ref.modelId)?.contextWindow;
+    return typeof window === "number" && window > 0 ? window : undefined;
+  } catch {
+    return undefined;
   }
 }

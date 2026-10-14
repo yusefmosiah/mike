@@ -62,6 +62,7 @@ type RunToolsFn = (
 type StreamChatCall = {
   tools: { function: { name: string } }[];
   systemPrompt: string;
+  turnContext?: { key: string; text: string }[];
   runTools?: RunToolsFn;
   [key: string]: unknown;
 };
@@ -90,6 +91,9 @@ async function turn(calls: Parameters<RunToolsFn>[0], extra: Record<string, unkn
   return results;
 }
 
+/** One turn context section of a call, or undefined when the turn has none. */
+const section = (call: StreamChatCall, key: string) => call.turnContext?.find((s) => s.key === key)?.text;
+
 const cell = (code: string, id = "p1") => ({ id, name: "run_python", input: { code } });
 
 const kernelDir = mkdtempSync(path.join(tmpdir(), "mike-kernel-"));
@@ -105,16 +109,20 @@ describe("code mode", () => {
     await runLLMStream(baseParams() as never);
     const offered = streamChatWithTools.mock.calls[0][0];
     expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
-    expect(offered.systemPrompt).toContain("TOOLS IN PYTHON:");
-    expect(offered.systemPrompt).toMatch(/await tools\.read_document\(doc_id: str/);
-    expect(offered.systemPrompt).toContain("await tools.list_documents(");
+    // The tool index is turn context; the system prompt never mentions it.
+    expect(offered.systemPrompt).not.toContain("TOOLS IN PYTHON:");
+    expect(section(offered, "code-mode")).toContain("TOOLS IN PYTHON:");
+    expect(section(offered, "code-mode")).toMatch(/await tools\.read_document\(doc_id: str/);
+    expect(section(offered, "code-mode")).toContain("await tools.list_documents(");
 
     vi.stubEnv("CODE_MODE_ENABLED", "false");
     await runLLMStream(baseParams() as never);
     const direct = streamChatWithTools.mock.calls[1][0];
     expect(direct.tools.map((t) => t.function.name)).not.toContain("run_python");
     expect(direct.tools.map((t) => t.function.name)).toContain("read_document");
-    expect(direct.systemPrompt).not.toContain("TOOLS IN PYTHON:");
+    expect(section(direct, "code-mode")).toBeUndefined();
+    // Falling back to direct tools does not change the system prompt.
+    expect(direct.systemPrompt).toBe(offered.systemPrompt);
   });
 
   it("runs a guest's turn in the host's workstation, with direct tools until the host allows the thread", async () => {
@@ -133,11 +141,12 @@ describe("code mode", () => {
     await runLLMStream(guest(false) as never);
     expect(names(0)).toContain("run_command");
     expect(names(0)).not.toContain("run_python");
-    expect(streamChatWithTools.mock.calls[0][0].systemPrompt).toContain("Each run_command asks Pat for permission first");
+    expect(section(streamChatWithTools.mock.calls[0][0], "workstation")).toContain("Each run_command asks Pat for permission first");
 
     await runLLMStream(guest(true) as never);
     expect(names(1)).toEqual(["run_python"]);
-    expect(streamChatWithTools.mock.calls[1][0].systemPrompt).toContain("Pat has allowed this user's messages to use it");
+    expect(section(streamChatWithTools.mock.calls[1][0], "workstation")).toContain("Pat has allowed this user's messages to use it");
+    expect(streamChatWithTools.mock.calls[1][0].systemPrompt).toBe(streamChatWithTools.mock.calls[0][0].systemPrompt);
 
     // A surface that cannot ask the host gives a guest no workstation at all.
     await runLLMStream(guest(null) as never);
@@ -216,8 +225,9 @@ except ToolError as e:
     await turn([cell("import json\nrates = {'a': 1}\ndef helper(): pass")], { conversationId: "conv-names" });
     await vi.waitFor(() => expect(kernels.knownNames("conv-names")).toContain("rates"));
     await runLLMStream({ ...baseParams(), conversationId: "conv-names" } as never);
-    const prompt = streamChatWithTools.mock.calls.at(-1)![0].systemPrompt;
-    expect(prompt).toMatch(/already defines, from earlier in this conversation: helper, json, rates\.$/);
+    const call = streamChatWithTools.mock.calls.at(-1)![0];
+    expect(section(call, "python-session")).toMatch(/already defines, from earlier in this conversation: helper, json, rates\.$/);
+    expect(call.systemPrompt).not.toContain("helper, json, rates");
   });
 
   it("pauses the turn when a cell asks the user, keeping the cell's variables", async () => {

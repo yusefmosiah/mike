@@ -21,7 +21,7 @@ export const RUN_PYTHON_SCHEMA = {
   function: {
     name: RUN_PYTHON_TOOL,
     description:
-      "Run Python in the user's workstation: a persistent kernel, like a Jupyter notebook, where variables, imports and functions stay defined across calls and across messages in this conversation. It is how you use every tool you have: call them as `await tools.<name>(...)` (see CODE MODE and TOOLS IN PYTHON in your instructions). Only what the code prints, and the value of its last line, come back to you. Top-level await works.",
+      "Run Python in the user's workstation: a persistent kernel, like a Jupyter notebook, where variables, imports and functions stay defined across calls and across messages in this conversation. It is how you use every tool you have: call them as `await tools.<name>(...)` (see CODE MODE and TOOLS IN PYTHON in the turn context). Only what the code prints, and the value of its last line, come back to you. Top-level await works.",
     parameters: {
       type: "object",
       properties: {
@@ -53,7 +53,14 @@ export function pythonToolSpecs(tools: readonly unknown[]): KernelToolSpec[] {
   return specs;
 }
 
-type JsonSchema = { type?: unknown; enum?: unknown; description?: unknown };
+type JsonSchema = {
+  type?: unknown;
+  enum?: unknown;
+  description?: unknown;
+  items?: JsonSchema;
+  properties?: Record<string, JsonSchema>;
+  required?: unknown;
+};
 
 const JSON_TYPES: Record<string, string> = {
   string: "str",
@@ -68,7 +75,29 @@ const JSON_TYPES: Record<string, string> = {
 function typeName(schema: JsonSchema): string {
   if (Array.isArray(schema.type)) return schema.type.map((t) => JSON_TYPES[String(t)] ?? String(t)).join(" | ");
   if (Array.isArray(schema.enum)) return schema.enum.slice(0, 8).map((v) => JSON.stringify(v)).join(" | ");
+  // A list says what it holds when its items have one plain type (the kernel's _type_name agrees).
+  const itemType = schema.type === "array" && typeof schema.items?.type === "string" ? JSON_TYPES[schema.items.type] : undefined;
+  if (itemType) return `list[${itemType}]`;
   return typeof schema.type === "string" ? (JSON_TYPES[schema.type] ?? "Any") : "Any";
+}
+
+/**
+ * The fields of a parameter that is an object, or a list of objects, one per
+ * line: the direct-call schema shows them, so the Python docs must too.
+ */
+function nestedFieldLines(schema: JsonSchema, depth: number): string[] {
+  const shape = schema.type === "array" ? schema.items : schema;
+  if (!shape || shape.type !== "object" || !shape.properties || depth > 2) return [];
+  const required = Array.isArray(shape.required) ? shape.required : [];
+  const pad = " ".repeat(4 + depth * 4);
+  const lines = [`${pad}${schema.type === "array" ? "Each item is a dict with:" : "A dict with:"}`];
+  for (const [name, field] of Object.entries(shape.properties)) {
+    const text = typeof field?.description === "string" ? field.description.trim() : "";
+    const flag = required.includes(name) ? ", required" : "";
+    lines.push(`${pad}  ${name} (${typeName(field ?? {})}${flag})${text ? `: ${text}` : ""}`);
+    lines.push(...nestedFieldLines(field ?? {}, depth + 1));
+  }
+  return lines;
 }
 
 /** Python keywords a tool parameter may be named after. */
@@ -97,6 +126,7 @@ export function pythonToolDoc(spec: KernelToolSpec): string {
   for (const name of order) {
     const text = typeof props[name]?.description === "string" ? (props[name].description as string).trim() : "";
     lines.push(`    ${pythonParamName(name)}${required.includes(name) ? "" : " (optional)"}${text ? `: ${text}` : ""}`);
+    lines.push(...nestedFieldLines(props[name] ?? {}, 1));
   }
   return lines.join("\n");
 }
@@ -108,9 +138,10 @@ const indent = (text: string) =>
     .join("\n");
 
 /**
- * How the model works in code mode. It sits after the base prompt, which was
- * written for direct tool calls, and says how each of its rules maps onto
- * run_python.
+ * How the model works in code mode. It reaches the model as turn context
+ * (lib/llm/turnContext.ts), not in the system prompt, because a turn falls
+ * back to direct tools when the kernel cannot start; it says how each rule of
+ * the base prompt, written for direct tool calls, maps onto run_python.
  */
 export const CODE_MODE_GUIDE = `CODE MODE:
 You work through one tool, run_python. It runs Python in a persistent kernel on the user's own workstation: a Linux machine with a home directory that persists (/home/agent), internet access, and common data libraries (pandas, openpyxl, python-docx and requests; try an import before relying on others). Shell commands run through subprocess.
@@ -119,7 +150,7 @@ How these instructions apply:
 - Wherever these instructions say to call a tool (read_document, find_in_document, edit_document, get_diff, ask_inputs, web_search, read_workflow and the rest), call it inside run_python as \`await tools.<name>(...)\` with the same arguments. One run_python call is one tool-use round: do as much as makes sense in one cell, and run independent calls together with \`await tools.gather(tools.a(...), tools.b(...))\`.
 - You see only what a cell prints and the value of its last line. Print what you need to read: counts, summaries, the passages that matter. Keep full results in variables rather than printing them.
 - Variables, imports and functions stay defined across cells and across the messages of this conversation. Reuse them instead of fetching again; "read each document at most once" means keep its text in a variable. Files you write under the home directory persist too; use them for large data.
-- Results that are JSON come back as dicts and lists, others as strings. Common shapes: web_search returns {"results": [{"title", "url", "snippet"}], "count"}; fetch_web_page returns {"url", "content", "sha256"}; fetch_documents returns one string with a "--- doc-N ---" header before each document; prefer \`docs\` (below) for reading. A long read_document result comes back in windows ending with a continuation notice; pass the id it names as \`from_=\` for the next window (\`from\` is a Python keyword, so parameters named after keywords take a trailing underscore). When you do not know a result's shape, print its type and keys before using it. A tool that fails raises ToolError; catch it to recover, or fix the call in the next cell. After a Python error, fix the cause and rerun only what failed.
+- Results that are JSON come back as dicts and lists, others as strings. Common shapes: web_search returns {"results": [{"title", "url", "snippet"}], "count"}; fetch_web_page returns {"url", "content", "total_chars", "truncated", "next_offset", ...} (pass offset= to read on); find_in_document returns {"total_matches", "returned", "hits": [{"block_id", "label", "context"}]}; edit_document returns {"ok", "applied", "errors", "version_number"}; read_document returns text; fetch_documents returns one string with a "--- doc-N ---" header before each document; prefer \`docs\` (below) for reading. A long read_document result comes back in windows ending with a continuation notice; pass the id it names as \`from_=\` for the next window (\`from\` is a Python keyword, so parameters named after keywords take a trailing underscore). When you do not know a result's shape, print its type and keys before using it. A tool that fails raises ToolError; catch it to recover, or fix the call in the next cell. After a Python error, fix the cause and rerun only what failed.
 - ask_inputs, and any call that needs the user's approval, ends the turn at that point. Do not wrap it in try/except. The answer arrives in the next message, and your variables are still there.
 - A cell may compute for 300 seconds (pass timeout_seconds for up to 3600); time spent waiting on tools does not count. Split long work into steps that each print their progress.
 - Citations quote text verbatim, so print the exact passages you will cite before citing them, or check them with \`d.quote(block_id, text)\`: for documents with their [Page N] markers (the chat-local labels such as "doc-0" are the doc_id values the tools take and the citation block uses), and for web pages with the url and title the search or fetch returned.
@@ -130,7 +161,7 @@ DOCUMENTS IN PYTHON:
 \`docs\` holds the documents this conversation can read: Word, PDF, Markdown, text, spreadsheets and slides, all in one shape. Nothing is read until you ask, so look at the structure first and read only the parts you need. Each document is a list of blocks with an .id, .kind (heading, paragraph, list_item, table, code, quote, note, figure), .level, .label (the clause or list number as shown, e.g. "12.3(b)"), .text and .page. Printing blocks shows each line with its [id] and [Page N] markers.
 - \`print(docs)\` lists them by doc_id and filename. \`d = docs["doc-0"]\` or \`docs.find("lease")\` by filename.
 - \`print(d.outline())\` shows headings with ids, clause numbers and section sizes. \`print(d.section("12"))\` prints one section, found by clause number or heading words. \`print(d["p40":"p52"])\` prints a block range, both ends included; \`d.around("p40")\` and \`d.page(3)\` print nearby blocks or one page.
-- \`docs.grep(r"pattern")\` and \`d.grep(...)\` find every match (case-insensitive) with document, block, page and section. \`docs.search("termination for convenience")\` ranks passages across documents by relevance, counting the words of each passage's section heading.
+- \`docs.grep(r"pattern")\` and \`d.grep(..., limit=50)\` find every match (case-insensitive) with document, block, page and section. Each hit has .doc_id, .block_id, .page, .label, .match (the matched words), .context (a snippet) and .text (the whole block). \`d.blocks\` is a list: index it by position or by block id, like \`d\`. \`docs.search("termination for convenience")\` ranks passages across documents by relevance, counting the words of each passage's section heading.
 - \`d.tables[0].df\` is a table as a pandas DataFrame; \`.text\` is plain text of a document, section or block range.
 - \`d.quote("p40", "exact words")\` checks the words appear verbatim in that block and returns the citation quote, or raises naming the closest passage.
 - Ids are stable for a document's version. PDF structure is reconstructed: blocks marked inferred are headings recognised by type size, and ocr marks text recovered from a scan. The document open in Word is not in \`docs\`; read it with read_document.`;
@@ -138,14 +169,11 @@ DOCUMENTS IN PYTHON:
 const MAX_LISTED_NAMES = 60;
 
 /**
- * The system prompt section that replaces the tools' own schemas. `names` are
- * the variables, functions and modules the conversation's kernel already
- * holds from earlier messages; they go last, so the long and stable part of
- * the prompt stays the same between turns.
+ * The code-mode guide and the tool index that replaces the tools' own
+ * schemas. It changes only when the tool set does (a connector added, say),
+ * so it is turn context: sent once, and again only when it changed.
  */
-export function pythonToolsPromptSection(specs: KernelToolSpec[], names: string[] = []): string {
-  const listed = names.slice(0, MAX_LISTED_NAMES).join(", ");
-  const more = names.length > MAX_LISTED_NAMES ? `, and ${names.length - MAX_LISTED_NAMES} more` : "";
+export function pythonToolsPromptSection(specs: KernelToolSpec[]): string {
   return [
     CODE_MODE_GUIDE,
     "",
@@ -153,10 +181,19 @@ export function pythonToolsPromptSection(specs: KernelToolSpec[], names: string[
     "Each tool below is an async function on `tools`. Pass keyword arguments (required ones may also be positional) or one dict.",
     "",
     ...specs.map(pythonToolDoc),
-    ...(names.length
-      ? ["", `Your Python session already defines, from earlier in this conversation: ${listed}${more}.`]
-      : []),
   ].join("\n");
+}
+
+/**
+ * The variables, functions and modules the conversation's kernel already
+ * holds from earlier messages, or null when it holds none. It changes on
+ * almost every turn, so it is its own small turn context section.
+ */
+export function pythonSessionPromptSection(names: string[]): string | null {
+  if (!names.length) return null;
+  const listed = names.slice(0, MAX_LISTED_NAMES).join(", ");
+  const more = names.length > MAX_LISTED_NAMES ? `, and ${names.length - MAX_LISTED_NAMES} more` : "";
+  return `PYTHON SESSION:\nYour Python session already defines, from earlier in this conversation: ${listed}${more}.`;
 }
 
 /** The tool result the model reads for one run_python call. */

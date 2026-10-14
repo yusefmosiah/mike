@@ -1829,39 +1829,214 @@ function tail(s: string, n: number): string {
 }
 
 
+/** The edit operations, with the fields each takes; quoted in every parse error. */
+export const EDIT_OP_FIELDS = {
+  replace: "block, find, replace",
+  insert: "after or before, paragraphs, style?",
+  delete: "block, through?",
+  format: "block, find?, and at least one of bold, italic, underline, strike, highlight, style, align",
+  insert_row: "after or before, cells",
+  delete_row: "block, through?",
+} as const;
+type OpName = keyof typeof EDIT_OP_FIELDS;
+const OP_NAMES = Object.keys(EDIT_OP_FIELDS) as OpName[];
+
+/** Every field an edit may carry, under its canonical name. */
+const EDIT_FIELDS = new Set([
+  "op", "block", "find", "replace", "after", "before", "paragraphs", "cells", "style",
+  "bold", "italic", "underline", "strike", "highlight", "align", "through", "reason",
+]);
+
+/** Other spellings models use for a field, read as the canonical one. */
+const FIELD_ALIASES: Record<string, string> = {
+  type: "op",
+  action: "op",
+  operation: "op",
+  kind: "op",
+  block_id: "block",
+  blockId: "block",
+  target: "block",
+  text: "paragraphs",
+  paragraph: "paragraphs",
+  new_paragraphs: "paragraphs",
+  replacement: "replace",
+  replace_with: "replace",
+  new_text: "replace",
+  old_text: "find",
+  search: "find",
+  after_block: "after",
+  before_block: "before",
+  through_block: "through",
+  to: "through",
+  explanation: "reason",
+  comment: "reason",
+  alignment: "align",
+};
+
+/** Other names models give an operation. */
+const OP_ALIASES: Record<string, OpName> = {
+  replace: "replace",
+  replace_text: "replace",
+  substitute: "replace",
+  edit: "replace",
+  modify: "replace",
+  update: "replace",
+  change: "replace",
+  insert: "insert",
+  add: "insert",
+  insert_paragraph: "insert",
+  insert_paragraphs: "insert",
+  add_paragraph: "insert",
+  add_paragraphs: "insert",
+  delete: "delete",
+  remove: "delete",
+  delete_block: "delete",
+  delete_paragraph: "delete",
+  format: "format",
+  formatting: "format",
+  style: "format",
+  insert_row: "insert_row",
+  add_row: "insert_row",
+  insert_rows: "insert_row",
+  delete_row: "delete_row",
+  remove_row: "delete_row",
+  delete_rows: "delete_row",
+};
+
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const next = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = next;
+    }
+  }
+  return row[b.length];
+}
+
+function didYouMean(word: string, candidates: Iterable<string>): string {
+  let best: string | undefined;
+  let bestScore = Infinity;
+  for (const candidate of candidates) {
+    const score = editDistance(word.toLowerCase(), candidate.toLowerCase());
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best && bestScore <= Math.max(2, Math.floor(word.length / 3)) ? ` (did you mean "${best}"?)` : "";
+}
+
+export type ParsedEditOps = { ok: true; ops: EditOp[] } | { ok: false; error: string };
+
+/** The fields and valid operations, for an error the model can act on. */
+export function editOpsHelp(): string {
+  return `Valid ops and their fields: ${OP_NAMES.map((name) => `${name} {${EDIT_OP_FIELDS[name]}}`).join("; ")}. Any edit may add reason.`;
+}
+
 /**
- * Tool arguments to operations. Accepts snake_case or camelCase keys; an
- * edit without `op` is a replace. Values are not validated here: the engine
- * reports problems per edit.
+ * Tool arguments to operations. Accepts snake_case or camelCase keys, `type`
+ * or `action` for `op`, and the other spellings in FIELD_ALIASES. An edit
+ * without any op is read from its fields (paragraphs → insert, cells →
+ * insert_row, find/replace → replace). Unknown keys, unknown ops and missing
+ * required fields are refused together, before anything is applied, with an
+ * error that lists the valid ops and the fields each needs; values that are
+ * present are checked by the engine, which reports problems per edit.
  */
-export function parseEditOps(raw: unknown): EditOp[] {
-  if (!Array.isArray(raw)) return [];
+export function parseEditOps(raw: unknown): ParsedEditOps {
+  let list = raw;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      /* reported below */
+    }
+  }
+  if (list && typeof list === "object" && !Array.isArray(list)) list = [list];
+  if (!Array.isArray(list) || list.length === 0) {
+    return { ok: false, error: `edits must be a non-empty list of edit objects. ${editOpsHelp()}` };
+  }
   const str = (v: unknown): string | undefined => (typeof v === "string" ? v : typeof v === "number" ? String(v) : undefined);
-  return raw.map((item): EditOp => {
-    const e = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+  const strings = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.map((p) => str(p) ?? "") : str(v) !== undefined ? str(v)!.split(/\n{2,}/) : undefined;
+  const problems: string[] = [];
+  const ops: EditOp[] = [];
+
+  list.forEach((item, index) => {
+    const where = `edit ${index + 1}`;
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      problems.push(`${where} is not an object`);
+      return;
+    }
+    const e: Record<string, unknown> = {};
+    const unknown: string[] = [];
+    for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+      const name = EDIT_FIELDS.has(key) ? key : FIELD_ALIASES[key];
+      if (!name) {
+        unknown.push(`"${key}"${didYouMean(key, EDIT_FIELDS)}`);
+        continue;
+      }
+      // The canonical spelling wins over an alias given alongside it.
+      if (e[name] === undefined || EDIT_FIELDS.has(key)) e[name] = value;
+    }
+    if (unknown.length) {
+      problems.push(`${where} has unknown key${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}`);
+      return;
+    }
+
+    let op: OpName | undefined;
+    const rawOp = str(e.op)?.trim();
+    if (rawOp) {
+      op = OP_ALIASES[rawOp.toLowerCase().replace(/[\s-]+/g, "_")];
+      if (!op) {
+        problems.push(`${where} has unknown op "${rawOp}"${didYouMean(rawOp, OP_NAMES)}`);
+        return;
+      }
+    } else if (e.paragraphs !== undefined) op = "insert";
+    else if (e.cells !== undefined) op = "insert_row";
+    else if (e.find !== undefined || e.replace !== undefined) op = "replace";
+    else {
+      problems.push(`${where} has no op`);
+      return;
+    }
+
     const reason = str(e.reason);
-    const op = str(e.op) ?? "replace";
-    const block = str(e.block ?? e.block_id ?? e.blockId);
-    if (op === "insert") {
-      const paragraphs = Array.isArray(e.paragraphs)
-        ? e.paragraphs.map((p) => str(p) ?? "")
-        : str(e.text) !== undefined
-          ? str(e.text)!.split(/\n{2,}/)
-          : [];
-      return { op, after: str(e.after), before: str(e.before), paragraphs, style: str(e.style), reason };
-    }
-    if (op === "delete") return { op, block: block!, through: str(e.through), reason };
-    if (op === "delete_row") return { op, block: block!, through: str(e.through), reason };
-    if (op === "insert_row") {
-      const cells = Array.isArray(e.cells) ? e.cells.map((c) => str(c) ?? "") : [];
-      return { op, after: str(e.after), before: str(e.before), cells, reason };
-    }
-    if (op === "format") {
+    const block = str(e.block);
+    const missing: string[] = [];
+    const need = (field: string, ok: boolean) => {
+      if (!ok) missing.push(field);
+    };
+    const anchored = () => need("after or before", str(e.after) !== undefined || str(e.before) !== undefined);
+    if (op === "replace") {
+      need("block", !!block);
+      need("find", str(e.find) !== undefined);
+      need("replace", str(e.replace) !== undefined);
+      if (!missing.length) ops.push({ op, block: block!, find: str(e.find)!, replace: str(e.replace)!, reason });
+    } else if (op === "insert") {
+      anchored();
+      const paragraphs = strings(e.paragraphs);
+      need("paragraphs", !!paragraphs && paragraphs.length > 0);
+      if (block && str(e.after) === undefined && str(e.before) === undefined) {
+        missing[0] = 'after or before (insert names its anchor with after: "<block id>" or before: "<block id>", not block)';
+      }
+      if (!missing.length) {
+        ops.push({ op, after: str(e.after), before: str(e.before), paragraphs: paragraphs!, style: str(e.style), reason });
+      }
+    } else if (op === "delete" || op === "delete_row") {
+      need("block", !!block);
+      if (!missing.length) ops.push({ op, block: block!, through: str(e.through), reason });
+    } else if (op === "insert_row") {
+      anchored();
+      const cells = strings(e.cells);
+      need("cells", !!cells);
+      if (!missing.length) ops.push({ op, after: str(e.after), before: str(e.before), cells: cells!, reason });
+    } else {
+      need("block", !!block);
       const bool = (v: unknown) => (typeof v === "boolean" ? v : v === "true" ? true : v === "false" ? false : v === undefined ? undefined : (v as boolean));
-      return {
-        op,
-        block: block!,
-        find: str(e.find),
+      const format = {
         bold: bool(e.bold),
         italic: bool(e.italic),
         underline: bool(e.underline),
@@ -1869,10 +2044,18 @@ export function parseEditOps(raw: unknown): EditOp[] {
         highlight: str(e.highlight),
         style: str(e.style),
         align: str(e.align) as "left" | "center" | "right" | "justify" | undefined,
-        reason,
       };
+      need(
+        "one of bold, italic, underline, strike, highlight, style, align",
+        Object.values(format).some((v) => v !== undefined),
+      );
+      if (!missing.length) ops.push({ op, block: block!, find: str(e.find), ...format, reason });
     }
-    if (op === "replace") return { op, block: block!, find: str(e.find)!, replace: str(e.replace)!, reason };
-    return { op } as unknown as EditOp;
+    if (missing.length) problems.push(`${where} (${op}) is missing ${missing.join(", ")}`);
   });
+
+  if (problems.length) {
+    return { ok: false, error: `No edits were applied: ${problems.join("; ")}. ${editOpsHelp()}` };
+  }
+  return { ok: true, ops };
 }

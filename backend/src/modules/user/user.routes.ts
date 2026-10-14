@@ -75,6 +75,8 @@ import {
     validateProfilePayload,
     getAutoModeDecisionSettings,
     setAutoModeDecisionModel,
+    getAutocompactSetting,
+    setAutocompactTokens,
 } from "./user.service";
 import { sendServiceFailure } from "../../lib/serviceResult";
 
@@ -277,6 +279,33 @@ userRouter.put("/auto-mode-decision", requireAuth, asyncRoute(async (req, res) =
         createDb(),
         res.locals.userId as string,
         (req.body as { model?: unknown } | undefined)?.model ?? null,
+    );
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// GET /user/autocompact?model=<id>
+// Where chats on this model auto-compact: the person's own threshold (null
+// when they set none), the model's default, and the bounds a new value has.
+userRouter.get("/autocompact", requireAuth, asyncRoute(async (req, res) => {
+    const result = await getAutocompactSetting(
+        createDb(),
+        res.locals.userId as string,
+        req.query.model,
+    );
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// PUT /user/autocompact  { model: "<id>", tokens: 500000 | null }
+// null resets the model to its default.
+userRouter.put("/autocompact", requireAuth, asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { model?: unknown; tokens?: unknown };
+    const result = await setAutocompactTokens(
+        createDb(),
+        res.locals.userId as string,
+        body.model,
+        body.tokens,
     );
     if (!result.ok) return void sendServiceFailure(res, result);
     res.json(result.data);

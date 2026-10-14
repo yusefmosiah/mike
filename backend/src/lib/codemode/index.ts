@@ -13,6 +13,7 @@ export {
   DEFAULT_CELL_TIMEOUT_MS,
   MAX_CELL_TIMEOUT_MS,
   NOT_IN_PYTHON,
+  pythonSessionPromptSection,
   pythonToolsPromptSection,
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,

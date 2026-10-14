@@ -87,6 +87,35 @@ export async function completeText(params: {
     return completeTextOnPi(params);
 }
 
+/**
+ * The context window, in tokens, of the model a turn on `model` runs, from
+ * the same catalog entry; undefined when the catalog cannot resolve it.
+ */
+export async function contextWindow(model: string): Promise<number | undefined> {
+    const { contextWindowOnPi } = await import("./pi/runtime.mjs");
+    return contextWindowOnPi(model);
+}
+
+/** The bounds `/autocompact` accepts, and where a chat compacts when its owner set nothing. */
+export type AutocompactPolicy = {
+    minTokens: number;
+    maxTokens: number;
+    defaultTokens: (contextWindow: number) => number;
+};
+
+export async function autocompactPolicy(): Promise<AutocompactPolicy> {
+    const {
+        AUTOCOMPACT_MIN_TOKENS,
+        AUTOCOMPACT_MAX_TOKENS,
+        defaultAutocompactTokens,
+    } = await import("./pi/compaction.mjs");
+    return {
+        minTokens: AUTOCOMPACT_MIN_TOKENS,
+        maxTokens: AUTOCOMPACT_MAX_TOKENS,
+        defaultTokens: defaultAutocompactTokens,
+    };
+}
+
 /** A subagent's record and work, or null when no subagent has this id. */
 export async function subagentTranscript(
     childId: string,

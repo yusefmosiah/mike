@@ -48,6 +48,11 @@ array:
 | `apiKeyProvider` | no | Use the requesting user's saved key for that provider. |
 | `tolerateTextToolCalls` | no | Override the tolerance default. |
 | `maxTokensField` | no | Output-token request field: `max_tokens` (default) or `max_completion_tokens`. |
+| `contextWindow` | recommended | Total tokens (input and output) the model accepts, at least 1,024. Drives compaction and the output budget. Omitted, Mike assumes 128,000 and logs a warning at startup. |
+| `maxOutputTokens` | recommended | Most output tokens one response may use; less than `contextWindow`. Omitted, 16,384 or half the window, whichever is smaller. |
+| `reasoning` | for reasoning models | How the model reasons (below). Omitted, the model is treated as non-reasoning and sent no reasoning parameters. |
+| `cost` | no | US dollars per million tokens: `{ "input", "output", "cacheRead", "cacheWrite" }`, each optional (default 0). Makes the model's spend visible in usage. |
+| `streamIdleTimeoutMs` | no | Longest silence (5,000 to 1,800,000 ms) tolerated once a response is flowing. Defaults to `STREAM_CONFIGURED_CHUNK_TIMEOUT_MS` (180,000). |
 
 An entry that declares no key at all is treated as needing none, regardless of
 whether its location is `local` or `cloud`. When a key source is declared but
@@ -94,7 +99,7 @@ configured model:
 ```
 
 For example, River's hosted open models (https://docs.river.ai/guides/inference-models/),
-listed under their own heading:
+listed under their own heading with their real limits and reasoning controls:
 
 ```json
 {
@@ -108,11 +113,87 @@ listed under their own heading:
       "baseUrl": "https://api.river.ai/v1",
       "apiModel": "deepseek-ai/DeepSeek-V4.1-Flash",
       "apiKeyEnv": "RIVER_API_KEY",
-      "supportsVision": true
+      "supportsVision": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 384000,
+      "reasoning": {
+        "efforts": ["high", "max"],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      }
+    },
+    {
+      "id": "river/glm-5.3-flash",
+      "label": "GLM 5.3 Flash",
+      "group": "River",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://api.river.ai/v1",
+      "apiModel": "zai-org/GLM-5.3-Flash",
+      "apiKeyEnv": "RIVER_API_KEY",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
+      "reasoning": {
+        "efforts": ["low", "high", "max"],
+        "default": "high",
+        "canDisable": false
+      }
     }
   ]
 }
 ```
+
+Add `"cost": { "input": …, "output": …, "cacheRead": … }` with River's
+current per-million-token prices to see each turn's spend.
+
+## Context window and output limit
+
+Declare `contextWindow` and `maxOutputTokens` for every model. Mike compacts
+a conversation as it nears the window, and pi-ai shrinks each request's output
+budget to what the window leaves. A window declared too small (the 128,000
+default, for a model with a million) makes Mike compact far too early and can
+leave a long request one token to answer with.
+
+A response that stops for its output limit after at most 16 tokens, with no
+tool call, when it had a real budget, is treated as a context overflow rather
+than an answer: the conversation is compacted and the request asked again, or,
+if it still does not fit, the turn fails with a message saying the
+conversation is too long for the model.
+
+## Reasoning
+
+Reasoning models are not built to answer without reasoning. Declare
+`reasoning` so Mike sends the model an effort it accepts:
+
+| Field | Meaning |
+| --- | --- |
+| `efforts` | The efforts the endpoint accepts, from `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Sent verbatim. A request for an effort the model lacks goes out at the nearest heavier one it has (or the heaviest it has). |
+| `default` | The effort used when Mike asks for none in particular (bulk work such as extraction). Defaults to `high` when listed, else the heaviest effort. |
+| `canDisable` | Whether reasoning can be turned off. Default `false`: a request for no reasoning (the "none" level, or a one-shot title) is sent at the lightest declared effort instead. |
+| `offValue` | With `canDisable`, the effort value that turns reasoning off. Default `none`. |
+| `param` | Where the effort goes: `reasoning_effort` (default, top level), `reasoning.effort` (OpenRouter's nested object), or `none` for a model that reasons with no control field. |
+
+The reasoning text comes back in `reasoning_content` (or `reasoning`) and is
+shown as the model's thinking, not as part of the answer. An entry with a
+malformed `reasoning`, `cost`, `contextWindow`, `maxOutputTokens` or
+`streamIdleTimeoutMs` is dropped like any other malformed entry.
+
+## Streaming silence
+
+Mike ends a response that goes silent (`STREAM_FIRST_CHUNK_TIMEOUT_MS` before
+the first output, then the gap limit). Any bytes the endpoint sends count,
+including SSE keep-alive comments. Some endpoints send a long tool call's
+arguments in one piece after a long silence, so configured models get
+`STREAM_CONFIGURED_CHUNK_TIMEOUT_MS` (default 180,000 ms) rather than the
+hosted providers' `STREAM_CHUNK_TIMEOUT_MS`, and a model can set its own
+`streamIdleTimeoutMs`.
+
+## Restarts
+
+Every declared model is registered with the model loop when the backend
+starts, before interrupted turns and compactions resume, so they find their
+model even if nothing else has used it since the restart.
 
 ## Attested inference (Phala)
 

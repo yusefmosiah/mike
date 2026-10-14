@@ -1086,15 +1086,16 @@ export async function consumeAssistantTurnStream(
                     ];
                   })
                 : [];
+              // The server refuses a question without words or options, so
+              // one arriving here is malformed: drop it rather than show the
+              // user a placeholder question.
+              const question =
+                typeof row.question === "string" ? row.question.trim() : "";
+              if (!question || options.length === 0) return acc;
               acc.push({
                 id,
                 kind: row.kind,
-                question:
-                  typeof row.question === "string"
-                    ? row.question
-                    : row.kind === "multi_choice"
-                      ? "Please choose one or more options."
-                      : "Please choose an option.",
+                question,
                 options,
                 allow_other: row.allow_other !== false,
                 other_label:
@@ -1109,13 +1110,13 @@ export async function consumeAssistantTurnStream(
               return acc;
             }
             if (row.kind === "text") {
+              const question =
+                typeof row.question === "string" ? row.question.trim() : "";
+              if (!question) return acc;
               acc.push({
                 id,
                 kind: "text" as const,
-                question:
-                  typeof row.question === "string"
-                    ? row.question
-                    : "Please provide the requested information.",
+                question,
                 response_prefix:
                   typeof row.response_prefix === "string"
                     ? row.response_prefix

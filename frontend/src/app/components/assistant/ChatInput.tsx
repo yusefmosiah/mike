@@ -42,7 +42,9 @@ import {
 } from "./workflowSlashCommands";
 import { ApiKeyMissingPopup } from "../popups/ApiKeyMissingPopup";
 import {
+    MODELS,
     ModelToggle,
+    modelDisplayName,
     type NoModelsReason,
     type ReasoningLevel,
 } from "./ModelToggle";
@@ -70,7 +72,9 @@ import {
 import {
     UploadBatchError,
     failedUploadMessage,
+    getAutocompactSetting,
     listWorkflows,
+    setAutocompactTokens,
     uploadProjectDocuments,
     uploadStandaloneDocuments,
     type UploadProgress,
@@ -83,6 +87,13 @@ import {
     partitionSupportedDocumentFiles,
 } from "@/app/lib/documentUploadValidation";
 import { userFacingApiError } from "@/app/lib/userFacingError";
+import {
+    AUTOCOMPACT_COMMAND,
+    parseAutocompactCommand,
+    runAutocompactCommand,
+    type AutocompactCommand,
+    type AutocompactNotice,
+} from "@/app/lib/autocompactCommand";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 import { useDictation } from "./useDictation";
 
@@ -281,6 +292,11 @@ function ChatInputForChatImpl(
         Array<{ clientId: string; filename: string }>
     >([]);
     const [uploadWarning, setUploadWarning] = useState<string | null>(null);
+    // The answer to an `/autocompact` command: shown under the composer until
+    // the next edit, never sent to the model.
+    const [autocompactNotice, setAutocompactNotice] =
+        useState<AutocompactNotice | null>(null);
+    const [autocompactRunning, setAutocompactRunning] = useState(false);
     const [droppedDocuments, setDroppedDocuments] = useState<Document[]>([]);
     const [slashWorkflows, setSlashWorkflows] = useState<Workflow[] | null>(
         null,
@@ -340,12 +356,16 @@ function ChatInputForChatImpl(
     const slashCommandsLoading = slashQuery !== null && slashWorkflows === null;
     // `/nr` is built in: offered at the start of a message, whatever
     // workflows exist, and never attached to a selected workflow.
-    const builtInCommands: SlashCommandOption[] = matchesNoResponseCommand(
-        value,
-        slashQuery,
-    )
-        ? [{ command: NO_RESPONSE_COMMAND, description: "Add to the thread without a reply" }]
-        : [];
+    const builtInCommands: SlashCommandOption[] = [
+        ...(matchesNoResponseCommand(value, slashQuery)
+            ? [{ command: NO_RESPONSE_COMMAND, description: "Add to the thread without a reply" }]
+            : []),
+        ...(slashQuery !== null &&
+        value.trimStart().toLowerCase() === slashQuery &&
+        AUTOCOMPACT_COMMAND.startsWith(slashQuery)
+            ? [{ command: AUTOCOMPACT_COMMAND, description: "Set where this model's chats compact, like 500k" }]
+            : []),
+    ];
     const menuWorkflows = selectedWorkflow ? [] : matchingWorkflows;
     const slashOptionCount = builtInCommands.length + menuWorkflows.length;
     const slashMenuOpen =
@@ -599,6 +619,7 @@ function ChatInputForChatImpl(
 
     const updateInput = (el: HTMLTextAreaElement) => {
         setValue(el.value);
+        setAutocompactNotice(null);
         setActiveSlashIndex(0);
         setSlashMenuDismissed(false);
         el.style.height = "auto";
@@ -722,9 +743,42 @@ function ChatInputForChatImpl(
         }
     };
 
+    // `/autocompact [value]`: a setting for the selected model, answered
+    // here under the composer. Nothing is sent to the model.
+    const runAutocompact = async (command: AutocompactCommand) => {
+        if (autocompactRunning) return;
+        const label = model
+            ? (configuredModels.find((option) => option.id === model)?.label ??
+              MODELS.find((option) => option.id === model)?.label ??
+              modelDisplayName(model))
+            : "";
+        setAutocompactRunning(true);
+        try {
+            const notice = await runAutocompactCommand(command, model, label, {
+                get: getAutocompactSetting,
+                set: setAutocompactTokens,
+            });
+            if (!uploadGenerationActiveRef.current) return;
+            setAutocompactNotice(notice);
+            if (notice.tone === "info") {
+                setValue("");
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = "auto";
+                }
+            }
+        } finally {
+            if (uploadGenerationActiveRef.current) setAutocompactRunning(false);
+        }
+    };
+
     const handleSubmit = () => {
         const query = value.trim();
         if (!composerOpen) return;
+        const autocompact = parseAutocompactCommand(value);
+        if (autocompact) {
+            void runAutocompact(autocompact);
+            return;
+        }
         const note = noResponseContent(value);
         if (note !== null) {
             submitNote(note);
@@ -885,6 +939,20 @@ function ChatInputForChatImpl(
                                 );
                             })}
                         </div>
+                    )}
+
+                    {autocompactNotice && (
+                        <p
+                            role={autocompactNotice.tone === "error" ? "alert" : "status"}
+                            className={cn(
+                                "px-3 pt-1.5 text-xs break-words",
+                                autocompactNotice.tone === "error"
+                                    ? "text-red-600"
+                                    : "text-gray-600",
+                            )}
+                        >
+                            {autocompactNotice.text}
+                        </p>
                     )}
 
                     {modelCannotSeeImages && (
@@ -1089,7 +1157,9 @@ function ChatInputForChatImpl(
                                         ? !canStop
                                         : !composerOpen ||
                                           !value.trim() ||
-                                          slashCommandsLoading ||
+                                          autocompactRunning ||
+                                          (slashCommandsLoading &&
+                                              parseAutocompactCommand(value) === null) ||
                                           (modelCannotSeeImages &&
                                               noResponseContent(value) === null)
                                 }

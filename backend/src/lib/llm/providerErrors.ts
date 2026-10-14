@@ -74,6 +74,23 @@ export function asProviderStallError(
   );
 }
 
+// The overflow the provider relay detects itself (pi/providers.mts
+// `asOverflow`): a response cut off at once because the request filled the
+// model's context window, which compaction could not make fit.
+const OVERFLOW_PATTERN = /^context_length_exceeded: /;
+
+function asContextOverflowError(
+  error: unknown,
+  context: ProviderContext,
+): UserFacingError | null {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  if (!OVERFLOW_PATTERN.test(text)) return null;
+  return new UserFacingError(
+    `This conversation is too long for ${context.label} to answer. Start a new chat, or select a model with a larger context window.`,
+    { cause: error },
+  );
+}
+
 /**
  * Convert a provider failure into the error we throw.
  *
@@ -88,6 +105,8 @@ export function toProviderStreamError(
 ): Error {
   const stalled = asProviderStallError(error, context);
   if (stalled) return stalled;
+  const overflow = asContextOverflowError(error, context);
+  if (overflow) return overflow;
   const apiError = findApiCallError(error);
   const invalidKey = asInvalidApiKeyError(apiError ?? error, context.label);
   if (invalidKey) return invalidKey;

@@ -63,6 +63,47 @@ describe("AskInputPopup", () => {
         expect(onSubmit.mock.calls[0][2]).toEqual([]);
     });
 
+    it("says plainly that the user declined when every question is skipped", async () => {
+        const onSubmit = vi.fn();
+        render(
+            <AskInputPopup
+                assistantMessageId="assistant-1"
+                event={{
+                    type: "ask_inputs",
+                    event_id: "ask-1",
+                    items: [
+                        {
+                            id: "topic",
+                            kind: "text",
+                            question: "What topic should the article cover?",
+                        },
+                        {
+                            id: "tone",
+                            kind: "choice",
+                            question: "Which tone?",
+                            options: [{ value: "Formal" }, { value: "Plain" }],
+                            allow_other: true,
+                            other_label: "Other",
+                        },
+                    ],
+                }}
+                onSubmit={onSubmit}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+        fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(onSubmit.mock.calls[0][0].responses).toEqual([
+            expect.objectContaining({ id: "topic", skipped: true }),
+            expect.objectContaining({ id: "tone", skipped: true }),
+        ]);
+        expect(onSubmit.mock.calls[0][1]).toMatch(
+            /^I skipped all of your questions and did not give those details:/,
+        );
+    });
+
     it("requires confirmation again after a confirmed answer is edited", async () => {
         const onSubmit = vi.fn();
         render(

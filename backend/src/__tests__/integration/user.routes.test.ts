@@ -1412,4 +1412,74 @@ describe("user.routes", () => {
             expect(res.body.code).toBe("mfa_verification_required");
         });
     });
+
+    describe("/user/autocompact", () => {
+        const MODEL = "gemini-3-flash-preview";
+
+        it("GET reports the default when the person set nothing", async () => {
+            dbState.tables.user_profiles = { data: { autocompact_tokens: {} }, error: null };
+            const res = await request(app)
+                .get(`/user/autocompact?model=${MODEL}`)
+                .set(...AUTH);
+            expect(res.status).toBe(200);
+            expect(res.body.model).toBe(MODEL);
+            expect(res.body.tokens).toBeNull();
+            expect(res.body.defaultTokens).toBeGreaterThan(0);
+            expect(res.body.effectiveTokens).toBe(res.body.defaultTokens);
+            expect(res.body.defaultTokens).toBeLessThanOrEqual(500_000);
+        });
+
+        it("PUT stores a threshold for the model and keeps the other models' values", async () => {
+            dbState.tables.user_profiles = { data: { autocompact_tokens: { other: 30_000 } }, error: null };
+            const res = await request(app)
+                .put("/user/autocompact")
+                .set(...AUTH)
+                .send({ model: MODEL, tokens: 421_000 });
+            expect(res.status).toBe(200);
+            expect(res.body).toMatchObject({ model: MODEL, tokens: 421_000, effectiveTokens: 421_000 });
+            const writes = (dbState.updates.user_profiles ?? []) as Array<Record<string, unknown>>;
+            expect(writes.at(-1)?.autocompact_tokens).toEqual({ other: 30_000, [MODEL]: 421_000 });
+        });
+
+        it("PUT with null resets the model to its default", async () => {
+            dbState.tables.user_profiles = { data: { autocompact_tokens: { [MODEL]: 421_000 } }, error: null };
+            const res = await request(app)
+                .put("/user/autocompact")
+                .set(...AUTH)
+                .send({ model: MODEL, tokens: null });
+            expect(res.status).toBe(200);
+            expect(res.body.tokens).toBeNull();
+            const writes = (dbState.updates.user_profiles ?? []) as Array<Record<string, unknown>>;
+            expect(writes.at(-1)?.autocompact_tokens).toEqual({});
+        });
+
+        it("rejects an unknown model, a missing value and an out-of-range value with a 400", async () => {
+            dbState.tables.user_profiles = { data: { autocompact_tokens: {} }, error: null };
+            for (const body of [
+                { model: "not-a-model", tokens: 400_000 },
+                { model: MODEL },
+                { model: MODEL, tokens: 5 },
+                { model: MODEL, tokens: 1e12 },
+            ]) {
+                const res = await request(app).put("/user/autocompact").set(...AUTH).send(body);
+                expect(res.status).toBe(400);
+                expect(typeof res.body.detail).toBe("string");
+            }
+            expect(dbState.updates.user_profiles ?? []).toEqual([]);
+        });
+
+        it("hides a failed write behind the generic 500", async () => {
+            dbState.tables.user_profiles = [
+                { data: { autocompact_tokens: {} }, error: null },
+                { data: { autocompact_tokens: {} }, error: null },
+                { data: null, error: { message: "secret internal failure" } },
+            ];
+            const res = await request(app)
+                .put("/user/autocompact")
+                .set(...AUTH)
+                .send({ model: MODEL, tokens: 400_000 });
+            expect(res.status).toBe(500);
+            expect(JSON.stringify(res.body)).not.toContain("secret internal failure");
+        });
+    });
 });

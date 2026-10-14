@@ -128,6 +128,34 @@ print(t.df.to_csv(index=False).strip() if importlib.util.find_spec("pandas") els
     expect(wrong.error?.evalue).toContain("Not verbatim in [m9]");
   });
 
+  it("takes the argument names models guess, and says what exists when a name is wrong", async () => {
+    expect((await run("len(docs['doc-0'].grep(r'liab', max_results=1))")).trim()).toBe("1");
+    expect((await run("len(docs.grep(r'twelve', max=1))")).trim()).toBe("1");
+    expect((await run("len(docs.search('liability', limit=1))")).trim()).toBe("1");
+    const typo = await session.execute("docs['doc-0'].grep('x', maxresults=3)", { timeoutMs: 10_000, onHostRequest: host });
+    expect(typo.error).toMatchObject({ ename: "TypeError" });
+    expect(typo.error?.evalue).toContain("it takes (pattern, case=False, context=80, limit=50)");
+
+    const hit = await run("h = docs['doc-0'].grep(r'twelve months')[0]\nprint(h.block_id, h.doc_id, h['block_id'], h.text[:4], h.match)");
+    expect(hit.trim()).toBe("m9 doc-0 m9 12.1 twelve months");
+    const wrong = await session.execute("h.snippet", { timeoutMs: 10_000, onHostRequest: host });
+    expect(wrong.error).toMatchObject({ ename: "AttributeError" });
+    expect(wrong.error?.evalue).toContain("A search hit has no attribute 'snippet'");
+    expect(wrong.error?.evalue).toContain("block_id");
+    expect(wrong.error?.evalue).toContain("context");
+  });
+
+  it("indexes d.blocks by id as well as by position", async () => {
+    expect((await run("print(docs['doc-0'].blocks['m9'].id, docs['doc-0'].blocks[0].id)")).trim()).toBe("m9 m1");
+    const range = await run(
+      "d = docs['doc-0']\nprint([b.id for b in d.blocks['m3':'m5']] == [b.id for b in d['m3':'m5']], d.blocks['m3':'m5'][-1].id)",
+    );
+    expect(range.trim()).toBe("True m5");
+    const missing = await session.execute("docs['doc-0'].blocks['p42']", { timeoutMs: 10_000, onHostRequest: host });
+    expect(missing.error).toMatchObject({ ename: "KeyError" });
+    expect(missing.error?.evalue).toContain("These blocks run from m1 to");
+  });
+
   it("reports a document the host refuses", async () => {
     const missing = await session.execute("docs['doc-9']", { timeoutMs: 10_000, onHostRequest: host });
     expect(missing.error).toMatchObject({ ename: "KeyError" });

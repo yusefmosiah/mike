@@ -200,6 +200,9 @@ async function prepareAdmittedChatStream(
     let allowDocumentMutation = true;
     // A new chat is the sender's; an existing one runs in its starter's VM.
     let workstationUserId: string | null = userId;
+    // A branched chat fences untrusted text with its family's nonce, so the
+    // transcript it inherits and its own turns agree (generateSpotlightNonce).
+    let branchRootChatId: string | null = null;
 
     if (chatId) {
         const access = await getAccessibleChat(db, {
@@ -235,6 +238,10 @@ async function prepareAdmittedChatStream(
         }
         resolvedProjectId = existingProjectId;
         workstationUserId = workstationHostOf(existing);
+        branchRootChatId =
+            typeof existing.branch_root_chat_id === "string"
+                ? existing.branch_root_chat_id
+                : null;
         // A database error in the audience check must not escape as a
         // rejected promise: memory bookkeeping never decides whether the
         // user gets an answer, and an unhandled rejection here used to
@@ -516,7 +523,7 @@ async function prepareAdmittedChatStream(
         }));
         // Generate the nonce before enriching prior events so document filenames
         // and workflow titles replayed from earlier turns are fenced as well.
-        const nonce = generateSpotlightNonce(chatId);
+        const nonce = generateSpotlightNonce(branchRootChatId ?? chatId);
         const timeZone = resolveRequestTimeZone(args.requestedTimeZone);
         const enrichedMessages = await enrichWithPriorEvents(
             messages,

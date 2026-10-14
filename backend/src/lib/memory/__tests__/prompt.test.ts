@@ -92,8 +92,16 @@ describe("buildMemoryTurn", () => {
       sharedAudience: true,
     });
 
-    expect(shared.systemPrompt).toContain("BASE");
-    expect(shared).toEqual({ message: null, systemPrompt: "BASE" });
+    // The policy does not wait for memory to exist, and the audience rides in
+    // the turn context, so the system prompt is the same on every turn.
+    expect(shared).toEqual({
+      message: null,
+      systemPrompt: `BASE\n\n${MEMORY_SYSTEM_POLICY}`,
+      audience: {
+        key: "memory-audience",
+        text: expect.stringContaining("CURRENT MEMORY AUDIENCE: SHARED"),
+      },
+    });
     expect(getMemoryCurrent).not.toHaveBeenCalled();
 
     getMemoryCurrent.mockReset();
@@ -105,7 +113,8 @@ describe("buildMemoryTurn", () => {
       systemPrompt: "BASE",
       userId: "user-1",
     });
-    expect(private_.systemPrompt).toContain(
+    expect(private_.systemPrompt).toBe(shared.systemPrompt);
+    expect(private_.audience?.text).toContain(
       "CURRENT MEMORY AUDIENCE: PRIVATE TO THE ACTIVE USER",
     );
     expect(private_.message?.content).toContain("# App");
@@ -201,7 +210,7 @@ describe("buildMemoryTurn", () => {
         userId: "user-1",
         include: false,
       }),
-    ).resolves.toEqual({ message: null, systemPrompt: "BASE" });
+    ).resolves.toEqual({ message: null, systemPrompt: "BASE", audience: null });
     expect(getMemoryCurrent).not.toHaveBeenCalled();
   });
 
@@ -220,7 +229,10 @@ describe("buildMemoryTurn", () => {
         userId: "user-1",
         projectId: "project-1",
       }),
-    ).resolves.toMatchObject({ message: null, systemPrompt: "BASE" });
+    ).resolves.toMatchObject({
+      message: null,
+      systemPrompt: `BASE\n\n${MEMORY_SYSTEM_POLICY}`,
+    });
     expect(warn).toHaveBeenCalledWith(
       "[memory-context] scoped memory could not be loaded",
       { scope: "app" },

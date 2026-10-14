@@ -405,7 +405,7 @@ export const TOOLS = [
     function: {
       name: "ask_inputs",
       description:
-        "Ask the user for one or more decisions, open-ended answers, clarifications, or document uploads before continuing. Use choice when exactly one option should be selected, multi_choice when one or more options may be selected, and text when the user should type a free-form answer and there are no useful suggested options. Use this when guessing would materially affect the answer or when required documents have not been attached. Put all needed questions and document requests in one items array. After calling ask_inputs, do not continue the substantive task until the user responds in a later message. If that response marks an input as skipped, do not ask for that input again; when drafting or editing a document, insert a descriptive placeholder in square brackets wherever the skipped value is required.",
+        'Ask the user for one or more decisions, open-ended answers, clarifications, or document uploads before continuing. Use this when guessing would materially affect the answer or when required documents have not been attached. Put all needed questions and document requests in one items array. Each item is {"id", "kind", "question", "options"}: kind "choice" when exactly one option should be selected, "multi_choice" when one or more may be, "text" when the user should type a free-form answer and there are no useful suggested options, and "documents" for uploads (with document_types instead of a question). Example: {"items": [{"id": "law", "kind": "choice", "question": "Which governing law?", "options": [{"value": "England and Wales"}, {"value": "New York"}]}, {"id": "party", "kind": "text", "question": "What is the counterparty\'s full legal name?"}]}. An item without a question, or a choice without options, is refused with an error and nothing is shown. Returns nothing: a valid call ends your turn, and the answers arrive in the user\'s next message; do not continue the substantive task until then. If the user skips some inputs, do not ask for them again; continue with what they gave you and mark each missing value in a draft with a descriptive placeholder in square brackets. If they skip every input, they have declined: do not start the substantive task on assumed defaults; say what you would need, or ask how they want to proceed.',
       parameters: {
         type: "object",
         properties: {
@@ -414,7 +414,7 @@ export const TOOLS = [
             minItems: 1,
             maxItems: 12,
             description:
-              "The list of user inputs needed before continuing. Use choice for exactly one selection, multi_choice for one or more selections, text for open-ended answers such as a name or address, and documents for required uploads.",
+              'The inputs needed before continuing, 1 to 12 objects of the form {"id", "kind", "question", "options"}. Use choice for exactly one selection, multi_choice for one or more selections, text for open-ended answers such as a name or address, and documents for required uploads.',
             items: {
               type: "object",
               properties: {
@@ -426,16 +426,18 @@ export const TOOLS = [
                 kind: {
                   type: "string",
                   enum: ["choice", "multi_choice", "text", "documents"],
+                  description:
+                    "choice (pick one), multi_choice (pick one or more), text (type an answer), or documents (attach files).",
                 },
                 question: {
                   type: "string",
                   description:
-                    "For choice, multi_choice, and text items: the concise question to show to the user.",
+                    "Required for choice, multi_choice, and text items: the full, concise question the user reads.",
                 },
                 options: {
                   type: "array",
                   description:
-                    "For choice and multi_choice items: selectable options to show. Each option has a single user-facing value, which is also sent back if selected.",
+                    'Required for choice and multi_choice items, 1 to 8 objects such as {"value": "New York"}. Each value is shown to the user and sent back if selected.',
                   minItems: 1,
                   maxItems: 8,
                   items: {
@@ -488,7 +490,7 @@ export const TOOLS = [
     function: {
       name: "read_document",
       description:
-        "Read the text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document. Word (.docx) documents read like a codebase: one block per line, starting with its id in brackets ([0000029F] or [p12]), then the clause number; a long document returns an outline and a first window, and you read further with section (a clause number or heading), from/to (block ids) or full. Other documents return line windows (offset/limit). Do not repeat a read you already have; read a different part, or use find_in_document for targeted checks.",
+        "Read the text content of an available document. Always call this before answering questions about, summarising, citing from, or editing a document. Word (.docx) documents read like a codebase: one block per line, starting with its id in brackets ([0000029F] or [p12]), then the clause number; a long document returns an outline and a first window, and you read further with section (a clause number or heading), from/to (block ids) or full. Other documents return line windows (offset/limit). Returns text, not JSON: a header naming the document, then the content; a partial read ends with a notice naming where to continue. A to past the end reads to the end. Do not repeat a read you already have; read a different part, or use find_in_document for targeted checks.",
       parameters: {
         type: "object",
         properties: {
@@ -539,7 +541,7 @@ export const TOOLS = [
     function: {
       name: "find_in_document",
       description:
-        "Search for specific strings inside a document — a Ctrl+F equivalent. Returns each match with surrounding context so you can locate and quote the exact text without reading the whole document. For .docx, each match names its block id and clause number, which read_document (from) and edit_document (block) accept. Matching is case-insensitive and whitespace-tolerant. Use this for targeted lookups (e.g. finding a clause title, party name, defined term or cross-reference) rather than reading the whole document.",
+        "Search for specific strings inside a document — a Ctrl+F equivalent. Returns each match with surrounding context so you can locate and quote the exact text without reading the whole document. For .docx, each match names its block id and clause number, which read_document (from) and edit_document (block) accept. Matching is case-insensitive and whitespace-tolerant. Use this for targeted lookups (e.g. finding a clause title, party name, defined term or cross-reference) rather than reading the whole document. Returns {\"ok\", \"filename\", \"query\", \"total_matches\", \"returned\", \"truncated\", \"hits\": [{\"index\", \"block_id\" and \"label\" (.docx) or \"excerpt\" (other files), \"context\"}]}.",
       parameters: {
         type: "object",
         properties: {
@@ -572,7 +574,7 @@ export const TOOLS = [
     function: {
       name: "find_in_documents",
       description:
-        "Search several documents at once for a string — find_in_document across the project. Returns, for each document with matches, how many there are and the first few with surrounding context (block ids and clause numbers for .docx). Use it to find which documents mention a party, term, figure or clause, and where, before reading anything; then read only the parts that matter. Matching is case-insensitive and whitespace-tolerant.",
+        "Search several documents at once for a string — find_in_document across the project. Returns, for each document with matches, how many there are and the first few with surrounding context (block ids and clause numbers for .docx). Use it to find which documents mention a party, term, figure or clause, and where, before reading anything; then read only the parts that matter. Matching is case-insensitive and whitespace-tolerant. Returns {\"ok\", \"query\", \"searched\", \"total_matches\", \"documents\": [{\"doc_id\", \"filename\", \"total_matches\", \"hits\": [as find_in_document]}], \"skipped\"}.",
       parameters: {
         type: "object",
         properties: {
@@ -603,7 +605,7 @@ export const TOOLS = [
     function: {
       name: "generate_docx",
       description:
-        "Generate a Word (.docx) document from structured content. Use this when the user asks you to draft, create, or produce a legal document. Returns a download URL for the generated file.",
+        "Generate a Word (.docx) document from structured content. Use this when the user asks you to draft, create, or produce a legal document. Returns {\"doc_id\", ...}: the new document's doc_id for read_document; the user gets its card automatically.",
       parameters: {
         type: "object",
         properties: {
@@ -692,7 +694,7 @@ export const TOOLS = [
     function: {
       name: "generate_excel",
       description:
-        "Generate an Excel (.xlsx) workbook from structured sheet data. Use this when the user asks for a spreadsheet, tracker, matrix, checklist, schedule, or Excel file. Returns a download URL for the generated file.",
+        "Generate an Excel (.xlsx) workbook from structured sheet data. Use this when the user asks for a spreadsheet, tracker, matrix, checklist, schedule, or Excel file. Returns {\"doc_id\", ...}: the new document's doc_id for read_document; the user gets its card automatically.",
       parameters: {
         type: "object",
         properties: {
@@ -739,7 +741,7 @@ export const TOOLS = [
     function: {
       name: "generate_ppt",
       description:
-        "Generate a PowerPoint (.pptx) presentation from structured slides. Use this when the user asks for slides, a deck, presentation, or PowerPoint file. Returns a download URL for the generated file.",
+        "Generate a PowerPoint (.pptx) presentation from structured slides. Use this when the user asks for slides, a deck, presentation, or PowerPoint file. Returns {\"doc_id\", ...}: the new document's doc_id for read_document; the user gets its card automatically.",
       parameters: {
         type: "object",
         properties: {
@@ -783,7 +785,7 @@ export const TOOLS = [
     function: {
       name: "edit_document",
       description:
-        "Propose edits to a user-attached .docx as tracked changes the user can accept or reject, in the web app or in Word. Edits target blocks by the ids read_document and find_in_document show; ids stay valid across versions, so an id read earlier still names the same paragraph. All edits in one call are checked against the document as you read it; if any edit fails, nothing is changed and every problem is reported. Formatting, footnotes, links and cross-references outside the changed words are kept. Returns one Accept/Reject card per edit.",
+        "Propose edits to a user-attached .docx as tracked changes the user can accept or reject, in the web app or in Word. Edits target blocks by the ids read_document and find_in_document show; ids stay valid across versions, so an id read earlier still names the same paragraph. All edits in one call are checked against the document as you read it; if any edit fails, nothing is changed and every problem is reported. Formatting, footnotes, links and cross-references outside the changed words are kept. Each edit names its operation in op and carries that op's fields: replace {block, find, replace}; insert {after or before, paragraphs}; delete {block, through?}; format {block, find?, bold/italic/underline/strike/highlight/style/align}; insert_row {after or before, cells}; delete_row {block, through?}. Example: [{\"op\": \"insert\", \"after\": \"p12\", \"paragraphs\": [\"New clause text.\"]}, {\"op\": \"replace\", \"block\": \"p14\", \"find\": \"30 days\", \"replace\": \"45 days\"}]. Returns {\"ok\": true, \"doc_id\", \"version_id\", \"version_number\", \"applied\": <number of changes>, \"errors\": [...]} and shows one Accept/Reject card per edit, or {\"ok\": false, \"error\"} when nothing was applied.",
       parameters: {
         type: "object",
         properties: {
@@ -801,6 +803,7 @@ export const TOOLS = [
                 op: {
                   type: "string",
                   enum: ["replace", "insert", "delete", "format", "insert_row", "delete_row"],
+                  description: "The operation. Unknown keys or ops are refused and nothing is applied.",
                 },
                 block: {
                   type: "string",
@@ -895,7 +898,7 @@ export const TOOLS = [
     function: {
       name: "web_search",
       description:
-        "Search the web for current or outside information on any subject: news, sports, prices, legal authorities, regulatory updates, company filings, market facts. Returns ranked results with title, URL, and snippet.",
+        "Search the web for current or outside information on any subject: news, sports, prices, legal authorities, regulatory updates, company filings, market facts. Returns ranked results: {\"results\": [{\"title\", \"url\", \"snippet\"}], \"count\"}.",
       parameters: {
         type: "object",
         properties: {
@@ -904,7 +907,7 @@ export const TOOLS = [
             description: "The search query.",
           },
           limit: {
-            type: "number",
+            type: "integer",
             description: "Maximum number of results to return (default: 5).",
           },
           provider: {
@@ -922,13 +925,24 @@ export const TOOLS = [
     function: {
       name: "fetch_web_page",
       description:
-        "Fetch the full content of an external web page or article. Extracts clean text, caches the content snapshot for verified citations, and enforces SSRF/private-mode egress guards.",
+        'Fetch an external web page or article as clean text, caching the snapshot for verified citations (egress guards apply). Returns one window of the text: {"url", "title", "content", "sha256", "offset", "returned_chars", "total_chars", "truncated", "next_offset", "note"}. A long page is cut at max_chars; when truncated is true and next_offset is present, call again with that offset to read on.',
       parameters: {
         type: "object",
         properties: {
           url: {
             type: "string",
             description: "The full HTTP/HTTPS URL of the web page to fetch.",
+          },
+          offset: {
+            type: "integer",
+            minimum: 0,
+            description: "Character offset to start from (default 0). Use next_offset from the previous result to continue.",
+          },
+          max_chars: {
+            type: "integer",
+            minimum: 1,
+            maximum: 40000,
+            description: "Most characters to return (default 12000, at most 40000).",
           },
         },
         required: ["url"],

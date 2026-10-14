@@ -14,6 +14,8 @@ import {
   devLog,
 } from "./types";
 import { buildSystemPrompt } from "./prompts";
+import type { TurnContextSection } from "../../../lib/llm/turnContext";
+import type { LlmMessage } from "../../../lib/llm/types";
 import {
   MESSAGE_TIME_PROMPT,
   answerTimeStamp,
@@ -37,6 +39,10 @@ import { describeFromBody, skillName } from "../../../lib/skillFormat";
  * is stable for the life of that conversation yet still unknowable to a
  * document author: they never see the key, and the value never appears in a
  * persisted message because `neutralizeFenceTokens` redacts any echo.
+ *
+ * A branched chat passes its family's root chat id (chats.branch_root_chat_id)
+ * rather than its own, so its turns and the transcript it inherited from the
+ * chat it branched from share one nonce, and so does its system prompt.
  *
  * Stability matters for latency. Providers reuse the already-processed prefix
  * of a prompt only while it is byte-identical, and the nonce sits in the
@@ -162,6 +168,40 @@ export function spotlightWorkflow(text: string, nonce: string): string {
   return `<workflow-instructions nonce="${nonce}">\n${neutralized}\n</workflow-instructions nonce="${nonce}">`;
 }
 
+const TOOL_ACTIVITY_HEADING = "\n\n[Tool activity in your previous turn]\n";
+
+/**
+ * For an ask_inputs continuation: move the paused answer's tool-activity
+ * summary (the person's answers, approvals and their outcomes) onto the input
+ * that resumes it. A runtime that keeps its own transcript continues from the
+ * paused answer it already holds and sends only the new input, so the summary
+ * must travel there to be seen.
+ */
+export function moveToolActivityToInput(messages: LlmMessage[]): LlmMessage[] {
+  const last = messages.at(-1);
+  if (last?.role !== "user") return messages;
+  let index = -1;
+  for (let i = messages.length - 2; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) return messages;
+  const target = messages[index] as Extract<LlmMessage, { role: "assistant" }>;
+  const content = typeof target.content === "string" ? target.content : "";
+  const at = content.lastIndexOf(TOOL_ACTIVITY_HEADING);
+  if (at < 0) return messages;
+  const summary = content.slice(at + 2);
+  const moved = messages.slice();
+  moved[index] = { ...target, content: content.slice(0, at) };
+  moved[moved.length - 1] =
+    typeof last.content === "string"
+      ? { ...last, content: `${summary}\n\n${last.content}` }
+      : { ...last, content: [{ type: "text", text: summary }, ...last.content] };
+  return moved;
+}
+
 export async function enrichWithPriorEvents(
   messages: ChatMessage[],
   chatId: string | null | undefined,
@@ -209,6 +249,8 @@ export async function enrichWithPriorEvents(
 
   const lines: string[] = [];
   let skippedInputSeen = false;
+  // Every question in an answer was skipped: the user declined them all.
+  let declinedAllInputs = false;
   // Connector approvals: what was asked, what the user decided, what ran.
   const approvalLabels = new Map<string, string>();
   const approvedIds: string[] = [];
@@ -301,6 +343,20 @@ export async function enrichWithPriorEvents(
       if (answeredAt && !Number.isNaN(answeredAt.getTime()))
         lines.push(`- user responded ${answerTimeStamp(answeredAt, timeZone!)}`);
       const responses = Array.isArray(ev.responses) ? ev.responses : [];
+      const questionResponses = responses.filter(
+        (response: unknown) =>
+          !!response &&
+          typeof response === "object" &&
+          ["choice", "multi_choice", "text", "documents"].includes(
+            String((response as Record<string, unknown>).kind),
+          ),
+      ) as Record<string, unknown>[];
+      if (
+        questionResponses.length > 0 &&
+        questionResponses.every((response) => response.skipped === true)
+      ) {
+        declinedAllInputs = true;
+      }
       for (const response of responses) {
         if (!response || typeof response !== "object") continue;
         const row = response as Record<string, unknown>;
@@ -364,13 +420,17 @@ export async function enrichWithPriorEvents(
       "- Instruction: do not retry a rejected action unless the user asks for it again.",
     );
   }
-  if (skippedInputSeen) {
+  if (declinedAllInputs) {
     lines.push(
-      "- Instruction: do not ask for any skipped input again. If drafting or editing a document, insert a descriptive placeholder in square brackets wherever a skipped value is required.",
+      "- Instruction: the user skipped every question, so they declined to give those details. Do not ask the same questions again, and do not start or draft the substantive task on assumed defaults; say briefly what you would need, or ask how they want to proceed.",
+    );
+  } else if (skippedInputSeen) {
+    lines.push(
+      "- Instruction: do not ask for any skipped input again. Continue with the answers given; if drafting or editing a document, mark each missing value with a descriptive placeholder in square brackets.",
     );
   }
   if (lines.length === 0) return messages;
-  const summary = `\n\n[Tool activity in your previous turn]\n${lines.join("\n")}`;
+  const summary = `${TOOL_ACTIVITY_HEADING}${lines.join("\n")}`;
 
   // Find the index of the last assistant message and attach the
   // summary there only.
@@ -426,6 +486,46 @@ export function parseOptionalDocumentContext(
   };
 }
 
+/**
+ * The system message a surface builds: its fixed text, and the turn context
+ * that goes with it (lib/llm/turnContext.ts). `runLLMStream` sends `content`
+ * as the system prompt and `turnContext` with the user's turn.
+ */
+export type SystemMessageWithContext = {
+  role: "system";
+  content: string;
+  turnContext?: TurnContextSection[];
+};
+
+/** The conversation's documents as a turn context section, or null when there are none. */
+export function documentsTurnContext(
+  docAvailability: readonly {
+    doc_id: string;
+    filename: string;
+    folder_path?: string;
+  }[],
+  nonce?: string,
+): TurnContextSection | null {
+  if (!docAvailability.length) return null;
+  const lines = docAvailability.map((doc) => {
+    // Filenames are user-controlled and may contain injected text.
+    // Wrap in the spotlight fence so the LLM treats them as data.
+    const rawLabel = doc.folder_path
+      ? `${doc.folder_path} / ${doc.filename}`
+      : doc.filename;
+    return `- ${doc.doc_id}: ${spotlightFilename(rawLabel, nonce)}`;
+  });
+  // Earlier reads stay in the append-only history, so re-reading the same
+  // version every turn only burns cache-write tokens; re-read only after an
+  // update event. Future document-update events surface in-line with the
+  // stable shape `[Document doc-X updated]`, which the model can watch for
+  // to invalidate just that handle.
+  return {
+    key: "documents",
+    text: `AVAILABLE DOCUMENTS:\n${lines.join("\n")}\n\nCall read_document (or fetch_documents) when you need a document's content and this conversation does not already contain it; earlier reads stay in the history, so reuse them instead of re-reading the same document/version in a later turn. Re-read only when the document changed - watch for \`[Document doc-X updated]\` events - or when the user asks for the latest version. Within the same response, never call read_document or fetch_documents again for a document/version that has already been read; use the prior tool result, find_in_document for targeted checks, or proceed to the next required tool.`,
+  };
+}
+
 export function buildMessages(
   messages: ChatMessage[],
   docAvailability: {
@@ -453,26 +553,16 @@ export function buildMessages(
     systemContent += `\n\n${MESSAGE_TIME_PROMPT}`;
   }
 
-  if (docAvailability.length) {
-    systemContent += "\n\n---\nAVAILABLE DOCUMENTS:\n";
-    for (const doc of docAvailability) {
-      // Filenames are user-controlled and may contain injected text.
-      // Wrap in the spotlight fence so the LLM treats them as data.
-      const rawLabel = doc.folder_path
-        ? `${doc.folder_path} / ${doc.filename}`
-        : doc.filename;
-      const label = spotlightFilename(rawLabel, nonce);
-      systemContent += `- ${doc.doc_id}: ${label}\n`;
-    }
-    // Earlier reads stay in the append-only history, so re-reading the same
-    // version every turn only burns cache-write tokens; re-read only after an
-    // update event. Future document-update events surface in-line with the
-    // stable shape `[Document doc-X updated]`, which the model can watch for
-    // to invalidate just that handle.
-    systemContent +=
-      "\nCall read_document (or fetch_documents) when you need a document's content and this conversation does not already contain it; earlier reads stay in the history, so reuse them instead of re-reading the same document/version in a later turn. Re-read only when the document changed - watch for `[Document doc-X updated]` events - or when the user asks for the latest version. Within the same response, never call read_document or fetch_documents again for a document/version that has already been read; use the prior tool result, find_in_document for targeted checks, or proceed to the next required tool.\n---\n";
-  }
-  formatted.push({ role: "system", content: systemContent });
+  // The system prompt is fixed for the life of a chat; the document list
+  // changes whenever a document is added, so it travels as turn context
+  // (lib/llm/turnContext.ts) and reaches the model only when it changed.
+  const documents = documentsTurnContext(docAvailability, nonce);
+  const system: SystemMessageWithContext = {
+    role: "system",
+    content: systemContent,
+    ...(documents ? { turnContext: [documents] } : {}),
+  };
+  formatted.push(system);
 
   // Map document_id (UUID) → current-turn doc_id slug, so when we
   // inline a user attachment we hand the model the same handle it

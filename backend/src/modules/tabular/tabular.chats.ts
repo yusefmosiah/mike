@@ -15,7 +15,7 @@ import {
     type TabularCellStore,
 } from "../chat/chat.service";
 import { MESSAGE_TIME_PROMPT, resolveRequestTimeZone } from "../../lib/userTime";
-import { OPEN_SOURCE_NOTE } from "../../lib/agentIdentity";
+import { OPEN_SOURCE_NOTE, RESPONSE_LANGUAGE_RULE } from "../../lib/agentIdentity";
 import { BRAND } from "../../lib/brand";
 import { type ReasoningLevel, type UserApiKeys } from "../../lib/llm";
 import { randomUUID } from "node:crypto";
@@ -115,16 +115,15 @@ export function buildTabularMessages(
         .map((c, i) => `- COL:${i} "${c.name}"`)
         .join("\n");
 
-    const systemContent = `This is the system prompt for ${BRAND.name}, an open-source AI agent for knowledge work, here helping with the tabular review titled "${reviewTitle}". "You" below means the model running as ${BRAND.name}. ${OPEN_SOURCE_NOTE}
+    // The system prompt is fixed for the life of the thread; the review's
+    // title, rows and columns change as the review does, so they travel as
+    // turn context (lib/llm/turnContext.ts), sent only when they changed.
+    const systemContent = `This is the system prompt for ${BRAND.name}, an open-source AI agent for knowledge work, here helping with a tabular review. "You" below means the model running as ${BRAND.name}. ${OPEN_SOURCE_NOTE}
 
-The review extracts specific fields from multiple documents into a structured table.
+The review extracts specific fields from multiple documents into a structured table. Its title, documents (rows) and columns (fields) are listed under TABULAR REVIEW in the turn context.
 You do NOT have the cell content yet — call read_table_cells to fetch the cells you need before answering.
 
-DOCUMENTS (rows):
-${docList || "- (none)"}
-
-COLUMNS (fields):
-${colList || "- (none)"}
+${RESPONSE_LANGUAGE_RULE}
 
 TABULAR CITATION INSTRUCTIONS:
 When you reference specific cell content, place a numbered marker [1], [2], etc. inline in your prose at the point of reference.
@@ -139,7 +138,7 @@ After your complete response, append a <CITATIONS> block containing a JSON array
 </CITATIONS>
 
 Rules:
-- col_index and row_index are 0-based (matching the COL/ROW numbers listed above)
+- col_index and row_index are 0-based (matching the COL/ROW numbers in TABULAR REVIEW)
 - Only cite cells you have read via read_table_cells
 - quote should be verbatim text from the cell's summary
 - Omit <CITATIONS> if you make no citations
@@ -147,8 +146,21 @@ Rules:
 - Answer in clear, concise prose. You may use markdown formatting.${
         time ? `\n\n${MESSAGE_TIME_PROMPT}` : ""
     }`;
+    const review = `TABULAR REVIEW: "${reviewTitle}"
 
-    const formatted: unknown[] = [{ role: "system", content: systemContent }];
+DOCUMENTS (rows):
+${docList || "- (none)"}
+
+COLUMNS (fields):
+${colList || "- (none)"}`;
+
+    const formatted: unknown[] = [
+        {
+            role: "system",
+            content: systemContent,
+            turnContext: [{ key: "tabular-review", text: review }],
+        },
+    ];
     const stamp = userMessageStamper(messages, time);
     for (const [index, msg] of messages.entries()) {
         formatted.push({

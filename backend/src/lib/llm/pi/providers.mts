@@ -9,14 +9,24 @@ import type {
   AssistantMessageEvent,
   Context,
   Model,
+  ModelCost,
+  OpenAICompletionsCompat,
   SimpleStreamOptions,
   TextContent,
   ThinkingContent,
+  ThinkingLevel,
+  ThinkingLevelMap,
   ToolCall,
 } from "@earendil-works/pi-ai";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { createModels, createProvider, type Models, type MutableModels } from "@earendil-works/pi-ai/models";
+import {
+  createModels,
+  createProvider,
+  getSupportedThinkingLevels,
+  type Models,
+  type MutableModels,
+} from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { googleProvider } from "@earendil-works/pi-ai/providers/google";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
@@ -49,14 +59,14 @@ import {
   providerForModel,
   vercelModelId,
 } from "../models.js";
-import { apiKeyForConfiguredModel, getConfiguredModel, tolerateTextToolCalls } from "../registry.js";
+import { apiKeyForConfiguredModel, getConfiguredModel, loadModelRegistry, tolerateTextToolCalls } from "../registry.js";
 import {
   collapseTrademarkOwnerCalls,
   parseTextToolCalls,
   TextToolMarkupFilter,
   ThinkTagFilter,
 } from "../toolCallParsing.js";
-import type { ConfiguredModel, Provider, UserApiKeys } from "../types.js";
+import type { ConfiguredModel, ConfiguredReasoning, Provider, UserApiKeys } from "../types.js";
 
 export type ModelRef = { provider: string; modelId: string };
 
@@ -65,7 +75,57 @@ type Route = {
   mikeProvider: Provider;
   configured?: ConfiguredModel;
   headers?: Record<string, string>;
+  /** The gap limit once output flows, when this endpoint's differs from the default. */
+  chunkMs?: number;
 };
+
+/** What Mike assumes of a configured model that declares no limits (kept for older configs). */
+const CONFIGURED_DEFAULT_CONTEXT_WINDOW = 128_000;
+const CONFIGURED_DEFAULT_MAX_OUTPUT = 16_384;
+
+/**
+ * A `length` stop with at most this many output tokens and no tool call is not
+ * an answer: pi-ai shrinks the output budget to what the context window leaves
+ * (down to one token), so a request that overflowed comes back cut off at once.
+ */
+export const OVERFLOW_OUTPUT_TOKENS = 16;
+
+/** pi-ai's thinking levels, lightest first. */
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * A configured model's reasoning as pi-ai model fields. Each declared effort
+ * maps to itself and every other level is unsupported, so pi-ai clamps a
+ * request to the nearest declared effort; "off" is unsupported too unless the
+ * model can turn reasoning off.
+ */
+function reasoningFields(reasoning: ConfiguredReasoning): {
+  thinkingLevelMap: ThinkingLevelMap;
+  compat: OpenAICompletionsCompat;
+} {
+  const thinkingLevelMap: ThinkingLevelMap = {
+    off: reasoning.canDisable ? (reasoning.offValue ?? "none") : null,
+  };
+  for (const level of THINKING_LEVELS) {
+    thinkingLevelMap[level] = (reasoning.efforts as readonly string[]).includes(level) ? level : null;
+  }
+  const compat: OpenAICompletionsCompat =
+    reasoning.param === "reasoning.effort"
+      ? { thinkingFormat: "openrouter" }
+      : { thinkingFormat: "openai", supportsReasoningEffort: reasoning.param === "reasoning_effort" };
+  return { thinkingLevelMap, compat };
+}
+
+/**
+ * The lightest effort a reasoning model runs at, or undefined when it can turn
+ * reasoning off (or does not reason). Reasoning models are not built to answer
+ * without reasoning, so a request for none goes out at this effort instead.
+ */
+export function lightestThinkingLevel(model: Model<Api>): ThinkingLevel | undefined {
+  const levels = getSupportedThinkingLevels(model);
+  if (!model.reasoning || levels.includes("off")) return undefined;
+  return levels.find((level): level is ThinkingLevel => level !== "off");
+}
 
 const HOSTED: Record<string, Provider> = {
   anthropic: "claude",
@@ -95,11 +155,19 @@ export type MikeModels = {
   models: Models;
   /** Resolve a Mike model id, registering an endpoint model on first use. */
   resolve(mikeModel: string): ModelRef;
+  /**
+   * Register every model declared in MIKE_MODEL_CONFIG_JSON now, so work a
+   * restart resumes finds its model before anything resolves it again.
+   */
+  registerConfigured(): void;
 };
+
+/** Configured models already warned about for declaring no context window. */
+const warnedNoContextWindow = new Set<string>();
 
 export function createMikeModels(
   base: MutableModels = createModels(),
-  options: { chunkTimeouts?: { firstChunkMs: number; chunkMs: number } } = {},
+  options: { chunkTimeouts?: { firstChunkMs: number; chunkMs: number; configuredChunkMs?: number } } = {},
 ): MikeModels {
   const timeouts = options.chunkTimeouts ?? streamChunkTimeouts();
   for (const provider of [
@@ -130,15 +198,22 @@ export function createMikeModels(
       vision: boolean;
       api?: "openai-completions" | "anthropic-messages";
       reasoning?: boolean;
+      thinkingLevelMap?: ThinkingLevelMap;
       contextWindow?: number;
       maxTokens?: number;
       maxTokensField?: "max_tokens" | "max_completion_tokens";
+      compat?: OpenAICompletionsCompat;
+      cost?: ModelCost;
     },
   ): ModelRef => {
     const existing = endpointRefs.get(mikeModel);
     if (existing) return existing;
     const id = `mike:${mikeModel}`;
     const api = spec.api ?? "openai-completions";
+    const compat = {
+      ...spec.compat,
+      ...(spec.maxTokensField ? { maxTokensField: spec.maxTokensField } : {}),
+    };
     const model: Model<Api> = {
       id: spec.apiModel,
       name: mikeModel,
@@ -146,11 +221,12 @@ export function createMikeModels(
       provider: id,
       baseUrl: spec.baseUrl,
       input: spec.vision ? ["text", "image"] : ["text"],
-      cost: ZERO_COST,
+      cost: spec.cost ?? ZERO_COST,
       reasoning: spec.reasoning ?? false,
+      ...(spec.thinkingLevelMap ? { thinkingLevelMap: spec.thinkingLevelMap } : {}),
       contextWindow: spec.contextWindow ?? 128_000,
       maxTokens: spec.maxTokens ?? 16_384,
-      ...(spec.maxTokensField ? { compat: { maxTokensField: spec.maxTokensField } } : {}),
+      ...(Object.keys(compat).length ? { compat } : {}),
     };
     base.setProvider(
       createProvider<Api>({
@@ -171,14 +247,32 @@ export function createMikeModels(
   const resolve = (mikeModel: string): ModelRef => {
     const configured = getConfiguredModel(mikeModel);
     if (configured) {
+      const contextWindow = configured.contextWindow ?? CONFIGURED_DEFAULT_CONTEXT_WINDOW;
+      const reasoning = configured.reasoning ? reasoningFields(configured.reasoning) : undefined;
       return endpoint(mikeModel, {
         apiModel: configured.apiModel ?? configured.id,
         baseUrl: configured.baseUrl.replace(/\/+$/, ""),
-        route: { mikeProvider: "openai-compatible", configured },
+        route: {
+          mikeProvider: "openai-compatible",
+          configured,
+          chunkMs: configured.streamIdleTimeoutMs ?? timeouts.configuredChunkMs ?? timeouts.chunkMs,
+        },
         vision: configured.supportsVision === true,
+        reasoning: reasoning !== undefined,
+        ...(reasoning ? { thinkingLevelMap: reasoning.thinkingLevelMap } : {}),
+        contextWindow,
+        // Without a declared limit, leave at least half the window for input.
+        maxTokens: configured.maxOutputTokens ?? Math.min(CONFIGURED_DEFAULT_MAX_OUTPUT, Math.floor(contextWindow / 2)),
         // Mike's contract: max_tokens unless the endpoint declares otherwise
         // (pi-ai's own default is max_completion_tokens).
         maxTokensField: configured.maxTokensField ?? "max_tokens",
+        compat: {
+          // Not every compatible server knows OpenAI's `developer` role, which
+          // pi-ai would otherwise use for a reasoning model's instructions.
+          supportsDeveloperRole: false,
+          ...reasoning?.compat,
+        },
+        ...(configured.cost ? { cost: configured.cost } : {}),
       });
     }
     const provider = providerForModel(mikeModel);
@@ -238,6 +332,18 @@ export function createMikeModels(
     }
   };
 
+  const registerConfigured = () => {
+    for (const configured of loadModelRegistry().models) {
+      if (configured.contextWindow === undefined && !warnedNoContextWindow.has(configured.id)) {
+        warnedNoContextWindow.add(configured.id);
+        console.warn(
+          `[models] ${configured.id} declares no contextWindow in MIKE_MODEL_CONFIG_JSON; assuming ${CONFIGURED_DEFAULT_CONTEXT_WINDOW} tokens. Declare its real limits (see docs/configured-models.md).`,
+        );
+      }
+      resolve(configured.id);
+    }
+  };
+
   /** The request options Mike adds: the turn's key and endpoint headers. */
   const withRequest = (model: Model<Api>, options: SimpleStreamOptions | undefined): SimpleStreamOptions => {
     const route = routes.get(model.provider);
@@ -262,8 +368,13 @@ export function createMikeModels(
 
   const streamSimple: Models["streamSimple"] = (model, context, options) => {
     const route = routes.get(model.provider);
-    const request = withRequest(model, options);
+    // A model that cannot turn reasoning off is never asked to: no reasoning
+    // requested (Pi Durable sends none for "off") becomes its lightest effort.
+    const lightest = options?.reasoning ? undefined : lightestThinkingLevel(model);
+    const request = withRequest(model, lightest ? { ...options, reasoning: lightest } : options);
     const configured = route?.configured;
+    const budget = request.maxTokens ?? model.maxTokens;
+    const limits = { firstChunkMs: timeouts.firstChunkMs, chunkMs: route?.chunkMs ?? timeouts.chunkMs };
     // Every request first passes the egress gate, and attested and tolerant
     // endpoints do more work before (or instead of) streaming, so events are
     // relayed through a stream of our own.
@@ -275,11 +386,31 @@ export function createMikeModels(
         await assertEgressAllowed(model.baseUrl, "llm");
         if (configured?.attestation) await attest(configured, request.apiKey);
         if (configured && tolerateTextToolCalls(configured) && (context.tools?.length ?? 0) > 0) {
-          const message = await base.completeSimple(model, context, request);
-          replay(out, tolerantMessage(message));
+          const message = tolerantMessage(await base.completeSimple(model, context, request));
+          const overflowed = asOverflow(message, budget);
+          if (overflowed) {
+            out.push({ type: "error", reason: "error", error: overflowed });
+            out.end(overflowed);
+            return;
+          }
+          replay(out, message);
           return;
         }
-        await relayWatched(out, model, (signal) => base.streamSimple(model, context, { ...request, signal }), request.signal, timeouts);
+        await relayWatched(
+          out,
+          model,
+          // Every byte the endpoint sends counts as life, even when it adds up
+          // to no event yet (a long tool call some servers send in one piece).
+          (signal, alive) =>
+            base.streamSimple(model, context, {
+              ...request,
+              signal,
+              ...(TAPPABLE_APIS.has(model.api) ? { fetch: tapBytes(request.fetch, alive) } : {}),
+            }),
+          request.signal,
+          limits,
+          budget,
+        );
       } catch (error) {
         const failed = failure(model, error);
         out.push({ type: "error", reason: "error", error: failed });
@@ -289,9 +420,26 @@ export function createMikeModels(
     return out;
   };
 
+  /**
+   * A lookup of an endpoint model not registered yet in this process (work a
+   * restart resumes, for a model nothing has resolved since) registers it from
+   * the Mike id its provider id carries.
+   */
+  const getModel: Models["getModel"] = ((provider: string, modelId: string) => {
+    const found = base.getModel(provider, modelId);
+    if (found || !provider.startsWith("mike:")) return found;
+    try {
+      resolve(provider.slice("mike:".length));
+    } catch {
+      return undefined;
+    }
+    return base.getModel(provider, modelId);
+  }) as Models["getModel"];
+
   const models: Models = new Proxy(base, {
     get(target, key, receiver) {
       if (key === "streamSimple") return streamSimple;
+      if (key === "getModel") return getModel;
       if (key === "completeSimple") {
         return (async (model: Model<Api>, context: Context, options?: SimpleStreamOptions) =>
           (await streamSimple(model, context, options)).result()) as Models["completeSimple"];
@@ -300,7 +448,7 @@ export function createMikeModels(
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  return { models, resolve };
+  return { models, resolve, registerConfigured };
 }
 
 /** How Mike names a model's provider to the user. */
@@ -409,15 +557,18 @@ async function attest(configured: ConfiguredModel, apiKey: string | undefined): 
  * Relay a provider stream, ending it when the provider goes quiet: no output
  * within `firstChunkMs` of the request (a reasoning model may think silently
  * for a while, so it is generous), or a gap over `chunkMs` once output flows.
+ * Bytes received with no event yet (`alive`) re-arm whichever limit applies.
  * The failure names the limit, which Mike reports as the provider having
- * stopped responding; the caller's own abort passes through unchanged.
+ * stopped responding; the caller's own abort passes through unchanged. A
+ * finished response that is really an overflow (`asOverflow`) is relayed as one.
  */
 async function relayWatched(
   out: ReturnType<typeof createAssistantMessageEventStream>,
   model: Model<Api>,
-  open: (signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>,
+  open: (signal: AbortSignal, alive: () => void) => AsyncIterable<AssistantMessageEvent>,
   callerSignal: AbortSignal | undefined,
   limits: { firstChunkMs: number; chunkMs: number },
+  budget: number,
 ): Promise<void> {
   const controller = new AbortController();
   const forward = () => controller.abort(callerSignal?.reason);
@@ -425,26 +576,35 @@ async function relayWatched(
   else callerSignal?.addEventListener("abort", forward, { once: true });
   let stalled: Error | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let finished = false;
+  let current: [number, string] = [limits.firstChunkMs, "first chunk"];
   const arm = (ms: number, limit: string) => {
+    current = [ms, limit];
     clearTimeout(timer);
     timer = setTimeout(() => {
       stalled = new Error(`${limit} timeout of ${ms}ms exceeded`);
       controller.abort(stalled);
     }, ms);
   };
+  const alive = () => {
+    if (!finished && !stalled) arm(...current);
+  };
   arm(limits.firstChunkMs, "first chunk");
   try {
-    for await (const event of open(controller.signal)) {
+    for await (const event of open(controller.signal, alive)) {
       if (stalled) break;
       if (event.type === "done" || event.type === "error") {
+        finished = true;
         clearTimeout(timer);
-        out.push(event);
+        const overflowed = event.type === "done" ? asOverflow(event.message, budget) : undefined;
+        out.push(overflowed ? { type: "error", reason: "error", error: overflowed } : event);
         continue;
       }
       if (event.type !== "start") arm(limits.chunkMs, "chunk");
       out.push(event);
     }
   } finally {
+    finished = true;
     clearTimeout(timer);
     callerSignal?.removeEventListener("abort", forward);
   }
@@ -455,6 +615,56 @@ async function relayWatched(
     return;
   }
   out.end();
+}
+
+/** pi-ai APIs whose clients take a custom fetch (Google's refuse one). */
+const TAPPABLE_APIS = new Set<string>(["openai-completions", "openai-responses", "anthropic-messages"]);
+
+/** A fetch that reports every chunk of a response body as it arrives. */
+function tapBytes(inner: typeof fetch | undefined, alive: () => void): typeof fetch {
+  return async (input, init) => {
+    const response = await (inner ?? fetch)(input, init);
+    if (!response.body) return response;
+    const body = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          alive();
+          controller.enqueue(chunk);
+        },
+      }),
+    );
+    const tapped = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    Object.defineProperty(tapped, "url", { value: response.url });
+    return tapped;
+  };
+}
+
+/** The error text of an overflow Mike detects itself; pi-ai and Pi Durable read it as a context overflow. */
+export const OVERFLOW_ERROR_PREFIX = "context_length_exceeded";
+
+/**
+ * A response that "finished" by running out of output budget almost at once
+ * (stop `length`, at most OVERFLOW_OUTPUT_TOKENS tokens, no tool call) when it
+ * had a real budget: pi-ai cut the budget to what the context window left, so
+ * the request overflowed. Returned as the overflow error it is, so Pi Durable
+ * compacts and asks again, or the turn fails clearly instead of with an empty
+ * answer. Undefined for any other response.
+ */
+export function asOverflow(message: AssistantMessage, budget: number): AssistantMessage | undefined {
+  if (message.stopReason !== "length" || budget <= OVERFLOW_OUTPUT_TOKENS) return undefined;
+  if (message.usage.output > OVERFLOW_OUTPUT_TOKENS) return undefined;
+  if (message.content.some((part) => part.type === "toolCall")) return undefined;
+  // Usage some endpoints never report must not turn a long cut-off answer into an overflow.
+  const written = message.content.reduce(
+    (sum, part) => sum + (part.type === "text" ? part.text.length : part.type === "thinking" ? part.thinking.length : 0),
+    0,
+  );
+  if (written > OVERFLOW_OUTPUT_TOKENS * 16) return undefined;
+  return {
+    ...message,
+    stopReason: "error",
+    errorMessage: `${OVERFLOW_ERROR_PREFIX}: the conversation no longer fits the model's context window (the response stopped after ${message.usage.output} output tokens)`,
+  };
 }
 
 function failure(model: Model<Api>, error: unknown): AssistantMessage {

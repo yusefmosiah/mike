@@ -261,12 +261,15 @@ async function prepareAdmittedProjectChatStream(
     let writeRole: ProjectRole | null = projectAccess.projectRole;
     // A new chat is the sender's; an existing one runs in its starter's VM.
     let workstationUserId: string | null = userId;
+    // A branched chat fences untrusted text with its family's nonce, so the
+    // transcript it inherits and its own turns agree (generateSpotlightNonce).
+    let branchRootChatId: string | null = null;
 
     if (chatId) {
         const { data: existing } = await db
             .from("chats")
             .select(
-                "id, title, model, reasoning_level, project_id, user_id, org_id",
+                "id, title, model, reasoning_level, project_id, user_id, org_id, branch_root_chat_id",
             )
             .eq("id", chatId)
             .maybeSingle();
@@ -275,6 +278,8 @@ async function prepareAdmittedProjectChatStream(
         else {
             chatTitle = existing!.title;
             workstationUserId = workstationHostOf(existing as { user_id: string | null });
+            branchRootChatId =
+                (existing!.branch_root_chat_id as string | null) ?? null;
             chatModel = (existing!.model as string | null) ?? null;
             chatReasoningLevel =
                 (existing!.reasoning_level as string | null) ?? null;
@@ -523,7 +528,7 @@ async function prepareAdmittedProjectChatStream(
         );
         // Generate the nonce before adding request metadata or prior events so
         // every document filename is fenced wherever it enters the prompt.
-        const nonce = generateSpotlightNonce(chatId);
+        const nonce = generateSpotlightNonce(branchRootChatId ?? chatId);
         const documentPromptRef = (
             documentId: string,
             requestFilename: string,
@@ -548,36 +553,39 @@ async function prepareAdmittedProjectChatStream(
             "chat_messages",
             timeZone,
         );
-        const messagesForLLM: ChatMessage[] = displayed_doc
+        // The user-attached docs for this turn (dragged into / picked from
+        // the chat input) come in as a request-level field. They belong to
+        // the latest message, so they ride on it with the current-turn doc_id
+        // slugs, distinct from the broader project doc list. The system
+        // prompt stays fixed for the life of the chat.
+        const attachedNote = attached_documents?.length
+            ? `[USER-ATTACHED DOCUMENTS FOR THIS MESSAGE: the user attached the following document(s) directly to this message. Treat them as the primary focus of the request unless the message clearly says otherwise.\n${attached_documents
+                  .map((d) => {
+                      const document = documentPromptRef(d.document_id, d.filename);
+                      return document.slug
+                          ? `- ${document.slug}: ${document.filename}`
+                          : `- ${document.filename}`;
+                  })
+                  .join("\n")}]`
+            : null;
+        const messagesForLLM: ChatMessage[] = displayed_doc || attachedNote
             ? enrichedMessages.map((m, i) => {
                   if (i !== enrichedMessages.length - 1 || m.role !== "user")
                       return m;
-                  const displayedDocument = documentPromptRef(
-                      displayed_doc.document_id,
-                      displayed_doc.filename,
-                  );
-                  return {
-                      ...m,
-                      content: `${m.content}\n\ndisplayed_doc: ${displayedDocument.filename}, displayed_doc_id: ${displayed_doc.document_id}`,
-                  };
+                  let content = m.content ?? "";
+                  if (attachedNote) content = `${attachedNote}\n\n${content}`;
+                  if (displayed_doc) {
+                      const displayedDocument = documentPromptRef(
+                          displayed_doc.document_id,
+                          displayed_doc.filename,
+                      );
+                      content = `${content}\n\ndisplayed_doc: ${displayedDocument.filename}, displayed_doc_id: ${displayed_doc.document_id}`;
+                  }
+                  return { ...m, content };
               })
             : enrichedMessages;
 
-        // The user-attached docs for this turn (dragged into / picked from
-        // the chat input) come in as a request-level field. Surface them in
-        // the system prompt with the current-turn doc_id slugs so the model
-        // knows which docs the user is highlighting *now*, distinct from
-        // the broader project doc list.
         let systemPromptExtra = PROJECT_SYSTEM_PROMPT_EXTRA;
-        if (attached_documents?.length) {
-            const lines = attached_documents.map((d) => {
-                const document = documentPromptRef(d.document_id, d.filename);
-                return document.slug
-                    ? `- ${document.slug}: ${document.filename}`
-                    : `- ${document.filename}`;
-            });
-            systemPromptExtra += `\n\nUSER-ATTACHED DOCUMENTS FOR THIS TURN:\nThe user has attached the following document(s) directly to their latest message. Treat these as the primary focus of the request unless their message clearly says otherwise.\n${lines.join("\n")}`;
-        }
 
         const {
             api_keys: apiKeys,

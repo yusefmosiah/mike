@@ -290,6 +290,9 @@ export async function driveChatTurn(
                           assistantMessageId,
                       }
                     : undefined,
+                ...(askInputsResponse
+                    ? { continuesAnswer: askInputsResponse.assistant_message_id }
+                    : {}),
                 includeMemory: true,
                 includeSubagents: true,
                 connectorApprovals: true,
@@ -545,8 +548,14 @@ export async function driveChatTurn(
                 write("data: [DONE]\n\n");
                 return { ok: true };
             }
-            console.error("[chat/stream] error:", err);
             const errorPayload = assistantStreamErrorPayload(err);
+            // Never the error itself: an AssistantStreamError carries the turn's
+            // full text and events, which can hold credentials (vault lease URLs).
+            console.error("[chat/stream] error:", {
+                ...safeError(err),
+                ...(errorPayload.code ? { code: errorPayload.code } : {}),
+                ...(errorPayload.safe_to_display ? { message: errorPayload.message } : {}),
+            });
             const message = errorPayload.message;
             const errorEvents =
                 err instanceof AssistantStreamError
@@ -578,7 +587,7 @@ export async function driveChatTurn(
                         saveError,
                     );
             } catch (saveErr) {
-                console.error("[chat/stream] failed to save error", saveErr);
+                console.error("[chat/stream] failed to save error", safeError(saveErr));
             }
             try {
                 write(

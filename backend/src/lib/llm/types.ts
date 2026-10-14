@@ -1,4 +1,6 @@
 // Shared types for the LLM provider adapter.
+import type { TurnContextSection } from "./turnContext";
+
 // Callers always speak OpenAI-style tools + { role, content } messages; each
 // provider translates internally.
 
@@ -106,7 +108,10 @@ export type StreamChatParams = {
     requireTools?: boolean;
     /**
      * Reasoning effort. Bulk extraction jobs should leave this unset; the
-     * runtime maps an omitted level to "off" to save tokens and latency.
+     * runtime maps an omitted level to "off" to save tokens and latency, except
+     * for a configured reasoning model, which runs at its declared default.
+     * A model that cannot turn reasoning off gets its lightest effort for
+     * "none" (see lib/llm/pi/providers.mts).
      */
     reasoning?: ReasoningLevel;
     abortSignal?: AbortSignal;
@@ -124,11 +129,24 @@ export type StreamChatParams = {
      */
     memoryMessage?: LlmMessage;
     /**
+     * This turn's context (./turnContext.ts): the facts that vary from turn
+     * to turn, kept out of `systemPrompt` so it stays byte-identical for the
+     * life of a chat. Runtimes with their own transcript send only the
+     * sections the model has not already seen, in the user's message.
+     */
+    turnContext?: TurnContextSection[];
+    /**
      * The stored identity of this turn, when the caller keeps a message tree:
      * the user message, its tree parent, and the assistant row reserved for
      * the answer. Runtimes with their own transcript map these to it.
      */
     turn?: TurnIdentity;
+    /**
+     * The stored answer this request continues: the assistant row a turn
+     * paused on to ask, which the person's answers resume. Set instead of
+     * `turn`, which a continuation does not have.
+     */
+    continuesAnswer?: string;
     /** Reads the memory this conversation may see, as of now (the memory tool). */
     readMemory?: () => Promise<string>;
     /**
@@ -144,6 +162,12 @@ export type StreamChatParams = {
      * (a child turn never has it: depth 1).
      */
     subagents?: SubagentHost;
+    /**
+     * The person's auto-compact threshold for this model, in tokens: compact
+     * the transcript once its context passes it. Unset, the runtime uses its
+     * default for the model's window.
+     */
+    autocompactTokens?: number;
 };
 
 /** The first line of the delegate tool's description; the host appends the model memo. */
@@ -286,6 +310,57 @@ export type ConfiguredModel = {
     supportsVision?: boolean;
     /** Request field used for the output-token limit by the compatible endpoint. */
     maxTokensField?: "max_tokens" | "max_completion_tokens";
+    /**
+     * Total tokens (input and output) the model accepts. Drives compaction and
+     * the output budget; omitted, Mike assumes a conservative 128,000 and warns.
+     */
+    contextWindow?: number;
+    /** Most output tokens one response may use. */
+    maxOutputTokens?: number;
+    /** How the endpoint reasons. Omitted, the model is treated as non-reasoning. */
+    reasoning?: ConfiguredReasoning;
+    /** Price in US dollars per million tokens, so spend is visible. Omitted, zero. */
+    cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    /**
+     * Longest silence (ms) tolerated on a response stream once it is flowing.
+     * Defaults to CONFIGURED_STREAM_IDLE_TIMEOUT_MS for configured models.
+     */
+    streamIdleTimeoutMs?: number;
+};
+
+/** Reasoning efforts a configured model may declare, lightest first (pi-ai's thinking levels). */
+export const CONFIGURED_REASONING_EFFORTS = [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+] as const;
+
+export type ConfiguredReasoningEffort =
+    (typeof CONFIGURED_REASONING_EFFORTS)[number];
+
+/**
+ * A reasoning model's controls. Reasoning models are not built to run without
+ * reasoning: unless `canDisable` is true, a request for no reasoning is sent at
+ * the lightest declared effort instead.
+ */
+export type ConfiguredReasoning = {
+    /** Efforts the endpoint accepts, lightest first. Sent verbatim. */
+    efforts: ConfiguredReasoningEffort[];
+    /** Effort used when Mike asks for none in particular. */
+    default: ConfiguredReasoningEffort;
+    /** Whether reasoning can be turned off at all. */
+    canDisable: boolean;
+    /** Effort value that turns reasoning off, when `canDisable` (default "none"). */
+    offValue?: string;
+    /**
+     * Request field carrying the effort: `reasoning_effort` (top level, the
+     * OpenAI convention), `reasoning.effort` (OpenRouter's nested object), or
+     * `none` when the model reasons with no control field.
+     */
+    param: "reasoning_effort" | "reasoning.effort" | "none";
 };
 
 /**

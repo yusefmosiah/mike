@@ -2562,6 +2562,37 @@ export async function setAutoModeDecisionModel(
     });
 }
 
+/** Where chats on a model auto-compact (GET/PUT /user/autocompact). */
+export type AutocompactSetting = {
+    model: string;
+    /** The person's own threshold, or null for the model's default. */
+    tokens: number | null;
+    defaultTokens: number;
+    effectiveTokens: number;
+    contextWindow: number;
+    minTokens: number;
+    maxTokens: number;
+};
+
+/** Where chats on `model` auto-compact, for `/autocompact` in the composer. */
+export async function getAutocompactSetting(
+    model: string,
+): Promise<AutocompactSetting> {
+    return apiRequest(`/user/autocompact?model=${encodeURIComponent(model)}`);
+}
+
+/** Sets where chats on `model` auto-compact; null goes back to the default. */
+export async function setAutocompactTokens(
+    model: string,
+    tokens: number | null,
+): Promise<AutocompactSetting> {
+    return apiRequest("/user/autocompact", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, tokens }),
+    });
+}
+
 export async function getChatPeople(chatId: string): Promise<ProjectPeople> {
     return apiRequest<ProjectPeople>(`/chat/${chatId}/people`);
 }

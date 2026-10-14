@@ -550,6 +550,43 @@ describe("runLLMStream Auto Mode", () => {
     );
   });
 
+  it("reads ask_inputs aliases as the dispatcher does, and refuses unusable items", async () => {
+    const capture = captureBatch([
+      {
+        id: "call-a",
+        name: "ask_inputs",
+        input: {
+          items: [{ type: "choice", prompt: "Tone?", options: ["Formal", "Plain"] }],
+        },
+      },
+      {
+        id: "call-b",
+        name: "ask_inputs",
+        input: { items: [{ type: "text" }] },
+      },
+    ]);
+
+    const result = await runLLMStream(baseParams());
+
+    expect(capture.threw).toBe(false);
+    const answered = JSON.parse(capture.results![0]!.content) as {
+      responses: unknown[];
+    };
+    expect(answered.responses).toEqual([
+      { id: "choice-1", kind: "choice", question: "Tone?", answer: "Formal" },
+    ]);
+    const refused = JSON.parse(capture.results![1]!.content) as {
+      ok: boolean;
+      error: string;
+    };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain("item 1 has no question text");
+    // Only the usable call left a question in the transcript.
+    expect(
+      result.events.filter((event) => event.type === "ask_inputs"),
+    ).toHaveLength(1);
+  });
+
   it("records a dispatcher ask_inputs event without pausing the turn", async () => {
     // A connector write that the user's own connector settings gate comes
     // back from the dispatcher as an approval item. Auto Mode streams and

@@ -310,6 +310,9 @@ export async function driveProjectChatTurn(
                           assistantMessageId,
                       }
                     : undefined,
+                ...(askInputsResponse
+                    ? { continuesAnswer: askInputsResponse.assistant_message_id }
+                    : {}),
                 includeMemory: true,
                 includeSubagents: true,
                 connectorApprovals: true,

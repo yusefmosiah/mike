@@ -2512,6 +2512,28 @@ describe("chat writes are gated on content.edit (org RBAC)", () => {
         expect(runLLMStream).toHaveBeenCalledTimes(1);
     });
 
+    it("fences a branched chat with its family's nonce, so its system prompt matches the chat it came from", async () => {
+        const chatLib = await import("../../modules/chat/engine/index.js");
+        vi.stubEnv("SPOTLIGHT_NONCE_SECRET", "test-secret");
+        mockedCreate.mockImplementation(
+            () =>
+                makeRbacDb("admin", "colleague-1", {
+                    chat: { branch_root_chat_id: "root-chat" },
+                }) as never,
+        );
+
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, chat_id: "chat-1" });
+
+        expect(res.status).toBe(200);
+        const { nonce } = runLLMStream.mock.calls[0][0] as { nonce: string };
+        expect(nonce).toBe(chatLib.generateSpotlightNonce("root-chat"));
+        expect(nonce).not.toBe(chatLib.generateSpotlightNonce("chat-1"));
+        vi.unstubAllEnvs();
+    });
+
     it("still lets an org admin generate a title", async () => {
         await seedResolvableModel();
         mockedCreate.mockImplementation(() => makeRbacDb("admin") as never);

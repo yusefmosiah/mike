@@ -129,14 +129,24 @@ export function streamRunDeadlines(env: NodeJS.ProcessEnv = process.env): {
  * relay in lib/llm/pi/providers.mts. `firstChunkMs` bounds the wait for the first
  * output of each step (a reasoning model may think silently for a while, so it
  * is generous); `chunkMs` bounds the gap between chunks once output is
- * flowing, and re-arms on every chunk. They catch a stalled provider at the
- * source; `streamRunDeadlines` stays as the run-level backstop.
+ * flowing, and re-arms on every chunk or received byte. `configuredChunkMs`
+ * is the gap limit for models declared in MIKE_MODEL_CONFIG_JSON that set no
+ * `streamIdleTimeoutMs` of their own: larger, because some compatible
+ * endpoints send a long tool call's arguments in one piece after a silence.
+ * They catch a stalled provider at the source; `streamRunDeadlines` stays as
+ * the run-level backstop.
  */
 export function streamChunkTimeouts(env: NodeJS.ProcessEnv = process.env): {
   firstChunkMs: number;
   chunkMs: number;
+  configuredChunkMs: number;
 } {
   return {
+    configuredChunkMs: clamp(
+      envInt("STREAM_CONFIGURED_CHUNK_TIMEOUT_MS", 3 * 60_000, env),
+      5_000,
+      30 * 60_000,
+    ),
     firstChunkMs: clamp(
       envInt("STREAM_FIRST_CHUNK_TIMEOUT_MS", 2 * 60_000, env),
       10_000,

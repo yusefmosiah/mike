@@ -51,7 +51,8 @@ import {
 } from "./citations";
 import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
-import { skillsPromptSection } from "./contextBuilders";
+import { parseAskInputs } from "./tools/askInputs";
+import { moveToolActivityToInput, skillsPromptSection } from "./contextBuilders";
 import { syncWorkspaceOncePerTurn } from "../../workspace/workspace.service";
 import {
   getCachedCaseOpinionTexts,
@@ -65,6 +66,7 @@ import {
 } from "./tools/documentOps";
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
+import { TURN_CONTEXT_PROMPT, type TurnContextSection } from "../../../lib/llm/turnContext";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
 import { getWebSnapshot } from "../../../lib/search/engine";
@@ -79,6 +81,7 @@ import {
   kernelLauncherFor,
   kernels,
   MAX_CELL_TIMEOUT_MS,
+  pythonSessionPromptSection,
   pythonToolsPromptSection,
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,
@@ -86,7 +89,7 @@ import {
   type HostReply,
 } from "../../../lib/codemode";
 import { createSubagentHost } from "./subagents/subagentHost";
-import { getAutoModeDecisionModel } from "../../user/user.service";
+import { getAutoModeDecisionModel, getAutocompactTokensFor } from "../../user/user.service";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
   carriesExternalContent,
@@ -333,109 +336,72 @@ function lastUserIntent(apiMessages: unknown[]): string {
  * offered option for a choice, an empty string for free text, a skip for
  * document requests — Auto Mode cannot upload a file — and a rejection for
  * approval items, because Auto Mode never approves a write on the user's
- * behalf.
+ * behalf. The questions are read exactly as the dispatcher reads them
+ * (parseAskInputs), so an unusable call gets the same error either way.
  */
-function autoAnswerAskInputs(args: Record<string, unknown>): {
-  event: AskInputsEvent;
-  responses: AskInputResponseItem[];
-} {
-  const items: AskInputsEvent["items"] = [];
-  const responses: AskInputResponseItem[] = [];
+function autoAnswerAskInputs(args: Record<string, unknown>):
+  | { ok: true; event: AskInputsEvent; responses: AskInputResponseItem[] }
+  | { ok: false; error: string; responses: AskInputResponseItem[] } {
   const rawItems = Array.isArray(args.items) ? args.items : [];
-  rawItems.forEach((rawItem, index) => {
-    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
-      return;
-    }
-    const rawId = "id" in rawItem ? rawItem.id : undefined;
-    const rawKind = "kind" in rawItem ? rawItem.kind : undefined;
-    const rawQuestion = "question" in rawItem ? rawItem.question : undefined;
-    const id =
-      typeof rawId === "string" && rawId.trim()
-        ? rawId.trim().slice(0, 80)
-        : `auto-${index + 1}`;
-    const question =
-      typeof rawQuestion === "string"
-        ? rawQuestion.trim().slice(0, 500)
-        : "";
-
-    if (rawKind === "approval") {
-      // Approval items carry a connector write; Auto Mode denies them
-      // (AUTO_MODE_SAFE_DEFAULTS.approval) and the write never runs.
-      responses.push({ id, kind: "approval", decision: "reject" });
-      return;
-    }
-
-    if (rawKind === "documents") {
-      // Nothing can be attached without a human: documents → "skip".
-      items.push({ id, kind: "documents", document_types: [] });
-      responses.push({ id, kind: "documents", filenames: [], skipped: true });
-      return;
-    }
-
-    if (rawKind === "text") {
-      const asked = question || "Please provide the requested information.";
-      items.push({ id, kind: "text", question: asked });
-      responses.push({
-        id,
-        kind: "text",
-        question: asked,
-        answer: AUTO_MODE_SAFE_DEFAULTS.text,
-      });
-      return;
-    }
-
-    const multiChoice = rawKind === "multi_choice";
-    const asked =
-      question ||
-      (multiChoice
-        ? "Please choose one or more options."
-        : "Please choose an option.");
-    const rawOptions = "options" in rawItem ? rawItem.options : undefined;
-    const options = (Array.isArray(rawOptions) ? rawOptions : [])
-      .map((option): string => {
-        if (typeof option === "string") return option.trim();
-        if (!option || typeof option !== "object" || Array.isArray(option)) {
-          return "";
-        }
-        const value = "value" in option ? option.value : undefined;
-        if (typeof value === "string" && value.trim()) return value.trim();
-        const label = "label" in option ? option.label : undefined;
-        return typeof label === "string" ? label.trim() : "";
-      })
-      .filter(Boolean)
-      .slice(0, 8);
-    // choice / multi_choice → "first_option".
-    const values = options.length > 0 ? options : ["Continue"];
-    const normalizedOptions = values.map((value) => ({ value }));
-    if (multiChoice) {
-      items.push({
-        id,
-        kind: "multi_choice",
-        question: asked,
-        options: normalizedOptions,
-        allow_other: false,
-        other_label: "Other",
-      });
-      responses.push({
-        id,
-        kind: "multi_choice",
-        question: asked,
-        answers: [values[0]],
-      });
-      return;
-    }
-    items.push({
-      id,
-      kind: "choice",
-      question: asked,
-      options: normalizedOptions,
-      allow_other: false,
-      other_label: "Other",
+  // Approval items are the server's to create, never the model's; one the
+  // model wrote is denied (AUTO_MODE_SAFE_DEFAULTS.approval) and never runs.
+  const isApproval = (item: unknown) =>
+    !!item &&
+    typeof item === "object" &&
+    (item as Record<string, unknown>).kind === "approval";
+  const responses: AskInputResponseItem[] = rawItems
+    .filter(isApproval)
+    .map((item, index) => {
+      const rawId = (item as Record<string, unknown>).id;
+      const id =
+        typeof rawId === "string" && rawId.trim()
+          ? rawId.trim().slice(0, 80)
+          : `auto-approval-${index + 1}`;
+      return { id, kind: "approval" as const, decision: "reject" as const };
     });
-    responses.push({ id, kind: "choice", question: asked, answer: values[0] });
-  });
+  const questions = rawItems.filter((item) => !isApproval(item));
+  const items: AskInputsEvent["items"] = [];
+  if (questions.length > 0 || responses.length === 0) {
+    const parsed = parseAskInputs(
+      Array.isArray(args.items) ? { ...args, items: questions } : args,
+    );
+    if (!parsed.ok) return { ok: false, error: parsed.error, responses };
+    for (const item of parsed.items) {
+      if (item.kind === "documents") {
+        // Nothing can be attached without a human: documents → "skip".
+        items.push(item);
+        responses.push({ id: item.id, kind: "documents", filenames: [], skipped: true });
+      } else if (item.kind === "text") {
+        items.push(item);
+        responses.push({
+          id: item.id,
+          kind: "text",
+          question: item.question,
+          answer: AUTO_MODE_SAFE_DEFAULTS.text,
+        });
+      } else if (item.kind === "multi_choice") {
+        // choice / multi_choice → "first_option".
+        items.push({ ...item, allow_other: false });
+        responses.push({
+          id: item.id,
+          kind: "multi_choice",
+          question: item.question,
+          answers: [item.options[0].value],
+        });
+      } else if (item.kind === "choice") {
+        items.push({ ...item, allow_other: false });
+        responses.push({
+          id: item.id,
+          kind: "choice",
+          question: item.question,
+          answer: item.options[0].value,
+        });
+      }
+    }
+  }
 
   return {
+    ok: true,
     event: { type: "ask_inputs", event_id: crypto.randomUUID(), items },
     responses,
   };
@@ -527,6 +493,8 @@ export async function runLLMStream(params: {
   conversationId?: string | null;
   /** The stored identity of this turn (see StreamChatParams.turn). */
   turn?: import("../../../lib/llm").TurnIdentity;
+  /** The paused answer an ask_inputs continuation resumes (see StreamChatParams.continuesAnswer). */
+  continuesAnswer?: string;
   /** Make the turn survive a restart, or drive one that did (see StreamChatParams.durableTurn). */
   durableTurn?: import("../../../lib/llm").StreamChatParams["durableTurn"];
   /**
@@ -645,6 +613,7 @@ export async function runLLMStream(params: {
   const rawMsgs = apiMessages as {
     role: string;
     content: string | LlmUserContent | null;
+    turnContext?: TurnContextSection[];
   }[];
   const firstMsg = rawMsgs[0];
   const baseSystemPrompt =
@@ -654,24 +623,40 @@ export async function runLLMStream(params: {
   const memory = await buildMemoryTurn({
     db,
     userId,
-    systemPrompt: baseSystemPrompt,
+    systemPrompt: baseSystemPrompt
+      ? `${baseSystemPrompt}\n\n${TURN_CONTEXT_PROMPT}`
+      : TURN_CONTEXT_PROMPT,
     include: includeMemory,
     projectId: memoryProjectId,
     sharedAudience: memorySharedAudience,
   });
-  const promptWithCode = codeMode
-    ? `${memory.systemPrompt}\n\n${pythonToolsPromptSection(
-        pythonSpecs,
-        conversationId ? kernels.knownNames(conversationId) : [],
-      )}`
-    : memory.systemPrompt;
-  // The user's skills, listed every turn so a chat finds one unprompted.
-  const promptWithSkills = workflowStore
-    ? `${promptWithCode}\n\n${skillsPromptSection(workflowStore, { workstation: !!workstation && !isGuest })}`
-    : promptWithCode;
-  const systemPrompt = isGuest && workstation
-    ? `${promptWithSkills}\n\n${guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed)}`
-    : promptWithSkills;
+  // The system prompt is byte-identical for the life of a chat: the
+  // surface's fixed text, how turn context works, and the memory policy.
+  // Providers cache a prompt's prefix only while it is unchanged, and a
+  // changed system prompt re-prefills the whole conversation. Everything that
+  // varies from turn to turn is turn context (lib/llm/turnContext.ts), which
+  // the runtime sends with the user's message only when it changed.
+  const systemPrompt = memory.systemPrompt;
+  const pythonSession = codeMode && conversationId
+    ? pythonSessionPromptSection(kernels.knownNames(conversationId))
+    : null;
+  const turnContext: TurnContextSection[] = [
+    ...(firstMsg?.role === "system" && Array.isArray(firstMsg.turnContext)
+      ? firstMsg.turnContext
+      : []),
+    ...(memory.audience ? [memory.audience] : []),
+    // The user's skills, listed so a chat finds one unprompted.
+    ...(workflowStore
+      ? [{ key: "skills", text: skillsPromptSection(workflowStore, { workstation: !!workstation && !isGuest }) }]
+      : []),
+    // Code mode: the guide and the tool index. A turn whose kernel cannot
+    // start falls back to direct tools, and the section is withdrawn.
+    ...(codeMode ? [{ key: "code-mode", text: pythonToolsPromptSection(pythonSpecs) }] : []),
+    ...(pythonSession ? [{ key: "python-session", text: pythonSession }] : []),
+    ...(isGuest && workstation
+      ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
+      : []),
+  ];
   const chatMessages: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")
     .map(
@@ -697,6 +682,9 @@ export async function runLLMStream(params: {
             (part) => part.type === "image" || part.text.trim().length > 0,
           );
     }));
+  // A continuation resumes the paused answer where the runtime left it, so
+  // what the person answered goes with the input that resumes it.
+  if (params.continuesAnswer) chatMessages.splice(0, chatMessages.length, ...moveToolActivityToInput(chatMessages));
   // Before every real turn: see MemoryTurn for why it goes there.
   if (memory.message) chatMessages.unshift(memory.message);
 
@@ -1238,7 +1226,22 @@ export async function runLLMStream(params: {
           });
 
         if (call.name === "ask_inputs") {
-          const { event, responses } = autoAnswerAskInputs(call.input);
+          const answered = autoAnswerAskInputs(call.input);
+          const { responses } = answered;
+          if (!answered.ok) {
+            return JSON.stringify({
+              ok: false,
+              error: answered.error,
+              ...(responses.length
+                ? {
+                    responses,
+                    message:
+                      "Auto Mode rejected the approval items: nothing was approved. Do not retry the approvals.",
+                  }
+                : {}),
+            });
+          }
+          const { event } = answered;
           // Mirror the dispatcher: a call with nothing to ask is no
           // question, so it leaves no event behind.
           if (event.items.length > 0) {
@@ -1540,11 +1543,23 @@ export async function runLLMStream(params: {
         console.error("[subagents] could not offer delegation", safeError(error));
       }
     }
+    // The person's `/autocompact` threshold for this model; unset (or
+    // unreadable) leaves the runtime's default.
+    let autocompactTokens: number | undefined;
+    try {
+      autocompactTokens = await getAutocompactTokensFor(db, userId, selectedModel);
+    } catch {
+      autocompactTokens = undefined;
+    }
     turnUsage = (await streamChatWithTools({
       model: selectedModel,
-      systemPrompt: delegation
-        ? `${systemPrompt}\n\n${delegation.promptSection}`
-        : systemPrompt,
+      ...(autocompactTokens ? { autocompactTokens } : {}),
+      systemPrompt,
+      // The subagent list names the chat's model, which can change mid-chat,
+      // so it is turn context like the rest.
+      turnContext: delegation
+        ? [...turnContext, { key: "subagents", text: delegation.promptSection }]
+        : turnContext,
       subagents: delegation?.host,
       messages: chatMessages,
       tools: modelTools as OpenAIToolSchema[],
@@ -1557,6 +1572,7 @@ export async function runLLMStream(params: {
       abortSignal: signal,
       conversationId,
       turn: params.turn,
+      ...(params.continuesAnswer ? { continuesAnswer: params.continuesAnswer } : {}),
       durableTurn: params.durableTurn,
       memoryMessage: memory.message ?? undefined,
       readMemory: includeMemory

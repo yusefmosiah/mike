@@ -1590,24 +1590,8 @@ describe("ask_inputs frames", () => {
             other_label: "Somewhere else",
             response_prefix: "Court: ",
           },
-          {
-            id: "input-2",
-            kind: "multi_choice",
-            question: "Please choose one or more options.",
-            options: [],
-            allow_other: true,
-            other_label: "Other",
-            response_prefix: undefined,
-          },
-          {
-            id: "input-3",
-            kind: "choice",
-            question: "Please choose an option.",
-            options: [],
-            allow_other: true,
-            other_label: "Other",
-            response_prefix: undefined,
-          },
+          // Questions without words or options are dropped, never shown
+          // with a placeholder question.
         ],
       },
     ]);
@@ -1644,12 +1628,6 @@ describe("ask_inputs frames", () => {
             kind: "text",
             question: "Anything else?",
             response_prefix: "Note: ",
-          },
-          {
-            id: "input-2",
-            kind: "text",
-            question: "Please provide the requested information.",
-            response_prefix: undefined,
           },
           {
             id: "input-3",
