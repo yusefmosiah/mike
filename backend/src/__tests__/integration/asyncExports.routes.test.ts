@@ -5,25 +5,15 @@ import request from "supertest";
 // The async export surface: POST /user/exports (schedule) + GET
 // /user/exports/:id (poll). Two invariants are baselined here.
 //
-// 1. RATE LIMITING. The legacy synchronous exports are all mounted behind
-//    exportLimiter (10/hour) because an export is the most expensive read the
-//    API offers — it walks a user's whole corpus. The async POST schedules
-//    exactly that work, so it must sit behind the same budget. Its POLL,
-//    however, must NOT: a client polls every couple of seconds while one
-//    export builds, so putting the poll under a 10/hour budget would 429 the
-//    user out of their own (successfully scheduled) export.
+// 1. NO RATE LIMIT. Exports are not request-limited: scheduling several and
+//    polling every couple of seconds while one builds must never answer 429.
 //
 // 2. NO-RUNNER TOPOLOGIES. With DB_JOBS_ENABLED=false nothing drains db_jobs.
 //    A 202 there is a lie that also wedges the dedupe key forever, so the
 //    route must refuse instead.
 //
-// Env is set inside vi.hoisted so it lands before app.ts reads it at import.
 // ---------------------------------------------------------------------------
 const { insertedJobs, dbJobsEnabled } = vi.hoisted(() => {
-    // 3, not 2: the no-runner test below spends one before the budget test.
-    process.env.RATE_LIMIT_EXPORT_MAX = "3";
-    process.env.RATE_LIMIT_EXPORT_WINDOW_HOURS = "1";
-    process.env.RATE_LIMIT_GENERAL_MAX = "500";
     return { insertedJobs: [] as unknown[], dbJobsEnabled: vi.fn(() => true) };
 });
 
@@ -112,27 +102,14 @@ describe("async exports", () => {
         expect(insertedJobs).toHaveLength(0);
     });
 
-    it("POST /user/exports is under the export budget; the poll is not", async () => {
-        // The budget is 3/hour for this suite; one was spent above.
-        const first = await request(app)
-            .post("/user/exports")
-            .set(...AUTH)
-            .send({ type: "account" });
-        expect(first.status).toBe(202);
-        const second = await request(app)
-            .post("/user/exports")
-            .set(...AUTH)
-            .send({ type: "account" });
-        expect(second.status).toBe(202);
-
-        const third = await request(app)
-            .post("/user/exports")
-            .set(...AUTH)
-            .send({ type: "account" });
-        expect(third.status).toBe(429);
-
-        // Polling an export must stay usable after the POST budget is spent —
-        // otherwise a user who scheduled an export cannot watch it finish.
+    it("never refuses an export or its poll with 429", async () => {
+        for (let i = 0; i < 12; i++) {
+            const scheduled = await request(app)
+                .post("/user/exports")
+                .set(...AUTH)
+                .send({ type: "account" });
+            expect(scheduled.status).toBe(202);
+        }
         for (let i = 0; i < 5; i++) {
             const poll = await request(app)
                 .get("/user/exports/job-1")

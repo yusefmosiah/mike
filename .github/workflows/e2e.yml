@@ -286,16 +286,10 @@ jobs:
             # encryption; supply CI dummies well over any length floor.
             echo "DOWNLOAD_SIGNING_SECRET=ci-download-signing-secret-0123456789abcdef"
             echo "USER_API_KEYS_ENCRYPTION_SECRET=ci-user-api-keys-encryption-secret-0123456789abcdef"
-            # The suite drives many writes back-to-back (create folder/workflow/
-            # review, upload, update profile, login); the default per-window caps
-            # trip 429s that surface as flaky timeouts. e2e isn't testing
-            # throttling, so raise every tunable cap above one serial run's needs.
-            echo "RATE_LIMIT_GENERAL_MAX=100000"
-            echo "RATE_LIMIT_CHAT_MAX=100000"
-            echo "RATE_LIMIT_CHAT_CREATE_MAX=100000"
-            echo "RATE_LIMIT_UPLOAD_MAX=100000"
-            echo "RATE_LIMIT_EXPORT_MAX=100000"
-            echo "RATE_LIMIT_DATA_DELETE_MAX=100000"
+            # The suite drives many uploads and logins back-to-back; the default
+            # upload-session and auth caps trip 429s that surface as flaky
+            # timeouts. e2e isn't testing throttling, so raise those caps above
+            # one serial run's needs.
             echo "RATE_LIMIT_UPLOAD_SESSION_MUTATION_MAX=100000"
             echo "RATE_LIMIT_UPLOAD_SESSION_POLL_MAX=100000"
             echo "RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_PER_HOUR=100000"

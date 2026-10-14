@@ -3,14 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import type { AssistantEvent, ConnectorApprovalItem } from "@mike/contracts";
 
-// #383's model-selection describes grew this file past the chat limiter's
-// 30-requests-per-window budget, so the last describe began answering 429
-// before any permission check ran. Hoisted so it precedes app.ts's limiter
-// construction; scoped to tests — production reads its own env.
-vi.hoisted(() => {
-    process.env.RATE_LIMIT_CHAT_MAX = "1000";
-});
-
 // Hoisted mock fn so the vi.mock factory below (which is itself hoisted above
 // the imports) can reference it. Lets each test drive the stream outcome.
 const {

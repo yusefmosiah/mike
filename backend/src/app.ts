@@ -71,7 +71,6 @@ function makeLimiter(options: {
   windowMs: number;
   max: number;
   message?: string;
-  skip?: (req: express.Request) => boolean;
   keyGenerator?: (req: express.Request) => string;
   skipSuccessfulRequests?: boolean;
 }) {
@@ -80,7 +79,7 @@ function makeLimiter(options: {
     max: options.max,
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req) => req.method === "OPTIONS" || options.skip?.(req) === true,
+    skip: (req) => req.method === "OPTIONS",
     keyGenerator: options.keyGenerator,
     skipSuccessfulRequests: options.skipSuccessfulRequests,
     message: {
@@ -89,57 +88,7 @@ function makeLimiter(options: {
   });
 }
 
-// The Word tool-result return channel gets its own lane: an edit-heavy turn
-// makes one POST per forwarded tool call, and letting those drain the shared
-// 300-request budget (per office NAT egress IP) turns a 429 into a full
-// tool-deadline stall per call inside a held SSE stream.
 const TOOL_RESULT_PATH = "/word-chat/tool-result";
-
-const generalLimiter = makeLimiter({
-  windowMs: minutes(envInt("RATE_LIMIT_GENERAL_WINDOW_MINUTES", 15)),
-  max: envInt("RATE_LIMIT_GENERAL_MAX", 300),
-  // Upload status polling has its own authenticated per-user limiter. Keep it
-  // and the dedicated Word tool-result lane out of the shared IP budget.
-  skip: (req) =>
-    req.path === TOOL_RESULT_PATH ||
-    req.path === "/upload-sessions" ||
-    req.path.startsWith("/upload-sessions/"),
-});
-
-const toolResultLimiter = makeLimiter({
-  windowMs: minutes(envInt("RATE_LIMIT_TOOL_RESULT_WINDOW_MINUTES", 15)),
-  max: envInt("RATE_LIMIT_TOOL_RESULT_MAX", 2000),
-  message: "Too many tool results. Please try again later.",
-});
-
-const chatLimiter = makeLimiter({
-  windowMs: minutes(envInt("RATE_LIMIT_CHAT_WINDOW_MINUTES", 15)),
-  max: envInt("RATE_LIMIT_CHAT_MAX", 30),
-  message: "Too many chat requests. Please try again later.",
-});
-
-const chatCreateLimiter = makeLimiter({
-  windowMs: minutes(envInt("RATE_LIMIT_CHAT_CREATE_WINDOW_MINUTES", 15)),
-  max: envInt("RATE_LIMIT_CHAT_CREATE_MAX", 60),
-});
-
-const exportLimiter = makeLimiter({
-  windowMs: hours(envInt("RATE_LIMIT_EXPORT_WINDOW_HOURS", 1)),
-  max: envInt("RATE_LIMIT_EXPORT_MAX", 10),
-  message: "Too many export requests. Please try again later.",
-});
-
-const workflowImportLimiter = makeLimiter({
-  windowMs: hours(envInt("RATE_LIMIT_UPLOAD_WINDOW_HOURS", 1)),
-  max: envInt("RATE_LIMIT_UPLOAD_MAX", 50),
-  message: "Too many workflow imports. Please try again later.",
-});
-
-const dataDeleteLimiter = makeLimiter({
-  windowMs: hours(envInt("RATE_LIMIT_DATA_DELETE_WINDOW_HOURS", 1)),
-  max: envInt("RATE_LIMIT_DATA_DELETE_MAX", 20),
-  message: "Too many data deletion requests. Please try again later.",
-});
 
 const authLoginIpLimiter = makeLimiter({
   windowMs: minutes(envInt("RATE_LIMIT_AUTH_LOGIN_WINDOW_MINUTES", 15)),
@@ -244,8 +193,9 @@ app.use(
   }),
 );
 
-app.use(generalLimiter);
-
+// Only the authentication endpoints are rate limited: they guard against
+// password guessing and email abuse. Chat, export, import and deletion
+// requests are not, so long-running and scripted work is never refused.
 app.post("/auth/login", authLoginIpLimiter);
 app.post(["/auth/signup", "/auth/password-reset"], authEmailLimiter);
 app.post(["/auth/oauth", "/auth/exchange", "/auth/handoff"], authFlowLimiter);
@@ -254,21 +204,14 @@ app.post(
   authMfaLimiter,
 );
 
-app.post("/chat", chatLimiter);
-app.post("/word-chat", chatLimiter);
-// Own limiter lane plus a tight body cap: the largest legitimate payload is
-// one live document read, which the backend truncates at 200k characters
-// anyway — 2mb leaves headroom for UTF-8 and JSON escaping while keeping the
-// global 50mb ceiling out of reach of this endpoint. This parser runs before
-// the global one; body-parser skips a request whose body is already parsed,
-// so the smaller limit wins for this path.
-app.post(TOOL_RESULT_PATH, toolResultLimiter, express.json({ limit: "2mb" }));
-app.post("/projects/:projectId/chat", chatLimiter);
-app.post("/tabular-review/:reviewId/chat", chatLimiter);
-app.post("/tabular-review/:reviewId/generate", chatLimiter);
-app.post("/chat/create", chatCreateLimiter);
-app.post("/chat/:chatId/generate-title", chatCreateLimiter);
-app.post("/workflow-addons/:addonId/import", workflowImportLimiter);
+// A tight body cap for the Word tool-result return channel: the largest
+// legitimate payload is one live document read, which the backend truncates at
+// 200k characters anyway — 2mb leaves headroom for UTF-8 and JSON escaping
+// while keeping the global 50mb ceiling out of reach of this endpoint. This
+// parser runs before the global one; body-parser skips a request whose body is
+// already parsed, so the smaller limit wins for this path.
+app.post(TOOL_RESULT_PATH, express.json({ limit: "2mb" }));
+
 const legacyUploadRemoved = (_req: express.Request, res: express.Response) => {
   res.status(410).json({
     code: "upload_session_required",
@@ -287,22 +230,6 @@ app.put(
   legacyUploadRemoved,
 );
 app.post("/projects/:projectId/documents", legacyUploadRemoved);
-app.get("/projects/:projectId/export", exportLimiter);
-app.get("/user/export", exportLimiter);
-app.get("/user/chats/export", exportLimiter);
-app.get("/user/tabular-reviews/export", exportLimiter);
-app.get("/audit/export", exportLimiter);
-// Scheduling an async export costs exactly what the synchronous GETs above
-// cost — the same whole-corpus walk, just on a worker — so it shares their
-// budget. Deliberately POST-only: the /user/exports/:id poll and its download
-// stay on the general limiter, because a client polls every couple of seconds
-// while an export builds and a 10/hour budget would lock the user out of an
-// export they legitimately scheduled.
-app.post("/user/exports", exportLimiter);
-app.delete("/user/account", dataDeleteLimiter);
-app.delete("/user/chats", dataDeleteLimiter);
-app.delete("/user/projects", dataDeleteLimiter);
-app.delete("/user/tabular-reviews", dataDeleteLimiter);
 
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 

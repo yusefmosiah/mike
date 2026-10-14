@@ -73,11 +73,10 @@ export SENTRY_DISABLED=true
 E2E_STUB_MODEL_PORT="${E2E_STUB_MODEL_PORT:-21434}"
 E2E_MODEL_CONFIG='{"models":[{"id":"e2e-placeholder","label":"E2E placeholder","provider":"openai-compatible","location":"local","baseUrl":"http://127.0.0.1:'"$E2E_STUB_MODEL_PORT"'/v1","apiModel":"e2e-placeholder"}]}'
 export MIKE_MODEL_CONFIG_JSON="${MIKE_MODEL_CONFIG_JSON:-$E2E_MODEL_CONFIG}"
-# The suite fires well over the backend's default 300-requests/15-min general
-# cap in one run; once tripped every call 429s and profile/list waits time out.
-# Same overrides CI uses — e2e is not testing throttling.
-for cap in GENERAL CHAT CHAT_CREATE UPLOAD EXPORT DATA_DELETE UPLOAD_SESSION_MUTATION \
-    UPLOAD_SESSION_POLL UPLOAD_SESSION_CREATE_MAX_PER_HOUR AUTH_LOGIN AUTH_ACCOUNT \
+# The suite fires more uploads and logins in one run than the default
+# upload-session and auth caps allow; once tripped those calls 429 and waits
+# time out. Same overrides CI uses — e2e is not testing throttling.
+for cap in UPLOAD_SESSION_MUTATION UPLOAD_SESSION_POLL UPLOAD_SESSION_CREATE_MAX_PER_HOUR AUTH_LOGIN AUTH_ACCOUNT \
     AUTH_EMAIL AUTH_FLOW AUTH_MFA; do
     case "$cap" in
     *_PER_HOUR) export "RATE_LIMIT_${cap}=100000" ;;

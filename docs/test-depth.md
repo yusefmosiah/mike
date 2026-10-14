@@ -123,10 +123,7 @@ missed an SLO we never agreed on".
 1. Start the backend as usual (see `docs/safe-local-testing.md` — a
    disposable database and auth server and low-limit provider keys; the test
    creates real chats and burns real tokens on whatever it hits).
-2. Raise the chat rate limit for the run, or the harness trips it from a
-   single IP immediately: `RATE_LIMIT_CHAT_MAX=100000` in `backend/.env`
-   (default is 30 per 15 min per IP).
-3. Get an access token for a test user from GoTrue's password grant
+2. Get an access token for a test user from GoTrue's password grant
    (`AUTH_URL` from `backend/.env`; locally `http://localhost:54321`):
 
    ```bash
@@ -135,7 +132,7 @@ missed an SLO we never agreed on".
      -d '{"email":"test@example.com","password":"..."}' | jq -r .access_token
    ```
 
-4. Run k6 (native binary, or the docker image if you don't have k6):
+3. Run k6 (native binary, or the docker image if you don't have k6):
 
    ```bash
    BASE_URL=http://localhost:3001 AUTH_TOKEN=eyJ... VUS=5 \

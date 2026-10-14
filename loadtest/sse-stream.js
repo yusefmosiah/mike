@@ -33,10 +33,7 @@
 //   STREAM_TIMEOUT per-request timeout (default 300s — long tool calls are
 //                  the incident class we're probing, so don't cut this short)
 //
-// NOTE on rate limits: the backend ships with RATE_LIMIT_CHAT_MAX=30 per
-// 15 min per IP (backend/src/app.ts). A load test from one IP will trip
-// that almost immediately — raise it on the TARGET stack for the test run,
-// e.g. RATE_LIMIT_CHAT_MAX=100000. 429s show up here as failed checks.
+// Chat requests are not rate limited, so one IP can drive the whole test.
 
 import http from "k6/http";
 import { check } from "k6";
