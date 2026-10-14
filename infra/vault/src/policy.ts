@@ -118,9 +118,14 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 /**
  * Read or write by HTTP method. This is a convention, not a guarantee: an API
  * that changes things on GET is not stopped by a read lease (docs/vault.md).
+ * One POST only reads: git's smart-HTTP fetch, which every clone and pull
+ * sends to `<repo>/git-upload-pack` (a push goes to `git-receive-pack`).
  */
-export function accessFor(method: string): Access {
-  return READ_METHODS.has(method.toUpperCase()) ? "read" : "write";
+export function accessFor(method: string, path = "", query = ""): Access {
+  const upper = method.toUpperCase();
+  if (READ_METHODS.has(upper)) return "read";
+  if (upper === "POST" && query === "" && path.split("/").at(-1) === "git-upload-pack") return "read";
+  return "write";
 }
 
 /** Headers that make a GET act as another method on some servers; never forwarded. */

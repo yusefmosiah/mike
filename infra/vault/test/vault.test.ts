@@ -739,6 +739,11 @@ describe("vault end to end", () => {
     assert.equal((await unixRequest(vmA, "GET", `/${token}/other.example.com/x`)).status, 403);
     assert.equal((await unixRequest(vmA, "POST", `/${token}/api.example.com/x`, "{}")).status, 403);
     assert.equal((await unixRequest(vmA, "GET", `/mvl_madeup/api.example.com/x`)).status, 401);
+    // A clone or fetch reads, though git sends it as a POST; a push does not.
+    assert.notEqual((await unixRequest(vmA, "POST", `/${token}/api.example.com/o/r.git/git-upload-pack`, "{}")).status, 403);
+    assert.equal((await unixRequest(vmA, "POST", `/${token}/api.example.com/o/r.git/git-receive-pack`, "{}")).status, 403);
+    assert.equal((await unixRequest(vmA, "POST", `/${token}/api.example.com/o/r.git/git-upload-pack?x=1`, "{}")).status, 403);
+    assert.equal((await unixRequest(vmA, "POST", `/${token}/api.example.com/git-upload-pack/x`, "{}")).status, 403);
   });
 
   it("refuses compressed responses, and drops cookies, ranges and method overrides", async () => {

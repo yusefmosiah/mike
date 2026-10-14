@@ -226,7 +226,7 @@ export function leaseInstructions(lease: VaultLease): string {
     `Example: curl -sS ${base}/${host}/<path>`,
     `For git over HTTPS, use the URL directly instead of saving it as a remote: git push ${base}/${host}/<owner>/<repo>.git <branch> (no username or token in the URL).`,
     lease.access === "read"
-      ? "This lease allows GET, HEAD and OPTIONS only. Ask for a write lease to push or change anything."
+      ? "This lease allows GET, HEAD and OPTIONS, and git clone, fetch and pull. Ask for a write lease to push or change anything."
       : "This lease also allows requests that change things (POST, PUT, PATCH, DELETE, git push).",
     "Never print, store or ask for the secret itself; you cannot see it and do not need it.",
   ].join("\n");

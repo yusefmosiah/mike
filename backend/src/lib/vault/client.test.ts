@@ -84,7 +84,7 @@ describe("vault client", () => {
     expect(JSON.parse(seen.at(-1)!.body)).toEqual({ user: "u1", vm: "ws-01", secret: "blog", access: "read", chat: "c1" });
     const text = leaseInstructions(lease);
     expect(text).toContain("$MIKE_VAULT_URL/mvl_x/gitlab.com/");
-    expect(text).toContain("GET, HEAD and OPTIONS only");
+    expect(text).toContain("GET, HEAD and OPTIONS, and git clone, fetch and pull");
     expect(text).toContain("end of this turn");
     expect(text).not.toContain("remote set-url");
   });

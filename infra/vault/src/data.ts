@@ -117,7 +117,7 @@ export function dataHandler(vm: string, plane: DataPlane) {
       deny(403, `${secret.name} may be sent only to ${secret.hosts.join(", ")}`);
       return;
     }
-    if (accessFor(method) === "write" && lease.access !== "write") {
+    if (accessFor(method, rest.join("/"), query) === "write" && lease.access !== "write") {
       deny(403, `${method} changes things and this is a read lease; ask for a write lease with vault_lease`);
       return;
     }
