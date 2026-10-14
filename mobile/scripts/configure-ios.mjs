@@ -259,6 +259,59 @@ class MikeKeyboardLayoutController: UIViewController {
 }
 `,
 );
+// MIKE_KEYBOARD_OVERLAP: the keyboard slides over the bottom of the page by
+// a little less than the chat composer's band below its buttons (6px gap and
+// 23px padding, frontend globals.css), so it covers the composer's empty
+// bottom and its rounded corners, never a button, and nothing shows behind
+// the keyboard's own rounded corners. Required: the web view never reaches
+// past the bottom of the screen, so with the keyboard closed nothing changes;
+// preferred: it ends that far below the keyboard's top edge, following it as
+// it opens, closes or is dragged away.
+patch("SceneDelegate.swift", "MIKE_KEYBOARD_OVERLAP", (source) =>
+  source.replace(
+    "            bottom = webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)\n",
+    `            // MIKE_KEYBOARD_OVERLAP: the keyboard covers the composer's empty
+            // bottom band (see configure-ios.mjs).
+            bottom = webView.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
+            let overlap = webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: 24)
+            overlap.priority = .defaultHigh
+            overlap.isActive = true
+`,
+  ),
+);
+
+// MIKE_KEYBOARD_EVENTS: WebKit is not told about the keyboard (above), so the
+// app tells the page: a \`mikekeyboard\` event on the window with whether it is
+// open, how far it overlaps the page and how long its animation runs. The
+// page uses it to shade the composer under the keyboard's edge and to move
+// the composer with the keyboard instead of jumping (frontend
+// lib/nativeKeyboard.ts).
+patch("SceneDelegate.swift", "MIKE_KEYBOARD_EVENTS", (source) =>
+  source.replace(
+    "        bridgeController.didMove(toParent: self)\n    }\n",
+    `        bridgeController.didMove(toParent: self)
+        if #available(iOS 17.0, *) {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardWillChangeFrame(_:)),
+                name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        }
+    }
+
+    // MIKE_KEYBOARD_EVENTS: tell the page where the keyboard is going.
+    @objc private func keyboardWillChangeFrame(_ note: Notification) {
+        guard let info = note.userInfo,
+              let end = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+        let duration = (info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+        let frame = view.convert(end, from: nil)
+        let open = frame.height > 0 && frame.minY < view.bounds.maxY - 1
+        // The same overlap as MIKE_KEYBOARD_OVERLAP.
+        let script = "window.dispatchEvent(new CustomEvent('mikekeyboard', { detail: { open: \\(open), overlap: \\(open ? 24 : 0), duration: \\(Int(duration * 1000)) } }))"
+        bridgeController.webView?.evaluateJavaScript(script, completionHandler: nil)
+    }
+`,
+  ),
+);
+
 // MIKE_UI_TESTS: the UI-test target. Written into project.pbxproj directly
 // (no Ruby gem needed) with fixed ids, so a second run finds the marker and
 // changes nothing. The Swift source is copied in on every run.

@@ -706,6 +706,20 @@
    clears the home indicator, unless the app runs edge to edge (below). */
 :root {
     --chat-composer-gap: 0.75rem;
+    /* The composer in the iPhone app, edge to edge (below). */
+    --chat-composer-edge-background: rgba(255, 255, 255, 0.86);
+    --chat-composer-edge-shadow:
+        0 -1px 2px rgba(15, 23, 42, 0.05), 0 -6px 20px rgba(15, 23, 42, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --chat-composer-keyboard-shade: rgba(15, 23, 42, 0.08);
+}
+
+.dark {
+    --chat-composer-edge-background: rgba(23, 30, 40, 0.9);
+    --chat-composer-edge-shadow:
+        0 -1px 2px rgba(0, 0, 0, 0.3), 0 -6px 20px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(148, 163, 184, 0.12);
+    --chat-composer-keyboard-shade: rgba(0, 0, 0, 0.3);
 }
 
 /* On a phone, a chat thread scrolls the page instead of a box inside it
@@ -748,9 +762,40 @@
         padding-inline: var(--chat-composer-gap);
     }
 
+    /* Three layers: the thread, the composer above it, the keyboard above
+       the composer. Here the composer is more opaque than the translucent
+       glass elsewhere, and its shadow falls upward onto the thread: below it
+       is only the edge of the screen, or the keyboard. */
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-surface"] {
         --chat-composer-bottom-radius: calc(var(--display-corner-radius, 55px) - var(--chat-composer-gap));
+        position: relative;
         border-radius: 21px 21px var(--chat-composer-bottom-radius) var(--chat-composer-bottom-radius);
+        background: var(--chat-composer-edge-background);
+        box-shadow: var(--chat-composer-edge-shadow);
+    }
+
+    /* While the keyboard is up it slides over the composer's bottom band
+       (lib/nativeKeyboard.ts); the composer darkens toward the keyboard's
+       edge, as if in its shadow. */
+    :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-surface"]::after {
+        content: "";
+        position: absolute;
+        inset-inline: 0;
+        bottom: 0;
+        height: calc(var(--keyboard-overlap, 0px) + 1.25rem);
+        border-radius: 0 0 var(--chat-composer-bottom-radius) var(--chat-composer-bottom-radius);
+        background: linear-gradient(
+            to bottom,
+            transparent,
+            var(--chat-composer-keyboard-shade) calc(100% - var(--keyboard-overlap, 0px))
+        );
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 250ms ease-out;
+    }
+
+    :root[data-display-edge][data-keyboard="open"] [data-document-scroll] [data-slot="chat-input-surface"]::after {
+        opacity: 1;
     }
 
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-controls"] {

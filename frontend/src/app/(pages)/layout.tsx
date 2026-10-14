@@ -12,6 +12,7 @@ import { FullScreenLoader } from "@/app/components/shared/FullScreenLoader";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import { cn } from "@/app/lib/utils";
 import { watchDisplayEdge } from "@/app/lib/displayEdge";
+import { watchNativeKeyboard } from "@/app/lib/nativeKeyboard";
 import { watchHorizontalSwipe } from "@/app/lib/horizontalSwipe";
 
 export default function MikeLayout({
@@ -36,6 +37,7 @@ export default function MikeLayout({
     // tap on the status bar scrolls the thread to the top.
     const scrollsDocument = /^\/assistant\/chat\/[^/]+\/?$/.test(pathname);
     useEffect(() => watchDisplayEdge(), []);
+    useEffect(() => watchNativeKeyboard(), []);
     const [mobileActionsContainer, setMobileActionsContainer] =
         useState<HTMLDivElement | null>(null);
 
