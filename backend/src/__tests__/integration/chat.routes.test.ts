@@ -488,11 +488,12 @@ describe("POST /chat — streaming endpoint", () => {
                 memorySharedAudience: false,
             }),
         );
-        const systemPromptExtra = vi.mocked(chatLib.buildMessages).mock
-            .calls[0]?.[2] as string;
-        expect(systemPromptExtra).toContain("USER PERSONALISATION");
-        expect(systemPromptExtra).toContain('"title": "Partner"');
-        expect(systemPromptExtra).toContain(
+        const personalisation = vi.mocked(chatLib.buildMessages).mock
+            .calls[0]?.[8] as string;
+        expect(vi.mocked(chatLib.buildMessages).mock.calls[0]?.[2]).toBeUndefined();
+        expect(personalisation).toContain("USER PERSONALISATION");
+        expect(personalisation).toContain('"title": "Partner"');
+        expect(personalisation).toContain(
             '"professional_setting": "Private practice"',
         );
 
@@ -1207,8 +1208,9 @@ describe("POST /chat — streaming endpoint", () => {
             >;
         };
         expect(systemPromptExtra).toContain("running here inside Microsoft Word");
-        expect(systemPromptExtra).toContain("USER PERSONALISATION");
-        expect(systemPromptExtra).toContain('"jurisdiction": "Singapore"');
+        expect(systemPromptExtra).not.toContain("USER PERSONALISATION");
+        expect(call[8]).toContain("USER PERSONALISATION");
+        expect(call[8]).toContain('"jurisdiction": "Singapore"');
         expect(systemPromptExtra).toContain(
             '\"deleted_text\":\"exact text copied from the active Word document\"',
         );

@@ -551,12 +551,13 @@ async function prepareAdmittedChatStream(
         const apiMessages = buildMessages(
             enrichedMessages,
             docAvailability,
-            personalisationPrompt || undefined,
+            undefined,
             undefined,
             legalResearchUs,
             nonce,
             "append",
             { timeZone, now: new Date(), userSentAt, userAuthors },
+            personalisationPrompt,
         );
         await attachImages({
             apiMessages: apiMessages as { role: string; content: unknown }[],

@@ -32,6 +32,7 @@ import {
     CHAT_TITLE_FALLBACK,
     generateAssistantChatTitle,
     isAbortError,
+    isMeaningfulTextlessAssistantOutput,
     logChatTitleFailure,
     PROJECT_EXTRA_TOOLS,
     runLLMStream,
@@ -148,7 +149,7 @@ export async function insertAssistantMessage(
         } catch (leafError) {
             console.error(
                 "[project-chat/stream] failed to move chat leaf",
-                leafError,
+                safeError(leafError),
             );
         }
     }
@@ -282,7 +283,7 @@ export async function driveProjectChatTurn(
                       })
                 : Promise.resolve();
 
-            const { events, citations } = await runLLMStream({
+            const { fullText, events, citations } = await runLLMStream({
                 apiMessages,
                 docStore,
                 docIndex,
@@ -332,7 +333,26 @@ export async function driveProjectChatTurn(
                     : undefined,
             });
 
-            const persistedEvents = stripTransientAssistantEvents(events);
+            // Upstream providers occasionally end the stream cleanly but empty.
+            // Keep whatever work the turn did with a visible error, as the
+            // standard chat does: a row saved with no content is dropped from
+            // the transcript, so a reload would lose the turn entirely.
+            const hasToolOutput =
+                approvalEvents.length > 0 ||
+                events?.some(isMeaningfulTextlessAssistantOutput);
+            const answerless = !fullText?.trim() && !hasToolOutput;
+            const work = stripTransientAssistantEvents(events ?? []);
+            const answerlessMessage = answerless
+                ? work.some((event) => !(event.type === "content" && !event.text.trim()))
+                    ? "The model stopped before writing an answer. Ask it to continue, or pick a different model."
+                    : "The model returned an empty response. Try again, or pick a different model."
+                : null;
+            const persistedEvents = answerlessMessage
+                ? [
+                      ...work.filter((event) => !(event.type === "content" && !event.text.trim())),
+                      { type: "error" as const, message: answerlessMessage },
+                  ]
+                : work;
             if (askInputsResponse) {
                 const appended = await appendAssistantEventsToMessage(
                     db,
@@ -355,7 +375,7 @@ export async function driveProjectChatTurn(
                 if (!saved.ok) {
                     console.error(
                         "[project-chat/stream] failed to save assistant response",
-                        saved.error,
+                        safeError(saved.error),
                     );
                     write(
                         `data: ${JSON.stringify({
@@ -367,6 +387,18 @@ export async function driveProjectChatTurn(
                     write("data: [DONE]\n\n");
                     return { ok: true };
                 }
+            }
+
+            if (answerlessMessage) {
+                write(
+                    `data: ${JSON.stringify({
+                        type: "error",
+                        message: answerlessMessage,
+                        safe_to_display: true,
+                    })}\n\n`,
+                );
+                write("data: [DONE]\n\n");
+                return { ok: true };
             }
 
             await titlePromise;
@@ -382,12 +414,18 @@ export async function driveProjectChatTurn(
             // back; see the chat turn.
             if (!chatTitle && titleOutcome.failure) {
                 const title = CHAT_TITLE_FALLBACK;
-                await updateChatTitle(db, { chatId, title });
-                chatTitle = title;
-                if (shouldGenerateTitle && !stream.signal.aborted) {
-                    write(
-                        `data: ${JSON.stringify({ type: "chat_title", chatId, title })}\n\n`,
-                    );
+                // Announce the title only once it is saved: a frame for an
+                // unsaved title shows one the next reload undoes.
+                const saved = await updateChatTitle(db, { chatId, title });
+                if (!saved.ok) {
+                    console.error("[project-chat/stream] failed to save chat title", safeError(saved.error));
+                } else {
+                    chatTitle = title;
+                    if (shouldGenerateTitle && !stream.signal.aborted) {
+                        write(
+                            `data: ${JSON.stringify({ type: "chat_title", chatId, title })}\n\n`,
+                        );
+                    }
                 }
             }
 
@@ -482,7 +520,7 @@ export async function driveProjectChatTurn(
                     if (saveError) {
                         console.error(
                             "[project-chat/stream] failed to save aborted stream",
-                            saveError,
+                            safeError(saveError),
                         );
                     }
                 }
@@ -490,8 +528,14 @@ export async function driveProjectChatTurn(
                 write("data: [DONE]\n\n");
                 return { ok: true };
             }
-            console.error("[project-chat/stream] error:", err);
             const errorPayload = assistantStreamErrorPayload(err);
+            // Never the error itself: an AssistantStreamError carries the turn's
+            // full text and events, which can hold credentials (vault lease URLs).
+            console.error("[project-chat/stream] error:", {
+                ...safeError(err),
+                ...(errorPayload.code ? { code: errorPayload.code } : {}),
+                ...(errorPayload.safe_to_display ? { message: errorPayload.message } : {}),
+            });
             const message = errorPayload.message;
             const errorEvents =
                 err instanceof AssistantStreamError
@@ -525,12 +569,12 @@ export async function driveProjectChatTurn(
                 if (saveError)
                     console.error(
                         "[project-chat/stream] failed to save error",
-                        saveError,
+                        safeError(saveError),
                     );
             } catch (saveErr) {
                 console.error(
                     "[project-chat/stream] failed to save error",
-                    saveErr,
+                    safeError(saveErr),
                 );
             }
             try {

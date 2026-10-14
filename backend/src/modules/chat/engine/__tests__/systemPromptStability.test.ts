@@ -79,6 +79,8 @@ type TurnShape = {
   sharedAudience: boolean;
   memory: string;
   model: string;
+  /** Who sent the turn: a shared chat has several people. */
+  sender: string;
 };
 
 function skillStore(names: string[]): WorkflowStore {
@@ -99,7 +101,7 @@ async function runTurn(shape: TurnShape): Promise<StreamChatCall> {
   vi.spyOn(kernels, "knownNames").mockReturnValue(shape.pythonNames);
   const nonce = generateSpotlightNonce(CHAT);
   const personalisation = buildUserPersonalisationPrompt(
-    { displayName: "Ada", organisation: "Acme", jurisdiction: null, practiceSetting: null, professionalTitle: null, practiceAreas: [] },
+    { displayName: shape.sender, organisation: "Acme", jurisdiction: null, practiceSetting: null, professionalTitle: null, practiceAreas: [] },
     nonce,
   );
   const history = [
@@ -110,12 +112,13 @@ async function runTurn(shape: TurnShape): Promise<StreamChatCall> {
   const apiMessages = buildMessages(
     history,
     shape.documents.map((filename, i) => ({ doc_id: `doc-${i}`, filename })),
-    personalisation,
+    undefined,
     undefined,
     true,
     nonce,
     "append",
     { timeZone: "Europe/Berlin", now: shape.now, userSentAt: [null, null] },
+    personalisation,
   );
   await runLLMStream({
     apiMessages,
@@ -146,6 +149,7 @@ const TURN_ONE: TurnShape = {
   sharedAudience: false,
   memory: "",
   model: "gemini-3-flash-preview",
+  sender: "Ada",
 };
 
 const TURN_TWO: TurnShape = {
@@ -158,10 +162,11 @@ const TURN_TWO: TurnShape = {
   sharedAudience: true,
   memory: "# Project\n- Matter Alpha",
   model: "gpt-5.4",
+  sender: "Grace",
 };
 
 describe("the chat system prompt", () => {
-  it("is byte-identical across turns that differ in documents, time, Python names, tools, skills, memory and model", async () => {
+  it("is byte-identical across turns that differ in documents, time, Python names, tools, skills, memory, model and sender", async () => {
     const first = await runTurn(TURN_ONE);
     const second = await runTurn(TURN_TWO);
     // Code mode on both turns; the tool definitions the model sees are the same.
@@ -179,20 +184,20 @@ describe("the chat system prompt", () => {
 
   it("names none of the turn's varying facts", async () => {
     const { systemPrompt } = await runTurn(TURN_TWO);
-    for (const varying of ["board memo.docx", "lease.pdf", "rates, helper", "crm_lookup", "nda-triage", "gpt-5.4", "Matter Alpha", "AUDIENCE: SHARED", "2026"]) {
+    for (const varying of ["board memo.docx", "lease.pdf", "rates, helper", "crm_lookup", "nda-triage", "gpt-5.4", "Matter Alpha", "AUDIENCE: SHARED", "2026", "Grace", "USER PERSONALISATION"]) {
       expect(systemPrompt).not.toContain(varying);
     }
     // The fixed parts stay: the surface's prompt, the language rule, turn context and memory policy.
     expect(systemPrompt).toContain("RESPONSE LANGUAGE:");
     expect(systemPrompt).toContain("TURN CONTEXT:");
     expect(systemPrompt).toContain("PERSISTED MEMORY POLICY:");
-    expect(systemPrompt).toContain("USER PERSONALISATION:");
   });
 
   it("carries what it left out as turn context", async () => {
     const call = await runTurn(TURN_TWO);
     expect(call.turnContext!.map((s) => s.key)).toEqual([
       "documents",
+      "personalisation",
       "memory-audience",
       "skills",
       "code-mode",
@@ -201,6 +206,8 @@ describe("the chat system prompt", () => {
     ]);
     expect(section(call, "documents")).toContain("AVAILABLE DOCUMENTS:");
     expect(section(call, "documents")).toContain("doc-1:");
+    expect(section(call, "personalisation")).toContain("USER PERSONALISATION:");
+    expect(section(call, "personalisation")).toContain('"name": "Grace"');
     expect(section(call, "documents")).toContain("board memo.docx");
     expect(section(call, "memory-audience")).toContain("CURRENT MEMORY AUDIENCE: SHARED");
     expect(section(call, "skills")).toContain("nda-triage");

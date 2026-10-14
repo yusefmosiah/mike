@@ -53,6 +53,7 @@ export {
   extractCitations,
   isAbortError,
   runLLMStream,
+  isMeaningfulTextlessAssistantOutput,
   stripTransientAssistantEvents,
   PROJECT_EXTRA_TOOLS,
   parseChatMessages,

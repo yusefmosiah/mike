@@ -300,12 +300,7 @@ export async function prepareWordChatStream(
       personalisation,
       nonce,
     );
-    const wordSystemPrompt = [
-      buildWordChatSystemPrompt(args.clientToolsEnabled),
-      personalisationPrompt,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const wordSystemPrompt = buildWordChatSystemPrompt(args.clientToolsEnabled);
     // A local-only chat stores no messages, so only its newest message is
     // stamped (with the current time).
     const userSentAt = await loadUserMessageSentTimes(
@@ -323,6 +318,7 @@ export async function prepareWordChatStream(
       nonce,
       "replace",
       { timeZone, now: new Date(), userSentAt },
+      personalisationPrompt,
     );
     const workflowStore = await buildWorkflowStore(userId, userEmail, db);
 

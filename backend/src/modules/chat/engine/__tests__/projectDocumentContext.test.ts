@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildProjectDocContext } from "../contextBuilders";
+import { buildProjectDocContext, documentsTurnContext, MAX_LISTED_DOCUMENTS, stableDocLabel } from "../contextBuilders";
 import type { createDb } from "../../../../lib/db";
 
 function contextDatabase() {
@@ -140,5 +140,46 @@ describe("project chat document context", () => {
     expect(
       from.mock.calls.filter(([table]) => table === "documents"),
     ).toHaveLength(1);
+  });
+});
+
+describe("project document labels", () => {
+  it("name a document by its id, so deleting an earlier one renames nothing", async () => {
+    const { db, documents } = contextDatabase();
+    const before = await buildProjectDocContext("p1", "u1", db);
+    documents.unshift({
+      id: "aaaaaaaa-0000-4000-8000-000000000000",
+      project_id: "p1",
+      user_id: "u1",
+      status: "ready",
+      folder_id: "folder-1",
+      current_version_id: "v1",
+    });
+    const after = await buildProjectDocContext("p1", "u1", db);
+    const labelOf = (context: typeof before, id: string) =>
+      Object.keys(context.docIndex).find((key) => context.docIndex[key].document_id === id);
+    expect(labelOf(before, "project-doc")).toBe("doc-projectd");
+    expect(labelOf(after, "project-doc")).toBe(labelOf(before, "project-doc"));
+  });
+
+  it("lengthens a label only when two ids share their first digits", () => {
+    expect(stableDocLabel("3f2a9c1b-1111-4000-8000-000000000000", new Set())).toBe("doc-3f2a9c1b");
+    expect(stableDocLabel("3f2a9c1b-1111-4000-8000-000000000000", new Set(["doc-3f2a9c1b"]))).toBe(
+      "doc-3f2a9c1b1111",
+    );
+  });
+});
+
+describe("the documents section", () => {
+  it("lists only the newest documents of a large project and says how to find the rest", () => {
+    const docs = Array.from({ length: MAX_LISTED_DOCUMENTS + 2 }, (_, i) => ({
+      doc_id: `doc-${i}`,
+      filename: `file ${i}.pdf`,
+    }));
+    const section = documentsTurnContext(docs)!;
+    expect(section.text).not.toContain("file 1.pdf");
+    expect(section.text).toContain(`file ${MAX_LISTED_DOCUMENTS + 1}.pdf`);
+    expect(section.text).toContain("2 older documents are not listed here");
+    expect(documentsTurnContext(docs.slice(0, 3))!.text).not.toContain("not listed");
   });
 });

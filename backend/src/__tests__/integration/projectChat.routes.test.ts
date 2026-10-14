@@ -208,8 +208,8 @@ describe("POST /projects/:projectId/chat", () => {
             folderPaths: new Map(),
         });
         runLLMStream.mockResolvedValue({
-            fullText: "",
-            events: [],
+            fullText: "Done.",
+            events: [{ type: "content", text: "Done." }],
             citations: [],
         });
         checkProjectAccess.mockResolvedValue({
@@ -253,7 +253,7 @@ describe("POST /projects/:projectId/chat", () => {
         expect(res.text).toContain('"type":"chat_title"');
         expect(runLLMStream).toHaveBeenCalledTimes(1);
         expect(buildProjectDocContext).toHaveBeenCalledWith(
-            "p1", "u1", expect.anything(), VALID_BODY.messages,
+            "p1", "u1", expect.anything(), VALID_BODY.messages, "u1@test.local",
         );
     expect(runLLMStream).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -262,8 +262,10 @@ describe("POST /projects/:projectId/chat", () => {
       }),
     );
     const systemPromptExtra = buildMessages.mock.calls[0]?.[2] as string;
-        expect(systemPromptExtra).toContain("USER PERSONALISATION");
-        expect(systemPromptExtra).toContain('"organisation": "Acme LLP"');
+        const personalisation = buildMessages.mock.calls[0]?.[8] as string;
+        expect(systemPromptExtra).not.toContain("USER PERSONALISATION");
+        expect(personalisation).toContain("USER PERSONALISATION");
+        expect(personalisation).toContain('"organisation": "Acme LLP"');
     expect(beginMemoryConversationTurn).toHaveBeenCalledWith({
       db: expect.anything(),
       surface: "chat",
@@ -637,6 +639,64 @@ describe("POST /projects/:projectId/chat", () => {
       turn: { activityId: "activity-1" },
     });
     expect(scheduleMemoryConsolidation).not.toHaveBeenCalled();
+    });
+
+    it("tells the person when the model returned an empty response", async () => {
+        runLLMStream.mockResolvedValue({ fullText: "", events: [], citations: [] });
+
+        const res = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("The model returned an empty response");
+        expect(res.text).toContain('"safe_to_display":true');
+        expect(res.text).toContain("[DONE]");
+        const assistantInsert = dbInserts.find(
+            ({ table, value }) =>
+                table === "chat_messages" &&
+                (value as { role?: unknown }).role === "assistant",
+        );
+        expect(
+            (assistantInsert?.value as { content?: unknown[] }).content,
+        ).toEqual([
+            {
+                type: "error",
+                message:
+                    "The model returned an empty response. Try again, or pick a different model.",
+            },
+        ]);
+    });
+
+    it("keeps the steps of a turn that stopped before writing an answer", async () => {
+        runLLMStream.mockResolvedValue({
+            fullText: "",
+            events: [{ type: "reasoning", text: "Looking at the lease." }],
+            citations: [],
+        });
+
+        const res = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+
+        expect(res.text).toContain("The model stopped before writing an answer");
+        const assistantInsert = dbInserts.find(
+            ({ table, value }) =>
+                table === "chat_messages" &&
+                (value as { role?: unknown }).role === "assistant",
+        );
+        expect(
+            (assistantInsert?.value as { content?: unknown[] }).content,
+        ).toEqual([
+            { type: "reasoning", text: "Looking at the lease." },
+            {
+                type: "error",
+                message:
+                    "The model stopped before writing an answer. Ask it to continue, or pick a different model.",
+            },
+        ]);
     });
     // -----------------------------------------------------------------------
     // Write authorization agrees with GET /chat

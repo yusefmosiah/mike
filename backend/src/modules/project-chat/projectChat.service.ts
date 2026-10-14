@@ -514,6 +514,7 @@ async function prepareAdmittedProjectChatStream(
             userId,
             db,
             messages,
+            userEmail,
         );
         const docAvailability = Object.entries(docIndex).map(([doc_id, info]) => ({
             doc_id,
@@ -579,13 +580,12 @@ async function prepareAdmittedProjectChatStream(
                           displayed_doc.document_id,
                           displayed_doc.filename,
                       );
-                      content = `${content}\n\ndisplayed_doc: ${displayedDocument.filename}, displayed_doc_id: ${displayed_doc.document_id}`;
+                      content = `${content}\n\ndisplayed_doc: ${displayedDocument.filename}, displayed_doc_id: ${displayedDocument.slug ?? displayed_doc.document_id}`;
                   }
                   return { ...m, content };
               })
             : enrichedMessages;
 
-        let systemPromptExtra = PROJECT_SYSTEM_PROMPT_EXTRA;
 
         const {
             api_keys: apiKeys,
@@ -597,9 +597,6 @@ async function prepareAdmittedProjectChatStream(
             personalisation,
             nonce,
         );
-        if (personalisationPrompt) {
-            systemPromptExtra += `\n\n${personalisationPrompt}`;
-        }
         const [userSentAt, userAuthors] = await Promise.all([
             loadUserMessageSentTimes(db, "chat_messages", chatId, messagesForLLM, !!args.askInputsResponse),
             loadUserMessageAuthors(db, "chat_messages", chatId, messagesForLLM, !!args.askInputsResponse),
@@ -607,12 +604,13 @@ async function prepareAdmittedProjectChatStream(
         const apiMessages = buildMessages(
             messagesForLLM,
             docAvailability,
-            systemPromptExtra,
+            PROJECT_SYSTEM_PROMPT_EXTRA,
             undefined,
             legalResearchUs,
             nonce,
             "append",
             { timeZone, now: new Date(), userSentAt, userAuthors },
+            personalisationPrompt,
         );
         await attachImages({
             apiMessages: apiMessages as { role: string; content: unknown }[],
