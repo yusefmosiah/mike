@@ -3,7 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.mts"],
+    // scripts/replay is the thread replay simulator (a CLI, not part of the
+    // server build); its pure parts are unit-tested with the server's suite.
+    include: ["src/**/*.test.ts", "src/**/*.test.mts", "scripts/replay/**/*.test.mts"],
     exclude: ["dist/**", "node_modules/**"],
     // Generous timeouts so cold-start module transform/import latency
     // can't cause spurious timeout failures on a cold CI runner. Warm
