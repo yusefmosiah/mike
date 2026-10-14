@@ -18,6 +18,7 @@
         "@capacitor/core": "^8.5.2",
         "@capacitor/ios": "^8.5.3",
         "@capacitor/preferences": "^8.0.1",
+        "@mike/files": "file:plugins/files",
         "@mike/speech": "file:plugins/speech"
     },
     "devDependencies": {

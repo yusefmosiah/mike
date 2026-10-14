@@ -175,7 +175,7 @@ function DocxViewContent(props: Props) {
         try {
             const buffer = providedBytes ?? await surface.exportDocx();
             const name = propsRef.current.filename || "document.docx";
-            downloadBlob(new Blob([buffer], {
+            await downloadBlob(new Blob([buffer], {
                 type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             }), /\.docx$/i.test(name) ? name : `${name}.docx`);
         } catch {

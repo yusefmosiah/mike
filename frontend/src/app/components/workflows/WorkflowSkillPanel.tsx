@@ -96,7 +96,7 @@ export function WorkflowSkillPanel({ workflow, readOnly, onRestored }: Props) {
         setError("");
         try {
             const file = await exportSkill(workflow.id);
-            downloadBlob(file.blob, file.filename || "skill.zip");
+            await downloadBlob(file.blob, file.filename || "skill.zip");
         } catch (caught) {
             setError(userFacingApiError(caught, "The skill could not be downloaded."));
         } finally {

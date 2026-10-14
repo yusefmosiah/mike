@@ -31,6 +31,9 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
   the chat composer above the bottom of the screen.
 - `plugins/speech/` is Mike's own plugin: dictation with Apple's on-device
   speech recognition (below).
+- `plugins/files/` saves downloads: the web view ignores a link that
+  downloads a blob, so a document's Download button opens the share sheet
+  (Save to Files, AirDrop, Mail) through this plugin instead.
 - Android has not been generated or built.
 
 ## How the pieces fit
@@ -432,6 +435,7 @@ the backend speech proxy:
 | `@capacitor/preferences` | declared | non-secret settings only. |
 | `@capacitor/camera` | declared | scanner input. |
 | `@mike/speech` (`plugins/speech/`) | installed, iOS | dictation with Apple's on-device recognition. |
+| `@mike/files` (`plugins/files/`) | installed, iOS | downloads through the share sheet. |
 | `@aparajita/capacitor-biometric-auth` | required before ship, not installed | biometric unlock. |
 | `@aparajita/capacitor-secure-storage` | required before ship, not installed | Keychain/Keystore token storage. |
 | `@capacitor/push-notifications` | optional, not installed | push (policy above). |
@@ -444,6 +448,7 @@ the backend speech proxy:
 - [x] Generate the iOS shell and apply the hardening by script.
 - [x] Native app-switcher cover and backup exclusion (iOS).
 - [x] On-device dictation with Apple's speech recognition (iOS).
+- [x] Downloads through the share sheet (iOS).
 - [ ] Run on a real iPhone; sign with the firm's profile.
 - [ ] Implement the biometric gate and secure token storage.
 - [ ] Implement deep-link routing.

@@ -21,13 +21,25 @@ it("uses the server filename, downloads bytes and releases the URL", async () =>
     vi.runAllTimers();
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(3);
 });
-it("cleans up even if clicking fails", () => {
+it("cleans up even if clicking fails", async () => {
     vi.useFakeTimers();
     URL.createObjectURL = vi.fn(() => "blob:failed");
     URL.revokeObjectURL = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => { throw new Error("click"); });
-    expect(() => downloadBlob(new Blob(), "test")).toThrow("click");
+    await expect(downloadBlob(new Blob(), "test")).rejects.toThrow("click");
     expect(document.querySelector('a[download]')).toBeNull();
     vi.runAllTimers();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:failed");
+});
+it("hands the file to the iPhone app's share sheet instead of a link", async () => {
+    const nativePromise = vi.fn().mockResolvedValue({ completed: true });
+    (window as { Capacitor?: unknown }).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles" }] };
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    try {
+        await downloadBlob(new Blob(["docx"]), "brief.docx");
+    } finally {
+        delete (window as { Capacitor?: unknown }).Capacitor;
+    }
+    expect(nativePromise).toHaveBeenCalledWith("MikeFiles", "share", expect.objectContaining({ filename: "brief.docx" }));
+    expect(click).not.toHaveBeenCalled();
 });

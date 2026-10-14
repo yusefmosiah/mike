@@ -1,0 +1,16 @@
+{
+    "name": "@mike/files",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Mike's iOS plugin: hand a downloaded file to the share sheet (Save to Files, AirDrop, Mail).",
+    "license": "AGPL-3.0-only",
+    "files": [
+        "ios/Sources",
+        "Package.swift"
+    ],
+    "capacitor": {
+        "ios": {
+            "src": "ios"
+        }
+    }
+}
