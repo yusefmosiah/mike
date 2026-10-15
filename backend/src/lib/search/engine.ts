@@ -53,6 +53,9 @@ export async function search(
       contentSha256: crypto.createHash("sha256").update(content).digest("hex"),
       fetchedAt: new Date().toISOString(),
       source: "search",
+      // Providers return a result's content as Markdown: the reader view
+      // renders it as such rather than showing its link and emphasis marks.
+      readerMarkdown: content,
     };
     for (const key of keys) remember(key, snapshot);
   }

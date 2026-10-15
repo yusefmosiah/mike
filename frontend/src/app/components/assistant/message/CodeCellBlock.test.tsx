@@ -29,4 +29,24 @@ describe("CodeCellBlock", () => {
         render(<CodeCellBlock event={{ type: "code_cell", call_id: "p1", code, status: "failed", output: "[error]\nZeroDivisionError" }} />);
         expect(screen.getByRole("button", { name: /Computation stopped/ })).toBeInTheDocument();
     });
+
+    it("opens the next cell the way the reader left the last one", () => {
+        const cell = (id: string) => (
+            <CodeCellBlock event={{ type: "code_cell", call_id: id, code, status: "ok", output: "1" }} />
+        );
+        // Shut by default, for someone who only wants the answer.
+        const first = render(cell("p1"));
+        expect(screen.getByRole("button", { name: /Computed/ })).toHaveAttribute("aria-expanded", "false");
+        // Opened for debugging: the next cell opens too, on a later page as well.
+        fireEvent.click(screen.getByRole("button", { name: /Computed/ }));
+        first.unmount();
+        const second = render(cell("p2"));
+        expect(screen.getByRole("button", { name: /Computed/ })).toHaveAttribute("aria-expanded", "true");
+        expect(localStorage.getItem("mike.disclosure.code-cell")).toBe("1");
+        // Closed again: the next one stays shut.
+        fireEvent.click(screen.getByRole("button", { name: /Computed/ }));
+        second.unmount();
+        render(cell("p3"));
+        expect(screen.getByRole("button", { name: /Computed/ })).toHaveAttribute("aria-expanded", "false");
+    });
 });

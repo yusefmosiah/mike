@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Pencil, Waypoints } from "lucide-react";
 import { FileTypeIcon } from "../shared/FileTypeIcon";
 import type { MessageFile } from "../shared/types";
@@ -39,6 +39,13 @@ interface Props {
     error?: string;
 }
 
+/**
+ * Height a prompt shows before it folds behind "Show more": twelve lines of
+ * text-sm. A taller prompt would push its own top off screen once it is
+ * scrolled into place above the answer.
+ */
+export const COLLAPSED_PROMPT_HEIGHT_PX = 240;
+
 /** Visible rows for the editor: wrapped lines included, between 2 and 8. */
 function editorRows(text: string): number {
     const wrapped = text
@@ -65,6 +72,37 @@ export function UserMessage({
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(content);
     const [saving, setSaving] = useState(false);
+    const textRef = useRef<HTMLParagraphElement>(null);
+    const bubbleRef = useRef<HTMLDivElement>(null);
+    // Whether the prompt is taller than the folded height; measured, since
+    // wrapping depends on the bubble's width.
+    const [foldable, setFoldable] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    useLayoutEffect(() => {
+        const text = textRef.current;
+        if (!text) return;
+        const measure = () =>
+            setFoldable(text.scrollHeight > COLLAPSED_PROMPT_HEIGHT_PX + 40);
+        measure();
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver(measure);
+        observer.observe(text);
+        return () => observer.disconnect();
+    }, [content, editing]);
+    const folded = foldable && !expanded;
+
+    const collapse = () => {
+        setExpanded(false);
+        // The button that was tapped sat at the end of the long text: bring
+        // the folded prompt back into view rather than leave the reader below it.
+        requestAnimationFrame(() => {
+            const bubble = bubbleRef.current;
+            if (bubble && bubble.getBoundingClientRect().top < 0) {
+                bubble.scrollIntoView({ block: "start", behavior: "smooth" });
+            }
+        });
+    };
 
     const openEditor = () => {
         setDraft(content);
@@ -134,10 +172,49 @@ export function UserMessage({
                         </div>
                     </form>
                 ) : (
-                    <div className="w-full bg-gray-100 rounded-xl px-4 py-3">
-                        <p className="text-sm text-gray-900 whitespace-pre-wrap [overflow-wrap:anywhere]">
-                            {content}
-                        </p>
+                    <div
+                        ref={bubbleRef}
+                        className="w-full bg-gray-100 rounded-xl px-4 py-3"
+                    >
+                        <div className="relative">
+                            <p
+                                ref={textRef}
+                                id={messageId ? `prompt-${messageId}` : undefined}
+                                className="text-sm text-gray-900 whitespace-pre-wrap [overflow-wrap:anywhere]"
+                                style={
+                                    folded
+                                        ? {
+                                              maxHeight: COLLAPSED_PROMPT_HEIGHT_PX,
+                                              overflow: "hidden",
+                                          }
+                                        : undefined
+                                }
+                            >
+                                {content}
+                            </p>
+                            {folded && (
+                                <div
+                                    aria-hidden="true"
+                                    className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-100 to-transparent"
+                                />
+                            )}
+                        </div>
+                        {foldable && (
+                            <div className="mt-1 flex justify-end">
+                                <TextButtonUI
+                                    size="xs"
+                                    aria-expanded={expanded}
+                                    aria-controls={
+                                        messageId ? `prompt-${messageId}` : undefined
+                                    }
+                                    onClick={() =>
+                                        expanded ? collapse() : setExpanded(true)
+                                    }
+                                >
+                                    {expanded ? "Show less" : "Show more"}
+                                </TextButtonUI>
+                            </div>
+                        )}
                         {(workflow || hasFiles) && (
                             <div className="flex flex-wrap justify-end gap-1.5 mt-3">
                                 {workflow && (

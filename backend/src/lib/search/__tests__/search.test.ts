@@ -162,6 +162,8 @@ describe("search results as citation snapshots", () => {
     await search("rockets", { provider: "keenable" });
     const snapshot = getWebSnapshot("https://example.com/game/");
     expect(snapshot).toMatchObject({ title: "Rockets rout Mavs", content: "Houston won 135-117 in Macao.", source: "search" });
+    // The provider's text is Markdown: the reader view renders it as such.
+    expect(snapshot?.readerMarkdown).toBe("Houston won 135-117 in Macao.");
   });
 
   it("never replaces a fetched page with a search snippet", async () => {

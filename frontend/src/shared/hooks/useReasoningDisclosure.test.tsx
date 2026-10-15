@@ -2,6 +2,16 @@ import { StrictMode, useLayoutEffect } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useReasoningDisclosure } from "./useReasoningDisclosure";
+import {
+    disclosurePreference,
+    rememberDisclosure,
+    resetDisclosurePreferencesForTests,
+} from "./disclosurePreference";
+
+/** The reader last collapsed a thought: the behaviour before any choice was remembered. */
+function startCollapsed() {
+    rememberDisclosure("reasoning", false);
+}
 
 let frames: Map<number, FrameRequestCallback>;
 let nextFrame: number;
@@ -76,6 +86,7 @@ describe("reasoning disclosure", () => {
     });
 
     it("coalesces resize notifications and dispatches only overflow transitions", () => {
+        startCollapsed();
         render(<Harness />);
         flushFrame();
         const initialCommits = commits;
@@ -92,7 +103,8 @@ describe("reasoning disclosure", () => {
         observers[0].resize();
         flushFrame();
         expect(screen.getByText("fits")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Expand" })).toBeInTheDocument();
+        // Expanded stays as the reader set it while the thought is short.
+        expect(screen.getByRole("button", { name: "Minimise" })).toBeInTheDocument();
         height = 300;
         observers[0].resize();
         flushFrame();
@@ -100,7 +112,8 @@ describe("reasoning disclosure", () => {
     });
 
     it("opens while streaming and stays open after, until the reader closes it", () => {
-        // A thought loaded already finished starts closed.
+        startCollapsed();
+        // Collapsed, a thought loaded already finished starts closed.
         const view = render(<Harness streaming={false} />);
         expect(screen.queryByText("Reasoning")).not.toBeInTheDocument();
         expect(observers).toHaveLength(0);
@@ -121,6 +134,61 @@ describe("reasoning disclosure", () => {
         view.rerender(<Harness />);
         view.rerender(<Harness streaming={false} />);
         expect(screen.getByText("Reasoning")).toBeInTheDocument();
+    });
+
+    it("opens in full by default, even a thought loaded already finished", () => {
+        render(<Harness streaming={false} />);
+        expect(screen.getByRole("button", { name: "Thought process" })).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByRole("button", { name: "Minimise" })).toBeInTheDocument();
+    });
+
+    it("starts the next thought the way the reader left the last one", () => {
+        const first = render(<Harness streaming={false} />);
+        fireEvent.click(screen.getByRole("button", { name: "Minimise" }));
+        first.unmount();
+        // Collapsed: the next finished thought starts closed.
+        const second = render(<Harness streaming={false} />);
+        expect(screen.getByRole("button", { name: "Thought process" })).toHaveAttribute("aria-expanded", "false");
+        // Opening it from its title shows all of it, and the next one too.
+        fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
+        expect(screen.getByRole("button", { name: "Minimise" })).toBeInTheDocument();
+        second.unmount();
+        const third = render(<Harness streaming={false} />);
+        expect(screen.getByRole("button", { name: "Thought process" })).toHaveAttribute("aria-expanded", "true");
+        // Closing it from its title collapses the next one.
+        fireEvent.click(screen.getByRole("button", { name: "Thought process" }));
+        third.unmount();
+        render(<Harness />);
+        expect(screen.getByRole("button", { name: "Expand" })).toBeInTheDocument();
+    });
+
+    it("remembers the choice across page loads, and in memory when storage refuses it", () => {
+        rememberDisclosure("reasoning", false);
+        // A new page: only storage remembers.
+        const stored = localStorage.getItem("mike.disclosure.reasoning");
+        resetDisclosurePreferencesForTests();
+        localStorage.setItem("mike.disclosure.reasoning", stored!);
+        expect(disclosurePreference("reasoning")).toBe(false);
+        // Each kind keeps its own choice.
+        expect(disclosurePreference("code-cell")).toBe(false);
+        rememberDisclosure("code-cell", true);
+        expect(disclosurePreference("reasoning")).toBe(false);
+
+        vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+            throw new Error("blocked");
+        });
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+            throw new Error("blocked");
+        });
+        rememberDisclosure("reasoning", true);
+        expect(disclosurePreference("reasoning")).toBe(true);
+        vi.restoreAllMocks();
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+            throw new Error("blocked");
+        });
+        resetDisclosurePreferencesForTests();
+        // Unreadable storage: the default.
+        expect(disclosurePreference("reasoning")).toBe(true);
     });
 
     it("keeps the collapsed window on the newest lines until the reader scrolls up in it", () => {
@@ -160,6 +228,7 @@ describe("reasoning disclosure", () => {
     });
 
     it("remeasures after reopening and cleans up pending work in Strict Mode", () => {
+        startCollapsed();
         const view = render(<StrictMode><Harness /></StrictMode>);
         expect(observers[0].disconnect).toHaveBeenCalledTimes(1);
         expect(frames.size).toBe(1);

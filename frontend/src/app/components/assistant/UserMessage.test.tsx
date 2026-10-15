@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { UserMessage } from "./UserMessage";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { COLLAPSED_PROMPT_HEIGHT_PX, UserMessage } from "./UserMessage";
 
 describe("UserMessage", () => {
     it("opens a document-backed file pill", async () => {
@@ -148,5 +148,45 @@ describe("UserMessage", () => {
         expect(screen.getByRole("alert")).toHaveTextContent(
             "Not added. A response is still being generated; send it again once it finishes.",
         );
+    });
+
+    describe("a long prompt", () => {
+        afterEach(() => vi.restoreAllMocks());
+
+        function promptHeight(px: number) {
+            vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(px);
+        }
+
+        it("folds behind Show more, and Show less folds it again from below the text", async () => {
+            promptHeight(COLLAPSED_PROMPT_HEIGHT_PX * 3);
+            const user = userEvent.setup();
+            render(<UserMessage messageId="m1" content={"Line\n".repeat(60)} />);
+            const text = document.getElementById("prompt-m1")!;
+            const more = screen.getByRole("button", { name: "Show more" });
+            expect(more).toHaveAttribute("aria-expanded", "false");
+            expect(more).toHaveAttribute("aria-controls", "prompt-m1");
+            expect(text).toHaveStyle({ maxHeight: `${COLLAPSED_PROMPT_HEIGHT_PX}px`, overflow: "hidden" });
+
+            await user.click(more);
+            const less = screen.getByRole("button", { name: "Show less" });
+            expect(less).toHaveAttribute("aria-expanded", "true");
+            expect(text.style.maxHeight).toBe("");
+            // The control follows the text, at its end.
+            expect(text.compareDocumentPosition(less) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+            const scrollIntoView = vi.fn();
+            Element.prototype.scrollIntoView = scrollIntoView;
+            vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ top: -500 } as DOMRect);
+            await user.click(less);
+            expect(screen.getByRole("button", { name: "Show more" })).toBeInTheDocument();
+            await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "smooth" }));
+        });
+
+        it("leaves a prompt that fits as it is", () => {
+            promptHeight(COLLAPSED_PROMPT_HEIGHT_PX);
+            render(<UserMessage messageId="m2" content="Short question" />);
+            expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+            expect(document.getElementById("prompt-m2")!.style.maxHeight).toBe("");
+        });
     });
 });

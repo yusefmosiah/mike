@@ -47,6 +47,24 @@ describe("WebPageView", () => {
         await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
     });
 
+    it("highlights a quote copied from the Markdown, link targets and all", async () => {
+        getChatWebPage.mockResolvedValue(page);
+        const { container } = render(
+            <WebPageView
+                document={document}
+                activeQuote={{ quote: "The court **held** for the [appellant](https://example.com/a)", target: {} }}
+            />,
+        );
+        await waitFor(() =>
+            expect(
+                [...container.querySelectorAll(".case-quote-highlight")]
+                    .map((element) => element.textContent)
+                    .join("")
+                    .replace(/\s/g, ""),
+            ).toBe("Thecourtheldfortheappellant"),
+        );
+    });
+
     it("shows the plain text when no article could be extracted, and leaves an unmatched quote alone", async () => {
         getChatWebPage.mockResolvedValue({ ...page, markdown: null });
         const { container } = render(

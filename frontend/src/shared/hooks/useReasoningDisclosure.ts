@@ -1,20 +1,30 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { disclosurePreference, rememberDisclosure } from "./disclosurePreference";
 
 type WindowScroll = "start" | "middle" | "end";
 
 /** Disclosure behavior shared by web and Word reasoning blocks. */
 export function useReasoningDisclosure(isStreaming: boolean) {
-    // Open while the thought streams, and stay open once it has: closing it
-    // when the segment or the answer ends takes away what the reader was
-    // reading. Only the reader closes it. A thought loaded already finished
-    // starts closed. Derive this default: syncing it in an effect on every
-    // text chunk can enqueue passive updates even when React receives the
-    // same boolean.
+    // A thought starts the way the reader left the last one
+    // (disclosurePreference.ts): open in full, or collapsed. Collapsed, it is
+    // open in a short window while it streams, and stays open once it has:
+    // closing it when the segment or the answer ends takes away what the
+    // reader was reading. A collapsed thought loaded already finished starts
+    // closed. Derive this default: syncing it in an effect on every text
+    // chunk can enqueue passive updates even when React receives the same
+    // boolean.
+    const [startExpanded] = useState(() => disclosurePreference("reasoning"));
     const [openOverride, setOpenOverride] = useState<boolean | null>(null);
     const [streamedHere, setStreamedHere] = useState(isStreaming);
     if (isStreaming && !streamedHere) setStreamedHere(true);
-    const isContentOpen = openOverride ?? (isStreaming || streamedHere);
-    const [isExpanded, setIsExpanded] = useState(false);
+    const isContentOpen =
+        openOverride ?? (startExpanded || isStreaming || streamedHere);
+    const [isExpanded, setExpandedState] = useState(startExpanded);
+    // The reader's choice, for this thought and the next.
+    const setIsExpanded = useCallback((expanded: boolean) => {
+        setExpandedState(expanded);
+        rememberDisclosure("reasoning", expanded);
+    }, []);
     const [isOverflowing, setIsOverflowing] = useState(false);
     const overflowingRef = useRef(false);
     const contentRef = useRef<HTMLDivElement | null>(null);
@@ -102,8 +112,9 @@ export function useReasoningDisclosure(isStreaming: boolean) {
             // while concurrent streaming work may already be queued.
             if (next === overflowingRef.current) return;
             overflowingRef.current = next;
+            // Expanded stays as the reader set it: a thought that starts
+            // short and grows keeps opening in full.
             setIsOverflowing(next);
-            if (!next) setIsExpanded(false);
         };
         const scheduleMeasure = () => {
             if (!disposed && frame === null) {
@@ -139,7 +150,12 @@ export function useReasoningDisclosure(isStreaming: boolean) {
         isExpanded,
         isOverflowing,
         setIsExpanded,
-        toggleContent: () =>
-            setOpenOverride((previous) => !(previous ?? (isStreaming || streamedHere))),
+        // Opening a thought from its title shows all of it; closing it
+        // collapses the next one too.
+        toggleContent: () => {
+            const open = !isContentOpen;
+            setOpenOverride(open);
+            setIsExpanded(open);
+        },
     };
 }

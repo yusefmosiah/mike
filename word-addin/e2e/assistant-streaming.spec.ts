@@ -65,7 +65,8 @@ test("sixteen exchanges keep reasoning, resizing and disclosure updates bounded"
       if (turn === 10) {
         await page.waitForFunction(() => Boolean((window as Window & { finishReasoning?: () => void }).finishReasoning), undefined, { timeout: 180_000 });
         const assistant = page.locator("[data-assistant-message-id]").last();
-        await assistant.getByRole("button", { name: "Expand thought process", exact: true }).click();
+        // Thinking opens in full by default.
+        await expect(assistant.getByRole("button", { name: "Minimise thought process", exact: true })).toBeVisible();
         await page.setViewportSize({ width: 320, height: 640 });
         // The fetch reader can finish before Word's batched publication paints
         // the final chunk. Wait for that content, then use the pane's explicit

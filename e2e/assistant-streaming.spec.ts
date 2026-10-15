@@ -124,7 +124,8 @@ for (const scope of ["assistant", "project", "tabular"] as const) {
                     await input.press("ControlOrMeta+Enter");
                     if (streamKind === "reasoning" && turn === 2) {
                         await page.waitForFunction(() => Boolean((window as Window & { finishReasoning?: () => void }).finishReasoning), undefined, { timeout: 180_000 });
-                        await page.getByRole("button", { name: "Expand thought process", exact: true }).last().click();
+                        // Thinking opens in full by default.
+                        await expect(page.getByRole("button", { name: "Minimise thought process", exact: true }).last()).toBeVisible();
                         await page.setViewportSize({ width: 480, height: 720 });
                         await page.getByRole("button", { name: "Minimise thought process", exact: true }).last().click();
                         const disclosure = page.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\.$/ }).last();

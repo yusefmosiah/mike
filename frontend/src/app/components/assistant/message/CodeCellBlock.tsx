@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import {
+    disclosurePreference,
+    rememberDisclosure,
+} from "@/shared/hooks/disclosurePreference";
 import type { AssistantEvent } from "@/app/components/shared/types";
 import { TextSlabUI } from "@/shared/ui/TextSlabUI";
 import { EventBlock } from "./EventBlocks";
@@ -30,7 +34,8 @@ function detailText(event: CodeCellEvent): string | null {
  * One code-mode cell (run_python). The line says the assistant is computing
  * and, once done, how many steps it took; the steps themselves (documents
  * read, searches) are their own lines below it. Opening it shows the code and
- * what came back, for anyone who wants to check the work.
+ * what came back, for anyone who wants to check the work; the next cell then
+ * opens too, until the reader closes one.
  */
 export function CodeCellBlock({
     event,
@@ -39,7 +44,12 @@ export function CodeCellBlock({
     event: CodeCellEvent;
     showConnector?: boolean;
 }) {
-    const [open, setOpen] = useState(false);
+    // Opens the way the reader left the last cell (disclosurePreference.ts).
+    const [open, setOpen] = useState(() => disclosurePreference("code-cell"));
+    const toggle = () => {
+        setOpen(!open);
+        rememberDisclosure("code-cell", !open);
+    };
     const running = event.status === "running";
     const detail = running ? null : detailText(event);
     return (
@@ -50,7 +60,7 @@ export function CodeCellBlock({
         >
             <EventDisclosureButton
                 open={open}
-                onToggle={() => setOpen((value) => !value)}
+                onToggle={toggle}
                 label={LABEL[event.status]}
                 detail={detail ? `· ${detail}` : undefined}
                 isStreaming={running}

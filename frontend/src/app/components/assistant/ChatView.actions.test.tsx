@@ -429,6 +429,39 @@ describe("ChatView streaming scroll controls", () => {
         expect(viewport.scrollTop).toBe(600);
     });
 
+    it("never follows a reserved answer height past the prompt's top", () => {
+        render(view(""));
+        const { content, viewport, size } = geometry();
+        const scrollTo = vi.fn((options: ScrollToOptions) => {
+            viewport.scrollTop = options.top ?? viewport.scrollTop;
+        });
+        Object.defineProperty(viewport, "scrollTo", { configurable: true, value: scrollTo });
+        const box = (top: number, height: number) =>
+            ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+        // The row wrapping the prompt, and the answer (which, mocked here,
+        // has no children: its own box ends where its content does).
+        const prompt = screen.getByText("Question").parentElement!;
+        const answerEnd = screen.getByTestId("assistant-message");
+        let answerBottom = 450;
+        vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(box(0, 600));
+        vi.spyOn(prompt, "getBoundingClientRect").mockImplementation(() => box(100 - viewport.scrollTop, 300));
+        vi.spyOn(answerEnd, "getBoundingClientRect").mockImplementation(() => box(answerBottom - 20 - viewport.scrollTop, 20));
+        flushFrame();
+
+        // The reservation below a short answer is too tall (a stale viewport
+        // height): following stops with the prompt at the top of the thread.
+        size.content = 2000;
+        act(() => observers.get(content)?.());
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 100 - 76, behavior: "auto" });
+        fireEvent.scroll(viewport);
+        flushFrame();
+
+        // Once the answer's own text runs past the screen, it is followed.
+        answerBottom = 1500;
+        act(() => observers.get(content)?.());
+        expect(scrollTo).toHaveBeenLastCalledWith({ top: 1500 + 116 - 600, behavior: "auto" });
+    });
+
     it("starts observing when the initial screen becomes a conversation", () => {
         const { rerender } = render(view("Answer", true));
         rerender(view());

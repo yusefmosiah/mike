@@ -17,6 +17,16 @@ const NO_CITATIONS = new Map();
 type Loaded = { key: string; page?: ChatWebPage; failed?: true };
 
 /**
+ * A quote as the rendered page reads it. Quotes are copied from the page's
+ * source text, which for a search result is Markdown: a link's target is not
+ * on the rendered page, so it would stop the quote matching. Brackets and
+ * emphasis marks need nothing, since matching compares letters and digits.
+ */
+export function quoteAsRendered(quote: string): string {
+    return quote.replace(/\]\([^)\s]*\)/g, "]");
+}
+
+/**
  * The reader view of a cited web page: the copy saved when the answer was
  * written, reduced to its main content and rendered like a Markdown file,
  * with the active quote highlighted. The live page is one click away in the
@@ -63,7 +73,10 @@ export function WebPageView({
         if (!root) return;
         clearDocxQuoteHighlights(root);
         if (!activeQuote) return;
-        const match = highlightDocxQuote(root, activeQuote.quote);
+        const match = highlightDocxQuote(
+            root,
+            page?.markdown ? quoteAsRendered(activeQuote.quote) : activeQuote.quote,
+        );
         if (!match) return;
         root.querySelectorAll(`.${QUOTE_HIGHLIGHT_CLASS}`).forEach((element) =>
             element.classList.add("case-quote-highlight"),

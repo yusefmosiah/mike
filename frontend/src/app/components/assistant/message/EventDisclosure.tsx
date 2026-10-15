@@ -31,7 +31,7 @@ export function EventLabel({
 export function EventChevron({ open }: { open: boolean }) {
     return (
         <ChevronDown
-            size={10}
+            size={12}
             aria-hidden="true"
             className={cn(
                 "relative top-px ml-1 shrink-0 transition-transform duration-200",
@@ -65,7 +65,9 @@ export function EventDisclosureButton({
             type="button"
             aria-expanded={open}
             onClick={onToggle}
-            className="inline-flex items-center text-left transition-colors hover:text-gray-700"
+            // The padding is the tap target; the negative margin keeps the
+            // line where it was.
+            className="-mx-1.5 -my-1 inline-flex min-h-7 items-center rounded-md px-1.5 py-1 text-left transition-colors hover:bg-gray-100/80 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 max-md:-my-1.5 max-md:min-h-9 max-md:py-1.5"
         >
             <EventLabel>{label}</EventLabel>
             {detail ? <span>&nbsp;{detail}</span> : null}

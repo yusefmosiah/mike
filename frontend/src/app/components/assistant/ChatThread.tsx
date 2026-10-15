@@ -16,6 +16,7 @@ import {
     computedPadding,
     onScrollViewportChange,
     scrollViewportOf,
+    type ScrollViewport,
 } from "@/app/lib/scrollViewport";
 import { LIQUID_GLASS_TRANSLUCENT_ACTION_CLASS } from "@/app/components/ui/liquid-surface";
 import { UserMessage } from "./UserMessage";
@@ -372,17 +373,47 @@ export function ChatThread({
     // While an answer streams, keep its newest text in view, as long as the
     // reader is at the end of the thread. Scrolling up stops following and
     // scrolling back to the end resumes it; the answer finishing moves
-    // nothing. Our own scrolls only ever move down, so any upward scroll is
-    // the reader's.
+    // nothing. Any upward scroll is the reader's, except the one correction
+    // below, which is recorded in ownScrollTopRef.
     const followRef = useRef(true);
     const followStreamRef = useRef(isResponseLoading);
+    const ownScrollTopRef = useRef<number | null>(null);
+    // The furthest an automatic scroll may go: the latest prompt at the top
+    // of the thread, unless the answer's own text already reaches further.
+    // The answer's reserved minimum height is measured, and on a phone a
+    // keyboard or Safari's bars can leave it stale for a moment; scrolling to
+    // the end of a too-tall reservation hid the top of the prompt.
+    const autoScrollLimit = useCallback((viewport: ScrollViewport) => {
+        const prompt = latestUserMessageRef.current;
+        const content = messagesContentRef.current;
+        if (!prompt || !content) return Infinity;
+        const promptBox = prompt.getBoundingClientRect();
+        // Not laid out (a hidden tab, or a test DOM): there is no measure.
+        if (promptBox.height === 0) return Infinity;
+        const inContent = (y: number) => y - viewport.top + viewport.scrollTop;
+        const pinned =
+            inContent(promptBox.top) -
+            computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING);
+        // The answer's wrapper carries the reserved height; its last child
+        // ends where the answer's content does.
+        const answer = prompt.nextElementSibling?.firstElementChild;
+        const textEnd = answer?.lastElementChild ?? answer ?? prompt;
+        const reach =
+            inContent(textEnd.getBoundingClientRect().bottom) +
+            computedPadding(content, "bottom", DEFAULT_ASSISTANT_BOTTOM_PADDING) -
+            viewport.height;
+        return Math.max(pinned, reach);
+    }, []);
     const scrollToEnd = useCallback(() => {
         const c = messagesContainerRef.current;
         if (!c) return;
         const viewport = scrollViewportOf(c);
         const end = viewport.scrollHeight - viewport.height;
-        if (end > viewport.scrollTop) viewport.scrollTo({ top: end, behavior: "auto" });
-    }, []);
+        const target = Math.max(0, Math.min(end, autoScrollLimit(viewport)));
+        if (Math.abs(target - viewport.scrollTop) <= 1) return;
+        if (target < viewport.scrollTop) ownScrollTopRef.current = target;
+        viewport.scrollTo({ top: target, behavior: "auto" });
+    }, [autoScrollLimit]);
     useLayoutEffect(() => {
         const wasStreaming = followStreamRef.current;
         followStreamRef.current = isResponseLoading;
@@ -417,7 +448,10 @@ export function ChatThread({
         };
         const onScroll = () => {
             const top = scrollViewportOf(c).scrollTop;
-            if (top < lastTop - 1) followRef.current = false;
+            const own = ownScrollTopRef.current;
+            if (own !== null && Math.abs(top - own) <= 2) {
+                ownScrollTopRef.current = null;
+            } else if (top < lastTop - 1) followRef.current = false;
             lastTop = top;
             scheduleMeasure();
         };
@@ -434,10 +468,17 @@ export function ChatThread({
         observer.observe(c);
         observer.observe(content);
         const stopListening = onScrollViewportChange(c, onScroll);
+        // A keyboard opening or closing changes the visible height without
+        // resizing the thread: re-check the position the stream is following.
+        const onViewportResize = () => {
+            if (followStreamRef.current && followRef.current) scrollToEnd();
+        };
+        window.visualViewport?.addEventListener("resize", onViewportResize);
         scheduleMeasure();
         return () => {
             observer.disconnect();
             stopListening();
+            window.visualViewport?.removeEventListener("resize", onViewportResize);
             if (frame !== null) cancelAnimationFrame(frame);
         };
     }, [scrollToEnd]);

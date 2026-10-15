@@ -133,7 +133,7 @@ export function ReasoningBlock({
                             // expand button.
                             className={
                                 isCollapsed
-                                    ? "overflow-y-auto pb-8 [scrollbar-width:none]"
+                                    ? "overflow-y-auto pb-10 [scrollbar-width:none]"
                                     : undefined
                             }
                             style={
@@ -169,13 +169,20 @@ export function ReasoningBlock({
                                     <div className="content-top-fade pointer-events-none absolute inset-x-0 top-0 h-10" />
                                 )}
                                 <div className="content-bottom-fade pointer-events-none absolute inset-x-0 bottom-0 h-10" />
+                                {/* The whole faded strip is the target, not just its chevron. */}
                                 <button
                                     type="button"
                                     onClick={() => setIsExpanded(true)}
-                                    className="absolute left-1/2 bottom-2 z-10 -translate-x-1/2 text-gray-400 transition-colors hover:text-gray-600"
+                                    className="absolute inset-x-0 bottom-0 z-10 flex h-10 items-end justify-center pb-1.5 font-sans text-xs text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
                                     aria-label="Expand thought process"
                                 >
-                                    <ChevronDown className="h-3.5 w-3.5" />
+                                    <span
+                                        className="inline-flex items-center gap-1"
+                                        aria-hidden="true"
+                                    >
+                                        Show more
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                    </span>
                                 </button>
                             </>
                         )}
@@ -184,10 +191,16 @@ export function ReasoningBlock({
                         <button
                             type="button"
                             onClick={() => setIsExpanded(false)}
-                            className="mx-auto mt-2 flex text-gray-400 transition-colors hover:text-gray-600"
+                            className="mt-1 flex min-h-8 w-full items-center justify-center gap-1 rounded-md font-sans text-xs text-gray-500 transition-colors hover:bg-gray-100/80 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
                             aria-label="Minimise thought process"
                         >
-                            <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                            <span
+                                className="inline-flex items-center gap-1"
+                                aria-hidden="true"
+                            >
+                                Show less
+                                <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                            </span>
                         </button>
                     )}
                 </div>

@@ -15,16 +15,15 @@ export type ChatWebPage = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function citesSnapshot(citations: unknown, snapshotId: string): boolean {
-    return (
-        Array.isArray(citations) &&
-        citations.some(
-            (citation) =>
-                !!citation &&
-                typeof citation === "object" &&
-                (citation as Record<string, unknown>).kind === "web" &&
-                (citation as Record<string, unknown>).snapshot_id === snapshotId,
-        )
+/** The chat's web citation of this snapshot, if any. */
+function citationOf(citations: unknown, snapshotId: string): Record<string, unknown> | undefined {
+    if (!Array.isArray(citations)) return undefined;
+    return citations.find(
+        (citation): citation is Record<string, unknown> =>
+            !!citation &&
+            typeof citation === "object" &&
+            (citation as Record<string, unknown>).kind === "web" &&
+            (citation as Record<string, unknown>).snapshot_id === snapshotId,
     );
 }
 
@@ -47,10 +46,10 @@ export async function getChatWebPage(
         .eq("chat_id", args.chatId)
         .eq("role", "assistant");
     if (messagesError) return internalFailure(messagesError);
-    const cited = ((messages ?? []) as { citations: unknown }[]).some((message) =>
-        citesSnapshot(message.citations, args.snapshotId),
-    );
-    if (!cited) return failure("not_found", "Page not found");
+    const citation = ((messages ?? []) as { citations: unknown }[])
+        .map((message) => citationOf(message.citations, args.snapshotId))
+        .find(Boolean);
+    if (!citation) return failure("not_found", "Page not found");
 
     const { data: snapshot, error } = await db
         .from("citation_snapshots")
@@ -71,7 +70,11 @@ export async function getChatWebPage(
         id: row.id,
         url: row.url ?? "",
         text: row.content,
-        markdown: row.reader_markdown,
+        // A search result's text is the provider's Markdown. Snapshots saved
+        // before that was recorded carry it only as `content`.
+        markdown:
+            row.reader_markdown ??
+            (citation.snapshot_source === "search" ? row.content : null),
         retrieved_at: new Date(row.retrieved_at).toISOString(),
     });
 }

@@ -45,6 +45,29 @@ describe("getChatWebPage", () => {
     expect(calls[1].filters).toContainEqual(["eq", "source_kind", "web"]);
   });
 
+  it("serves a search result saved without reader Markdown as Markdown", async () => {
+    const markdown = "At [PegaWorld](https://www.pega.com/events) on June 8, *Pega* announced Infinity 26.";
+    const { db } = scriptedDb([
+      { table: "chat_messages", data: [{ citations: [{ kind: "web", snapshot_id: SNAPSHOT, snapshot_source: "search" }] }] },
+      {
+        table: "citation_snapshots",
+        data: { id: SNAPSHOT, url: "https://epikonic.com/pega", content: markdown, reader_markdown: null, retrieved_at: new Date("2026-10-15T09:00:00Z") },
+      },
+    ]);
+    expect(await getChatWebPage(db, args)).toMatchObject({ ok: true, data: { text: markdown, markdown } });
+  });
+
+  it("leaves a fetched page without reader Markdown as plain text", async () => {
+    const { db } = scriptedDb([
+      { table: "chat_messages", data: [{ citations: [{ kind: "web", snapshot_id: SNAPSHOT, snapshot_source: "fetch" }] }] },
+      {
+        table: "citation_snapshots",
+        data: { id: SNAPSHOT, url: "https://example.com", content: "Plain *text*", reader_markdown: null, retrieved_at: new Date("2026-10-15T09:00:00Z") },
+      },
+    ]);
+    expect(await getChatWebPage(db, args)).toMatchObject({ ok: true, data: { markdown: null } });
+  });
+
   it("is not found for a page no message in this chat cites", async () => {
     const { db, calls } = scriptedDb([
       { table: "chat_messages", data: [{ citations: [{ kind: "web", snapshot_id: "another" }] }, { citations: null }] },
