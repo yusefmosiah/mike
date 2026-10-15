@@ -9,10 +9,7 @@ makes that check *required*.
 ## What the workflow does
 
 On every `pull_request`, including stacked PRs targeting another feature branch,
-on manual `workflow_dispatch`, and **nightly at 03:47 UTC** (a `schedule` cron,
-so drift that lands between PRs — dependency bumps, image changes,
-selector-breaking UI tweaks — is caught within a day), the `e2e / playwright`
-matrix:
+and on manual `workflow_dispatch`, the `e2e / playwright` matrix:
 
 1. installs the root (Playwright), `backend/`, and `frontend/` dependencies;
 2. boots **RustFS** (S3-compatible object storage — several specs upload documents);
@@ -83,8 +80,7 @@ the production build: **`e2e / Playwright (development stress)`** (~25-35 min),
 Development stress (chromium + webkit)`** (~18-24 min). They were the last checks
 to finish on every slow PR, so they are off the default PR path. They run:
 
-- nightly (e2e at 03:47 UTC, the Word add-in at 04:17 UTC) and on manual
-  dispatch;
+- on manual dispatch;
 - on every push to `main` (Word add-in only);
 - on any PR carrying the **`stress`** label.
 

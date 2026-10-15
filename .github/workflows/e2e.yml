@@ -23,14 +23,6 @@ on:
   workflow_dispatch:
   # Include stacked PRs whose base is another feature branch.
   pull_request:
-  # Nightly run against the default branch, so drift that lands BETWEEN pull
-  # requests (a dependency bump, an image change, an upstream UI tweak
-  # breaking a selector) is caught within a day instead of surfacing on the next
-  # unrelated PR. 03:47 UTC is a quiet hour for GitHub's cron pool (on-the-hour
-  # slots are congested and can be delayed or dropped). Like every run here, it
-  # skips the 4 LLM-gated specs.
-  schedule:
-    - cron: "47 3 * * *"
 
 # Don't pile up runs on rapid pushes to the same PR.
 concurrency:
@@ -39,7 +31,7 @@ concurrency:
 
 # Development stress (the `next dev` renderer) is 3-4x slower than the
 # production suite — ~25-35 min against ~7 — and was the last check to finish
-# on every slow PR. It runs nightly, on manual dispatch, and on any PR carrying
+# on every slow PR. It runs on manual dispatch and on any PR carrying
 # the `stress` label; ordinary PR pushes run only the production suite. Add the
 # label to PRs that touch streaming, render loops or effect dependencies; it
 # takes effect on the next push (or close + reopen the PR). There is deliberately

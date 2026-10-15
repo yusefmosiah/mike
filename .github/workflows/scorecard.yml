@@ -1,7 +1,7 @@
 # OpenSSF Scorecard: automated checks of this repo's own security posture
 # (branch protection, token permissions, pinned dependencies, ...).
 #
-# Runs on pushes to main plus a weekly cron — Scorecard rates the repo, not
+# Runs on pushes to main — Scorecard rates the repo, not
 # a PR's diff, so there is no pull_request trigger. publish_results: true
 # sends the score to the OpenSSF public API (which enables the README badge
 # and is what other tools query); that upload is signed via OIDC, hence
@@ -11,9 +11,6 @@ name: Scorecard
 on:
   push:
     branches: [main]
-  schedule:
-    # Mondays 05:30 UTC.
-    - cron: "30 5 * * 1"
 
 permissions: read-all
 

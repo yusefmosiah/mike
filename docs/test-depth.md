@@ -65,7 +65,7 @@ separate breakages, both reproduced locally on 2026-09-14:
 So the harness fails loudly rather than lying green — but its failure
 message is misleading, and a 0.00 PR gate would block every
 security-lib PR for a reason that has nothing to do with the PR. That is
-why `mutation.yml` kept its dispatch + cron triggers instead of gaining
+why `mutation.yml` kept its dispatch-only trigger instead of gaining
 the `pull_request:` trigger it was about to get.
 
 **Revival:** when `@stryker-mutator/*` ships vitest 5 support, bump it,

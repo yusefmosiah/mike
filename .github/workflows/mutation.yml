@@ -6,7 +6,7 @@
 # vitest suite per mutant. A surviving mutant = a behavior change (e.g. an
 # access check inverted, a blocked IP range allowed) that no test caught.
 #
-# ON-DEMAND + monthly cron, NOT a PR gate. It was going to become a
+# ON-DEMAND only, NOT a PR gate. It was going to become a
 # path-filtered PR gate in this PR (the step docs/test-depth.md named as the
 # natural next stage, and a measured run takes ~2 minutes, not the ~10 the
 # original header guessed). That promotion is held back because the harness
@@ -17,7 +17,7 @@
 # "your tests collapsed" when nothing about the tests changed. Gating PRs on
 # that would be worse than not gating them at all.
 #
-# The last honest score is the 2026-09-03 cron run (green, on vitest 4).
+# The last honest score is the 2026-09-03 scheduled run (green, on vitest 4).
 # docs/test-depth.md records the evidence and the revival condition; when
 # @stryker-mutator/* ships vitest 5 support, bump it, confirm a real score
 # locally, and add the `pull_request:` trigger with a path filter matching
@@ -29,11 +29,6 @@ name: Mutation testing
 
 on:
   workflow_dispatch:
-  schedule:
-    # Monthly, on the 3rd at 06:17 UTC (odd minute to dodge the top-of-hour
-    # GitHub cron rush). Drift check only — failures show up in the Actions
-    # tab, they block nothing.
-    - cron: "17 6 3 * *"
 
 jobs:
   mutation:
