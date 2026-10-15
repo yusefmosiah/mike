@@ -22,7 +22,12 @@ import { LIQUID_GLASS_TRANSLUCENT_ACTION_CLASS } from "@/app/components/ui/liqui
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { CodeApprovalRequests } from "./CodeApprovalRequests";
-import { ChatInput, type ChatInputHandle, type ChatInputProps } from "./ChatInput";
+import {
+    ChatInput,
+    type ChatInputHandle,
+    type ChatInputProps,
+    type EditedPrompt,
+} from "./ChatInput";
 import { ChatInputPrompt } from "./ChatInputPrompt";
 import {
     generatingNotice,
@@ -107,7 +112,11 @@ export interface ChatThreadProps {
     >;
 
     // Message actions. An absent handler hides its control.
-    onEditBranch?: (message: Message, content: string) => Promise<void>;
+    /**
+     * Saves an edited prompt (text and files) as a new version of it. The
+     * edit happens in the composer: the pencil loads the prompt there.
+     */
+    onEditBranch?: (message: Message, edited: EditedPrompt) => Promise<void>;
     onNavigateSibling?: (
         message: Message,
         knownIds: Array<string | number> | null,
@@ -296,6 +305,21 @@ export function ChatThread({
     // Branch controls mutate stored rows; acting while an answer streams
     // would race the turn writing into this chat.
     const branchActionsEnabled = !isResponseLoading;
+    // The prompt being edited in the composer, for the chat it belongs to.
+    const [editing, setEditing] = useState<{
+        chatId: string | null | undefined;
+        message: Message;
+    } | null>(null);
+    const editingMessage =
+        editing && editing.chatId === chatId ? editing.message : null;
+    const submitEdit = useCallback(
+        async (edited: EditedPrompt) => {
+            if (!editingMessage || !onEditBranch) return;
+            await onEditBranch(editingMessage, edited);
+            setEditing(null);
+        },
+        [editingMessage, onEditBranch],
+    );
     const showEmptyState =
         emptyState !== undefined && !chatLoading && messages.length === 0;
 
@@ -642,10 +666,13 @@ export function ChatThread({
                                     ? threadPersonLabel(msg.author, viewerId)
                                     : null
                             }
-                            onEditBranch={
+                            onEdit={
                                 chatId && msg.id && onEditBranch
-                                    ? (content) => onEditBranch(msg, content)
+                                    ? () => setEditing({ chatId, message: msg })
                                     : undefined
+                            }
+                            beingEdited={
+                                !!msg.id && editingMessage?.id === msg.id
                             }
                             editDisabled={!branchActionsEnabled}
                             onNavigateSibling={navigateSibling}
@@ -848,6 +875,9 @@ export function ChatThread({
                                     chatReasoningLevel={chatReasoningLevel}
                                     onDocumentClick={onDocumentClick}
                                     {...chatInputProps}
+                                    editTarget={editingMessage}
+                                    onEditSubmit={submitEdit}
+                                    onEditCancel={() => setEditing(null)}
                                 />
                             </ChatInputPrompt>
                         </div>

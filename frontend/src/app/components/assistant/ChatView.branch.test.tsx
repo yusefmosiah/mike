@@ -44,7 +44,39 @@ vi.mock("@/app/contexts/ChatHistoryContext", () => ({
         setNewChatMessages: vi.fn(),
     }),
 }));
-vi.mock("./ChatInput", () => ({ ChatInput: () => <div>Chat input</div> }));
+// The composer stands in for sending an edit: it shows which prompt it holds
+// and sends "edited content" with no files.
+vi.mock("./ChatInput", () => ({
+    ChatInput: ({
+        editTarget,
+        onEditSubmit,
+    }: {
+        editTarget?: { id?: string } | null;
+        onEditSubmit?: (edited: {
+            content: string;
+            files: unknown[];
+        }) => Promise<void>;
+    }) => (
+        <div data-testid="chat-input" data-editing={editTarget?.id}>
+            Chat input
+            {editTarget && onEditSubmit && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        const save = onEditSubmit({
+                            content: "edited content",
+                            files: [],
+                        });
+                        editSaves.push(save);
+                        save.catch(() => {});
+                    }}
+                >
+                    send edit
+                </button>
+            )}
+        </div>
+    ),
+}));
 vi.mock("./AssistantWorkflowModal", () => ({
     AssistantWorkflowModal: () => null,
 }));
@@ -62,14 +94,14 @@ vi.mock("./UserMessage", () => ({
         content,
         messageId,
         sibling,
-        onEditBranch,
+        onEdit,
         editDisabled,
         onNavigateSibling,
     }: {
         content: string;
         messageId?: string;
         sibling?: { index: number; total: number } | null;
-        onEditBranch?: (content: string) => void | Promise<void>;
+        onEdit?: () => void;
         editDisabled?: boolean;
         onNavigateSibling?: (dir: -1 | 1) => void;
     }) => (
@@ -80,15 +112,11 @@ vi.mock("./UserMessage", () => ({
                     {sibling.index}/{sibling.total}
                 </span>
             )}
-            {onEditBranch && (
+            {onEdit && (
                 <button
                     type="button"
                     disabled={editDisabled}
-                    onClick={() => {
-                        const save = onEditBranch("edited content");
-                        editSaves.push(save);
-                        if (save) save.catch(() => {});
-                    }}
+                    onClick={onEdit}
                 >
                     edit {messageId}
                 </button>
@@ -228,6 +256,7 @@ describe("ChatView branch controls", () => {
         await user.click(
             screen.getByRole("button", { name: "edit user-1" }),
         );
+        await user.click(screen.getByRole("button", { name: "send edit" }));
 
         await waitFor(() => {
             expect(branchApi.createBranch).toHaveBeenCalledWith(
@@ -252,11 +281,13 @@ describe("ChatView branch controls", () => {
         await user.click(
             screen.getByRole("button", { name: "edit user-1" }),
         );
+        await user.click(screen.getByRole("button", { name: "send edit" }));
 
         await waitFor(() =>
             expect(onEditPrompt).toHaveBeenCalledWith({
                 message: expect.objectContaining({ id: "user-1" }),
                 content: "edited content",
+                files: [],
             }),
         );
         expect(branchApi.createBranch).not.toHaveBeenCalled();
@@ -377,10 +408,15 @@ describe("ChatView branch controls", () => {
         await user.click(
             screen.getByRole("button", { name: "edit user-1" }),
         );
+        await user.click(screen.getByRole("button", { name: "send edit" }));
 
-        // The row's save rejects, which is what keeps its draft open.
+        // The save rejects, which is what keeps the prompt in the composer.
         expect(editSaves).toHaveLength(1);
         await expect(editSaves[0]).rejects.toThrow("offline");
+        expect(screen.getByTestId("chat-input")).toHaveAttribute(
+            "data-editing",
+            "user-1",
+        );
         expect(
             await screen.findByText("Could not save the edit"),
         ).toBeInTheDocument();

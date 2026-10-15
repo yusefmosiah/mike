@@ -23,7 +23,7 @@ import { QuickActionsModal } from "./QuickActionsModal";
 import { AddDocumentsModal } from "@/app/components/modals/AddDocumentsModal";
 import { useQuickActions } from "@/app/hooks/useQuickActions";
 import { resolveDocumentViewType } from "@/app/lib/documentViewType";
-import type { ChatInputHandle } from "./ChatInput";
+import type { ChatInputHandle, EditedPrompt } from "./ChatInput";
 import {
     AssistantSidePanel,
     assistantSidePanelTabId,
@@ -166,12 +166,13 @@ interface Props {
      * Saves an edited prompt as a sibling branch. When provided, the host
      * owns the whole flow (create the branch, reload the active path, and
      * stream the re-answer) and receives the original message plus the
-     * edited text. Without it, the view creates the branch itself and asks
-     * the host to reload through `onBranchChange`.
+     * edited text and files. Without it, the view creates the branch itself
+     * and asks the host to reload through `onBranchChange`.
      */
     onEditPrompt?: (args: {
         message: Message;
         content: string;
+        files?: Message["files"];
     }) => void | Promise<void>;
     /**
      * Branches into a new thread from an answer: the host creates the new
@@ -550,10 +551,11 @@ export function ChatView({
     );
 
     const handleEditBranch = useCallback(
-        async (message: Message, content: string) => {
+        async (message: Message, edited: EditedPrompt) => {
+            const { content, files } = edited;
             if (onEditPrompt) {
                 try {
-                    await onEditPrompt({ message, content });
+                    await onEditPrompt({ message, content, files });
                 } catch (error) {
                     setActionError({
                         title: "Could not save the edit",
@@ -562,7 +564,7 @@ export function ChatView({
                             "The edited message could not be saved. Please try again.",
                         ),
                     });
-                    // The editor stays open with the draft.
+                    // The composer keeps the edit, to try again.
                     throw error;
                 }
                 return;
@@ -576,7 +578,7 @@ export function ChatView({
                 await createBranch(chatId, {
                     from_message_id: message.id,
                     content,
-                    files: message.files,
+                    files,
                     workflow: message.workflow,
                 });
                 await onBranchChange?.();

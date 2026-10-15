@@ -62,9 +62,13 @@ async function editPrompt(page: Page, from: string, to: string) {
     // The edit control sits in the prompt's own row; with one prompt on the
     // page there is exactly one.
     await page.getByRole("button", { name: "Edit prompt" }).click();
-    const editor = page.getByRole("textbox", { name: "Edit message" });
-    await editor.fill(to);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    // The prompt comes back into the composer, which sends the edit.
+    await expect(page.getByText("Editing message")).toBeVisible();
+    const composer = page.getByPlaceholder("How can I help?");
+    await expect(composer).toHaveValue(from);
+    await composer.fill(to);
+    await composer.press("ControlOrMeta+Enter");
+    await expect(page.getByText("Editing message")).toBeHidden({ timeout: 30_000 });
 }
 
 test.describe("branching", () => {

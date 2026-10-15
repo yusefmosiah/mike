@@ -70,14 +70,20 @@ export function useChatBranchActions({
      * failed save rejects and the caller keeps the draft.
      */
     const editPrompt = useCallback(
-        async (args: { message: Message; content: string }) => {
+        async (args: {
+            message: Message;
+            content: string;
+            /** The edited prompt's files; the original's when omitted. */
+            files?: Message["files"];
+        }) => {
             if (!chatId || !args.message.id || busyRef.current) return;
+            const files = args.files ?? args.message.files;
             busyRef.current = true;
             try {
                 const created = await createBranch(chatId, {
                     from_message_id: args.message.id,
                     content: args.content,
-                    files: args.message.files,
+                    files,
                     workflow: args.message.workflow,
                 });
                 // The full read carries branch positions, so the new version
@@ -94,7 +100,7 @@ export function useChatBranchActions({
                               id: created.id,
                               role: "user",
                               content: args.content,
-                              files: args.message.files,
+                              files,
                               workflow: args.message.workflow,
                           };
                 const history =

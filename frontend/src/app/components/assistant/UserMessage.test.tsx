@@ -49,57 +49,27 @@ describe("UserMessage", () => {
         });
     });
 
-    it("saves an inline edit as a sibling branch", async () => {
+    it("starts an edit in the composer, and marks the prompt being edited", async () => {
         const user = userEvent.setup();
-        const onEditBranch = vi.fn();
-        render(
-            <UserMessage
-                content="Original wording"
-                messageId="message-1"
-                onEditBranch={onEditBranch}
-            />,
+        const onEdit = vi.fn();
+        const { rerender } = render(
+            <UserMessage content="Original wording" messageId="message-1" onEdit={onEdit} />,
         );
 
-        await user.click(
-            screen.getByRole("button", { name: "Edit prompt" }),
-        );
-        const editor = screen.getByRole("textbox", { name: "Edit message" });
-        expect(editor).toHaveValue("Original wording");
+        await user.click(screen.getByRole("button", { name: "Edit prompt" }));
+        expect(onEdit).toHaveBeenCalledTimes(1);
+        // No editor in the thread: the text and files are edited below.
+        expect(screen.queryByRole("textbox")).toBeNull();
 
-        await user.clear(editor);
-        await user.type(editor, "Revised wording");
-        await user.click(screen.getByRole("button", { name: "Save" }));
-
-        expect(onEditBranch).toHaveBeenCalledWith("Revised wording");
-        await waitFor(() =>
-            expect(
-                screen.queryByRole("textbox", { name: "Edit message" }),
-            ).not.toBeInTheDocument(),
+        rerender(
+            <UserMessage content="Original wording" messageId="message-1" onEdit={onEdit} beingEdited />,
         );
+        expect(screen.getByText("Editing below")).toBeInTheDocument();
     });
 
-    it("cancels the inline editor without emitting an edit", async () => {
-        const user = userEvent.setup();
-        const onEditBranch = vi.fn();
-        render(
-            <UserMessage
-                content="Original wording"
-                messageId="message-1"
-                onEditBranch={onEditBranch}
-            />,
-        );
-
-        await user.click(
-            screen.getByRole("button", { name: "Edit prompt" }),
-        );
-        await user.type(
-            screen.getByRole("textbox", { name: "Edit message" }),
-            " and more",
-        );
-        await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-        expect(onEditBranch).not.toHaveBeenCalled();
-        expect(screen.getByText("Original wording")).toBeVisible();
+    it("keeps the edit control while an answer streams, but unusable", () => {
+        render(<UserMessage content="Original wording" messageId="m" onEdit={vi.fn()} editDisabled />);
+        expect(screen.getByRole("button", { name: "Edit prompt" })).toBeDisabled();
     });
 
     it("offers no edit control when branching is not wired", () => {

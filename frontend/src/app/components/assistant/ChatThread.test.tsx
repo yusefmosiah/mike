@@ -46,15 +46,29 @@ vi.mock("./ChatInput", () => ({
         projectId?: string;
         enableGlobalFileDrop?: boolean;
         dropUploadsToProject?: boolean;
+        editTarget?: { content: string } | null;
+        onEditSubmit?: (edited: { content: string; files: MessageFile[] }) => void;
     }) => (
         <div
             data-testid="chat-input"
+            data-editing={props.editTarget?.content}
             data-can-stop={String(props.canStop)}
             data-loading={String(props.isLoading)}
             data-project-id={props.projectId}
             data-global-drop={String(props.enableGlobalFileDrop)}
             data-drop-to-project={String(props.dropUploadsToProject)}
-        />
+        >
+            {props.editTarget && (
+                <button
+                    type="button"
+                    onClick={() =>
+                        props.onEditSubmit?.({ content: "Edited", files: [] })
+                    }
+                >
+                    Send edit
+                </button>
+            )}
+        </div>
     ),
 }));
 vi.mock("./UserMessage", () => ({
@@ -62,7 +76,7 @@ vi.mock("./UserMessage", () => ({
         content: string;
         error?: string;
         editDisabled?: boolean;
-        onEditBranch?: (content: string) => void;
+        onEdit?: () => void;
         onNavigateSibling?: (dir: -1 | 1) => void;
         onWorkflowClick?: (workflow: { id: string; title: string }) => void;
         onFileClick?: (file: MessageFile) => void;
@@ -73,11 +87,11 @@ vi.mock("./UserMessage", () => ({
         <div data-testid="user-message" data-error={props.error}>
             <p>{props.content}</p>
             {props.authorLabel && <span>{props.authorLabel}</span>}
-            {props.onEditBranch && (
+            {props.onEdit && (
                 <button
                     type="button"
                     disabled={props.editDisabled}
-                    onClick={() => props.onEditBranch?.("Edited")}
+                    onClick={() => props.onEdit?.()}
                 >
                     Edit {props.content}
                 </button>
@@ -385,10 +399,18 @@ describe("ChatThread messages", () => {
             onLoadSubagentTranscript: vi.fn(),
         });
         fireEvent.click(screen.getByRole("button", { name: "Edit First question" }));
+        expect(screen.getByTestId("chat-input")).toHaveAttribute(
+            "data-editing",
+            "First question",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Send edit" }));
         fireEvent.click(screen.getByRole("button", { name: "Next First question" }));
         fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
         fireEvent.click(screen.getByRole("button", { name: "Branch" }));
-        expect(onEditBranch).toHaveBeenCalledWith(messages[0], "Edited");
+        expect(onEditBranch).toHaveBeenCalledWith(messages[0], {
+            content: "Edited",
+            files: [],
+        });
         expect(onNavigateSibling).toHaveBeenCalledWith(messages[0], ["u0", "u1"], 1);
         expect(onRegenerate).toHaveBeenCalledWith(messages[1], messages[0]);
         expect(onBranchIntoNewThread).toHaveBeenCalledWith(messages[1]);

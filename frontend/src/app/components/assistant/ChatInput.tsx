@@ -16,6 +16,7 @@ import {
     Check,
     Loader2,
     Mic,
+    Pencil,
     Square,
     Waypoints,
     X,
@@ -62,7 +63,7 @@ import {
     isModelAvailable,
     type ModelProvider,
 } from "@/app/lib/modelAvailability";
-import type { Document, Message, Workflow } from "../shared/types";
+import type { Document, Message, MessageFile, Workflow } from "../shared/types";
 import type { DirectoryTab } from "../shared/useDirectoryData";
 import { cn } from "@/app/lib/utils";
 import {
@@ -85,6 +86,7 @@ import {
     SUPPORTED_ATTACHMENT_ACCEPT,
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
+    incomingFiles,
 } from "@/app/lib/documentUploadValidation";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
@@ -109,6 +111,34 @@ export interface ChatInputHandle {
         prompt?: string,
         options?: { initialDocumentTab?: DirectoryTab },
     ) => void;
+}
+
+/** A prompt as edited in the composer: its new text and files. */
+export type EditedPrompt = { content: string; files: MessageFile[] };
+
+/** A sent prompt's files as composer attachments, at the versions it sent. */
+function attachmentsOf(files: MessageFile[] | undefined): Document[] {
+    return (files ?? []).flatMap((file) =>
+        file.document_id
+            ? [
+                  {
+                      id: file.document_id,
+                      filename: file.filename,
+                      file_type: file.filename.split(".").pop()?.toLowerCase() ?? null,
+                      project_id: null,
+                      storage_path: null,
+                      pdf_storage_path: null,
+                      size_bytes: null,
+                      page_count: null,
+                      structure_tree: null,
+                      status: "ready" as const,
+                      created_at: null,
+                      current_version_id: file.version_id ?? null,
+                      active_version_number: file.version_number ?? null,
+                  },
+              ]
+            : [],
+    );
 }
 
 export interface ChatInputProps {
@@ -154,6 +184,15 @@ export interface ChatInputProps {
     chatModel?: string | null;
     chatReasoningLevel?: ReasoningLevel | null;
     chatKey?: string | null;
+    /**
+     * A sent prompt being edited. Its text and files load into the composer,
+     * where both can be changed, and sending saves them as a new version of
+     * it through `onEditSubmit` instead of sending a new message. Whatever
+     * was being typed before comes back when the edit is sent or cancelled.
+     */
+    editTarget?: Message | null;
+    onEditSubmit?: (edited: EditedPrompt) => Promise<void>;
+    onEditCancel?: () => void;
 }
 
 /**
@@ -209,6 +248,9 @@ function ChatInputForChatImpl(
         chatModel,
         chatReasoningLevel,
         chatKey,
+        editTarget = null,
+        onEditSubmit,
+        onEditCancel,
     }: ChatInputProps,
     ref: ForwardedRef<ChatInputHandle>,
 ) {
@@ -259,6 +301,49 @@ function ChatInputForChatImpl(
     const apiKeys = apiKeysDegraded ? undefined : profile?.apiKeys;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const surfaceRef = useRef<HTMLDivElement>(null);
+
+    // Editing a sent prompt: the draft in progress is set aside while the
+    // prompt's text and files fill the composer, and comes back after.
+    const setAsideRef = useRef<{
+        value: string;
+        docs: Document[];
+        workflow: { id: string; title: string } | null;
+    } | null>(null);
+    const [editSaving, setEditSaving] = useState(false);
+    const editId = editTarget?.id ?? null;
+    useEffect(() => {
+        if (editTarget) {
+            if (!setAsideRef.current) {
+                setAsideRef.current = {
+                    value,
+                    docs: attachedDocs,
+                    workflow: selectedWorkflow,
+                };
+            }
+            const content = editTarget.content ?? "";
+            setValue(content);
+            setAttachedDocs(attachmentsOf(editTarget.files));
+            setSelectedWorkflow(null);
+            requestAnimationFrame(() => {
+                const el = textareaRef.current;
+                if (!el) return;
+                el.focus();
+                el.setSelectionRange(content.length, content.length);
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+            });
+        } else if (setAsideRef.current) {
+            const { value: draft, docs, workflow } = setAsideRef.current;
+            setAsideRef.current = null;
+            setValue(draft);
+            setAttachedDocs(docs);
+            setSelectedWorkflow(workflow);
+            if (textareaRef.current) textareaRef.current.style.height = "auto";
+        }
+        // Only a change of prompt starts or ends an edit; the draft it sets
+        // aside is read at that moment.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editId]);
     // A tap on the page closes the phone's keyboard (iOS will not by itself).
     useBlurOnOutsideTap(textareaRef, surfaceRef);
     const controlsRef = useRef<HTMLDivElement>(null);
@@ -454,7 +539,7 @@ function ChatInputForChatImpl(
                 return;
             }
             const { supported, unsupported } =
-                partitionSupportedDocumentFiles(files, ATTACHMENTS);
+                partitionSupportedDocumentFiles(incomingFiles(files), ATTACHMENTS);
             setUploadWarning(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS));
             if (supported.length === 0) return;
 
@@ -696,6 +781,16 @@ function ChatInputForChatImpl(
             return;
         }
         if (modelCannotSeeImages) return;
+        if (editTarget && onEditSubmit) {
+            if (editSaving) return;
+            // The composer keeps the edit until it is saved: a failure is
+            // reported by the host, and the edit can be sent again.
+            setEditSaving(true);
+            void onEditSubmit({ content: query, files: attachedFiles() })
+                .catch(() => undefined)
+                .finally(() => setEditSaving(false));
+            return;
+        }
         setValue("");
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
@@ -774,6 +869,11 @@ function ChatInputForChatImpl(
     const handleSubmit = () => {
         const query = value.trim();
         if (!composerOpen) return;
+        // An edited prompt is sent as written: commands apply to new messages.
+        if (editTarget) {
+            submitMessage(query, null);
+            return;
+        }
         const autocompact = parseAutocompactCommand(value);
         if (autocompact) {
             void runAutocompact(autocompact);
@@ -829,6 +929,11 @@ function ChatInputForChatImpl(
             setSlashMenuDismissed(true);
             return;
         }
+        if (editTarget && e.key === "Escape") {
+            e.preventDefault();
+            onEditCancel?.();
+            return;
+        }
         // Enter starts a new line; Cmd+Enter (Ctrl+Enter off a Mac) sends.
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -856,6 +961,22 @@ function ChatInputForChatImpl(
                         LIQUID_GLASS_TRANSLUCENT_CLASS,
                     )}
                 >
+                    {editTarget && (
+                        <div className="flex items-center justify-between gap-2 pl-3 pr-1.5 pt-1.5 text-xs text-gray-600">
+                            <span className="inline-flex items-center gap-1.5 font-medium">
+                                <Pencil className="h-3 w-3" aria-hidden="true" />
+                                Editing message
+                            </span>
+                            <button
+                                type="button"
+                                onClick={onEditCancel}
+                                aria-label="Cancel editing"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-200/70 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                    )}
                     {/* Attached chips */}
                     {(selectedWorkflow || attachedDocs.length > 0) && (
                         <div className="flex flex-wrap gap-1.5 px-2 pt-2">

@@ -71,7 +71,7 @@ import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
 import { ChatThread } from "@/app/components/assistant/ChatThread";
 import { AssistantWorkflowModal } from "@/app/components/assistant/AssistantWorkflowModal";
 import { ChatAccessModal } from "@/app/components/assistant/ChatAccessModal";
-import type { ChatInputHandle } from "@/app/components/assistant/ChatInput";
+import type { ChatInputHandle, EditedPrompt } from "@/app/components/assistant/ChatInput";
 import {
     ProjectExplorer,
     type ProjectExplorerHandle,
@@ -143,6 +143,7 @@ import {
     combineUploadWarnings,
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
+    incomingEntries,
 } from "@/app/lib/documentUploadValidation";
 
 interface Props {
@@ -470,9 +471,9 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // The branch actions surface failures through the page's warning popup:
     // the message rows own no error surface of their own.
     const handleEditPrompt = useCallback(
-        async (message: Message, content: string) => {
+        async (message: Message, edited: EditedPrompt) => {
             try {
-                await editPrompt({ message, content });
+                await editPrompt({ message, content: edited.content, files: edited.files });
             } catch (error) {
                 setChatActionError({
                     title: "Could not save the edit",
@@ -1322,12 +1323,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         // `accept` cannot constrain either. Filter to the types the converter
         // can read before spending an upload session (or creating folders) on
         // files the server is guaranteed to refuse.
+        const incoming = incomingEntries(selectedEntries);
         const { supported, unsupported } = partitionSupportedDocumentFiles(
-            selectedEntries.map((entry) => entry.file),
+            incoming.map((entry) => entry.file),
             ATTACHMENTS,
         );
         const supportedFiles = new Set(supported);
-        const entries = selectedEntries.filter((entry) =>
+        const entries = incoming.filter((entry) =>
             supportedFiles.has(entry.file),
         );
         const unsupportedWarning = formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS);

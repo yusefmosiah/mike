@@ -61,6 +61,7 @@ import { useRemountPersistentState } from "@/app/hooks/useRemountPersistentState
 import {
     formatUnsupportedDocumentWarning,
     partitionSupportedDocumentFiles,
+    incomingEntries,
     ATTACHMENTS,
     SUPPORTED_ATTACHMENT_ACCEPT,
 } from "@/app/lib/documentUploadValidation";
@@ -1538,14 +1539,15 @@ export function DocTable({
         // doomed upload that the backend would 403 anyway.
         if (!requireCapability("content.edit", "add documents", "editor"))
             return;
+        const incoming = incomingEntries(entries);
         const { supported, unsupported } = partitionSupportedDocumentFiles(
-            entries.map((entry) => entry.file),
+            incoming.map((entry) => entry.file),
             ATTACHMENTS,
         );
         setDocumentUploadWarning(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS));
         if (supported.length === 0) return;
         const supportedFiles = new Set(supported);
-        const supportedEntries = entries.filter((entry) =>
+        const supportedEntries = incoming.filter((entry) =>
             supportedFiles.has(entry.file),
         );
         if (

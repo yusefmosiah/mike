@@ -8,6 +8,8 @@ import {
     isImageFilename,
     SUPPORTED_DOCUMENT_ACCEPT,
     UNSUPPORTED_DOCUMENT_WARNING_MESSAGE,
+    incomingFiles,
+    withTypedName,
     combineUploadWarnings,
     formatUnsupportedDocumentWarning,
     isSupportedDocumentFile,
@@ -89,7 +91,7 @@ describe("formatUnsupportedDocumentWarning", () => {
 
     it("returns the shared warning message when files were rejected", () => {
         expect(formatUnsupportedDocumentWarning([file("x.txt")])).toBe(
-            UNSUPPORTED_DOCUMENT_WARNING_MESSAGE,
+            `${UNSUPPORTED_DOCUMENT_WARNING_MESSAGE} Not added: x.txt.`,
         );
     });
 });
@@ -136,7 +138,9 @@ describe("attachments: documents, images and text", () => {
 
     it("keeps images out where only documents belong", () => {
         expect(isSupportedDocumentFile(file("photo.png"))).toBe(false);
-        expect(formatUnsupportedDocumentWarning([file("photo.png")])).toBe(UNSUPPORTED_DOCUMENT_WARNING_MESSAGE);
+        expect(formatUnsupportedDocumentWarning([file("photo.png")])).toBe(
+            `${UNSUPPORTED_DOCUMENT_WARNING_MESSAGE} Not added: photo.png.`,
+        );
     });
 
     it("accepts plain text only where attachments are", () => {
@@ -147,7 +151,7 @@ describe("attachments: documents, images and text", () => {
         expect(isSupportedDocumentFile(file("notes.txt"), { text: true })).toBe(true);
         expect(isSupportedDocumentFile(file("photo.png"), { text: true })).toBe(false);
         expect(formatUnsupportedDocumentWarning([file("run.sh")], { text: true })).toBe(
-            UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+            `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} Not added: run.sh.`,
         );
     });
 
@@ -161,12 +165,51 @@ describe("attachments: documents, images and text", () => {
         expect(unsupported.map((f) => f.name)).toEqual(["logo.svg", "scan.jpg"]);
         expect(formatUnsupportedDocumentWarning([big], ATTACHMENTS)).toBe(IMAGE_TOO_LARGE_WARNING_MESSAGE);
         expect(formatUnsupportedDocumentWarning([file("logo.svg")], ATTACHMENTS)).toBe(
-            UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+            `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} Not added: logo.svg.`,
         );
         expect(formatUnsupportedDocumentWarning(unsupported, ATTACHMENTS)).toBe(
-            `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} ${IMAGE_TOO_LARGE_WARNING_MESSAGE}`,
+            `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} Not added: logo.svg. ${IMAGE_TOO_LARGE_WARNING_MESSAGE}`,
         );
+        // Many refused files are counted, not all listed; a nameless one is described.
+        expect(
+            formatUnsupportedDocumentWarning(
+                ["a.svg", "b.svg", "c.svg", "d.svg", ""].map((name) => file(name)),
+                ATTACHMENTS,
+            ),
+        ).toBe(`${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} Not added: a.svg, b.svg, c.svg and 2 more.`);
+        expect(formatUnsupportedDocumentWarning([file("")], ATTACHMENTS)).toContain("Not added: an unnamed file.");
         expect(formatUnsupportedDocumentWarning([], ATTACHMENTS)).toBeNull();
         expect(isSupportedDocumentFile(file("noextension."), ATTACHMENTS)).toBe(false);
+    });
+});
+
+describe("files as they come in", () => {
+    const typed = (name: string, type: string) => new File(["x"], name, { type });
+
+    it("names a file by its type when its name does not say it", () => {
+        const screenshot = withTypedName(typed("image", "image/png"));
+        expect(screenshot.name).toBe("image.png");
+        expect(screenshot.type).toBe("image/png");
+        expect(withTypedName(typed("", "application/pdf")).name).toBe("attachment.pdf");
+        // A name that already says a supported type, or a type we do not take, is left alone.
+        const report = typed("report.docx", "application/pdf");
+        expect(withTypedName(report)).toBe(report);
+        const photo = typed("IMG_1.heic", "image/heic");
+        expect(withTypedName(photo)).toBe(photo);
+    });
+
+    it("keeps one uploadable copy of an image dragged in several formats", () => {
+        const png = typed("IMG_0449.png", "image/png");
+        const heic = typed("IMG_0449.heic", "image/heic");
+        const pdf = typed("IMG_0449.pdf", "application/pdf");
+        expect(incomingFiles([heic, png, pdf])).toEqual([png, pdf]);
+        // Different images, or copies none of which can be uploaded, all stay.
+        const other = typed("IMG_0450.png", "image/png");
+        expect(incomingFiles([png, other])).toEqual([png, other]);
+        const tiff = typed("scan.tiff", "image/tiff");
+        const heif = typed("scan.heif", "image/heif");
+        expect(incomingFiles([tiff, heif])).toEqual([tiff, heif]);
+        // Where images are not taken, no copy is chosen over another.
+        expect(incomingFiles([heic, png], {})).toEqual([heic, png]);
     });
 });
