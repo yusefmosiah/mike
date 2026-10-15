@@ -26,16 +26,16 @@ describe("buildSystemPrompt", () => {
         }
     });
 
-    it("always contains the citation contract the parser depends on", () => {
+    it("always contains the cite-tag contract the stream parser depends on", () => {
         for (const prompt of [buildSystemPrompt(true), buildSystemPrompt(false)]) {
-            expect(prompt).toContain("<CITATIONS>");
-            expect(prompt).toContain("</CITATIONS>");
+            expect(prompt).toContain('<cite doc="doc-3f9a1c2e" page="3">');
+            expect(prompt).toContain('<cite url="https://www.example.com/article">');
+            expect(prompt).toContain('<cite case="123" opinion="456">');
+            expect(prompt).toContain("Never type a citation number or a [n] yourself");
             expect(prompt).toContain(
-                `Every [N] marker must have exactly one matching entry with "ref": N.`,
+                `"doc" must be the exact chat-local label, such as "doc-3f9a1c2e"`,
             );
-            expect(prompt).toContain(
-                `"doc_id" must be the exact chat-local label you were given`,
-            );
+            expect(prompt).not.toContain("</CITATIONS>");
         }
     });
 

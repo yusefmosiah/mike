@@ -48,7 +48,9 @@ import {
   parsePartialCitationObjects,
   createCitation,
   CITATIONS_OPEN_TAG,
+  type ParsedCitation,
 } from "./citations";
+import { InlineCitationStream } from "./citations.inline";
 import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import { parseAskInputs } from "./tools/askInputs";
@@ -715,6 +717,27 @@ export async function runLLMStream(params: {
   let streamingCitationsBuffer = "";
   let streamedCitationCount = 0;
 
+  // Inline `<cite>` tags (citations.inline.ts): the server numbers the
+  // markers and keeps every citation they issued across the turn's text
+  // segments. Surfaces with their own builder (Word chat, tabular) keep the
+  // trailing block and get no inline processing.
+  const inlineCitations = buildCitations
+    ? null
+    : new InlineCitationStream(
+        (label) =>
+          Object.prototype.hasOwnProperty.call(docIndex, label) || docStore.has(label),
+      );
+  const inlineParsed: ParsedCitation[] = [];
+
+  const buildCitationData = (c: ParsedCitation) =>
+    createCitation(
+      c,
+      docIndex,
+      courtlistenerTurnState.casesByClusterId,
+      docStore,
+      (url) => getWebSnapshot(url)?.title?.trim() || null,
+    );
+
   const emitCitationStreamSnapshot = (
     status: "started" | "partial",
     citations: unknown[],
@@ -726,21 +749,37 @@ export async function runLLMStream(params: {
   };
 
   const streamHiddenCitationContent = (delta: string) => {
-    if (buildCitations || !delta) return;
+    // A block is ignored once tags have issued markers: its refs would collide.
+    if (buildCitations || !delta || inlineParsed.length) return;
     streamingCitationsBuffer += delta;
     const partial = parsePartialCitationObjects(streamingCitationsBuffer);
     if (partial.length <= streamedCitationCount) return;
     streamedCitationCount = partial.length;
-    const citations = partial.map((c) =>
-      createCitation(
-        c,
-        docIndex,
-        courtlistenerTurnState.casesByClusterId,
-        docStore,
-        (url) => getWebSnapshot(url)?.title?.trim() || null,
-      ),
-    );
-    emitCitationStreamSnapshot("partial", citations);
+    emitCitationStreamSnapshot("partial", partial.map(buildCitationData));
+  };
+
+  // Visible text goes through the inline-tag pass: markers replace the tags
+  // and the citations they name reach the client before the marker does.
+  const showVisible = (text: string, emit = true) => {
+    const result = inlineCitations ? inlineCitations.push(text) : { text, citations: [] };
+    emitInline(result, emit);
+  };
+
+  const emitInline = (
+    result: { text: string; citations: ParsedCitation[] },
+    emit: boolean,
+  ) => {
+    if (result.citations.length) {
+      inlineParsed.push(...result.citations);
+      if (emit) emitCitationStreamSnapshot("partial", inlineParsed.map(buildCitationData));
+    }
+    if (!result.text) return;
+    iterVisibleText += result.text;
+    if (emit) {
+      write(
+        `data: ${JSON.stringify({ type: "content_delta", text: result.text })}\n\n`,
+      );
+    }
   };
 
   const streamVisibleContent = (delta: string) => {
@@ -754,17 +793,13 @@ export async function runLLMStream(params: {
     const markerIdx = combined.indexOf(CITATIONS_OPEN_TAG);
     if (markerIdx >= 0) {
       const visible = combined.slice(0, markerIdx);
-      if (visible) {
-        iterVisibleText += visible;
-        write(
-          `data: ${JSON.stringify({ type: "content_delta", text: visible })}\n\n`,
-        );
-      }
+      if (visible) showVisible(visible);
+      if (inlineCitations) emitInline(inlineCitations.end(), true);
       visibleTailBuffer = "";
       citationsOpenSeen = true;
       streamingCitationsBuffer = "";
       streamedCitationCount = 0;
-      emitCitationStreamSnapshot("started", []);
+      if (!inlineParsed.length) emitCitationStreamSnapshot("started", []);
       streamHiddenCitationContent(
         combined.slice(markerIdx + CITATIONS_OPEN_TAG.length),
       );
@@ -774,27 +809,17 @@ export async function runLLMStream(params: {
     const keep = Math.min(CITATIONS_OPEN_TAG.length - 1, combined.length);
     const visible = combined.slice(0, combined.length - keep);
     visibleTailBuffer = combined.slice(combined.length - keep);
-    if (visible) {
-      iterVisibleText += visible;
-      write(
-        `data: ${JSON.stringify({ type: "content_delta", text: visible })}\n\n`,
-      );
-    }
+    if (visible) showVisible(visible);
   };
 
   const flushVisibleTail = (opts: { emit?: boolean } = {}) => {
     const emit = opts.emit ?? true;
-    if (citationsOpenSeen || !visibleTailBuffer) {
-      visibleTailBuffer = "";
-      return;
-    }
-    iterVisibleText += visibleTailBuffer;
-    if (emit) {
-      write(
-        `data: ${JSON.stringify({ type: "content_delta", text: visibleTailBuffer })}\n\n`,
-      );
+    if (!citationsOpenSeen && visibleTailBuffer) {
+      showVisible(visibleTailBuffer, emit);
     }
     visibleTailBuffer = "";
+    // The segment is over: held text is released, an open tag is dropped.
+    if (!citationsOpenSeen && inlineCitations) emitInline(inlineCitations.end(), emit);
   };
 
   const flushText = (opts: { emit?: boolean } = {}) => {
@@ -1692,23 +1717,21 @@ export async function runLLMStream(params: {
     write(`data: ${JSON.stringify(usageEvent)}\n\n`);
   }
 
-  // Parse and emit citations from <CITATIONS> block
-  const { citations: parsedCitations, diagnostics: citationDiagnostics } =
+  // The citations come from the inline tags. TODO(inline-citations): once
+  // tags have run on staging for two weeks without a fallback to the block,
+  // delete the block path (CITATIONS_*, parseCitationsWithDiagnostics, the
+  // hold-back in streamVisibleContent).
+  const { citations: blockCitations, diagnostics: citationDiagnostics } =
     parseCitationsWithDiagnostics(fullText);
+  // A turn with tags ignores a trailing block (its refs would collide); a
+  // turn without any still gets the block parsed.
+  const parsedCitations = inlineParsed.length ? inlineParsed : blockCitations;
   let citations: unknown[];
   if (buildCitations) {
     // Custom builders (tabular) bypass document-citation verification.
     citations = buildCitations(fullText);
   } else {
-    const rawCitations = parsedCitations.map((c) =>
-      createCitation(
-        c,
-        docIndex,
-        courtlistenerTurnState.casesByClusterId,
-        docStore,
-        (url) => getWebSnapshot(url)?.title?.trim() || null,
-      ),
-    );
+    const rawCitations = parsedCitations.map(buildCitationData);
     // Server-side quote verification. Fetch each document's extracted source
     // text at most once per turn (memoized by doc_id), reading only bytes
     // already in storage with emitEvents:false. Case citations are matched
@@ -1737,6 +1760,23 @@ export async function runLLMStream(params: {
       getSourceText,
       async (clusterId) =>
         getCachedCaseOpinionTexts(courtlistenerTurnState, clusterId),
+      undefined,
+      inlineParsed.length
+        ? {
+            docIds: Object.keys(docIndex),
+            recreate: (annotation, docId) =>
+              buildCitationData({
+                kind: "document",
+                ref: annotation.ref as number,
+                doc_id: docId,
+                page: annotation.page as number | string,
+                quote: annotation.quote as string,
+                sheet: annotation.sheet as string | undefined,
+                cell: annotation.cell as string | undefined,
+                quotes: annotation.quotes as never,
+              }),
+          }
+        : undefined,
     );
     // Web citations keep the page they were checked against, for the reader.
     citations = await attachWebSnapshots(citations, getWebSnapshot, (snapshot) =>
@@ -1744,6 +1784,8 @@ export async function runLLMStream(params: {
     );
   }
   devLog("[chat/stream] final citations", {
+    inlineCitationCount: inlineParsed.length,
+    droppedInlineTags: inlineCitations?.dropped ?? [],
     hasCitationsBlock: citationDiagnostics.hasBlock,
     citationsBlockLength: citationDiagnostics.rawLength,
     parseError: citationDiagnostics.error,

@@ -1321,10 +1321,11 @@ export async function buildDocContext(
       if (ok) docList.push(doc);
     }
     await attachActiveVersionPaths(db, docList);
-    for (let i = 0; i < docList.length; i++) {
-      const doc = docList[i];
+    const labels = new Set<string>();
+    for (const doc of docList) {
       if (!doc.storage_path) continue;
-      const docLabel = `doc-${i}`;
+      const docLabel = stableDocLabel(doc.id, labels);
+      labels.add(docLabel);
       const filename = doc.filename?.trim() || "Untitled document";
       docIndex[docLabel] = {
         document_id: doc.id,
@@ -1354,7 +1355,7 @@ export async function buildDocContext(
 }
 
 /**
- * A project document's chat label, from its id: `doc-` and the first eight
+ * A document's chat label, from its id: `doc-` and the first eight
  * hex digits, longer only on a clash. A label is how the model names a
  * document in tool calls and citations, and those stay in the conversation's
  * history; a positional label (`doc-3` for the fourth ready document) named a

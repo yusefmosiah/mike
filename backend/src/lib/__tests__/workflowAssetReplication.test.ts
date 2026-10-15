@@ -233,11 +233,12 @@ describe("workflow asset replication", () => {
             file_type: "pdf",
             source: "upload",
         });
-        expect(index["doc-0"]).toMatchObject({
+        const copyLabel = `doc-${documentId.replace(/-/g, "").slice(0, 8)}`;
+        expect(index[copyLabel]).toMatchObject({
             document_id: documentId,
             filename: "Client precedent.pdf",
         });
-        expect(store.get("doc-0")?.source_kind).toBe("document");
+        expect(store.get(copyLabel)?.source_kind).toBe("document");
         const toolResult = result.toolResults[0] as { content: string };
         expect(JSON.parse(toolResult.content)).toMatchObject({
             ok: true,

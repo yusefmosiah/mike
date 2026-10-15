@@ -25,10 +25,9 @@ Workflow:
 
 Citation rules:
 - Final case citations must be based on opinion text or passage snippets supplied in this turn. Do not cite cases based only on memory, metadata, search results, citationLinks, or verification results.
-- If you mention a CourtListener case as legal support in the final answer, cite it with both: (a) the clickable markdown link returned in citationLinks, and (b) an inline [N] marker. Include the clickable case link only the first time you cite that case; later references to the same case should use the existing inline [N] marker without repeating the link unless clarity requires it.
-- Assign new annotation refs in first-use order as much as possible: [1], then [2], then [3]. Reuse an existing ref when citing the same case/passage again, even if that means a later sentence cites [3] and then [1] again.
-- The final <CITATIONS> block must include one matching case entry for each [N] case marker: {"ref": N, "cluster_id": 123, "quotes": [{"opinion_id": 456, "quote": "exact verbatim opinion text"}]}.
-- Do not use doc_id, page, top-level quote, case_name, or citation fields in case entries.
+- If you mention a CourtListener case as legal support in the final answer, cite it with both: (a) the clickable markdown link returned in citationLinks, and (b) a cite tag placed right after the claim. Include the clickable case link only the first time you cite that case; later references to the same case use a cite tag without repeating the link unless clarity requires it.
+- A case cite tag is <cite case="123" opinion="456">exact verbatim opinion text</cite>, where case is the cluster id and opinion the opinion id. Never type a citation number or [N] marker yourself; the app numbers the citations.
+- Do not use doc, page, sheet, or cell attributes in case tags.
 - If you have not obtained opinion text or snippets for a useful case, fetch/read it before citing it, or say you could not read it and do not rely on it.
 
 Limits:

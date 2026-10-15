@@ -455,3 +455,98 @@ describe("verifyWebCitationAnnotation", () => {
     expect(out.verified).toBe(false);
   });
 });
+
+describe("verifyCitations re-attribution", () => {
+  const sources = {
+    "doc-1": "The Tenant shall pay rent on the first day of each month.",
+    "doc-2": "The Landlord may terminate this Lease upon written notice.",
+    "doc-3": "The Landlord may terminate this Lease upon written notice, as well.",
+  };
+  const quote = "pay rent on the first day";
+  const recreate = (a: Record<string, unknown>, docId: string) => ({
+    ...a,
+    doc_id: docId,
+    document_id: `uuid-${docId}`,
+    version_id: `ver-${docId}`,
+  });
+  const reattribute = (docIds = Object.keys(sources)) => ({ docIds, recreate });
+
+  it("attributes a quote to the one other document that holds it", async () => {
+    const [result] = (await verifyCitations(
+      [docAnnotation([{ page: 1, quote }])],
+      fetcherFor(sources),
+      async () => [],
+      undefined,
+      reattribute(),
+    )) as Record<string, unknown>[];
+    // The tag named doc-1 and the text is in doc-1, so nothing moves.
+    expect(result).toMatchObject({ doc_id: "doc-1", verified: true });
+
+    const [moved] = (await verifyCitations(
+      [{ ...docAnnotation([{ page: 1, quote }]), doc_id: "doc-2" }],
+      fetcherFor(sources),
+      async () => [],
+      undefined,
+      reattribute(),
+    )) as Record<string, unknown>[];
+    expect(moved).toMatchObject({
+      doc_id: "doc-1",
+      document_id: "uuid-doc-1",
+      version_id: "ver-doc-1",
+      verified: true,
+    });
+  });
+
+  it("leaves a quote unverified when it is in no other document or in several", async () => {
+    for (const text of ["a passage that is nowhere", "Landlord may terminate this Lease"]) {
+      const [result] = (await verifyCitations(
+        [{ ...docAnnotation([{ page: 1, quote: text }]), doc_id: "doc-1" }],
+        fetcherFor(sources),
+        async () => [],
+        undefined,
+        reattribute(),
+      )) as Record<string, unknown>[];
+      expect(result).toMatchObject({ doc_id: "doc-1", verified: false });
+    }
+  });
+
+  it("moves a citation only when every one of its quotes is in the other document", async () => {
+    const [result] = (await verifyCitations(
+      [
+        {
+          ...docAnnotation([
+            { page: 1, quote },
+            { page: 2, quote: "upon written notice" },
+          ]),
+          doc_id: "doc-3",
+        },
+      ],
+      fetcherFor(sources),
+      async () => [],
+      undefined,
+      reattribute(),
+    )) as Record<string, unknown>[];
+    expect(result).toMatchObject({ doc_id: "doc-3", verified: false });
+  });
+
+  it("does nothing without the option", async () => {
+    const [result] = (await verifyCitations(
+      [{ ...docAnnotation([{ page: 1, quote }]), doc_id: "doc-2" }],
+      fetcherFor(sources),
+      async () => [],
+    )) as Record<string, unknown>[];
+    expect(result).toMatchObject({ doc_id: "doc-2", verified: false });
+  });
+
+  it("skips the search when there are too many documents to read", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => `doc-x${i}`);
+    const [result] = (await verifyCitations(
+      [{ ...docAnnotation([{ page: 1, quote }]), doc_id: "doc-2" }],
+      fetcherFor(sources),
+      async () => [],
+      undefined,
+      reattribute([...many, "doc-1"]),
+    )) as Record<string, unknown>[];
+    expect(result).toMatchObject({ doc_id: "doc-2", verified: false });
+  });
+});

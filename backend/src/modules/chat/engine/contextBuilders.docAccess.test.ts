@@ -170,6 +170,23 @@ describe("buildDocContext access scoping", () => {
     );
   });
 
+  it("labels a document from its id, so an earlier removal renames nothing", async () => {
+    const a = "3f9a1c2e-0000-4000-8000-000000000001";
+    const b = "b71d0c55-0000-4000-8000-000000000002";
+    const both = makeDb([
+      { id: a, user_id: "u1", project_id: null, status: "ready" },
+      { id: b, user_id: "u1", project_id: null, status: "ready" },
+    ]);
+    const only = makeDb([{ id: b, user_id: "u1", project_id: null, status: "ready" }]);
+
+    const first = await buildDocContext(message([a, b]), "u1", both, null, "chat_messages", "u1@test.local");
+    const later = await buildDocContext(message([b]), "u1", only, null, "chat_messages", "u1@test.local");
+
+    expect(Object.keys(first.docIndex).sort()).toEqual(["doc-3f9a1c2e", "doc-b71d0c55"]);
+    expect(Object.keys(later.docIndex)).toEqual(["doc-b71d0c55"]);
+    expect(later.docIndex["doc-b71d0c55"].document_id).toBe(b);
+  });
+
   it("asks once per container, not once per document", async () => {
     // ensureDocAccess resolves a document through its project, then its
     // workflow, then its org — two or three round trips each. A turn citing

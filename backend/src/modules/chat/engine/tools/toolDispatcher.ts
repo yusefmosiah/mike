@@ -97,6 +97,7 @@ import {
   spotlight,
   spotlightFilename,
   spotlightWorkflow,
+  stableDocLabel,
 } from "../contextBuilders";
 import {
   cachedCaseOpinionTexts,
@@ -362,10 +363,7 @@ export async function runToolCalls(
       const storagePath = (result as { storage_path?: string }).storage_path;
 
       if (documentId && storagePath && docIndex) {
-        const existingLabels = new Set(Object.keys(docIndex));
-        let i = 0;
-        while (existingLabels.has(`doc-${i}`)) i++;
-        newDocLabel = `doc-${i}`;
+        newDocLabel = stableDocLabel(documentId, new Set(Object.keys(docIndex)));
         docIndex[newDocLabel] = {
           document_id: documentId,
           filename: dlFilename,
@@ -412,7 +410,7 @@ export async function runToolCalls(
             `Before writing your final response, call read_document with doc_id "${newDocLabel}".`,
             `Base your description on the generated document's actual returned text, not on memory of what you intended to generate.`,
             `Do not include download links, URLs, or markdown links to the document in your prose response; the document card is shown automatically by the UI.`,
-            `Give a concise description of the generated document and, if you make factual claims about its contents, cite it with [N] markers and a final <CITATIONS> block using doc_id "${newDocLabel}", not any source/template document.`,
+            `Give a concise description of the generated document and, if you make factual claims about its contents, cite it with a cite tag using doc="${newDocLabel}", not any source/template document.`,
           ].join(" "),
         }
       : safeToolResult;
@@ -1793,7 +1791,7 @@ export async function runToolCalls(
                 `Block ids of existing paragraphs are unchanged; inserted paragraphs are numbered after their anchor ("<id>+1", "<id>+2").`,
                 `Before making factual claims about the edited document's final contents, call read_document with doc_id "${docId}" and base the response on that returned text.`,
                 `Do not include download links or URLs in your prose response; the edited document card is shown automatically by the UI.`,
-                `If you describe specific content from the edited document, cite it with [N] markers and a final <CITATIONS> block using doc_id "${docId}".`,
+                `If you describe specific content from the edited document, cite it with a cite tag using doc="${docId}".`,
               ].join(" "),
             }),
           });
@@ -2228,11 +2226,10 @@ export async function runToolCalls(
                 const failedCopies: { filename: string; error: string }[] = [];
                 const linkedDocIds = new Set(newDocs.map((doc) => doc.id));
 
-                // Register every successful copy under a fresh
-                // doc-N slug so the model can edit/read any of
+                // Register every successful copy under a stable
+                // doc-<id> label so the model can edit/read any of
                 // them in the same turn.
                 const existingLabels = new Set(Object.keys(docIndex));
-                let nextLabelIdx = 0;
                 const copies: {
                   new_filename: string;
                   document_id: string;
@@ -2274,9 +2271,7 @@ export async function runToolCalls(
                       );
                     }
                   }
-                  while (existingLabels.has(`doc-${nextLabelIdx}`))
-                    nextLabelIdx++;
-                  const slug = `doc-${nextLabelIdx}`;
+                  const slug = stableDocLabel(d.id, existingLabels);
                   existingLabels.add(slug);
                   docIndex[slug] = {
                     document_id: d.id,

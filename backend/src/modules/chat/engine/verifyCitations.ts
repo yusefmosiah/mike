@@ -406,6 +406,20 @@ export async function verifyWebCitationAnnotation(
 }
 
 /**
+ * Where a document quote may really come from when its tag names the wrong
+ * document: the labels of the turn's documents, and a way to build the
+ * citation again for one of them (its title, document and version).
+ */
+export type DocumentReattribution = {
+  docIds: string[];
+  recreate: (annotation: Record<string, unknown>, docId: string) => unknown;
+};
+
+// Looking for a quote's real document reads every candidate; past this many
+// the search is skipped and the citation stays unverified.
+const MAX_REATTRIBUTION_DOCS = 40;
+
+/**
  * Attach server-side verification to one document citation annotation.
  * Case-law annotations are handled separately by
  * `verifyCaseCitationAnnotation`. For document annotations, source text is
@@ -416,6 +430,7 @@ export async function verifyWebCitationAnnotation(
 export async function verifyDocumentCitationAnnotation(
   annotation: unknown,
   getSourceText: (docId: string) => Promise<string>,
+  reattribute?: DocumentReattribution,
 ): Promise<unknown> {
   if (!annotation || typeof annotation !== "object") return annotation;
   const a = annotation as Record<string, unknown>;
@@ -451,6 +466,23 @@ export async function verifyDocumentCitationAnnotation(
 
   const verified = verifiedQuotes.every((q) => q.verification.verified);
 
+  // The quote decides the source: a transposed label must not produce a
+  // wrong citation. Found whole in exactly one other document, it is theirs.
+  if (!verified && reattribute) {
+    const other = await findOnlyDocumentContaining(
+      entries.map((entry) => entry.quote),
+      docId,
+      getSourceText,
+      reattribute.docIds,
+    );
+    if (other) {
+      return verifyDocumentCitationAnnotation(
+        reattribute.recreate(a, other),
+        getSourceText,
+      );
+    }
+  }
+
   const verifiedDocument = withVerifiedDocumentQuotes(
     a.document,
     verifiedQuotes,
@@ -465,6 +497,32 @@ export async function verifyDocumentCitationAnnotation(
   };
 }
 
+/** The one document (besides `except`) in which every quote verifies, else null. */
+async function findOnlyDocumentContaining(
+  quotes: string[],
+  except: string,
+  getSourceText: (docId: string) => Promise<string>,
+  candidates: string[],
+): Promise<string | null> {
+  const others = candidates.filter((id) => id !== except);
+  if (!quotes.length || !others.length || others.length > MAX_REATTRIBUTION_DOCS) {
+    return null;
+  }
+  let found: string | null = null;
+  for (const id of others) {
+    let source: string;
+    try {
+      source = await getSourceText(id);
+    } catch {
+      continue;
+    }
+    if (!quotes.every((quote) => verifyQuoteAgainstSource(source, quote).verified)) continue;
+    if (found) return null;
+    found = id;
+  }
+  return found;
+}
+
 /**
  * Verify a batch of citation annotations. Document annotations are verified
  * against extracted file text and case annotations against opinion text read
@@ -476,6 +534,7 @@ export async function verifyCitations(
   getSourceText: (docId: string) => Promise<string>,
   getCaseOpinions: (clusterId: number) => Promise<CaseOpinionSource[]>,
   getWebSnapshotFn?: (url: string) => Promise<string | null>,
+  reattribute?: DocumentReattribution,
 ): Promise<unknown[]> {
   const resolveWebText =
     getWebSnapshotFn ?? (async (u: string) => getWebSnapshot(u)?.content ?? null);
@@ -489,7 +548,7 @@ export async function verifyCitations(
       if (value?.kind === "web" || (value?.url && typeof value.url === "string")) {
         return verifyWebCitationAnnotation(annotation, resolveWebText);
       }
-      return verifyDocumentCitationAnnotation(annotation, getSourceText);
+      return verifyDocumentCitationAnnotation(annotation, getSourceText, reattribute);
     }),
   );
 }

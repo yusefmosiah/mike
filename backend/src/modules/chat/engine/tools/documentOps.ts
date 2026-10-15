@@ -67,15 +67,15 @@ export function citationReminder(
     filename.split(".").pop() ?? "",
   );
   const shapeLine = isSpreadsheet
-    ? `Use this citation object shape for this spreadsheet: {"ref": 1, "doc_id": "${docLabel}", "quotes": [{"sheet": "Sheet name", "cell": "B7", "quote": "plain cell value"}]}. Cite by "sheet" + "cell" (A1 address or range), not by page.`
-    : `Use this citation object shape: {"ref": 1, "doc_id": "${docLabel}", "quotes": [{"page": 1, "quote": "exact verbatim text from the document"}]}. Include top-level "page" and "quote" too only if they match the first quote.`;
+    ? `Cite this spreadsheet by cell, not by page: <cite doc="${docLabel}" sheet="Sheet name" cell="B7">plain cell value</cite>.`
+    : `Cite it with the quote inside the tag: <cite doc="${docLabel}" page="1">exact verbatim text from the document</cite>.`;
   return [
     `[Citation requirement for ${docLabel}]:`,
     `Document filename: ${promptFilename}`,
-    `If your final answer makes any factual claim from this document, include inline [N] markers and append a final <CITATIONS> JSON block.`,
-    `Every citation entry for this document MUST use "doc_id": "${docLabel}".`,
+    `If your final answer makes any factual claim from this document, cite it with a cite tag placed right after the claim.`,
+    `Every cite tag for this document MUST use doc="${docLabel}".`,
     shapeLine,
-    `Do not use "marker" or "text" keys in the citation block; use "ref" and "quotes".`,
+    `Never type a citation number or [N] marker yourself; the app numbers the citations.`,
   ].join("\n");
 }
 

@@ -211,6 +211,7 @@ describe("replicate_document rendition path", () => {
         );
         expect(content.ok).toBe(true);
         expect(content.copies).toHaveLength(1);
-        expect(index["doc-0"]).toBeDefined();
+        // The copy is labelled from its document id, not by position.
+        expect(Object.keys(index)).toEqual([expect.stringMatching(/^doc-[0-9a-f]{8}$/)]);
     });
 });

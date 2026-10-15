@@ -49,7 +49,7 @@ type ParsedWebCitation = {
   quotes: { quote: string }[];
 };
 
-type ParsedCitation = ParsedDocumentCitation | ParsedCaseCitation | ParsedWebCitation;
+export type ParsedCitation = ParsedDocumentCitation | ParsedCaseCitation | ParsedWebCitation;
 
 /** An http(s) URL, or null. */
 function webUrl(value: unknown): string | null {
@@ -62,7 +62,7 @@ function webUrl(value: unknown): string | null {
   }
 }
 
-function normalizeCitation(raw: unknown): ParsedCitation | null {
+export function normalizeCitation(raw: unknown): ParsedCitation | null {
   if (!raw || typeof raw !== "object") return null;
   const c = raw as Record<string, unknown>;
   const markerRef =
