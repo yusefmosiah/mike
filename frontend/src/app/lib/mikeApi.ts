@@ -2593,6 +2593,20 @@ export async function setAutocompactTokens(
     });
 }
 
+/** The person's dictation vocabulary (GET/PUT /user/dictation-vocabulary). */
+export async function getDictationVocabulary(): Promise<{ terms: string[] }> {
+    return apiRequest("/user/dictation-vocabulary");
+}
+
+/** Replaces the whole vocabulary; the server trims and de-duplicates it. */
+export async function saveDictationVocabulary(terms: string[]): Promise<{ terms: string[] }> {
+    return apiRequest("/user/dictation-vocabulary", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terms }),
+    });
+}
+
 export async function getChatPeople(chatId: string): Promise<ProjectPeople> {
     return apiRequest<ProjectPeople>(`/chat/${chatId}/people`);
 }

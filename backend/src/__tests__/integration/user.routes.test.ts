@@ -1482,4 +1482,34 @@ describe("user.routes", () => {
             expect(JSON.stringify(res.body)).not.toContain("secret internal failure");
         });
     });
+    describe("/user/dictation-vocabulary", () => {
+        it("GET returns the stored terms", async () => {
+            dbState.tables.user_profiles = { data: { dictation_vocabulary: ["Ximena Achterberg"] }, error: null };
+            const res = await request(app).get("/user/dictation-vocabulary").set(...AUTH);
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ terms: ["Ximena Achterberg"] });
+        });
+
+        it("PUT replaces the list", async () => {
+            dbState.tables.user_profiles = { data: null, error: null };
+            const res = await request(app)
+                .put("/user/dictation-vocabulary")
+                .set(...AUTH)
+                .send({ terms: ["Szczepański Holdings", "szczepański holdings", "Vasquez-Oyelaran"] });
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ terms: ["Szczepański Holdings", "Vasquez-Oyelaran"] });
+            const writes = (dbState.updates.user_profiles ?? []) as Array<Record<string, unknown>>;
+            expect(writes.at(-1)?.dictation_vocabulary).toEqual(["Szczepański Holdings", "Vasquez-Oyelaran"]);
+        });
+
+        it("PUT rejects malformed lists with a 400 and writes nothing", async () => {
+            dbState.tables.user_profiles = { data: null, error: null };
+            for (const body of [{}, { terms: "x" }, { terms: [1] }, { terms: ["a".repeat(65)] }]) {
+                const res = await request(app).put("/user/dictation-vocabulary").set(...AUTH).send(body);
+                expect(res.status).toBe(400);
+                expect(typeof res.body.detail).toBe("string");
+            }
+            expect(dbState.updates.user_profiles ?? []).toEqual([]);
+        });
+    });
 });

@@ -76,7 +76,9 @@ import {
     getAutoModeDecisionSettings,
     setAutoModeDecisionModel,
     getAutocompactSetting,
+    getDictationVocabulary,
     setAutocompactTokens,
+    setDictationVocabulary,
 } from "./user.service";
 import { sendServiceFailure } from "../../lib/serviceResult";
 
@@ -307,6 +309,25 @@ userRouter.put("/autocompact", requireAuth, asyncRoute(async (req, res) => {
         body.model,
         body.tokens,
     );
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// GET /user/dictation-vocabulary
+// The person's dictation vocabulary: { terms: string[] }. Terms are client
+// names; nothing here logs them.
+userRouter.get("/dictation-vocabulary", requireAuth, asyncRoute(async (_req, res) => {
+    const result = await getDictationVocabulary(createDb(), res.locals.userId as string);
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
+}));
+
+// PUT /user/dictation-vocabulary  { terms: string[] }
+// Replaces the whole list (1-4 words and at most 64 characters per term, at
+// most 500 terms); anything else is a 400.
+userRouter.put("/dictation-vocabulary", requireAuth, asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as { terms?: unknown };
+    const result = await setDictationVocabulary(createDb(), res.locals.userId as string, body.terms);
     if (!result.ok) return void sendServiceFailure(res, result);
     res.json(result.data);
 }));

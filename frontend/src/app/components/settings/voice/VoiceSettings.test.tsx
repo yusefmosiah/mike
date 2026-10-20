@@ -2,12 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceOptions } from "@/app/lib/mikeApi";
 
-const state = vi.hoisted(() => ({ options: null as unknown }));
+const state = vi.hoisted(() => ({ options: null as unknown, terms: [] as string[] }));
 
 vi.mock("@/app/lib/mikeApi", () => ({
     getVoiceOptions: vi.fn(async () => state.options),
     synthesizeSpeechDetailed: vi.fn(),
     transcribeAudio: vi.fn(),
+    getDictationVocabulary: vi.fn(async () => ({ terms: [...state.terms] })),
+    saveDictationVocabulary: vi.fn(async (terms: string[]) => {
+        state.terms = terms;
+        return { terms };
+    }),
 }));
 vi.mock("@/app/lib/voice/browserSpeech", () => ({
     browserSpeechSupported: () => true,
@@ -18,6 +23,7 @@ vi.mock("@/app/lib/voice/browserSpeech", () => ({
 }));
 
 import { VoiceSettings } from "./VoiceSettings";
+import { resetDictationVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
 const catalog = {
@@ -39,6 +45,8 @@ const options = (overrides: Partial<VoiceOptions> = {}): VoiceOptions => ({
 beforeEach(() => {
     window.localStorage.clear();
     state.options = options();
+    state.terms = [];
+    resetDictationVocabulary();
 });
 afterEach(() => window.localStorage.clear());
 
@@ -151,5 +159,46 @@ describe("VoiceSettings in the iPhone app", () => {
             fireEvent.click(screen.getByRole("button", { name: "Apple" }));
             await waitFor(() => expect(loadVoicePreferences().transcription).toEqual({ engine: "device", model: "apple" }));
         });
+    });
+});
+
+describe("VoiceSettings vocabulary", () => {
+    it("says so when it is empty", async () => {
+        render(<VoiceSettings />);
+        expect(await screen.findByText(/Names and terms dictation should spell exactly/)).toBeInTheDocument();
+        expect(await screen.findByText(/No terms yet/)).toBeInTheDocument();
+    });
+
+    it("lists terms alphabetically, adds one and removes one", async () => {
+        state.terms = ["Zeta Holdings", "alpha Trust"];
+        render(<VoiceSettings />);
+        const list = await screen.findByRole("list", { name: "Vocabulary" });
+        expect(Array.from(list.querySelectorAll("li")).map((li) => li.firstChild?.textContent)).toEqual([
+            "alpha Trust",
+            "Zeta Holdings",
+        ]);
+
+        fireEvent.change(screen.getByLabelText("New vocabulary term"), { target: { value: "  Ximena   Achterberg " } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await waitFor(() => expect(state.terms).toEqual(["alpha Trust", "Zeta Holdings", "Ximena Achterberg"]));
+        expect(await screen.findByText("Ximena Achterberg")).toBeInTheDocument();
+        expect(screen.getByLabelText("New vocabulary term")).toHaveValue("");
+
+        fireEvent.click(screen.getByRole("button", { name: "Remove alpha Trust" }));
+        await waitFor(() => expect(state.terms).toEqual(["Ximena Achterberg", "Zeta Holdings"]));
+    });
+
+    it("refuses a duplicate or a term over four words without saving", async () => {
+        state.terms = ["Ximena Achterberg"];
+        render(<VoiceSettings />);
+        await screen.findByRole("list", { name: "Vocabulary" });
+        const input = screen.getByLabelText("New vocabulary term");
+        fireEvent.change(input, { target: { value: "ximena achterberg" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("already in the list");
+        fireEvent.change(input, { target: { value: "one two three four five" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("at most 4 words");
+        expect(state.terms).toEqual(["Ximena Achterberg"]);
     });
 });

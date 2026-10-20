@@ -19,6 +19,7 @@ import {
 } from "@/app/lib/authApi";
 import { AUTH_SESSION_INVALIDATED_EVENT } from "@/app/lib/authEvents";
 import { setReportingUser } from "@/app/lib/errorReporting";
+import { resetDictationVocabulary } from "@/app/lib/voice/dictationVocabulary";
 
 type User = AuthUser;
 
@@ -79,6 +80,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // how many people it affects; cleared again on sign-out.
     useEffect(() => {
         setReportingUser(user ? { id: user.id } : null);
+    }, [user]);
+
+    // A dictation vocabulary holds client names: the next person to sign in
+    // on this browser must not get the last one's. Reset when a signed-in
+    // user goes (sign-out, another account, a lost session).
+    const vocabularyUserRef = useRef<string | null>(null);
+    useEffect(() => {
+        const id = user?.id ?? null;
+        if (vocabularyUserRef.current !== null && vocabularyUserRef.current !== id) {
+            resetDictationVocabulary();
+        }
+        vocabularyUserRef.current = id;
     }, [user]);
 
     const fetchAndApplySession = useCallback(async () => {

@@ -128,6 +128,12 @@ export {
     type AutocompactSetting,
 } from "./user.autocompact";
 
+export {
+    getDictationVocabulary,
+    setDictationVocabulary,
+    type DictationVocabulary,
+} from "./user.dictationVocabulary";
+
 export { handleAccountDelete } from "./user.accountJobs";
 export { handleExportBuild } from "./user.exportJobs";
 export { handleMcpRefreshToken, MCP_TOKEN_REFRESH_WINDOW_MS } from "./user.mcpJobs";

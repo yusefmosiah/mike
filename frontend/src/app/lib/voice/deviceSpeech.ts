@@ -147,9 +147,16 @@ export function resetFluidSpeechMiniAvailability(): void {
 /**
  * Transcribes a recording on the phone: with Apple's recognizer, or with
  * Fluid Speech Mini when `engine` is `FLUID_MINI_ENGINE` (English only; it
- * ignores `language`).
+ * ignores `language` and `vocabulary`). `vocabulary` (up to 100 names and
+ * terms) is passed to Apple's recognizer as contextual strings; an app build
+ * from before that ignores it.
  */
-export async function transcribeOnDevice(blob: Blob, language?: string, engine?: typeof FLUID_MINI_ENGINE): Promise<string> {
+export async function transcribeOnDevice(
+    blob: Blob,
+    language?: string,
+    engine?: typeof FLUID_MINI_ENGINE,
+    vocabulary?: readonly string[],
+): Promise<string> {
     const call = nativePromise();
     if (!call) throw new DeviceSpeechError(DEVICE_ERROR_MESSAGES.unavailable);
     let result: unknown;
@@ -158,6 +165,9 @@ export async function transcribeOnDevice(blob: Blob, language?: string, engine?:
             audio: await toBase64(blob),
             mimeType: blob.type,
             ...(engine ? { engine } : languageOption(language)),
+            // Apple's recognizer leans toward these spellings; Fluid Speech
+            // Mini ignores them (the vocabulary matcher still corrects its text).
+            ...(!engine && vocabulary?.length ? { vocabulary: [...vocabulary] } : {}),
         });
     } catch (error) {
         throw new DeviceSpeechError(knownErrorCodeMessage(error, DEVICE_ERROR_MESSAGES, DEVICE_TRANSCRIBE_FAILURE_MESSAGE));

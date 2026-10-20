@@ -27,6 +27,7 @@ import { BrowserModelSetup } from "./BrowserModelSetup";
 import { useVoiceAvailability } from "./useVoiceAvailability";
 import { VoiceChoiceDropdown, type VoiceChoice } from "./VoiceChoiceDropdown";
 import { VoiceTestBench } from "./VoiceTestBench";
+import { VocabularySection } from "./VocabularySection";
 
 /** Why the saved choice cannot run here, if it cannot. */
 function unavailableReason(engine: VoiceEngine): string {
@@ -127,7 +128,7 @@ export function VoiceSettings() {
   if (loading) {
     return (
       <div className="space-y-8" aria-busy="true">
-        {[0, 1].map((i) => (
+        {[0, 1, 2].map((i) => (
           <section key={i} className="space-y-3">
             <div className="h-5 w-32 animate-pulse rounded bg-gray-100" />
             <div className="h-32 animate-pulse rounded-xl bg-gray-100" />
@@ -302,6 +303,8 @@ export function VoiceSettings() {
           )}
         </SettingsCard>
       </section>
+
+      <VocabularySection />
 
       <section className="space-y-3">
         <SettingsHeading>Read aloud</SettingsHeading>

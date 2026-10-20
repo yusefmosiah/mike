@@ -100,6 +100,7 @@ import {
 import { PermissionDeniedPopup } from "@/app/components/popups/PermissionDeniedPopup";
 import { MikeIcon } from "@/app/components/chat/mike-icon";
 import { useAuth } from "@/app/contexts/AuthContext";
+import { useDictationContext } from "@/app/lib/voice/dictationVocabulary";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { HeaderActionsMenu } from "@/app/components/shared/HeaderActionsMenu";
@@ -331,6 +332,13 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     // only they answer other members' requests to run code there.
     const [loadedChat, setLoadedChat] = useState<{ chatId: string; chat: Chat } | null>(null);
     const [chatTitle, setChatTitle] = useState<string | null>(null);
+    // Names on this page that dictation should spell exactly.
+    useDictationContext("project-chat", {
+        projectName: project?.name,
+        chatTitle,
+        filenames: project?.documents?.map((document) => document.filename),
+        people: [project?.owner_display_name],
+    });
     const [chatTitleEdit, setChatTitleEdit] = useState<{
         chatId: string;
         title: string;

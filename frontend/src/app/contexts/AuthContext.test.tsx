@@ -15,6 +15,14 @@ const {
     updateAuthPassword: vi.fn(),
 }));
 
+const { resetDictationVocabulary } = vi.hoisted(() => ({
+    resetDictationVocabulary: vi.fn(),
+}));
+
+vi.mock("@/app/lib/voice/dictationVocabulary", () => ({
+    resetDictationVocabulary,
+}));
+
 vi.mock("@/app/lib/authApi", () => ({
     getAuthSession,
     logout,
@@ -52,7 +60,28 @@ describe("AuthProvider", () => {
         logout.mockReset();
         updateAuthEmail.mockReset();
         updateAuthPassword.mockReset();
+        resetDictationVocabulary.mockReset();
         window.localStorage.clear();
+    });
+
+    it("forgets the dictation vocabulary when the user signs out, not when they sign in", async () => {
+        getAuthSession.mockResolvedValue(user);
+        logout.mockResolvedValue(undefined);
+        render(
+            <AuthProvider>
+                <Consumer />
+            </AuthProvider>,
+        );
+        await waitFor(() =>
+            expect(screen.getByTestId("user")).toHaveTextContent(user.email),
+        );
+        expect(resetDictationVocabulary).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("user")).toHaveTextContent("signed-out"),
+        );
+        expect(resetDictationVocabulary).toHaveBeenCalledTimes(1);
     });
 
     it("surfaces an initial session failure without leaving loading stuck", async () => {

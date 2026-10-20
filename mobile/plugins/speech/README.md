@@ -37,7 +37,7 @@ stopping there cut every chunk off after about 13 seconds.
 | --- | --- | --- |
 | `status` | `language?` (BCP 47; default the phone's), `engine?` (`"fluid-mini"`; absent means Apple's recognizer, so an older web build keeps working) | `{ state, engine?, locale? }`; `state` is `available`, `downloadable`, `downloading` or `unavailable` |
 | `install` | `language?`, `engine?` (a no-op for `"fluid-mini"`, which ships in the app) | the new status, after Apple's speech model for the language downloads (a system download; called only from the user's click) |
-| `transcribe` | `audio` (base64), `mimeType`, `language?`, `engine?` (`"fluid-mini"` ignores `language`) | `{ text }` |
+| `transcribe` | `audio` (base64), `mimeType`, `language?`, `engine?` (`"fluid-mini"` ignores `language`), `vocabulary?` (up to 100 names and terms of at most 64 characters, the person's first; set as `contextualStrings` on `SFSpeechRecognitionRequest` and `AnalysisContext` for `SpeechAnalyzer`; `"fluid-mini"` ignores it; an older app build ignores it too) | `{ text }` |
 | `voices` | none | `{ voices: [{ id, name, language, quality }] }`; `quality` is `default`, `enhanced` or `premium` |
 | `speak` | `text` (up to 20,000 characters), `voice?` (an `id`), `language?` | `{ audio, mimeType: "audio/wav" }`, 16-bit mono PCM from `AVSpeechSynthesizer.write` |
 

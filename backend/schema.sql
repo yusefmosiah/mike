@@ -50,6 +50,8 @@ create table if not exists public.user_profiles (
   -- Per-model auto-compact thresholds in tokens ({ "<model id>": 500000 }),
   -- set with `/autocompact`; a model without an entry uses the default.
   autocompact_tokens jsonb not null default '{}'::jsonb,
+  -- Names and terms dictation should spell exactly (array of strings).
+  dictation_vocabulary jsonb not null default '[]'::jsonb,
   last_selected_chat_model text,
   last_selected_reasoning_level text check (last_selected_reasoning_level in ('none', 'low', 'medium', 'high', 'xhigh', 'max')),
   quote_model text,
@@ -8177,5 +8179,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_11_text_upload_types.sql'),
   ('20261010_12_skill_versions.sql'),
   ('20261012_01_web_reader_snapshots.sql'),
-  ('20261013_01_autocompact_tokens.sql')
+  ('20261013_01_autocompact_tokens.sql'),
+  ('20261020_01_dictation_vocabulary.sql')
 on conflict (filename) do nothing;

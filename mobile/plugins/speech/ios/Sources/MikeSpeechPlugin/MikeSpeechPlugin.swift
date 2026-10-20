@@ -67,6 +67,8 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let language = call.getString("language")
         let fluidMini = Self.usesFluidMini(call)
+        // Fluid Speech Mini ignores the vocabulary for now; an older web build sends none.
+        let vocabulary = OnDeviceSpeech.contextualStrings(call.getArray("vocabulary", String.self))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("mike-dictation-\(UUID().uuidString)")
             .appendingPathExtension(ext)
@@ -76,7 +78,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
                 try audio.write(to: url, options: [.atomic, .completeFileProtection])
                 let text = fluidMini
                     ? try await FluidSpeechMini.transcribe(file: url)
-                    : try await OnDeviceSpeech.transcribe(file: url, language: language)
+                    : try await OnDeviceSpeech.transcribe(file: url, language: language, vocabulary: vocabulary)
                 call.resolve(["text": text])
             } catch {
                 Self.reject(call, error)

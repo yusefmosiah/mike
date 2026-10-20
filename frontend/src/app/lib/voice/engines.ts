@@ -15,7 +15,9 @@ import {
     speakOnDevice,
     transcribeOnDevice,
 } from "./deviceSpeech";
+import { currentDictationVocabulary, loadUserVocabulary, recognizerTerms } from "./dictationVocabulary";
 import { loadVoicePreferences, type VoicePreferences } from "./preferences";
+import { correctWithVocabulary, type DictationVocabulary } from "./vocabulary";
 
 /**
  * Dictation on the phone: Fluid Speech Mini when the app has it, the choice
@@ -23,28 +25,47 @@ import { loadVoicePreferences, type VoicePreferences } from "./preferences";
  * only); otherwise Apple's recognizer. If Fluid Speech Mini fails, Apple's
  * takes the recording; when that fails too, the first error is the one shown.
  */
-async function transcribeOnPhone(blob: Blob, preferences: VoicePreferences["transcription"]): Promise<string> {
+async function transcribeOnPhone(
+    blob: Blob,
+    preferences: VoicePreferences["transcription"],
+    vocabulary: DictationVocabulary,
+): Promise<string> {
+    // Apple's recognizer is told the terms; the extra argument is left out
+    // when there are none.
+    const terms = recognizerTerms(vocabulary);
+    const withApple = () =>
+        terms.length > 0
+            ? transcribeOnDevice(blob, preferences.language, undefined, terms)
+            : transcribeOnDevice(blob, preferences.language);
     const wantsFluid = preferences.model !== "apple" && isEnglishLanguage(preferences.language);
     if (!wantsFluid || !(await fluidSpeechMiniAvailable())) {
-        return transcribeOnDevice(blob, preferences.language);
+        return withApple();
     }
     try {
         return await transcribeOnDevice(blob, preferences.language, FLUID_MINI_ENGINE);
     } catch (error) {
         try {
-            return await transcribeOnDevice(blob, preferences.language);
+            return await withApple();
         } catch {
             throw error;
         }
     }
 }
 
-export async function transcribeRecording(
+/** The vocabulary for this dictation: the person's list (fetched if need be) and the page's names. */
+async function dictationVocabulary(): Promise<DictationVocabulary> {
+    // A list that cannot be loaded (offline, signed out) is the same as none.
+    await loadUserVocabulary().catch(() => undefined);
+    return currentDictationVocabulary();
+}
+
+async function recognise(
     blob: Blob,
-    preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
+    preferences: VoicePreferences["transcription"],
+    vocabulary: DictationVocabulary,
 ): Promise<string> {
     if (preferences.engine === "device") {
-        return transcribeOnPhone(blob, preferences);
+        return transcribeOnPhone(blob, preferences, vocabulary);
     }
     if (preferences.engine === "webgpu") {
         const { transcribeInBrowser } = await import("./browserModels");
@@ -57,6 +78,24 @@ export async function transcribeRecording(
             : { language: preferences.language },
     );
     return text;
+}
+
+/**
+ * Dictation text from a recording, with the person's vocabulary applied to
+ * whatever engine heard it.
+ */
+export async function transcribeRecording(
+    blob: Blob,
+    preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
+    vocabulary?: DictationVocabulary,
+): Promise<string> {
+    const terms = vocabulary ?? (await dictationVocabulary());
+    return correctWithVocabulary(await recognise(blob, preferences, terms), terms);
+}
+
+/** Applies the vocabulary to text an engine produced itself (the browser's own recognition). */
+export async function correctDictation(text: string): Promise<string> {
+    return correctWithVocabulary(text, await dictationVocabulary());
 }
 
 /**

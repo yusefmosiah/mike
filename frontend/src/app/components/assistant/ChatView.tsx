@@ -72,6 +72,7 @@ import {
 } from "@/app/lib/modelAvailability";
 import { can, roleFrom } from "@/app/lib/permissions";
 import { useAuth } from "@/app/contexts/AuthContext";
+import { useDictationContext } from "@/app/lib/voice/dictationVocabulary";
 import {
     createBranch,
     deleteDocument,
@@ -284,6 +285,15 @@ export function ChatView({
         chat ??
         null;
     const activeChatRole = activeChat ? roleFrom(activeChat) : null;
+    // Names in this chat that dictation should spell exactly.
+    useDictationContext("chat-view", {
+        projectName: activeChat?.project_name,
+        chatTitle: activeChat?.title,
+        filenames: messages.flatMap((message) =>
+            (message.files ?? []).map((file) => file.filename),
+        ),
+        people: [activeChat?.creator_display_name],
+    });
     const panelCloseTimerRef = useRef<number | null>(null);
     const activeTab = tabs.find((tab) => tab.id === activeTabId);
     const activeCitation =

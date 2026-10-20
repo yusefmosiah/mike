@@ -41,6 +41,7 @@ import {
 } from "@/app/components/popups/PermissionDeniedPopup";
 import { AccessModal } from "@/app/components/modals/AccessModal";
 import { useAuth } from "@/app/contexts/AuthContext";
+import { useDictationContext } from "@/app/lib/voice/dictationVocabulary";
 import {
     type Capability,
     type ProjectRole,
@@ -174,6 +175,12 @@ export function ProjectWorkspaceProvider({
     children: ReactNode;
 }) {
     const [project, setProject] = useState<Project | null>(null);
+    // Names on this page that dictation should spell exactly.
+    useDictationContext("project-workspace", {
+        projectName: project?.name,
+        filenames: project?.documents?.map((document) => document.filename),
+        people: [project?.owner_display_name],
+    });
     const [folders, setFolders] = useState<ProjectFolder[]>([]);
     const [projectLoading, setProjectLoading] = useState(true);
     const [searchBySection, setSearchBySection] = useState<

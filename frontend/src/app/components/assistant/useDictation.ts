@@ -9,7 +9,8 @@ import {
 } from "@/app/lib/voice/browserSpeech";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
-import { transcribeRecording } from "@/app/lib/voice/engines";
+import { correctDictation, transcribeRecording } from "@/app/lib/voice/engines";
+import { loadUserVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
 /**
@@ -163,6 +164,9 @@ export function useDictation({
         startingRef.current = true;
         try {
             setError(null);
+            // Fetch the person's vocabulary while they speak; a failure only
+            // means dictation runs without it.
+            void loadUserVocabulary().catch(() => undefined);
             if (loadVoicePreferences().transcription.engine === "browser") {
                 try {
                     browserSessionRef.current = startOnDeviceRecognition(
@@ -279,6 +283,7 @@ export function useDictation({
             setBusy(true);
             session
                 .stop()
+                .then((text) => correctDictation(text))
                 .then((text) => {
                     const trimmed = text.trim();
                     if (trimmed && activeRef.current) {

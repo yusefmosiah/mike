@@ -96,6 +96,17 @@ describe("transcribeOnDevice", () => {
         });
     });
 
+    it("sends the vocabulary to Apple's recognizer but not to Fluid Speech Mini", async () => {
+        inApp();
+        nativePromise.mockResolvedValue({ text: "" });
+        await transcribeOnDevice(new Blob(["hi"], { type: "audio/mp4" }), "en-GB", undefined, ["Ximena Achterberg"]);
+        expect(nativePromise.mock.calls[0][2]).toMatchObject({ vocabulary: ["Ximena Achterberg"] });
+        await transcribeOnDevice(new Blob(["hi"], { type: "audio/mp4" }), undefined, "fluid-mini", ["Ximena Achterberg"]);
+        expect(nativePromise.mock.calls[1][2]).not.toHaveProperty("vocabulary");
+        await transcribeOnDevice(new Blob(["hi"], { type: "audio/mp4" }), "en-GB", undefined, []);
+        expect(nativePromise.mock.calls[2][2]).not.toHaveProperty("vocabulary");
+    });
+
     it("encodes a recording larger than one chunk", async () => {
         inApp();
         nativePromise.mockResolvedValueOnce({ text: "" });

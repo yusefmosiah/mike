@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
     transcribeAudio: vi.fn(async () => ({ text: "hello" })),
     synthesizeSpeech: vi.fn(async () => new Blob(["mp3"])),
+    getDictationVocabulary: vi.fn(async () => ({ terms: [] as string[] })),
+    saveDictationVocabulary: vi.fn(async (terms: string[]) => ({ terms })),
 }));
 vi.mock("@/app/lib/mikeApi", () => api);
 const local = vi.hoisted(() => ({
@@ -21,9 +23,14 @@ const phone = vi.hoisted(() => ({
 }));
 vi.mock("./deviceSpeech", () => phone);
 
-import { speechRenderPlan, synthesizeSentence, transcribeRecording } from "./engines";
+import { resetDictationVocabulary, setDictationContext } from "./dictationVocabulary";
+import { correctDictation, speechRenderPlan, synthesizeSentence, transcribeRecording } from "./engines";
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+    vi.clearAllMocks();
+    api.getDictationVocabulary.mockResolvedValue({ terms: [] });
+    resetDictationVocabulary();
+});
 
 describe("transcribeRecording", () => {
     const blob = new Blob(["a"], { type: "audio/webm" });
@@ -42,6 +49,48 @@ describe("transcribeRecording", () => {
         expect(await transcribeRecording(blob, { engine: "device", language: "en-GB" })).toBe("phone words");
         expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, "en-GB");
         expect(api.transcribeAudio).not.toHaveBeenCalled();
+    });
+
+    describe("with a vocabulary", () => {
+        it("corrects the text of any engine, with the person's terms and the page's names", async () => {
+            api.getDictationVocabulary.mockResolvedValue({ terms: ["Ximena Achterberg"] });
+            setDictationContext("test", ["Okonkwo-Lindqvist"]);
+            api.transcribeAudio.mockResolvedValueOnce({ text: "Ask Zamina Akterberg about Conquo Lindqvist." });
+            expect(await transcribeRecording(blob, { engine: "operator" })).toBe(
+                "Ask Ximena Achterberg about Okonkwo-Lindqvist.",
+            );
+        });
+
+        it("transcribes without it when the list cannot be loaded", async () => {
+            api.getDictationVocabulary.mockRejectedValue(new Error("offline"));
+            api.transcribeAudio.mockResolvedValueOnce({ text: "Zamina Akterberg" });
+            expect(await transcribeRecording(blob, { engine: "operator" })).toBe("Zamina Akterberg");
+        });
+
+        it("corrects text an engine produced itself", async () => {
+            api.getDictationVocabulary.mockResolvedValue({ terms: ["Ximena Achterberg"] });
+            expect(await correctDictation("Zamina Akterberg")).toBe("Ximena Achterberg");
+        });
+
+        it("gives Apple's recognizer up to 100 terms, the person's first", async () => {
+            const own = Array.from({ length: 60 }, (_, i) => `Person Term${i}`);
+            api.getDictationVocabulary.mockResolvedValue({ terms: own });
+            setDictationContext("test", Array.from({ length: 80 }, (_, i) => `Automatic Name${i}`));
+            await transcribeRecording(blob, { engine: "device", language: "en-GB" });
+            const args = phone.transcribeOnDevice.mock.calls[0];
+            expect(args.slice(0, 3)).toEqual([blob, "en-GB", undefined]);
+            const sent = args[3] as string[];
+            expect(sent).toHaveLength(100);
+            expect(sent.slice(0, 60)).toEqual(own);
+            expect(sent[60]).toBe("Automatic Name0");
+        });
+
+        it("does not send the vocabulary to Fluid Speech Mini", async () => {
+            phone.fluidSpeechMiniAvailable.mockResolvedValue(true);
+            api.getDictationVocabulary.mockResolvedValue({ terms: ["Ximena Achterberg"] });
+            await transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini" });
+            expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, undefined, "fluid-mini");
+        });
     });
 
     describe("on the phone with Fluid Speech Mini", () => {

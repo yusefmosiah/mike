@@ -48,6 +48,26 @@ enum OnDeviceSpeech {
         }
     }
 
+    /// The most terms handed to the recognizer.
+    static let maxContextualStrings = 100
+    /// The longest a term can be (the web app allows 64 characters).
+    static let maxContextualStringLength = 64
+
+    /// The vocabulary the web app sent, cleaned for the recognizer: trimmed,
+    /// non-empty, at most 64 characters each, no repeats, at most 100,
+    /// in the order sent (the person's own terms come first).
+    static func contextualStrings(_ raw: [String]?) -> [String] {
+        var seen = Set<String>()
+        var terms: [String] = []
+        for item in raw ?? [] {
+            let term = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty, term.count <= maxContextualStringLength, seen.insert(term.lowercased()).inserted else { continue }
+            terms.append(term)
+            if terms.count == maxContextualStrings { break }
+        }
+        return terms
+    }
+
     static func requestedLocale(_ language: String?) -> Locale {
         if let language = language?.trimmingCharacters(in: .whitespaces), !language.isEmpty {
             return Locale(identifier: language)
@@ -85,7 +105,9 @@ enum OnDeviceSpeech {
     }
 
     /// Transcribes an audio file (m4a, wav, aiff, mp3: what AVAudioFile reads).
-    static func transcribe(file url: URL, language: String?) async throws -> String {
+    /// `vocabulary` (names and terms to spell exactly) biases the recognizer
+    /// toward those spellings; it never leaves the device.
+    static func transcribe(file url: URL, language: String?, vocabulary: [String] = []) async throws -> String {
         let file: AVAudioFile
         do {
             file = try AVAudioFile(forReading: url)
@@ -96,17 +118,17 @@ enum OnDeviceSpeech {
         if #available(iOS 26.0, macOS 26.0, *), let module = await AnalyzerModule.make(locale) {
             switch await module.state() {
             case .available:
-                return try await module.transcribe(file)
+                return try await module.transcribe(file, vocabulary: vocabulary)
             case .downloadable, .downloading:
                 throw Failure.notInstalled
             case .unavailable:
                 break
             }
         }
-        return try await transcribeWithRecognizer(url, locale: locale)
+        return try await transcribeWithRecognizer(url, locale: locale, vocabulary: vocabulary)
     }
 
-    private static func transcribeWithRecognizer(_ url: URL, locale: Locale) async throws -> String {
+    private static func transcribeWithRecognizer(_ url: URL, locale: Locale, vocabulary: [String]) async throws -> String {
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.supportsOnDeviceRecognition else {
             throw Failure.unavailable
         }
@@ -114,6 +136,9 @@ enum OnDeviceSpeech {
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = false
+        if !vocabulary.isEmpty {
+            request.contextualStrings = vocabulary
+        }
         if #available(iOS 16.0, macOS 13.0, *) {
             request.addsPunctuation = true
         }
@@ -216,7 +241,7 @@ private enum AnalyzerModule {
         }
     }
 
-    func transcribe(_ file: AVAudioFile) async throws -> String {
+    func transcribe(_ file: AVAudioFile, vocabulary: [String]) async throws -> String {
         let segments: Task<[String], Error>
         switch self {
         case .transcriber(let module, _):
@@ -237,7 +262,16 @@ private enum AnalyzerModule {
             }
         }
         do {
-            let analyzer = try await SpeechAnalyzer(inputAudioFile: file, modules: [module], finishAfterFile: true)
+            let context = AnalysisContext()
+            if !vocabulary.isEmpty {
+                context.contextualStrings = [.general: vocabulary]
+            }
+            let analyzer = try await SpeechAnalyzer(
+                inputAudioFile: file,
+                modules: [module],
+                analysisContext: context,
+                finishAfterFile: true
+            )
             let parts = try await segments.value
             withExtendedLifetime(analyzer) {}
             return parts
