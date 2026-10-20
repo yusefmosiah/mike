@@ -97,7 +97,7 @@ import {
     type AutocompactNotice,
 } from "@/app/lib/autocompactCommand";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
-import { LiveDictationText } from "./LiveDictationText";
+import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
 
 export interface ChatInputHandle {
@@ -488,23 +488,83 @@ function ChatInputForChatImpl(
         };
     }, [slashCommandsLoading]);
 
+    // While the iPhone transcribes live, the heard words are shown in the
+    // composer itself, spliced into the text that was there at the caret when
+    // recording began. The composer is read-only until the final text lands
+    // (or the dictation is cancelled and the original text comes back).
+    const liveText = dictation.liveText;
+    const liveActive = liveText !== null;
+    const liveBaseRef = useRef<{ original: string; before: string; after: string } | null>(null);
+    const resizeTextarea = (el: HTMLTextAreaElement) => {
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+    };
+    useLayoutEffect(() => {
+        const el = textareaRef.current;
+        if (!liveText) return;
+        if (!liveBaseRef.current) {
+            const current = el?.value ?? "";
+            const caret = el?.selectionStart ?? current.length;
+            const selectionEnd = el?.selectionEnd ?? caret;
+            liveBaseRef.current = {
+                original: current,
+                before: current.slice(0, caret),
+                after: current.slice(selectionEnd),
+            };
+        }
+        const base = liveBaseRef.current;
+        setValue(spliceDictation(base.before, liveTextOf(liveText), base.after));
+    }, [liveText]);
+    // Keep the latest words in view as the composer grows.
+    useLayoutEffect(() => {
+        const el = textareaRef.current;
+        if (!liveActive || !el) return;
+        resizeTextarea(el);
+        el.scrollTop = el.scrollHeight;
+    }, [liveActive, value]);
+
     // A finished dictation lands at the caret as ordinary editable text —
     // the composer never submits it on the user's behalf. The version
-    // counter makes each transcript insert exactly once.
+    // counter makes each transcript insert exactly once. After a live
+    // dictation the final text replaces the live text in place.
     const dictatedTranscript = dictation.transcript;
     const dictatedTranscriptVersion = dictation.transcriptVersion;
     useEffect(() => {
         if (dictatedTranscriptVersion === 0 || !dictatedTranscript) return;
         const el = textareaRef.current;
         if (!el) return;
+        const base = liveBaseRef.current;
+        if (base) {
+            liveBaseRef.current = null;
+            const before = spliceDictation(base.before, dictatedTranscript, "");
+            const next = spliceDictation(base.before, dictatedTranscript, base.after);
+            setValue(next);
+            el.value = next;
+            el.setSelectionRange(before.length, before.length);
+            resizeTextarea(el);
+            el.focus();
+            return;
+        }
         const caret = el.selectionStart ?? el.value.length;
         const selectionEnd = el.selectionEnd ?? caret;
         el.setRangeText(dictatedTranscript, caret, selectionEnd, "end");
-        el.style.height = "auto";
-        el.style.height = `${el.scrollHeight}px`;
+        resizeTextarea(el);
         setValue(el.value);
         el.focus();
     }, [dictatedTranscript, dictatedTranscriptVersion]);
+    // A live dictation that ended without final text (cancelled, failed or
+    // silent) gives the composer back exactly as it was.
+    useEffect(() => {
+        if (liveText || !liveBaseRef.current) return;
+        const { original } = liveBaseRef.current;
+        liveBaseRef.current = null;
+        setValue(original);
+        const el = textareaRef.current;
+        if (el) {
+            el.value = original;
+            resizeTextarea(el);
+        }
+    }, [liveText]);
 
     const handleAddDocsFromSelector = useCallback(
         (selectedDocs: Document[]) => {
@@ -869,7 +929,7 @@ function ChatInputForChatImpl(
 
     const handleSubmit = () => {
         const query = value.trim();
-        if (!composerOpen) return;
+        if (!composerOpen || liveActive) return;
         // An edited prompt is sent as written: commands apply to new messages.
         if (editTarget) {
             submitMessage(query, null);
@@ -1100,13 +1160,10 @@ function ChatInputForChatImpl(
                         </div>
                     )}
 
-                    {/* The text heard so far, while the iPhone transcribes live */}
-                    {dictation.liveText && (
-                        <LiveDictationText
-                            confirmed={dictation.liveText.confirmed}
-                            volatile={dictation.liveText.volatile}
-                        />
-                    )}
+                    {/* Confirmed live words only, for screen readers: the textarea itself changes too often to announce */}
+                    <span aria-live="polite" className="sr-only">
+                        {liveText?.confirmed ?? ""}
+                    </span>
 
                     {/* Input */}
                     <div className="px-4 pt-4">
@@ -1114,11 +1171,16 @@ function ChatInputForChatImpl(
                             ref={textareaRef}
                             rows={1}
                             disabled={!composerOpen}
-                            placeholder={placeholderFor({
-                                canSend,
-                                chatLoading,
-                                isLoading,
-                            })}
+                            readOnly={liveActive}
+                            placeholder={
+                                liveActive
+                                    ? "Listening…"
+                                    : placeholderFor({
+                                          canSend,
+                                          chatLoading,
+                                          isLoading,
+                                      })
+                            }
                             value={value}
                             onChange={(event) => updateInput(event.target)}
                             onPaste={handlePaste}

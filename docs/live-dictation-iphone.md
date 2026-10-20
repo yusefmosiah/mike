@@ -120,8 +120,19 @@ Deviations from the design above:
 - Added a Cancel (X) button beside Stop while recording, and `cancel()` on
   `useDictation` for every engine; the design's "cancel discards" had no
   control to hang on.
-- While the final text is being collected after Stop, the live text stays
-  visible until the final text lands in the composer.
+- The live text appears in the composer's own text input, not in a separate
+  area above it. When recording starts, `ChatInput` remembers the text before
+  and after the caret (or selection); on every update the textarea shows
+  before + confirmed + volatile + after, with a space added only where words
+  would run together (`lib/voice/liveComposer.ts`), and stays scrolled to the
+  newest text. The textarea is `readOnly` until the dictation ends, and the
+  placeholder reads "Listening…" while nothing is there yet. On Stop the final
+  text replaces the live text in place (caret after it); on Cancel, or when
+  stopping fails or returns nothing, the composer returns exactly to what it
+  was. The text stays in place, read-only, while the final text is collected.
+  A visually hidden `aria-live="polite"` region carries the confirmed text
+  only, so the textarea's changing value does not flood a screen reader. There
+  is no separate bar.
 - An app build in the background: the app going to the background ends the
   dictation like an interruption (the model is then unloaded after the idle
   limit rather than at once, because it was in use when the background
