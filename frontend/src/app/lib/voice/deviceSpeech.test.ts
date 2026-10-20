@@ -266,5 +266,7 @@ describe("isEnglishLanguage", () => {
         expect(isEnglishLanguage()).toBe(false);
         vi.stubGlobal("navigator", { language: "en-AU" });
         expect(isEnglishLanguage()).toBe(true);
+        vi.stubGlobal("navigator", { language: "" });
+        expect(isEnglishLanguage()).toBe(true);
     });
 });

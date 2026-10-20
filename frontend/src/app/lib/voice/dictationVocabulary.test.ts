@@ -1,3 +1,4 @@
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -15,6 +16,8 @@ import {
     resetDictationVocabulary,
     saveUserVocabulary,
     setDictationContext,
+    useDictationContext,
+    useUserVocabulary,
 } from "./dictationVocabulary";
 
 beforeEach(() => {
@@ -75,5 +78,54 @@ describe("the vocabulary in use", () => {
         api.getDictationVocabulary.mockRejectedValueOnce(new Error("offline"));
         await expect(loadUserVocabulary()).rejects.toThrow();
         await expect(loadUserVocabulary()).resolves.toEqual(["Okonkwo-Lindqvist"]);
+    });
+});
+
+describe("edges", () => {
+    it("treats a malformed load as an empty list and works before any load", async () => {
+        expect(currentDictationVocabulary()).toEqual({ terms: [], automatic: [] });
+        expect(recognizerTerms({ terms: ["Okonkwo-Lindqvist"] })).toEqual(["Okonkwo-Lindqvist"]);
+        api.getDictationVocabulary.mockResolvedValueOnce({ terms: null as unknown as string[] });
+        await expect(loadUserVocabulary(true)).resolves.toEqual([]);
+    });
+
+    it("ignores withdrawing names a page never published, and names over four words", () => {
+        setDictationContext("never", []);
+        expect(automaticTermsFrom({ projectName: "One two three four five" })).toEqual([]);
+    });
+});
+
+describe("signing out mid-load", () => {
+    it("lets the next load start afresh", async () => {
+        const first = loadUserVocabulary();
+        resetDictationVocabulary();
+        const second = loadUserVocabulary();
+        expect(second).not.toBe(first);
+        await Promise.all([first, second]);
+        expect(api.getDictationVocabulary).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("hooks", () => {
+    it("gives Settings nothing until the list loads, then the list sorted", async () => {
+        const { result, rerender } = renderHook(() => useUserVocabulary());
+        expect(result.current).toBeNull();
+        rerender();
+        api.getDictationVocabulary.mockResolvedValueOnce({ terms: ["Zeta Holdings", "alpha Trust"] });
+        await act(() => loadUserVocabulary());
+        expect(result.current).toEqual(["alpha Trust", "Zeta Holdings"]);
+    });
+
+    it("publishes a page's names while it is mounted", () => {
+        const first = { chatTitle: "Smith v Jones" };
+        const { rerender, unmount } = renderHook(({ input }) => useDictationContext("chat", input), {
+            initialProps: { input: first },
+        });
+        expect(currentDictationVocabulary().automatic).toEqual(["Smith v Jones"]);
+        rerender({ input: first });
+        rerender({ input: { chatTitle: "Okonkwo Holdings" } });
+        expect(currentDictationVocabulary().automatic).toEqual(["Okonkwo Holdings"]);
+        unmount();
+        expect(currentDictationVocabulary().automatic).toEqual([]);
     });
 });

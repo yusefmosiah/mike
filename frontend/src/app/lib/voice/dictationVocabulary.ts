@@ -106,11 +106,14 @@ function subscribe(listener: () => void) {
     return () => void listeners.delete(listener);
 }
 
+// The snapshot is the list itself (replaced, never mutated) so that a render
+// reads what the store holds rather than a remembered value. The server never
+// loads a list, so the same getter serves its render too.
+const snapshot = () => userTerms;
+
 /** The person's list for Settings: undefined until it has loaded. */
 export function useUserVocabulary(): readonly string[] | null {
-    // The snapshot is the list itself (replaced, never mutated) so that a
-    // render reads what the store holds rather than a remembered value.
-    const terms = useSyncExternalStore(subscribe, () => userTerms, () => null);
+    const terms = useSyncExternalStore(subscribe, snapshot, snapshot);
     return useMemo(() => (terms === null ? null : sortTerms(terms)), [terms]);
 }
 

@@ -113,6 +113,21 @@ describe("correctWithVocabulary rules", () => {
         expect(fixed).toBe("Ximena Achterberg");
     });
 
+    it("fixes every occurrence of a name, left to right", () => {
+        const text = "Zamina Akterberg called; then Zamina Akterberg wrote.";
+        expect(correctWithVocabulary(text, { terms: ["Ximena Achterberg"] })).toBe(
+            "Ximena Achterberg called; then Ximena Achterberg wrote.",
+        );
+    });
+
+    it("skips blank, punctuation-only, over-long and repeated terms", () => {
+        const detailed = correctWithVocabularyDetailed("Zamina Akterberg", {
+            terms: ["", "  ", "--", "One Two Three Four Five", "Ximena Achterberg", "ximena achterberg"],
+        });
+        expect(detailed.text).toBe("Ximena Achterberg");
+        expect(detailed.matches).toHaveLength(1);
+    });
+
     it("ignores automatic terms under six characters, and short windows for them", () => {
         expect(correctWithVocabulary("the Smyth deal", { terms: [], automatic: ["Smith"] })).toBe("the Smyth deal");
         expect(correctWithVocabulary("the Smyth deal", { terms: ["Smith"] })).toBe("the Smith deal");

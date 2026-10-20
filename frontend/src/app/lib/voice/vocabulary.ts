@@ -51,8 +51,6 @@ function normalise(text: string): string {
 }
 
 function levenshtein(a: string, b: string): number {
-    if (!a.length) return b.length;
-    if (!b.length) return a.length;
     let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
     for (let i = 1; i <= a.length; i++) {
         const current = [i];
@@ -69,8 +67,7 @@ function levenshtein(a: string, b: string): number {
 }
 
 function similarity(a: string, b: string): number {
-    const longest = Math.max(a.length, b.length);
-    return longest ? 1 - levenshtein(a, b) / longest : 1;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length, 1);
 }
 
 function codesOf(joined: string): string[] {
@@ -98,7 +95,7 @@ function prepare(vocabulary: DictationVocabulary): PreparedTerm[] {
     const add = (raw: string, automatic: boolean) => {
         const text = raw.trim();
         const words = normalise(text).split(" ").filter(Boolean);
-        if (!text || words.length === 0 || words.length > MAX_TERM_WORDS) return;
+        if (words.length === 0 || words.length > MAX_TERM_WORDS) return;
         const joined = words.join("");
         if (seen.has(joined)) return;
         if (automatic && joined.length < AUTOMATIC_MIN_CHARS) return;
@@ -218,8 +215,8 @@ export function correctWithVocabularyDetailed(
             out.push(tokens[index++]);
             continue;
         }
-        const lead = tokens[hit.from].match(/^[^\p{L}\p{N}]*/u)?.[0] ?? "";
-        const trail = tokens[hit.to - 1].match(/[^\p{L}\p{N}]*$/u)?.[0] ?? "";
+        const lead = tokens[hit.from].replace(/^([^\p{L}\p{N}]*)[\s\S]*$/u, "$1");
+        const trail = tokens[hit.to - 1].replace(/^[\s\S]*?([^\p{L}\p{N}]*)$/u, "$1");
         out.push(lead + hit.term.text + trail);
         matches.push({
             original: tokens.slice(hit.from, hit.to).join(" "),
