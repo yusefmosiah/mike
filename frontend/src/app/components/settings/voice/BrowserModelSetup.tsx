@@ -9,6 +9,7 @@ import {
   browserModelRuntime,
   estimateBrowserModelSetup,
   hasBrowserModelConsent,
+  loadBrowserPhonon,
   loadBrowserSpeaker,
   loadBrowserTranscriber,
   setBrowserModelConsent,
@@ -38,11 +39,13 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
   );
   const runtime = browserModelRuntime();
   const backend =
-    runtime.device === "webgpu"
-      ? "WebGPU"
-      : runtime.webkit
-        ? "WebAssembly (WebGPU is not used in this browser)"
-        : "WebAssembly (slower; this browser has no WebGPU)";
+    kind === "phonon"
+      ? "WebGPU where this browser has it, otherwise the processor"
+      : runtime.device === "webgpu"
+        ? "WebGPU"
+        : runtime.webkit
+          ? "WebAssembly (WebGPU is not used in this browser)"
+          : "WebAssembly (slower; this browser has no WebGPU)";
 
   const estimate = async () => {
     setPhase({ step: "estimating" });
@@ -59,6 +62,7 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
     try {
       const onProgress = (fraction: number) => setPhase({ step: "loading", progress: fraction });
       if (kind === "transcription") await loadBrowserTranscriber(onProgress);
+      else if (kind === "phonon") await loadBrowserPhonon(onProgress);
       else await loadBrowserSpeaker(onProgress);
       setPhase({ step: "ready" });
     } catch (error) {
@@ -77,7 +81,7 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
       <SettingsDescription>
         {spec.label} runs in this browser on {backend}. What you say and what is read
         aloud stay on this device; the model is downloaded once and kept in the
-        browser&apos;s cache.
+        browser&apos;s cache{spec.downloadSize ? ` (${spec.downloadSize})` : ""}.
       </SettingsDescription>
       {phase.step === "ask" && (
         <PillButtonUI tone="white" size="sm" onClick={() => void estimate()}>

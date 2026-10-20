@@ -114,6 +114,125 @@ export function isEnglishLanguage(language?: string): boolean {
     return /^en([-_]|$)/i.test(tag);
 }
 
+/** The `engine` value that asks the plugin for Phonon. */
+export const PHONON_ENGINE = "phonon";
+
+/** Which voices the "device" read-aloud engine uses, stored as its `model`. */
+export type DeviceSpeechModel = "phonon" | "apple";
+export const DEVICE_SPEECH_MODELS: readonly DeviceSpeechModel[] = ["phonon", "apple"];
+
+/**
+ * Phonon on the phone: `not-installed` (its model is not downloaded yet),
+ * `installing`, `available`, or `unavailable` (iOS before 18, an app build
+ * without it, or no download source in this build).
+ */
+export type PhononState = "not-installed" | "installing" | "available" | "unavailable";
+const PHONON_STATES: readonly PhononState[] = ["not-installed", "installing", "available", "unavailable"];
+
+export interface PhononStatus {
+    state: PhononState;
+    /** While installing: the fraction downloaded, 0 to 1. */
+    progress?: number;
+    /** True when the first reading will first compile the models (about 10 seconds). */
+    compiling?: boolean;
+}
+
+const UNAVAILABLE: PhononStatus = { state: "unavailable" };
+
+function phononStatusOf(result: unknown): PhononStatus {
+    // An older app build ignores `engine` and answers about Apple's recognizer.
+    if (!result || typeof result !== "object" || (result as { engine?: unknown }).engine !== PHONON_ENGINE) {
+        return UNAVAILABLE;
+    }
+    const { state, progress, compiling } = result as { state?: unknown; progress?: unknown; compiling?: unknown };
+    const known = PHONON_STATES.find((candidate) => candidate === state);
+    if (!known) return UNAVAILABLE;
+    return {
+        state: known,
+        ...(typeof progress === "number" && Number.isFinite(progress) ? { progress: Math.min(1, Math.max(0, progress)) } : {}),
+        ...(compiling === true ? { compiling: true } : {}),
+    };
+}
+
+/** Whether Phonon can read aloud on this phone now, and how far its download is. */
+export async function phononStatus(): Promise<PhononStatus> {
+    const call = nativePromise();
+    if (!call) return UNAVAILABLE;
+    try {
+        return phononStatusOf(await call(PLUGIN, "status", { engine: PHONON_ENGINE }));
+    } catch {
+        return UNAVAILABLE;
+    }
+}
+
+let phononInstalled: Promise<boolean> | null = null;
+
+/**
+ * True when Phonon's model is downloaded and the app can use it. A positive
+ * answer is kept (reading aloud asks for every sentence); a negative one is
+ * asked again.
+ */
+export function phononAvailable(): Promise<boolean> {
+    if (phononInstalled) return phononInstalled;
+    const asked = phononStatus().then((status) => status.state === "available");
+    phononInstalled = asked;
+    void asked.then((ok) => {
+        if (!ok && phononInstalled === asked) phononInstalled = null;
+    });
+    return asked;
+}
+
+/** Forgets the cached answer of `phononAvailable` (after a download or a removal, and tests). */
+export function resetPhononAvailability(): void {
+    phononInstalled = null;
+}
+
+export const PHONON_INSTALL_FAILURE_MESSAGE = "Could not download the voice model. Check the connection and try again.";
+
+/**
+ * Downloads Phonon's model onto the phone (call from the person's click).
+ * `onProgress` hears the fraction downloaded, from the plugin's status, until
+ * the download ends. Resolves with the new status.
+ */
+export async function installPhonon(onProgress?: (fraction: number) => void): Promise<PhononStatus> {
+    const call = nativePromise();
+    if (!call) throw new DeviceSpeechError(PHONON_INSTALL_FAILURE_MESSAGE);
+    let polling = true;
+    const poll = async () => {
+        while (polling) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            if (!polling) return;
+            const { state, progress } = await phononStatus();
+            if (polling && state === "installing" && progress !== undefined) onProgress?.(progress);
+        }
+    };
+    void poll();
+    try {
+        await call(PLUGIN, "install", { engine: PHONON_ENGINE });
+    } catch {
+        throw new DeviceSpeechError(PHONON_INSTALL_FAILURE_MESSAGE);
+    } finally {
+        polling = false;
+    }
+    resetPhononAvailability();
+    const status = await phononStatus();
+    if (status.state !== "available") throw new DeviceSpeechError(PHONON_INSTALL_FAILURE_MESSAGE);
+    return status;
+}
+
+/** Deletes Phonon's model from the phone; reading aloud then uses Apple's voices. */
+export async function removePhonon(): Promise<PhononStatus> {
+    const call = nativePromise();
+    if (!call) return UNAVAILABLE;
+    try {
+        await call(PLUGIN, "remove", { engine: PHONON_ENGINE });
+    } catch {
+        // The status below says what is left.
+    }
+    resetPhononAvailability();
+    return phononStatus();
+}
+
 let fluidAvailable: Promise<boolean> | null = null;
 
 /**
@@ -210,13 +329,17 @@ const DEVICE_SPEAK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
     "too-long": "This is too long to read aloud on this iPhone at once.",
 };
 
-/** `text` spoken by one of the phone's voices, as a WAV file. */
-export async function speakOnDevice(text: string, voice?: string): Promise<Blob> {
+/**
+ * `text` spoken as a WAV file by one of Apple's voices on the phone, or, with
+ * `engine` `PHONON_ENGINE`, by Phonon (English, once downloaded; `voice` is
+ * then a Phonon voice name).
+ */
+export async function speakOnDevice(text: string, voice?: string, engine?: typeof PHONON_ENGINE): Promise<Blob> {
     const call = nativePromise();
     if (!call) throw new DeviceSpeechError(DEVICE_SPEAK_FAILURE_MESSAGE);
     let result: unknown;
     try {
-        result = await call(PLUGIN, "speak", { text, ...(voice ? { voice } : {}) });
+        result = await call(PLUGIN, "speak", { text, ...(voice ? { voice } : {}), ...(engine ? { engine } : {}) });
     } catch (error) {
         throw new DeviceSpeechError(knownErrorCodeMessage(error, DEVICE_SPEAK_ERROR_MESSAGES, DEVICE_SPEAK_FAILURE_MESSAGE));
     }

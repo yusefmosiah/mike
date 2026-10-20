@@ -10,11 +10,15 @@
 import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
 import {
     FLUID_MINI_ENGINE,
+    PHONON_ENGINE,
     fluidSpeechMiniAvailable,
+    phononAvailable,
     isEnglishLanguage,
     speakOnDevice,
     transcribeOnDevice,
 } from "./deviceSpeech";
+import { isPhononVoice } from "./browserModels.spec";
+import { looksEnglish } from "./englishText";
 import { currentDictationVocabulary, loadUserVocabulary, recognizerTerms } from "./dictationVocabulary";
 import { loadVoicePreferences, type VoicePreferences } from "./preferences";
 import { correctWithVocabulary, type DictationVocabulary } from "./vocabulary";
@@ -113,14 +117,35 @@ export function speechRenderPlan(
     return { maxChars: 1200, concurrency: 3 };
 }
 
+/**
+ * Read-aloud on the phone: Phonon when the choice (`model`) is not Apple's,
+ * the chosen voice (if any) is a Phonon voice, the text is English and the app
+ * has downloaded the model; otherwise Apple's voices. If Phonon fails, Apple's
+ * voice reads the sentence instead.
+ */
+async function speakOnPhone(text: string, preferences: VoicePreferences["speech"]): Promise<Blob> {
+    // A Phonon voice name means nothing to Apple's synthesizer.
+    const appleVoice = isPhononVoice(preferences.voice) ? undefined : preferences.voice;
+    const wantsPhonon =
+        preferences.model !== "apple" && (!preferences.voice || isPhononVoice(preferences.voice)) && looksEnglish(text);
+    if (wantsPhonon && (await phononAvailable())) {
+        try {
+            return await speakOnDevice(text, preferences.voice, PHONON_ENGINE);
+        } catch {
+            // Apple's voice below reads it.
+        }
+    }
+    return speakOnDevice(text, appleVoice);
+}
+
 export async function synthesizeSentence(
     text: string,
     preferences: VoicePreferences["speech"] = loadVoicePreferences().speech,
 ): Promise<Blob> {
-    if (preferences.engine === "device") return speakOnDevice(text, preferences.voice);
+    if (preferences.engine === "device") return speakOnPhone(text, preferences);
     if (preferences.engine === "webgpu") {
         const { speakWithBrowserModel } = await import("./browserModels");
-        return speakWithBrowserModel(text, { voice: preferences.voice });
+        return speakWithBrowserModel(text, { voice: preferences.voice, model: preferences.model });
     }
     if (preferences.engine === "openrouter") {
         return synthesizeSpeech(text, { provider: "openrouter", model: preferences.model, voice: preferences.voice });

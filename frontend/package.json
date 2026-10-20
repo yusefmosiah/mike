@@ -3,7 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
+        "predev": "node scripts/copy-phonon-tts.mjs",
         "dev": "next dev",
+        "prebuild": "node scripts/copy-phonon-tts.mjs",
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
@@ -55,6 +57,7 @@
         "next": "^16.3.8",
         "nextjs-toploader": "^3.9.17",
         "pdfjs-dist": "6.3.289",
+        "phonon-tts": "0.4.0",
         "react": "19.3.0",
         "react-dom": "19.3.0",
         "react-markdown": "^10.1.0",

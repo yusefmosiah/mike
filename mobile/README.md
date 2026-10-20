@@ -30,10 +30,14 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
   on iOS 27, could leave it short after the keyboard closed, which floated
   the chat composer above the bottom of the screen.
 - `plugins/speech/` is Mike's own plugin: dictation with Fluid Speech Mini
-  (bundled in the app) or Apple's on-device speech recognition (below). The
-  app's deployment target is iOS 17: the FluidAudio package that runs
-  Fluid Speech Mini needs it; the model itself needs iOS 18 and older phones
-  use Apple's recognizer.
+  (bundled in the app) or Apple's on-device speech recognition, and read-aloud
+  with Phonon (downloaded on request) or Apple's voices (below). The app's
+  deployment target is iOS 18: the xn-ptts package that runs Phonon declares
+  iOS 18, and Swift Package Manager refuses a dependency with a higher
+  floor than the package using it (the models need iOS 18 anyway). `cap sync`
+  re-derives the target from the project and writes `.iOS(.v18)`, which
+  CapApp-SPM's tools version (5.9) rejects, so run `npm run ios:configure`
+  after every `npm run sync` (it writes `.iOS("18.0")`).
 - `plugins/files/` saves downloads: the web view ignores a link that
   downloads a blob, so a document's Download button opens the share sheet
   (Save to Files, AirDrop, Mail) through this plugin instead.
@@ -117,7 +121,7 @@ Keyboard > Connect Hardware Keyboard, or
 | Script | Runs | Purpose |
 |---|---|---|
 | `www` | `scripts/write-www.mjs` | Write `www/server.js` (the offline page's retry URL). |
-| `speech-model` | `scripts/fetch-speech-model.mjs` | Fetch the Fluid Speech Mini Core ML files (about 250 MB) at the revision pinned in `scripts/speech-model.manifest.json`, check each file's SHA-256 and refuse a mismatch; a no-op when the files match. `MIKE_SKIP_SPEECH_MODEL=1` skips it (the app then reports the model unavailable and dictation uses Apple's recognizer). |
+| `speech-model` | `scripts/fetch-speech-model.mjs` | Fetch the Fluid Speech Mini Core ML files (about 250 MB) at the revision pinned in `scripts/speech-model.manifest.json`, check each file's SHA-256 and refuse a mismatch; a no-op when the files match. `MIKE_SKIP_SPEECH_MODEL=1` skips it (the app then reports the model unavailable and dictation uses Apple's recognizer). Phonon is not fetched here: the app downloads it on request. |
 | `sync` | `www` + `speech-model` + `cap sync` | Copy `www/`, write `capacitor.config.json`, update plugins (SPM). |
 | `test` | `node --test scripts/*.test.mjs` | Unit tests of the scripts. |
 | `ios:add` | `www` + `cap add ios` + `ios:configure` | Generate the iOS project. |
@@ -144,6 +148,36 @@ from Apple, started only by that click). The attribution for the model is in
 Settings → Voice; its LICENSE and NOTICE are bundled with it. The web
 side is `frontend/src/app/lib/voice/deviceSpeech.ts`; the plugin's methods
 and error codes are in `plugins/speech/README.md`.
+
+## Read-aloud on the phone
+
+Settings → Voice → Read aloud → "This iPhone" offers Apple's voices and
+Phonon 31m by Gradium (Apache-2.0, built on Kyutai's Pocket TTS; xn-ptts
+0.4.0, Swift product `ptts`, module `PhononTTS`), a Core ML model on the
+Neural Engine for English. Unlike Fluid Speech Mini it is not in the app, so
+the app does not grow. The person chooses Phonon and presses "Download
+Phonon"; the plugin then fetches the model (about 160 MB; about twice that on
+disk once the phone has compiled it) with `PhononModels.download`, which
+checks every file against its `bundle.json` and resumes an interrupted
+download, into Application Support (excluded from backup). "Remove Phonon"
+deletes it. Until it is on the phone, a build without it, iOS before 18,
+another language than English, a failed reading or an Apple voice chosen,
+read-aloud uses Apple's voices. The first reading after a download compiles
+the models for the phone (about 10 seconds); the model is then kept until a
+memory warning or five idle minutes.
+
+This is the only request the phone makes to a host other than the firm's
+server, and it carries no user content: a public model download from
+`https://huggingface.co/mosiah/phonon-31m-en-coreml/resolve/<commit>/`. The
+commit is the `PhononVoice.modelBaseURL` constant in
+`plugins/speech/ios/Sources/MikeSpeechPlugin/PhononVoice.swift`; change it
+only together with a new upload to that repository. The files
+are the v0.4.0 release's `phonon-31m-en-coreml.zip` (SHA-256
+`10f3a99fd39256db44f826267ef21d78cca959b16c0554926344c09fde27b436`),
+unzipped, with the voices cut to the eight Settings offers plus the default
+and `bundle.json` rewritten to list exactly the files present. The credit
+("Phonon by Gradium", linking the model card) is in Settings → Voice. The web
+side is `frontend/src/app/lib/voice/deviceSpeech.ts`.
 
 ## Distribution: MDM only
 

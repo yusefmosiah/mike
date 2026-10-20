@@ -5,12 +5,16 @@ import type * as BrowserModelsModule from "@/app/lib/voice/browserModels";
 const models = vi.hoisted(() => ({
     estimate: vi.fn(async () => 2),
     loadTranscriber: vi.fn(),
+    loadPhonon: vi.fn(),
+    loadSpeaker: vi.fn(),
 }));
 
 vi.mock("@/app/lib/voice/browserModels", async (importOriginal) => ({
     ...(await importOriginal<typeof BrowserModelsModule>()),
     estimateBrowserModelSetup: models.estimate,
     loadBrowserTranscriber: models.loadTranscriber,
+    loadBrowserPhonon: models.loadPhonon,
+    loadBrowserSpeaker: models.loadSpeaker,
 }));
 
 import { BrowserModelError, BROWSER_MODEL_RESTARTED_MESSAGE } from "@/app/lib/voice/browserModels";
@@ -24,6 +28,8 @@ const CHROME =
 beforeEach(() => {
     window.localStorage.clear();
     models.loadTranscriber.mockReset();
+    models.loadPhonon.mockReset();
+    models.loadSpeaker.mockReset();
 });
 afterEach(() => {
     vi.unstubAllGlobals();
@@ -72,5 +78,29 @@ describe("BrowserModelSetup", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent(
             "Setup did not finish. Check the connection and try again.",
         );
+    });
+
+    it("sets up Phonon, saying the size and that the GPU is used where there is one", async () => {
+        vi.stubGlobal("navigator", { userAgent: CHROME, gpu: {} });
+        models.loadPhonon.mockImplementation(async (onProgress: (fraction: number) => void) => onProgress(0.5));
+        render(<BrowserModelSetup kind="phonon" />);
+        expect(screen.getByText(/Phonon 31M runs in this browser on WebGPU where this browser has it/)).toHaveTextContent(
+            "(about 65 MB)",
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Check how long setup takes" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Set up Phonon 31M" }));
+        expect(await screen.findByText("Set up on this device.")).toBeInTheDocument();
+        expect(models.loadPhonon).toHaveBeenCalled();
+        expect(models.loadSpeaker).not.toHaveBeenCalled();
+    });
+
+    it("sets up Kokoro with its own loader", async () => {
+        vi.stubGlobal("navigator", { userAgent: CHROME, gpu: {} });
+        models.loadSpeaker.mockResolvedValue(undefined);
+        render(<BrowserModelSetup kind="speech" />);
+        fireEvent.click(screen.getByRole("button", { name: "Check how long setup takes" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Set up Kokoro 82M" }));
+        expect(await screen.findByText("Set up on this device.")).toBeInTheDocument();
+        expect(models.loadSpeaker).toHaveBeenCalled();
     });
 });

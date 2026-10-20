@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceOptions } from "@/app/lib/mikeApi";
 
@@ -158,6 +160,157 @@ describe("VoiceSettings in the iPhone app", () => {
             expect(credit).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/");
             fireEvent.click(screen.getByRole("button", { name: "Apple" }));
             await waitFor(() => expect(loadVoicePreferences().transcription).toEqual({ engine: "device", model: "apple" }));
+        });
+    });
+});
+
+describe("VoiceSettings read-aloud with Phonon", () => {
+    const pills = (group: HTMLElement) =>
+        Array.from(group.querySelectorAll("button")).map((b) => [b.textContent, b.getAttribute("aria-pressed")]);
+
+    describe("in the browser", () => {
+        beforeEach(() => {
+            vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+        });
+        afterEach(() => vi.unstubAllGlobals());
+
+        it("starts the in-browser engine on Phonon, with its voices and the credit", async () => {
+            render(<VoiceSettings />);
+            const speech = await screen.findByRole("group", { name: "Read-aloud engine" });
+            fireEvent.click(Array.from(speech.querySelectorAll("button")).find((b) => b.textContent === "Open model in browser")!);
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "phonon" }));
+            expect(pills(screen.getByRole("group", { name: "Read-aloud model" }))).toEqual([
+                ["Phonon", "true"],
+                ["Kokoro", "false"],
+            ]);
+            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("Harper");
+            expect(screen.getByText(/Phonon 31M runs in this browser/)).toHaveTextContent("about 65 MB");
+            expect(screen.getByRole("link", { name: "Phonon by Gradium" })).toHaveAttribute(
+                "href",
+                "https://huggingface.co/gradium/phonon-31m-en",
+            );
+        });
+
+        it("keeps Kokoro for a stored choice with no model, and switches between the two", async () => {
+            window.localStorage.setItem("mike.voice.v1", JSON.stringify({ speech: { engine: "webgpu", voice: "bm_george" } }));
+            render(<VoiceSettings />);
+            const model = await screen.findByRole("group", { name: "Read-aloud model" });
+            expect(pills(model)).toEqual([
+                ["Phonon", "false"],
+                ["Kokoro", "true"],
+            ]);
+            expect(screen.getByText(/Kokoro 82M runs in this browser/)).toBeInTheDocument();
+            expect(screen.queryByRole("link", { name: "Phonon by Gradium" })).not.toBeInTheDocument();
+            fireEvent.click(screen.getByRole("button", { name: "Phonon" }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "phonon" }));
+            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
+            await userEvent.click(await screen.findByRole("menuitem", { name: /Miles/ }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "phonon", voice: "Miles" }));
+            fireEvent.click(screen.getByRole("button", { name: "Kokoro" }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "kokoro" }));
+            await userEvent.click(await screen.findByRole("button", { name: "Read-aloud voice" }));
+            await userEvent.click(await screen.findByRole("menuitem", { name: /af_heart/ }));
+            await waitFor(() =>
+                expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "kokoro", voice: "af_heart" }),
+            );
+        });
+    });
+
+    describe("in the iPhone app", () => {
+        let phonon: { state: string; progress?: number; compiling?: boolean };
+        const nativePromise = vi.fn(async (_plugin: string, method: string, args?: Record<string, unknown>) => {
+            if (method === "status" && args?.engine === "phonon") return { engine: "phonon", ...phonon };
+            if (method === "status") return { state: "available", engine: "speech-analyzer" };
+            if (method === "install" && args?.engine === "phonon") {
+                phonon = { state: "available" };
+                return { engine: "phonon", ...phonon };
+            }
+            if (method === "remove") {
+                phonon = { state: "not-installed" };
+                return { engine: "phonon", ...phonon };
+            }
+            if (method === "voices") return { voices: [{ id: "zoe", name: "Zoe", language: "en-US", quality: "premium" }] };
+            return {};
+        });
+        beforeEach(() => {
+            phonon = { state: "not-installed" };
+            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "speak" }] }], nativePromise });
+        });
+        afterEach(() => {
+            vi.unstubAllGlobals();
+            nativePromise.mockClear();
+        });
+
+        it("reads with Apple's voices until Phonon is downloaded, then downloads it on request and can remove it", async () => {
+            render(<VoiceSettings />);
+            const voices = await screen.findByRole("group", { name: "Read-aloud voices" });
+            expect(pills(voices)).toEqual([
+                ["Phonon", "false"],
+                ["Apple", "true"],
+            ]);
+            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("The iPhone's default voice");
+
+            fireEvent.click(within(voices).getByRole("button", { name: "Phonon" }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "phonon" }));
+            expect(await screen.findByText(/Phonon is not on this iPhone yet/)).toHaveTextContent("about 160 MB");
+            expect(nativePromise).not.toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" });
+            expect(screen.getByRole("link", { name: "Phonon by Gradium" })).toBeInTheDocument();
+
+            fireEvent.click(screen.getByRole("button", { name: "Download Phonon" }));
+            await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" }));
+            expect(await screen.findByRole("button", { name: "Remove Phonon" })).toBeInTheDocument();
+            expect(screen.getByText(/Phonon reads English on this iPhone/)).toBeInTheDocument();
+            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("Harper");
+
+            fireEvent.click(screen.getByRole("button", { name: "Remove Phonon" }));
+            await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "remove", { engine: "phonon" }));
+            expect(await screen.findByRole("button", { name: "Download Phonon" })).toBeInTheDocument();
+        });
+
+        it("uses Phonon by default once it is downloaded, and Apple's voices when chosen", async () => {
+            phonon = { state: "available", compiling: true };
+            render(<VoiceSettings />);
+            const voices = await screen.findByRole("group", { name: "Read-aloud voices" });
+            await waitFor(() =>
+                expect(pills(voices)).toEqual([
+                    ["Phonon", "true"],
+                    ["Apple", "false"],
+                ]),
+            );
+            expect(screen.getByText(/takes about ten seconds/)).toBeInTheDocument();
+            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
+            await userEvent.click(await screen.findByRole("menuitem", { name: /Maeve/ }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "phonon", voice: "Maeve" }));
+
+            fireEvent.click(within(voices).getByRole("button", { name: "Apple" }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "apple" }));
+            expect(screen.getByText(/Phonon is on this iPhone. Choose it above/)).toBeInTheDocument();
+            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
+            await userEvent.click(await screen.findByRole("menuitem", { name: /Zoe/ }));
+            await waitFor(() =>
+                expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "apple", voice: "zoe" }),
+            );
+        });
+
+        it("keeps an Apple voice chosen earlier, with no model stored", async () => {
+            window.localStorage.setItem("mike.voice.v1", JSON.stringify({ speech: { engine: "device", voice: "zoe" } }));
+            render(<VoiceSettings />);
+            const voices = await screen.findByRole("group", { name: "Read-aloud voices" });
+            expect(pills(voices)).toEqual([
+                ["Phonon", "false"],
+                ["Apple", "true"],
+            ]);
+            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
+            await userEvent.click(await screen.findByRole("menuitem", { name: /Zoe/ }));
+            await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", voice: "zoe" }));
+        });
+
+        it("offers only Apple's voices in an app build without Phonon", async () => {
+            phonon = { state: "unavailable" };
+            render(<VoiceSettings />);
+            await screen.findByRole("button", { name: "Read-aloud voice" });
+            expect(screen.queryByRole("group", { name: "Read-aloud voices" })).not.toBeInTheDocument();
+            expect(screen.queryByRole("link", { name: "Phonon by Gradium" })).not.toBeInTheDocument();
         });
     });
 });

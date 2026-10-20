@@ -6,9 +6,11 @@ const lib = vi.hoisted(() => ({
     pipeline: vi.fn(),
     env: { allowLocalModels: true } as { allowLocalModels: boolean; backends?: unknown },
     fromPretrained: vi.fn(),
+    phononLoad: vi.fn(),
 }));
 vi.mock("@huggingface/transformers", () => ({ pipeline: lib.pipeline, env: lib.env }));
 vi.mock("kokoro-js", () => ({ KokoroTTS: { from_pretrained: lib.fromPretrained } }));
+vi.mock("/phonon-tts/index.js", () => ({ PhononTTS: { load: lib.phononLoad } }));
 
 type Module = typeof import("./browserModels");
 let mod: Module;
@@ -18,6 +20,7 @@ beforeEach(async () => {
     mod = await import("./browserModels");
     lib.pipeline.mockReset();
     lib.fromPretrained.mockReset();
+    lib.phononLoad.mockReset();
     lib.env.allowLocalModels = true;
     delete lib.env.backends;
     // A desktop browser unless a test says otherwise (jsdom's own user
@@ -423,5 +426,110 @@ describe("a page that died while a model ran", () => {
     it("leaves the consent message as it is", async () => {
         await expect(mod.transcribeInBrowser(blob())).rejects.toBeInstanceOf(mod.BrowserModelConsentError);
         await expect(mod.speakWithBrowserModel("Hi")).rejects.toBeInstanceOf(mod.BrowserModelConsentError);
+    });
+});
+
+function fakePhonon() {
+    const voices = ["default"];
+    return {
+        device: "cpu",
+        voices,
+        addVoice: vi.fn(async (name: string) => {
+            voices.push(name);
+        }),
+        synthWav: vi.fn(async () => new Blob(["wav"])),
+        dispose: vi.fn(),
+    };
+}
+
+describe("Phonon in the browser", () => {
+    it("asks for its own consent, apart from Kokoro's", async () => {
+        mod.setBrowserModelConsent("speech", true);
+        expect(mod.hasBrowserModelConsent("phonon")).toBe(false);
+        await expect(mod.loadBrowserPhonon()).rejects.toBeInstanceOf(mod.BrowserModelConsentError);
+        await expect(mod.speakWithBrowserModel("Hi", { model: "phonon" })).rejects.toBeInstanceOf(mod.BrowserModelConsentError);
+        mod.setBrowserModelConsent("phonon", true);
+        lib.phononLoad.mockResolvedValue(fakePhonon());
+        await expect(mod.loadBrowserPhonon()).resolves.toBeUndefined();
+    });
+
+    it("speaks through the package and leaves Kokoro alone", async () => {
+        mod.setBrowserModelConsent("phonon", true);
+        const tts = fakePhonon();
+        lib.phononLoad.mockResolvedValue(tts);
+        const wav = await mod.speakWithBrowserModel("Hi.", { model: "phonon", voice: "Maeve" });
+        expect(wav).toBeInstanceOf(Blob);
+        expect(tts.synthWav).toHaveBeenCalledWith("Hi.", { voice: "Maeve" });
+        expect(lib.fromPretrained).not.toHaveBeenCalled();
+    });
+
+    it("gives a library failure one message written for the person", async () => {
+        mod.setBrowserModelConsent("phonon", true);
+        lib.phononLoad.mockRejectedValue(new Error("wasm: out of memory"));
+        await expect(mod.speakWithBrowserModel("Hi.", { model: "phonon" })).rejects.toThrow(mod.BROWSER_MODEL_FAILED_MESSAGE);
+    });
+
+    it("chooses the model from the speech preference: Kokoro unless it says Phonon", () => {
+        expect(mod.browserSpeechModel(undefined)).toBe("kokoro");
+        expect(mod.browserSpeechModel("kokoro")).toBe("kokoro");
+        expect(mod.browserSpeechModel("something-else")).toBe("kokoro");
+        expect(mod.browserSpeechModel("phonon")).toBe("phonon");
+        expect(mod.browserSpeechKind(undefined)).toBe("speech");
+        expect(mod.browserSpeechKind("phonon")).toBe("phonon");
+    });
+
+    it("sizes its download from the pinned commit's files, whatever the runtime", async () => {
+        expect(mod.browserModelFiles("phonon")).toEqual([
+            "model.q8.gguf",
+            "config.json",
+            "tokenizer.json",
+            "default-voice.safetensors",
+        ]);
+        const fetchMock = vi.fn(async () =>
+            new Response(
+                JSON.stringify([
+                    { path: "model.q8.gguf", lfs: { size: 64_500_000 } },
+                    { path: "config.json", size: 1000 },
+                    { path: "model.safetensors", lfs: { size: 124_000_000 } },
+                ]),
+            ),
+        ) as unknown as typeof fetch;
+        expect(await mod.browserModelBytes("phonon", { fetch: fetchMock })).toBe(64_501_000);
+        expect(fetchMock).toHaveBeenCalledWith(
+            "https://huggingface.co/api/models/gradium/phonon-31m-en/tree/52433c46975bfa13144c56204c9f4ee1c5b148aa",
+        );
+    });
+
+    it("is released on the iPhone before Whisper or Kokoro load, and releases them when it loads", async () => {
+        vi.stubGlobal("navigator", { userAgent: IPHONE, gpu: {}, maxTouchPoints: 5 });
+        lib.env.backends = { onnx: onnxEnv() };
+        mod.setBrowserModelConsent("speech", true);
+        mod.setBrowserModelConsent("phonon", true);
+        const disposeKokoro = vi.fn(async () => {});
+        lib.fromPretrained.mockResolvedValue({ generate: vi.fn(async () => spoken()), model: { dispose: disposeKokoro } });
+        const phonon = fakePhonon();
+        lib.phononLoad.mockResolvedValue(phonon);
+
+        await mod.speakWithBrowserModel("Hi.");
+        await mod.speakWithBrowserModel("Hi.", { model: "phonon" });
+        expect(disposeKokoro).toHaveBeenCalledTimes(1);
+        expect(phonon.dispose).not.toHaveBeenCalled();
+        await mod.speakWithBrowserModel("Hi.");
+        expect(phonon.dispose).toHaveBeenCalledTimes(1);
+        expect(lib.fromPretrained).toHaveBeenCalledTimes(2);
+    });
+
+    it("also releases Whisper when it loads", async () => {
+        vi.stubGlobal("navigator", { userAgent: IPHONE, gpu: {}, maxTouchPoints: 5 });
+        lib.env.backends = { onnx: onnxEnv() };
+        mod.setBrowserModelConsent("transcription", true);
+        mod.setBrowserModelConsent("phonon", true);
+        const disposeWhisper = vi.fn(async () => {});
+        lib.pipeline.mockResolvedValue(Object.assign(vi.fn(async () => ({ text: "hi" })), { dispose: disposeWhisper }));
+        lib.phononLoad.mockResolvedValue(fakePhonon());
+        stubAudio([new Float32Array([0])]);
+        await mod.transcribeInBrowser(blob());
+        await mod.speakWithBrowserModel("Hi.", { model: "phonon" });
+        expect(disposeWhisper).toHaveBeenCalledTimes(1);
     });
 });

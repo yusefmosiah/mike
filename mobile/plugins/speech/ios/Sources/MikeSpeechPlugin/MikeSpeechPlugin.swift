@@ -14,6 +14,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "install", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "transcribe", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voices", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise)
@@ -25,6 +26,10 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     static let maxSpeechCharacters = 20_000
 
     @objc func status(_ call: CAPPluginCall) {
+        if Self.usesPhonon(call) {
+            Task { call.resolve(await PhononVoice.status().payload) }
+            return
+        }
         if Self.usesFluidMini(call) {
             call.resolve(Self.payload(FluidSpeechMini.status()))
             return
@@ -36,6 +41,19 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func install(_ call: CAPPluginCall) {
+        // Phonon's model is downloaded here, from the person's click; the web
+        // app watches `status` for the progress while this call is pending.
+        if Self.usesPhonon(call) {
+            Task {
+                do {
+                    try await PhononVoice.install()
+                    call.resolve(await PhononVoice.status().payload)
+                } catch {
+                    call.reject("The voice model could not be downloaded.", "install-failed")
+                }
+            }
+            return
+        }
         // Fluid Speech Mini ships in the app: there is nothing to download.
         if Self.usesFluidMini(call) {
             call.resolve(Self.payload(FluidSpeechMini.status()))
@@ -49,6 +67,18 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             } catch {
                 Self.reject(call, error)
             }
+        }
+    }
+
+    /// Deletes Phonon's downloaded model. Nothing else can be removed.
+    @objc func remove(_ call: CAPPluginCall) {
+        guard Self.usesPhonon(call) else {
+            call.reject("Nothing to remove.", "unavailable")
+            return
+        }
+        Task {
+            await PhononVoice.remove()
+            call.resolve(await PhononVoice.status().payload)
         }
     }
 
@@ -104,6 +134,18 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let voice = call.getString("voice")
         let language = call.getString("language")
+        if Self.usesPhonon(call) {
+            Task {
+                do {
+                    let audio = try await PhononVoice.render(text: text, voice: voice)
+                    call.resolve(["audio": audio.base64EncodedString(), "mimeType": "audio/wav"])
+                } catch {
+                    let failure = error as? PhononVoice.Failure ?? .failed
+                    call.reject("Reading aloud on this iPhone failed.", failure.code)
+                }
+            }
+            return
+        }
         Task {
             do {
                 let audio = try await OnDeviceVoice.render(text: text, voiceIdentifier: voice, language: language)
@@ -134,6 +176,11 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Apple's recognizer, so an older web build keeps working.
     static func usesFluidMini(_ call: CAPPluginCall) -> Bool {
         call.getString("engine") == FluidSpeechMini.engineName
+    }
+
+    /// Whether the call asks for Phonon (read-aloud, and its download).
+    static func usesPhonon(_ call: CAPPluginCall) -> Bool {
+        call.getString("engine") == PhononVoice.engineName
     }
 
     static func payload(_ status: OnDeviceSpeech.Status) -> [String: Any] {

@@ -128,14 +128,17 @@ function speakerInstance(runtime: BrowserModelRuntime, onProgress?: SetupProgres
     return kokoro;
 }
 
-/** Frees the model that is not `kind`, so only one is in memory. */
+/**
+ * Frees the models that are not `kind`, so only one is in memory. Phonon runs
+ * on the page (browserModels.phonon.ts), so for it both of these go.
+ */
 export async function releaseOther(kind: BrowserModelKind): Promise<void> {
-    if (kind === "transcription" && kokoro) {
+    if (kind !== "speech" && kokoro) {
         const held = kokoro;
         kokoro = null;
         await held.then((model) => model.model?.dispose?.()).catch(() => undefined);
     }
-    if (kind === "speech" && transcriber) {
+    if (kind !== "transcription" && transcriber) {
         const held = transcriber;
         transcriber = null;
         await held.then((run) => run.dispose?.()).catch(() => undefined);

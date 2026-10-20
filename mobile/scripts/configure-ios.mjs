@@ -22,10 +22,11 @@
 //   - SceneDelegate: on iOS 17 and later the web view ends at the keyboard's
 //     top edge and WebKit is not told about the keyboard, so the page's
 //     viewport is just the space above it (MIKE_KEYBOARD_LAYOUT).
-//   - Deployment target 17.0 (the project, and CapApp-SPM's platform, which
-//     `cap sync` re-derives from the project): the FluidAudio package that
-//     runs Fluid Speech Mini (plugins/speech) needs iOS 17. The model itself
-//     needs iOS 18; below that the app uses Apple's recognizer.
+//   - Deployment target 18.0 (the project, and CapApp-SPM's platform, which
+//     `cap sync` re-derives from the project): the xn-ptts package that runs
+//     Phonon (plugins/speech) declares iOS 18, and Swift Package Manager
+//     refuses a dependency with a higher floor than the package using it.
+//     Fluid Speech Mini and Phonon need iOS 18 themselves.
 //   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
 //     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
@@ -325,7 +326,7 @@ mkdirSync(testDir, { recursive: true });
 copyFileSync(new URL("../ui-tests/AppUITests.swift", import.meta.url).pathname, `${testDir}AppUITests.swift`);
 
 const pbxPath = `${iosApp}App.xcodeproj/project.pbxproj`;
-const MIN_IOS = "17.0";
+const MIN_IOS = "18.0";
 {
   const source = readFileSync(pbxPath, "utf8");
   const next = source.replace(/IPHONEOS_DEPLOYMENT_TARGET = [\d.]+;/g, `IPHONEOS_DEPLOYMENT_TARGET = ${MIN_IOS};`);
@@ -333,7 +334,8 @@ const MIN_IOS = "17.0";
   const spmPath = `${iosApp}CapApp-SPM/Package.swift`;
   if (existsSync(spmPath)) {
     const spm = readFileSync(spmPath, "utf8");
-    const spmNext = spm.replace(/platforms: \[\.iOS\(\.v\d+\)\]/, `platforms: [.iOS(.v${MIN_IOS.split(".")[0]})]`);
+    // The string form: `.v18` needs a tools version of 6.0, and Capacitor writes 5.9.
+    const spmNext = spm.replace(/platforms: \[\.iOS\([^)]*\)\]/, `platforms: [.iOS("${MIN_IOS}")]`);
     if (spmNext !== spm) writeFileSync(spmPath, spmNext);
   }
 }

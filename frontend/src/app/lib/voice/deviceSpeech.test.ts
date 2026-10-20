@@ -11,8 +11,15 @@ import {
     FLUID_MINI_ENGINE,
     fluidSpeechMiniAvailable,
     installDeviceSpeech,
+    installPhonon,
     isEnglishLanguage,
+    PHONON_ENGINE,
+    PHONON_INSTALL_FAILURE_MESSAGE,
+    phononAvailable,
+    phononStatus,
+    removePhonon,
     resetFluidSpeechMiniAvailability,
+    resetPhononAvailability,
     speakOnDevice,
     transcribeOnDevice,
 } from "./deviceSpeech";
@@ -25,6 +32,7 @@ function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ na
 
 afterEach(() => {
     resetFluidSpeechMiniAvailability();
+    resetPhononAvailability();
     vi.unstubAllGlobals();
     nativePromise.mockReset();
 });
@@ -268,5 +276,190 @@ describe("isEnglishLanguage", () => {
         expect(isEnglishLanguage()).toBe(true);
         vi.stubGlobal("navigator", { language: "" });
         expect(isEnglishLanguage()).toBe(true);
+    });
+});
+
+describe("speakOnDevice with Phonon", () => {
+    it("sends the engine and the Phonon voice", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ audio: btoa("RIFF"), mimeType: "audio/wav" });
+        await speakOnDevice("Hello.", "Maeve", PHONON_ENGINE);
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "speak", { text: "Hello.", voice: "Maeve", engine: "phonon" });
+    });
+});
+
+describe("phononStatus", () => {
+    it("is unavailable in a browser and when the call fails", async () => {
+        expect(await phononStatus()).toEqual({ state: "unavailable" });
+        inApp();
+        nativePromise.mockRejectedValueOnce(new Error("bridge"));
+        expect(await phononStatus()).toEqual({ state: "unavailable" });
+    });
+
+    it("reads the phone's answer for the Phonon engine", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "not-installed", engine: "phonon" });
+        expect(await phononStatus()).toEqual({ state: "not-installed" });
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "status", { engine: "phonon" });
+        nativePromise.mockResolvedValueOnce({ state: "installing", engine: "phonon", progress: 1.5 });
+        expect(await phononStatus()).toEqual({ state: "installing", progress: 1 });
+        nativePromise.mockResolvedValueOnce({ state: "installing", engine: "phonon", progress: -2 });
+        expect(await phononStatus()).toEqual({ state: "installing", progress: 0 });
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "phonon", compiling: true });
+        expect(await phononStatus()).toEqual({ state: "available", compiling: true });
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "phonon", progress: "x", compiling: false });
+        expect(await phononStatus()).toEqual({ state: "available" });
+    });
+
+    it("is unavailable on an older app build, which answers for Apple's recognizer, or on an unknown state", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "speech-analyzer" });
+        expect(await phononStatus()).toEqual({ state: "unavailable" });
+        nativePromise.mockResolvedValueOnce(null);
+        expect(await phononStatus()).toEqual({ state: "unavailable" });
+        nativePromise.mockResolvedValueOnce({ state: "weird", engine: "phonon" });
+        expect(await phononStatus()).toEqual({ state: "unavailable" });
+    });
+});
+
+describe("phononAvailable", () => {
+    it("keeps a positive answer and asks again after a negative one", async () => {
+        expect(await phononAvailable()).toBe(false);
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "not-installed", engine: "phonon" });
+        expect(await phononAvailable()).toBe(false);
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "phonon" });
+        expect(await phononAvailable()).toBe(true);
+        expect(await phononAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledTimes(2);
+        resetPhononAvailability();
+        nativePromise.mockResolvedValueOnce({ state: "not-installed", engine: "phonon" });
+        expect(await phononAvailable()).toBe(false);
+    });
+
+    it("lets a newer ask replace a negative answer that arrives late", async () => {
+        inApp();
+        let late: (value: unknown) => void = () => {};
+        nativePromise.mockReturnValueOnce(new Promise((resolve) => (late = resolve)));
+        const first = phononAvailable();
+        resetPhononAvailability();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "phonon" });
+        expect(await phononAvailable()).toBe(true);
+        late({ state: "not-installed", engine: "phonon" });
+        expect(await first).toBe(false);
+        expect(await phononAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("installPhonon and removePhonon", () => {
+    it("download through the plugin, report progress from its status, and end available", async () => {
+        inApp();
+        vi.useFakeTimers();
+        try {
+            let finish: (value: unknown) => void = () => {};
+            let progress = 0.25;
+            let installed = false;
+            nativePromise.mockImplementation((_plugin: string, method: string) => {
+                if (method === "install") return new Promise((resolve) => (finish = resolve));
+                return Promise.resolve(
+                    installed
+                        ? { state: "available", engine: "phonon" }
+                        : { state: "installing", engine: "phonon", progress },
+                );
+            });
+            const heard = vi.fn();
+            const done = installPhonon(heard);
+            await vi.advanceTimersByTimeAsync(500);
+            expect(heard).toHaveBeenLastCalledWith(0.25);
+            progress = 0.75;
+            await vi.advanceTimersByTimeAsync(500);
+            expect(heard).toHaveBeenLastCalledWith(0.75);
+            installed = true;
+            finish({ state: "available", engine: "phonon" });
+            expect(await done).toEqual({ state: "available" });
+            expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" });
+            // Polling stops with the download.
+            const calls = nativePromise.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(nativePromise.mock.calls.length).toBe(calls);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("ignores a status that is not a download in progress, and needs no listener", async () => {
+        inApp();
+        vi.useFakeTimers();
+        try {
+            let finish: (value: unknown) => void = () => {};
+            nativePromise.mockImplementation((_plugin: string, method: string) =>
+                method === "install"
+                    ? new Promise((resolve) => (finish = resolve))
+                    : Promise.resolve({ state: "installing", engine: "phonon" }),
+            );
+            const heard = vi.fn();
+            const done = installPhonon(heard);
+            await vi.advanceTimersByTimeAsync(600);
+            expect(heard).not.toHaveBeenCalled();
+            nativePromise.mockImplementation(async () => ({ state: "available", engine: "phonon" }));
+            finish({});
+            expect(await done).toEqual({ state: "available" });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("stops listening when the download ends while a status call is pending", async () => {
+        inApp();
+        vi.useFakeTimers();
+        try {
+            let answerStatus: (value: unknown) => void = () => {};
+            let finish: (value: unknown) => void = () => {};
+            nativePromise.mockImplementation((_plugin: string, method: string) =>
+                method === "install"
+                    ? new Promise((resolve) => (finish = resolve))
+                    : new Promise((resolve) => (answerStatus = resolve)),
+            );
+            const heard = vi.fn();
+            const done = installPhonon(heard);
+            await vi.advanceTimersByTimeAsync(500);
+            nativePromise.mockImplementation(async () => ({ state: "available", engine: "phonon" }));
+            finish({});
+            await done;
+            answerStatus({ state: "installing", engine: "phonon", progress: 0.5 });
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(heard).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("fails with a message when the download fails, the model is still missing, or there is no app", async () => {
+        await expect(installPhonon()).rejects.toThrow(PHONON_INSTALL_FAILURE_MESSAGE);
+        inApp();
+        nativePromise.mockRejectedValueOnce(Object.assign(new Error("raw"), { code: "install-failed" }));
+        await expect(installPhonon()).rejects.toBeInstanceOf(DeviceSpeechError);
+        nativePromise.mockReset();
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "install" ? {} : { state: "not-installed", engine: "phonon" },
+        );
+        await expect(installPhonon()).rejects.toThrow(PHONON_INSTALL_FAILURE_MESSAGE);
+    });
+
+    it("remove the model and return the new status", async () => {
+        expect(await removePhonon()).toEqual({ state: "unavailable" });
+        inApp();
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "remove" ? {} : { state: "not-installed", engine: "phonon" },
+        );
+        expect(await removePhonon()).toEqual({ state: "not-installed" });
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "remove", { engine: "phonon" });
+        // An app build without the method rejects; the status still answers.
+        nativePromise.mockImplementation(async (_plugin: string, method: string) => {
+            if (method === "remove") throw new Error("not implemented");
+            return { state: "unavailable" };
+        });
+        expect(await removePhonon()).toEqual({ state: "unavailable" });
     });
 });

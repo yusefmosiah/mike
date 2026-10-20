@@ -11,10 +11,23 @@ import {
   browserVoices,
   installOnDeviceRecognition,
 } from "@/app/lib/voice/browserSpeech";
-import { deviceVoices, installDeviceSpeech, isEnglishLanguage, type DeviceDictationModel } from "@/app/lib/voice/deviceSpeech";
+import {
+  deviceVoices,
+  installDeviceSpeech,
+  isEnglishLanguage,
+  type DeviceDictationModel,
+  type DeviceSpeechModel,
+} from "@/app/lib/voice/deviceSpeech";
 import {
   DEFAULT_KOKORO_VOICE,
+  DEFAULT_PHONON_VOICE,
+  PHONON_MODEL_CARD_URL,
+  PHONON_VOICES,
   browserModelVoices,
+  browserSpeechKind,
+  browserSpeechModel,
+  isPhononVoice,
+  type BrowserSpeechModel,
 } from "@/app/lib/voice/browserModels";
 import { formatVoicePrice } from "@/app/lib/voice/pricing";
 import {
@@ -24,6 +37,7 @@ import {
   type VoiceEngine,
 } from "@/app/lib/voice/preferences";
 import { BrowserModelSetup } from "./BrowserModelSetup";
+import { PhononPhoneSetup } from "./PhononPhoneSetup";
 import { useVoiceAvailability } from "./useVoiceAvailability";
 import { VoiceChoiceDropdown, type VoiceChoice } from "./VoiceChoiceDropdown";
 import { VoiceTestBench } from "./VoiceTestBench";
@@ -49,6 +63,35 @@ const DEVICE_MODEL_CHOICES: readonly { model: DeviceDictationModel; label: strin
   { model: "fluid-speech-mini", label: "Fluid Speech Mini" },
   { model: "apple", label: "Apple" },
 ];
+
+const DEVICE_SPEECH_CHOICES: readonly { model: DeviceSpeechModel; label: string }[] = [
+  { model: "phonon", label: "Phonon" },
+  { model: "apple", label: "Apple" },
+];
+
+const BROWSER_SPEECH_CHOICES: readonly { model: BrowserSpeechModel; label: string }[] = [
+  { model: "phonon", label: "Phonon" },
+  { model: "kokoro", label: "Kokoro" },
+];
+
+const PHONON_VOICE_CHOICES: VoiceChoice[] = PHONON_VOICES.map(({ id, label, detail }) => ({ id, label, detail }));
+
+const CREDIT_LINK_CLASS =
+  "underline underline-offset-2 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900";
+
+/** The credit Phonon's licence (Apache-2.0) asks for, linking the model card. */
+function PhononCredit() {
+  return (
+    <SettingsRow>
+      <SettingsDescription>
+        <a href={PHONON_MODEL_CARD_URL} target="_blank" rel="noopener noreferrer" className={CREDIT_LINK_CLASS}>
+          Phonon by Gradium
+        </a>{" "}
+        (Apache-2.0). Built on Kyutai&apos;s Pocket TTS.
+      </SettingsDescription>
+    </SettingsRow>
+  );
+}
 
 /** The licence of Fluid Speech Mini (CC BY 4.0), which asks for this credit. */
 const FLUID_SPEECH_MINI_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
@@ -86,7 +129,7 @@ function EnginePills({
 /** Settings → Voice: engines, models, voices and a side-by-side test bench. */
 export function VoiceSettings() {
   const [preferences, setPreferences] = useVoicePreferences();
-  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, fluidSpeechMini, loading, error } =
+  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, fluidSpeechMini, phonon, refreshPhonon, loading, error } =
     useVoiceAvailability();
   const [systemVoices, setSystemVoices] = useState<VoiceChoice[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
@@ -99,6 +142,11 @@ export function VoiceSettings() {
     fluidSpeechMini && stt.model !== "apple" ? "fluid-speech-mini" : "apple";
   // What dictation will actually use: the model is English only.
   const usesFluid = fluidSpeechMini && deviceModel === "fluid-speech-mini" && isEnglishLanguage(stt.language);
+
+  // The phone reads with Phonon when it is chosen, or, with no choice, once it is downloaded.
+  const phoneSpeechModel: DeviceSpeechModel =
+    phonon.state === "unavailable" || tts.model === "apple" ? "apple" : tts.model === "phonon" || phonon.state === "available" ? "phonon" : "apple";
+  const browserModel = browserSpeechModel(tts.model);
 
   useEffect(() => {
     if (tts.engine !== "browser") return;
@@ -121,9 +169,9 @@ export function VoiceSettings() {
   }, [tts.engine]);
 
   useEffect(() => {
-    if (tts.engine !== "webgpu") return;
+    if (tts.engine !== "webgpu" || browserModel !== "kokoro") return;
     void browserModelVoices().then(setKokoroVoices).catch(() => setKokoroVoices([DEFAULT_KOKORO_VOICE]));
-  }, [tts.engine]);
+  }, [tts.engine, browserModel]);
 
   if (loading) {
     return (
@@ -318,7 +366,10 @@ export function VoiceSettings() {
               kind="speech"
               value={tts.engine}
               available={(engine) => engineAvailable("speech", engine, availability)}
-              onChange={(engine) => setPreferences({ ...preferences, speech: { engine } })}
+              onChange={(engine) =>
+                // The in-browser engine starts on Phonon; a stored choice without a model stays Kokoro.
+                setPreferences({ ...preferences, speech: engine === "webgpu" ? { engine, model: "phonon" } : { engine } })
+              }
             />
             {!engineAvailable("speech", tts.engine, availability) && (
               <p className="text-sm text-gray-700" role="status">
@@ -360,20 +411,64 @@ export function VoiceSettings() {
             </SettingsRow>
           )}
           {tts.engine === "device" && engineAvailable("speech", "device", availability) && (
-            <SettingsRow layout="stacked">
-              <SettingsLabel>Voice</SettingsLabel>
-              <VoiceChoiceDropdown
-                label="Read-aloud voice"
-                value={tts.voice}
-                placeholder="The iPhone's default voice"
-                choices={phoneVoices}
-                onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "device", voice } })}
-              />
-              <SettingsDescription>
-                Apple&apos;s voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be
-                downloaded in the iPhone&apos;s Accessibility settings, under spoken content.
-              </SettingsDescription>
-            </SettingsRow>
+            <>
+              {phonon.state !== "unavailable" && (
+                <SettingsRow layout="stacked">
+                  <div className="min-w-0 space-y-1">
+                    <SettingsLabel>Voices</SettingsLabel>
+                    <SettingsDescription>Phonon reads English only; other languages use Apple&apos;s voices.</SettingsDescription>
+                  </div>
+                  <div role="group" aria-label="Read-aloud voices" className="flex flex-wrap gap-1.5">
+                    {DEVICE_SPEECH_CHOICES.map(({ model, label }) => (
+                      <TabPillButtonUI
+                        key={model}
+                        active={phoneSpeechModel === model}
+                        onClick={() =>
+                          // A voice belongs to the model that offers it.
+                          setPreferences({ ...preferences, speech: { engine: "device", model } })
+                        }
+                      >
+                        {label}
+                      </TabPillButtonUI>
+                    ))}
+                  </div>
+                  <PhononPhoneSetup status={phonon} chosen={phoneSpeechModel === "phonon"} onChange={refreshPhonon} />
+                </SettingsRow>
+              )}
+              <SettingsRow layout="stacked">
+                <SettingsLabel>Voice</SettingsLabel>
+                {phoneSpeechModel === "phonon" ? (
+                  <VoiceChoiceDropdown
+                    label="Read-aloud voice"
+                    value={isPhononVoice(tts.voice) ? tts.voice : DEFAULT_PHONON_VOICE}
+                    placeholder="Choose a voice"
+                    choices={PHONON_VOICE_CHOICES}
+                    onChange={(voice) =>
+                      setPreferences({ ...preferences, speech: { engine: "device", model: "phonon", voice } })
+                    }
+                  />
+                ) : (
+                  <VoiceChoiceDropdown
+                    label="Read-aloud voice"
+                    value={tts.voice}
+                    placeholder="The iPhone's default voice"
+                    choices={phoneVoices}
+                    onChange={(voice) =>
+                      setPreferences({
+                        ...preferences,
+                        speech: { engine: "device", ...(tts.model ? { model: tts.model } : {}), voice },
+                      })
+                    }
+                  />
+                )}
+                <SettingsDescription>
+                  {phoneSpeechModel === "phonon"
+                    ? "Phonon's voice reads English on this iPhone; the text never leaves it."
+                    : "Apple's voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be downloaded in the iPhone's Accessibility settings, under spoken content."}
+                </SettingsDescription>
+              </SettingsRow>
+              {phonon.state !== "unavailable" && <PhononCredit />}
+            </>
           )}
           {tts.engine === "browser" && (
             <SettingsRow layout="stacked">
@@ -389,17 +484,42 @@ export function VoiceSettings() {
             </SettingsRow>
           )}
           {tts.engine === "webgpu" && (
-            <SettingsRow layout="stacked">
-              <BrowserModelSetup kind="speech" />
-              <SettingsLabel>Voice</SettingsLabel>
-              <VoiceChoiceDropdown
-                label="Read-aloud voice"
-                value={tts.voice ?? DEFAULT_KOKORO_VOICE}
-                placeholder="Choose a voice"
-                choices={kokoroVoices.map((v) => ({ id: v, label: v }))}
-                onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "webgpu", voice } })}
-              />
-            </SettingsRow>
+            <>
+              <SettingsRow layout="stacked">
+                <SettingsLabel>Model</SettingsLabel>
+                <div role="group" aria-label="Read-aloud model" className="flex flex-wrap gap-1.5">
+                  {BROWSER_SPEECH_CHOICES.map(({ model, label }) => (
+                    <TabPillButtonUI
+                      key={model}
+                      active={browserModel === model}
+                      onClick={() => setPreferences({ ...preferences, speech: { engine: "webgpu", model } })}
+                    >
+                      {label}
+                    </TabPillButtonUI>
+                  ))}
+                </div>
+                <BrowserModelSetup key={browserSpeechKind(tts.model)} kind={browserSpeechKind(tts.model)} />
+                <SettingsLabel>Voice</SettingsLabel>
+                {browserModel === "phonon" ? (
+                  <VoiceChoiceDropdown
+                    label="Read-aloud voice"
+                    value={isPhononVoice(tts.voice) ? tts.voice : DEFAULT_PHONON_VOICE}
+                    placeholder="Choose a voice"
+                    choices={PHONON_VOICE_CHOICES}
+                    onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "webgpu", model: "phonon", voice } })}
+                  />
+                ) : (
+                  <VoiceChoiceDropdown
+                    label="Read-aloud voice"
+                    value={tts.voice ?? DEFAULT_KOKORO_VOICE}
+                    placeholder="Choose a voice"
+                    choices={kokoroVoices.map((v) => ({ id: v, label: v }))}
+                    onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "webgpu", model: "kokoro", voice } })}
+                  />
+                )}
+              </SettingsRow>
+              {browserModel === "phonon" && <PhononCredit />}
+            </>
           )}
         </SettingsCard>
       </section>

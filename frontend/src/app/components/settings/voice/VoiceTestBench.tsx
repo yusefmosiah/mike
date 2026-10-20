@@ -202,6 +202,9 @@ export function VoiceTestBench({
     ...(availability.webgpu && hasBrowserModelConsent("speech")
       ? [{ key: "webgpu", label: "Kokoro 82M in this browser", engine: "webgpu" as const }]
       : []),
+    ...(availability.webgpu && hasBrowserModelConsent("phonon")
+      ? [{ key: "phonon", label: "Phonon 31M in this browser", engine: "webgpu" as const, model: "phonon" }]
+      : []),
     ...speechModels.map((id) => ({ key: `or:${id}`, label: `OpenRouter: ${nameOf(catalog?.speech, id)}`, engine: "openrouter" as const, model: id })),
   ];
   const sttCandidates: Candidate[] = [
@@ -237,7 +240,7 @@ export function VoiceTestBench({
         let blob: Blob;
         let cost: number | null | undefined;
         if (candidate.engine === "webgpu") {
-          blob = await speakWithBrowserModel(text);
+          blob = await speakWithBrowserModel(text, { model: candidate.model });
           cost = undefined;
         } else {
           const spoken = await synthesizeSpeechDetailed(

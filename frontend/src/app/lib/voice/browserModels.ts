@@ -33,14 +33,22 @@
  */
 
 import type { EngineRequest } from "./browserModels.engine";
+import { loadPhonon, releasePhonon, speakWithPhonon } from "./browserModels.phonon";
 import { estimateSetupMinutes, measureDownloadSpeed } from "./pricing";
 
 export {
     BROWSER_MODELS,
+    BROWSER_SPEECH_MODELS,
     DEFAULT_KOKORO_VOICE,
+    DEFAULT_PHONON_VOICE,
+    PHONON_MODEL_CARD_URL,
+    PHONON_VOICES,
+    isPhononVoice,
     type BrowserModelKind,
     type BrowserModelRuntime,
     type BrowserModelSpec,
+    type BrowserSpeechModel,
+    type PhononVoice,
     type SetupProgress,
 } from "./browserModels.spec";
 import {
@@ -49,6 +57,7 @@ import {
     DTYPE_SUFFIX,
     type BrowserModelKind,
     type BrowserModelRuntime,
+    type BrowserSpeechModel,
     type SetupProgress,
 } from "./browserModels.spec";
 
@@ -106,12 +115,14 @@ export function browserModelFiles(
     kind: BrowserModelKind,
     runtime: BrowserModelRuntime = browserModelRuntime(),
 ): string[] {
-    return Object.entries(BROWSER_MODELS[kind].dtypes(runtime)).map(
-        ([session, dtype]) => `onnx/${session}${DTYPE_SUFFIX[dtype]}.onnx`,
-    );
+    const spec = BROWSER_MODELS[kind];
+    return [
+        ...Object.entries(spec.dtypes(runtime)).map(([session, dtype]) => `onnx/${session}${DTYPE_SUFFIX[dtype]}.onnx`),
+        ...(spec.fixedFiles ?? []),
+    ];
 }
 
-/** WebAssembly is enough to run either model, slowly; WebGPU is faster. */
+/** WebAssembly is enough to run any of the models, slowly; WebGPU is faster. */
 export function browserModelsSupported(): boolean {
     return typeof window !== "undefined" && typeof WebAssembly !== "undefined";
 }
@@ -171,7 +182,8 @@ export async function browserModelBytes(
     const spec = BROWSER_MODELS[kind];
     const doFetch = deps.fetch ?? fetch;
     const wanted = new Set(browserModelFiles(kind, deps.runtime));
-    const response = await doFetch(`${HUB}/api/models/${spec.repo}/tree/main/onnx`);
+    const directory = spec.weightsDir ? `/${spec.weightsDir}` : "";
+    const response = await doFetch(`${HUB}/api/models/${spec.repo}/tree/${spec.revision}${directory}`);
     if (!response.ok) throw new Error("model size lookup failed");
     const files = (await response.json()) as Array<{ path: string; size?: number; lfs?: { size?: number } }>;
     return files
@@ -288,7 +300,11 @@ function withModel<T>(kind: BrowserModelKind, work: (runtime: BrowserModelRuntim
             markRunning(null);
             throw new BrowserModelError(BROWSER_MODEL_RESTARTED_MESSAGE);
         }
-        if (runtime.oneModelAtATime) await runEngine({ op: "release-other", kind });
+        if (runtime.oneModelAtATime) {
+            // Phonon lives on the page; the others in the engine's worker.
+            if (kind !== "phonon") await releasePhonon();
+            await runEngine({ op: "release-other", kind });
+        }
         running += 1;
         markRunning(kind);
         try {
@@ -315,6 +331,20 @@ export function loadBrowserSpeaker(onProgress?: SetupProgress): Promise<void> {
     if (!consented("speech")) return Promise.reject(new BrowserModelConsentError());
     return withModel("speech", (runtime) => runEngine<void>({ op: "load", kind: "speech", runtime }, onProgress));
 }
+
+/** Downloads (first time) and loads Phonon. Requires consent. */
+export function loadBrowserPhonon(onProgress?: SetupProgress): Promise<void> {
+    if (!consented("phonon")) return Promise.reject(new BrowserModelConsentError());
+    return withModel("phonon", () => loadPhonon(onProgress));
+}
+
+/** The in-browser read-aloud model a speech preference names: Kokoro unless it says Phonon. */
+export const browserSpeechModel = (model: string | undefined): BrowserSpeechModel =>
+    model === "phonon" ? "phonon" : "kokoro";
+
+/** The consent kind of a read-aloud model. */
+export const browserSpeechKind = (model: string | undefined): BrowserModelKind =>
+    browserSpeechModel(model) === "phonon" ? "phonon" : "speech";
 
 /** Errors from the libraries become one message written for the user. */
 function forUser(error: unknown): BrowserModelError {
@@ -359,10 +389,21 @@ export async function browserModelVoices(deps: { fetch?: typeof fetch } = {}): P
     return voices.length ? voices : [DEFAULT_KOKORO_VOICE];
 }
 
-/** A WAV blob of `text` spoken by Kokoro in this browser. */
-export async function speakWithBrowserModel(text: string, options: { voice?: string; speed?: number } = {}): Promise<Blob> {
-    if (!consented("speech")) throw new BrowserModelConsentError();
+/**
+ * A WAV blob of `text` spoken in this browser by Kokoro (the default) or, with
+ * `model: "phonon"`, by Phonon (whose `speed` is not adjustable: the player
+ * changes the speed).
+ */
+export async function speakWithBrowserModel(
+    text: string,
+    options: { voice?: string; speed?: number; model?: string } = {},
+): Promise<Blob> {
+    const kind = browserSpeechKind(options.model);
+    if (!consented(kind)) throw new BrowserModelConsentError();
     try {
+        if (kind === "phonon") {
+            return await withModel(kind, () => speakWithPhonon(text, options.voice));
+        }
         return await withModel("speech", (runtime) =>
             runEngine<Blob>({ op: "speak", runtime, text, voice: options.voice, speed: options.speed }),
         );

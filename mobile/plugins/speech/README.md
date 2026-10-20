@@ -20,9 +20,22 @@ stopping there cut every chunk off after about 13 seconds.
   copies the directory into the app). The model loads on the first dictation,
   is dropped on a memory warning, when the app goes to the background and
   after five idle minutes, and needs no speech-recognition permission. The
-  package's floor is iOS 17 because FluidAudio's is. Test: `xcodebuild test
+  package's floor is iOS 18 (see Phonon). Test: `xcodebuild test
   -scheme MikeSpeech -destination 'platform=iOS Simulator,name=iPhone 17'`
   in this directory (skipped without the model).
+- Phonon (`engine: "phonon"`, read-aloud only): Gradium's Phonon 31m (Apache-2.0),
+  English, a Core ML model on the Neural Engine through the xn-ptts package
+  (MIT OR Apache-2.0, pinned to 0.4.0, product `ptts`, module `PhononTTS`).
+  The model is not in the app: `install` downloads it
+  (`PhononVoice.modelBaseURL`, a public Hugging Face repository at a pinned
+  commit, every file checked against its `bundle.json`, resumable) into
+  Application Support, and `remove` deletes it. `status` reports
+  `not-installed`, `installing` (with `progress`), `available` (with
+  `compiling` while the models still need preparing for this phone, about 10
+  seconds on the first reading) or `unavailable` (iOS before 18, no download
+  source configured). The package's floor is iOS 18 because xn-ptts's is.
+  The model loads on the first reading, is dropped on a memory warning and
+  after five idle minutes.
 - Otherwise, iOS 26 and later: `SpeechAnalyzer` with `SpeechTranscriber`, or
   `DictationTranscriber` on hardware without it. These never send audio off
   the device.
@@ -35,16 +48,17 @@ stopping there cut every chunk off after about 13 seconds.
 
 | Method | Options | Resolves |
 | --- | --- | --- |
-| `status` | `language?` (BCP 47; default the phone's), `engine?` (`"fluid-mini"`; absent means Apple's recognizer, so an older web build keeps working) | `{ state, engine?, locale? }`; `state` is `available`, `downloadable`, `downloading` or `unavailable` |
-| `install` | `language?`, `engine?` (a no-op for `"fluid-mini"`, which ships in the app) | the new status, after Apple's speech model for the language downloads (a system download; called only from the user's click) |
+| `status` | `language?` (BCP 47; default the phone's), `engine?` (`"fluid-mini"` or `"phonon"`; absent means Apple's recognizer, so an older web build keeps working) | `{ state, engine?, locale? }`; `state` is `available`, `downloadable`, `downloading` or `unavailable`; for `"phonon"`: `{ state, engine: "phonon", progress?, compiling? }` with `state` `not-installed`, `installing`, `available` or `unavailable` |
+| `install` | `language?`, `engine?` (a no-op for `"fluid-mini"`, which ships in the app; `"phonon"` downloads its model and resolves when it is done, while `status` reports the progress) | the new status, after Apple's speech model for the language downloads (a system download; called only from the user's click) |
+| `remove` | `engine` (`"phonon"` only) | the new Phonon status; the model's files are deleted |
 | `transcribe` | `audio` (base64), `mimeType`, `language?`, `engine?` (`"fluid-mini"` ignores `language`), `vocabulary?` (up to 100 names and terms of at most 64 characters, the person's first; set as `contextualStrings` on `SFSpeechRecognitionRequest` and `AnalysisContext` for `SpeechAnalyzer`; `"fluid-mini"` ignores it; an older app build ignores it too) | `{ text }` |
 | `voices` | none | `{ voices: [{ id, name, language, quality }] }`; `quality` is `default`, `enhanced` or `premium` |
-| `speak` | `text` (up to 20,000 characters), `voice?` (an `id`), `language?` | `{ audio, mimeType: "audio/wav" }`, 16-bit mono PCM from `AVSpeechSynthesizer.write` |
+| `speak` | `text` (up to 20,000 characters), `voice?` (an `id`, or a Phonon voice name with `engine: "phonon"`), `language?`, `engine?` (`"phonon"`; rejects `not-installed` until the model is downloaded) | `{ audio, mimeType: "audio/wav" }`, 16-bit mono PCM from `AVSpeechSynthesizer.write` |
 
 Rejections carry a `code`: `not-installed`, `unavailable`, `permission-denied`
 (speech recognition turned off, older iOS only), `unsupported-audio` (WebM,
 unreadable), `invalid-audio`, `too-long` (over 25 MB, or text over 20,000
-characters), `empty-text` or `failed`. The web app shows its own message for
+characters), `empty-text`, `install-failed` (Phonon's download) or `failed`. The web app shows its own message for
 each code.
 
 The clip (or the rendered speech) is written to a temporary file for the

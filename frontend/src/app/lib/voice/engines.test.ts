@@ -19,7 +19,9 @@ const phone = vi.hoisted(() => ({
     FLUID_MINI_ENGINE: "fluid-mini",
     deviceSpeechSupported: vi.fn(() => false),
     deviceVoiceSupported: vi.fn(() => false),
-    speakOnDevice: vi.fn(async () => new Blob(["wav"])),
+    speakOnDevice: vi.fn(async (...args: unknown[]) => new Blob(["wav"], { type: `x${args.length}` })),
+    PHONON_ENGINE: "phonon",
+    phononAvailable: vi.fn(async () => false),
 }));
 vi.mock("./deviceSpeech", () => phone);
 
@@ -146,7 +148,56 @@ describe("synthesizeSentence", () => {
         await synthesizeSentence("Hi.", { engine: "device", voice: "zoe" });
         expect(phone.speakOnDevice).toHaveBeenCalledWith("Hi.", "zoe");
         await synthesizeSentence("Hi.", { engine: "webgpu", voice: "bm_george" });
-        expect(local.speakWithBrowserModel).toHaveBeenCalledWith("Hi.", { voice: "bm_george" });
+        expect(local.speakWithBrowserModel).toHaveBeenCalledWith("Hi.", { voice: "bm_george", model: undefined });
+    });
+
+    it("tells the browser engine which model the preference names", async () => {
+        await synthesizeSentence("Hi.", { engine: "webgpu", model: "phonon", voice: "Maeve" });
+        expect(local.speakWithBrowserModel).toHaveBeenCalledWith("Hi.", { voice: "Maeve", model: "phonon" });
+    });
+
+    describe("on the phone", () => {
+        const english = "The court held that the contract was void for want of consideration.";
+        beforeEach(() => phone.phononAvailable.mockResolvedValue(true));
+
+        it("reads English with Phonon once it is downloaded, and no choice means Phonon", async () => {
+            await synthesizeSentence(english, { engine: "device" });
+            expect(phone.speakOnDevice).toHaveBeenCalledWith(english, undefined, "phonon");
+            await synthesizeSentence(english, { engine: "device", model: "phonon", voice: "Maeve" });
+            expect(phone.speakOnDevice).toHaveBeenLastCalledWith(english, "Maeve", "phonon");
+        });
+
+        it("reads with Apple's voices when Apple's are chosen", async () => {
+            await synthesizeSentence(english, { engine: "device", model: "apple", voice: "Maeve" });
+            expect(phone.speakOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.speakOnDevice).toHaveBeenCalledWith(english, undefined);
+        });
+
+        it("keeps an Apple voice chosen before Phonon existed", async () => {
+            await synthesizeSentence(english, { engine: "device", voice: "com.apple.voice.premium.en-US.Zoe" });
+            expect(phone.speakOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.speakOnDevice).toHaveBeenCalledWith(english, "com.apple.voice.premium.en-US.Zoe");
+        });
+
+        it("reads other languages with Apple's voices", async () => {
+            await synthesizeSentence("Le tribunal a jugé que le contrat était nul faute de cause.", { engine: "device", model: "phonon" });
+            expect(phone.speakOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.speakOnDevice).toHaveBeenCalledWith("Le tribunal a jugé que le contrat était nul faute de cause.", undefined);
+        });
+
+        it("reads with Apple's voices until Phonon is downloaded", async () => {
+            phone.phononAvailable.mockResolvedValue(false);
+            await synthesizeSentence(english, { engine: "device", model: "phonon", voice: "Maeve" });
+            expect(phone.speakOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.speakOnDevice).toHaveBeenCalledWith(english, undefined);
+        });
+
+        it("falls back to Apple's voice when Phonon fails", async () => {
+            phone.speakOnDevice.mockRejectedValueOnce(new Error("phonon"));
+            await synthesizeSentence(english, { engine: "device", model: "phonon", voice: "Maeve" });
+            expect(phone.speakOnDevice).toHaveBeenCalledTimes(2);
+            expect(phone.speakOnDevice).toHaveBeenLastCalledWith(english, undefined);
+        });
     });
 });
 

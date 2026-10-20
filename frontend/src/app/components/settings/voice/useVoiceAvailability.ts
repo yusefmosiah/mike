@@ -11,7 +11,9 @@ import {
   deviceSpeechStatus,
   deviceVoiceSupported,
   fluidSpeechMiniAvailable,
+  phononStatus,
   type DeviceSpeechState,
+  type PhononStatus,
 } from "@/app/lib/voice/deviceSpeech";
 import type { VoiceAvailability } from "@/app/lib/voice/preferences";
 
@@ -27,9 +29,14 @@ export interface VoiceAvailabilityState {
   refreshDevice: () => void;
   /** Fluid Speech Mini, bundled in the iPhone app (iOS 18 and later). */
   fluidSpeechMini: boolean;
+  /** Phonon on the phone: downloaded or not, in the iPhone app (iOS 18 and later). */
+  phonon: PhononStatus;
+  refreshPhonon: () => void;
   loading: boolean;
   error: boolean;
 }
+
+const PHONON_UNAVAILABLE: PhononStatus = { state: "unavailable" };
 
 /**
  * What this deployment offers and what this browser (or, in the iPhone app,
@@ -44,6 +51,8 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
   const [deviceStatus, setDeviceStatus] = useState<DeviceSpeechState>("unavailable");
   const [deviceCheck, setDeviceCheck] = useState(0);
   const [fluidSpeechMini, setFluidSpeechMini] = useState(false);
+  const [phonon, setPhonon] = useState<PhononStatus>(PHONON_UNAVAILABLE);
+  const [phononCheck, setPhononCheck] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +101,16 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void phononStatus().then((status) => {
+      if (active) setPhonon(status);
+    });
+    return () => {
+      active = false;
+    };
+  }, [phononCheck]);
+
   return {
     options,
     availability: {
@@ -111,6 +130,8 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     deviceStatus,
     refreshDevice: () => setDeviceCheck((n) => n + 1),
     fluidSpeechMini,
+    phonon,
+    refreshPhonon: () => setPhononCheck((n) => n + 1),
     loading,
     error,
   };

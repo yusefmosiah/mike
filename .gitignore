@@ -18,6 +18,9 @@ next-env.d.ts
 .vercel
 coverage
 
+# phonon-tts, copied from node_modules at build time (frontend/scripts/copy-phonon-tts.mjs)
+frontend/public/phonon-tts/
+
 # Playwright artifacts and the bootstrapped e2e session (contains auth tokens)
 test-results/
 playwright-report/
