@@ -13,6 +13,14 @@ import {
     installDeviceSpeech,
     installPhonon,
     isEnglishLanguage,
+    LIVE_START_FAILURE_MESSAGE,
+    LiveDictationError,
+    cancelLiveDictation,
+    liveDictationAvailable,
+    resetLiveDictationAvailability,
+    startLiveDictation,
+    stopLiveDictation,
+    type LiveDictationEvent,
     prepareFluidSpeechMini,
     PHONON_ENGINE,
     PHONON_INSTALL_FAILURE_MESSAGE,
@@ -32,6 +40,7 @@ function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ na
 }
 
 afterEach(() => {
+    resetLiveDictationAvailability();
     resetFluidSpeechMiniAvailability();
     resetPhononAvailability();
     vi.unstubAllGlobals();
@@ -477,5 +486,164 @@ describe("installPhonon and removePhonon", () => {
             return { state: "unavailable" };
         });
         expect(await removePhonon()).toEqual({ state: "unavailable" });
+    });
+});
+
+describe("liveDictationAvailable", () => {
+    it("is false in a browser", async () => {
+        expect(await liveDictationAvailable()).toBe(false);
+    });
+
+    it("is true only when Fluid Speech Mini reports live, and the answer is kept", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini", locale: "en", live: true });
+        expect(await liveDictationAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "status", { engine: "fluid-mini" });
+        expect(await liveDictationAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledTimes(1);
+    });
+
+    it("is false on a build without live, without Fluid Speech Mini or when the bridge fails, and is asked again", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini" });
+        expect(await liveDictationAvailable()).toBe(false);
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "speech-analyzer", live: true });
+        expect(await liveDictationAvailable()).toBe(false);
+        nativePromise.mockResolvedValueOnce({ state: "unavailable", live: true });
+        expect(await liveDictationAvailable()).toBe(false);
+        nativePromise.mockRejectedValueOnce(new Error("bridge"));
+        expect(await liveDictationAvailable()).toBe(false);
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini", live: true });
+        expect(await liveDictationAvailable()).toBe(true);
+    });
+});
+
+describe("live dictation", () => {
+    const remove = vi.fn();
+    let emit: (data: unknown) => void;
+    const addListener = vi.fn((_plugin: string, _event: string, callback: (data: unknown) => void) => {
+        emit = callback;
+        return { remove };
+    });
+
+    function inAppWithListeners() {
+        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }], nativePromise, addListener });
+    }
+
+    afterEach(() => {
+        nativePromise.mockResolvedValue(undefined);
+        cancelLiveDictation();
+        remove.mockReset();
+        addListener.mockClear();
+    });
+
+    it("cannot start in a browser or in a shell without listeners", async () => {
+        await expect(startLiveDictation(() => undefined)).rejects.toMatchObject({ message: LIVE_START_FAILURE_MESSAGE, code: "unavailable" });
+        inApp();
+        await expect(startLiveDictation(() => undefined)).rejects.toBeInstanceOf(LiveDictationError);
+        vi.stubGlobal("window", undefined);
+        await expect(startLiveDictation(() => undefined)).rejects.toBeInstanceOf(LiveDictationError);
+    });
+
+    it("starts the plugin and passes its events on, ignoring what it does not understand", async () => {
+        inAppWithListeners();
+        nativePromise.mockResolvedValueOnce(undefined);
+        const events: LiveDictationEvent[] = [];
+        await startLiveDictation((event) => events.push(event));
+        expect(addListener).toHaveBeenCalledWith("MikeSpeech", "liveTranscript", expect.any(Function));
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "startLive", { engine: "fluid-mini" });
+
+        emit({ confirmed: "Hello", volatile: " wor" });
+        emit({ confirmed: "Hello world", ended: true });
+        emit({ volatile: "tail" });
+        emit({ level: 7 });
+        emit({ level: -1 });
+        emit({ level: Number.NaN });
+        emit({ other: true });
+        emit(null);
+        emit("text");
+        expect(events).toEqual([
+            { kind: "text", confirmed: "Hello", volatile: " wor", ended: false },
+            { kind: "text", confirmed: "Hello world", volatile: "", ended: true },
+            { kind: "text", confirmed: "", volatile: "tail", ended: false },
+            { kind: "level", level: 1 },
+            { kind: "level", level: 0 },
+        ]);
+    });
+
+    it("removes the listener and maps the plugin's code when starting fails", async () => {
+        inAppWithListeners();
+        nativePromise.mockRejectedValueOnce({ code: "permission-denied" });
+        await expect(startLiveDictation(() => undefined)).rejects.toMatchObject({
+            code: "permission-denied",
+            message: "Speech recognition is turned off for this app in the iPhone's Settings.",
+        });
+        expect(remove).toHaveBeenCalledTimes(1);
+
+        nativePromise.mockRejectedValueOnce(new Error("raw native failure"));
+        await expect(startLiveDictation(() => undefined)).rejects.toMatchObject({
+            message: LIVE_START_FAILURE_MESSAGE,
+            code: undefined,
+        });
+        expect(remove).toHaveBeenCalledTimes(2);
+    });
+
+    it("replaces the listener of an earlier dictation", async () => {
+        inAppWithListeners();
+        nativePromise.mockResolvedValue(undefined);
+        await startLiveDictation(() => undefined);
+        await startLiveDictation(() => undefined);
+        expect(remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops with the final text and removes the listener", async () => {
+        inAppWithListeners();
+        nativePromise.mockResolvedValueOnce(undefined);
+        await startLiveDictation(() => undefined);
+        nativePromise.mockResolvedValueOnce({ text: "Hello world." });
+        expect(await stopLiveDictation()).toBe("Hello world.");
+        expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "stopLive");
+        expect(remove).toHaveBeenCalledTimes(1);
+        nativePromise.mockResolvedValueOnce({});
+        expect(await stopLiveDictation()).toBe("");
+        expect(remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a failed stop with a message for the user, and without the bridge", async () => {
+        inAppWithListeners();
+        nativePromise.mockRejectedValueOnce({ code: "failed", message: "raw" });
+        await expect(stopLiveDictation()).rejects.toMatchObject({ message: DEVICE_TRANSCRIBE_FAILURE_MESSAGE, code: "failed" });
+        nativePromise.mockRejectedValueOnce("boom");
+        await expect(stopLiveDictation()).rejects.toMatchObject({ code: undefined });
+        vi.unstubAllGlobals();
+        await expect(stopLiveDictation()).rejects.toBeInstanceOf(LiveDictationError);
+    });
+
+    it("cancels: removes the listener and tells the plugin, ignoring its refusal", async () => {
+        cancelLiveDictation();
+        expect(nativePromise).not.toHaveBeenCalled();
+        inAppWithListeners();
+        nativePromise.mockResolvedValueOnce(undefined);
+        await startLiveDictation(() => undefined);
+        nativePromise.mockRejectedValueOnce(new Error("UNIMPLEMENTED"));
+        cancelLiveDictation();
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "cancelLive");
+        await Promise.resolve();
+    });
+
+    it("survives a listener whose removal throws or rejects", async () => {
+        inAppWithListeners();
+        nativePromise.mockResolvedValue(undefined);
+        remove.mockImplementationOnce(() => {
+            throw new Error("gone");
+        });
+        await startLiveDictation(() => undefined);
+        cancelLiveDictation();
+        remove.mockRejectedValueOnce(new Error("gone"));
+        await startLiveDictation(() => undefined);
+        cancelLiveDictation();
+        await Promise.resolve();
+        expect(remove).toHaveBeenCalledTimes(2);
     });
 });

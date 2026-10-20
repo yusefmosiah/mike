@@ -27,6 +27,8 @@ enum OnDeviceSpeech {
         let engine: String?
         /// BCP 47 identifier of the language that will be used.
         let locale: String?
+        /// Fluid Speech Mini only: the build can transcribe while the person speaks.
+        var live: Bool = false
     }
 
     /// Failures the web app maps to its own messages, by `code`.

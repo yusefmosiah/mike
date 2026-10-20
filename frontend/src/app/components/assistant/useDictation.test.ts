@@ -427,4 +427,20 @@ describe("useDictation", () => {
             );
         });
     });
+
+    it("cancel discards a recording: nothing is transcribed", async () => {
+        const { result } = renderHook(() => useDictation());
+
+        await act(async () => {
+            await result.current.start();
+        });
+        act(() => result.current.cancel());
+
+        expect(result.current.recording).toBe(false);
+        expect(stopTrack).toHaveBeenCalled();
+        expect(transcribeAudio).not.toHaveBeenCalled();
+        expect(result.current.transcript).toBeNull();
+        // Cancelling with nothing recording is harmless.
+        act(() => result.current.cancel());
+    });
 });

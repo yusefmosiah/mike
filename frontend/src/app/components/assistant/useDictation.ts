@@ -8,8 +8,17 @@ import {
     type OnDeviceRecognitionSession,
 } from "@/app/lib/voice/browserSpeech";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
-import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
-import { correctDictation, prepareTranscription, transcribeRecording } from "@/app/lib/voice/engines";
+import { DeviceSpeechError, LiveDictationError } from "@/app/lib/voice/deviceSpeech";
+import {
+    cancelLiveTranscription,
+    correctDictation,
+    prepareTranscription,
+    startLiveTranscription,
+    stopLiveTranscription,
+    transcribeRecording,
+    wantsLiveDictation,
+    type LiveTranscript,
+} from "@/app/lib/voice/engines";
 import { loadUserVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
@@ -37,6 +46,14 @@ const MICROPHONE_START_FAILURE_MESSAGE =
 const TRANSCRIBE_FAILURE_MESSAGE =
     "Could not transcribe the recording. Please try again.";
 
+/** The message for a failure of the iPhone's live dictation. */
+function liveFailure(liveError: unknown): string {
+    if (liveError instanceof LiveDictationError && liveError.code === "permission-denied") {
+        return MICROPHONE_ACCESS_DENIED_MESSAGE;
+    }
+    return liveError instanceof DeviceSpeechError ? liveError.message : MICROPHONE_START_FAILURE_MESSAGE;
+}
+
 export interface UseDictationOptions {
     /** Blocks starting a recording (e.g. while a response is loading). */
     disabled?: boolean;
@@ -49,6 +66,12 @@ export interface UseDictationResult {
     elapsedMs: number;
     /** User-facing failure text, or null. */
     error: string | null;
+    /**
+     * The text heard so far while a live dictation runs (the iPhone app with
+     * Fluid Speech Mini), until its final text arrives; null otherwise.
+     * `confirmed` will not change; `volatile` is the tail that may.
+     */
+    liveText: LiveTranscript | null;
     /** True while a finished recording is being transcribed. */
     busy: boolean;
     /**
@@ -60,6 +83,8 @@ export interface UseDictationResult {
     transcriptVersion: number;
     start: () => Promise<void>;
     stop: () => void;
+    /** Stops and throws the recording away; nothing is transcribed. */
+    cancel: () => void;
     toggle: () => void;
     clearError: () => void;
 }
@@ -80,6 +105,7 @@ export function useDictation({
     const [elapsedMs, setElapsedMs] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [liveText, setLiveText] = useState<LiveTranscript | null>(null);
     const [transcript, setTranscript] = useState<string | null>(null);
     const [transcriptVersion, setTranscriptVersion] = useState(0);
 
@@ -94,6 +120,8 @@ export function useDictation({
     const activeRef = useRef(true);
     const startingRef = useRef(false);
     const recordingRef = useRef(false);
+    // True from the moment a live dictation is asked for until it ends.
+    const liveRef = useRef(false);
     const busyRef = useRef(false);
     const disabledRef = useRef(disabled);
     disabledRef.current = disabled;
@@ -152,6 +180,66 @@ export function useDictation({
         [clearTimer, releaseStream],
     );
 
+    // Ends a live dictation: the final text goes to the composer. Also what
+    // happens when the app ends it itself (a call, the app going to the
+    // background), which keeps the text so far.
+    const finishLive = useCallback(() => {
+        if (!liveRef.current) return;
+        liveRef.current = false;
+        clearTimer();
+        recordingRef.current = false;
+        setRecording(false);
+        busyRef.current = true;
+        setBusy(true);
+        stopLiveTranscription()
+            .then((text) => {
+                const trimmed = text.trim();
+                if (trimmed && activeRef.current) {
+                    setTranscript(trimmed);
+                    setTranscriptVersion((version) => version + 1);
+                }
+            })
+            .catch((stopError: unknown) => {
+                setError(liveFailure(stopError));
+            })
+            .finally(() => {
+                busyRef.current = false;
+                setBusy(false);
+                setLiveText(null);
+            });
+    }, [clearTimer]);
+
+    const startLive = useCallback(async () => {
+        liveRef.current = true;
+        try {
+            await startLiveTranscription({
+                onText: (text, ended) => {
+                    if (!liveRef.current || !activeRef.current) return;
+                    setLiveText(text);
+                    if (ended) finishLive();
+                },
+            });
+        } catch (liveError) {
+            liveRef.current = false;
+            setError(liveFailure(liveError));
+            return;
+        }
+        if (!activeRef.current || !liveRef.current) {
+            // Unmounted (or cancelled) while the microphone was opening.
+            liveRef.current = false;
+            cancelLiveTranscription();
+            return;
+        }
+        startedAtRef.current = Date.now();
+        setElapsedMs(0);
+        setLiveText({ confirmed: "", volatile: "" });
+        recordingRef.current = true;
+        setRecording(true);
+        timerRef.current = window.setInterval(() => {
+            setElapsedMs(Date.now() - startedAtRef.current);
+        }, 1000);
+    }, [finishLive]);
+
     const start = useCallback(async () => {
         if (
             disabledRef.current ||
@@ -169,6 +257,14 @@ export function useDictation({
             void loadUserVocabulary().catch(() => undefined);
             // Load the on-device model while they speak, not after.
             void prepareTranscription().catch(() => undefined);
+            // On the iPhone with Fluid Speech Mini the phone records and
+            // transcribes as the person speaks; everything else records a
+            // clip here and transcribes it at the end.
+            const preferences = loadVoicePreferences().transcription;
+            if (preferences.engine === "device" && (await wantsLiveDictation(preferences))) {
+                await startLive();
+                return;
+            }
             if (loadVoicePreferences().transcription.engine === "browser") {
                 try {
                     browserSessionRef.current = startOnDeviceRecognition(
@@ -272,9 +368,13 @@ export function useDictation({
         } finally {
             startingRef.current = false;
         }
-    }, [clearTimer, finishRecording, releaseStream]);
+    }, [clearTimer, finishRecording, releaseStream, startLive]);
 
     const stop = useCallback(() => {
+        if (liveRef.current) {
+            finishLive();
+            return;
+        }
         const session = browserSessionRef.current;
         if (session) {
             browserSessionRef.current = null;
@@ -309,7 +409,36 @@ export function useDictation({
         const recorder = recorderRef.current;
         if (!recorder || recorder.state === "inactive") return;
         recorder.stop();
-    }, [clearTimer]);
+    }, [clearTimer, finishLive]);
+
+    const cancel = useCallback(() => {
+        if (liveRef.current) {
+            liveRef.current = false;
+            cancelLiveTranscription();
+            clearTimer();
+            recordingRef.current = false;
+            setRecording(false);
+            setLiveText(null);
+            return;
+        }
+        const session = browserSessionRef.current;
+        if (session) {
+            browserSessionRef.current = null;
+            session.cancel();
+        }
+        const recorder = recorderRef.current;
+        recorderRef.current = null;
+        if (recorder && recorder.state !== "inactive") {
+            recorder.onstop = null;
+            recorder.ondataavailable = null;
+            recorder.stop();
+        }
+        chunksRef.current = [];
+        releaseStream();
+        clearTimer();
+        recordingRef.current = false;
+        setRecording(false);
+    }, [clearTimer, releaseStream]);
 
     const toggle = useCallback(() => {
         if (recordingRef.current) {
@@ -326,6 +455,10 @@ export function useDictation({
         return () => {
             activeRef.current = false;
             clearTimer();
+            if (liveRef.current) {
+                liveRef.current = false;
+                cancelLiveTranscription();
+            }
             browserSessionRef.current?.cancel();
             browserSessionRef.current = null;
             const recorder = recorderRef.current;
@@ -346,10 +479,12 @@ export function useDictation({
         elapsedMs,
         error,
         busy,
+        liveText,
         transcript,
         transcriptVersion,
         start,
         stop,
+        cancel,
         toggle,
         clearError,
     };

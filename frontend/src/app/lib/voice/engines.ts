@@ -11,8 +11,13 @@ import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
 import {
     FLUID_MINI_ENGINE,
     PHONON_ENGINE,
+    cancelLiveDictation,
     fluidSpeechMiniAvailable,
+    liveDictationAvailable,
     prepareFluidSpeechMini,
+    startLiveDictation,
+    stopLiveDictation,
+    type LiveDictationEvent,
     phononAvailable,
     isEnglishLanguage,
     speakOnDevice,
@@ -71,6 +76,59 @@ export async function prepareTranscription(
 ): Promise<void> {
     if (preferences.engine !== "device" || !wantsFluidSpeechMini(preferences)) return;
     if (await fluidSpeechMiniAvailable()) prepareFluidSpeechMini();
+}
+
+/**
+ * True when this dictation should be transcribed while the person speaks: the
+ * phone's engine with Fluid Speech Mini, English, and an app build that
+ * reports `live`. Everything else records a clip and transcribes it at the end.
+ */
+export async function wantsLiveDictation(
+    preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
+): Promise<boolean> {
+    return preferences.engine === "device" && wantsFluidSpeechMini(preferences) && (await liveDictationAvailable());
+}
+
+/** What the composer shows while a live dictation runs. */
+export interface LiveTranscript {
+    /** Text that will not change, with the person's vocabulary applied. */
+    confirmed: string;
+    /** The tail that may still change. */
+    volatile: string;
+}
+
+/**
+ * Starts a live dictation on the phone. `onText` hears the text so far (the
+ * vocabulary applied to the confirmed part; `ended` when an interruption
+ * stopped the dictation, which then keeps its text) and `onLevel` the input
+ * level.
+ */
+export async function startLiveTranscription(handlers: {
+    onText: (text: LiveTranscript, ended: boolean) => void;
+    onLevel?: (level: number) => void;
+}): Promise<void> {
+    // A list that cannot be loaded is the same as none; the cache serves the rest.
+    await loadUserVocabulary().catch(() => undefined);
+    await startLiveDictation((event: LiveDictationEvent) => {
+        if (event.kind === "level") {
+            handlers.onLevel?.(event.level);
+            return;
+        }
+        handlers.onText(
+            { confirmed: correctWithVocabulary(event.confirmed, currentDictationVocabulary()), volatile: event.volatile },
+            event.ended,
+        );
+    });
+}
+
+/** Stops the live dictation: the final text, with the vocabulary applied. */
+export async function stopLiveTranscription(): Promise<string> {
+    return correctWithVocabulary(await stopLiveDictation(), await dictationVocabulary());
+}
+
+/** Stops the live dictation and discards it. */
+export function cancelLiveTranscription(): void {
+    cancelLiveDictation();
 }
 
 /** The vocabulary for this dictation: the person's list (fetched if need be) and the page's names. */

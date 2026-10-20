@@ -17,6 +17,9 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "prepare", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "transcribe", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startLive", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopLive", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cancelLive", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voices", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise)
     ]
@@ -126,6 +129,85 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Starts recording and transcribing with Fluid Speech Mini as the person
+    /// speaks. Resolves when recording has started; the text arrives as
+    /// `liveTranscript` events (`{ confirmed, volatile }` with the whole text
+    /// so far, `{ level }` about ten times a second, and `ended: true` when an
+    /// interruption stopped the dictation). Audio is kept in memory only.
+    @objc func startLive(_ call: CAPPluginCall) {
+        guard Self.usesFluidMini(call) else {
+            call.reject("Live dictation needs Fluid Speech Mini.", "unavailable")
+            return
+        }
+        #if canImport(FluidAudio)
+        guard #available(iOS 18.0, *), let directory = FluidSpeechMini.modelDirectory() else {
+            call.reject("Live dictation is not available on this iPhone.", "unavailable")
+            return
+        }
+        Task {
+            do {
+                try await LiveDictation.shared.start(modelDirectory: directory) { [weak self] event in
+                    self?.notifyListeners(Self.liveEventName, data: Self.livePayload(event))
+                }
+                call.resolve()
+            } catch {
+                Self.reject(call, error)
+            }
+        }
+        #else
+        call.reject("Live dictation is not available on this iPhone.", "unavailable")
+        #endif
+    }
+
+    /// Stops recording, finishes the transcription and resolves `{ text }`.
+    @objc func stopLive(_ call: CAPPluginCall) {
+        #if canImport(FluidAudio)
+        guard #available(iOS 18.0, *) else {
+            call.reject("Live dictation is not available on this iPhone.", "unavailable")
+            return
+        }
+        Task {
+            do {
+                call.resolve(["text": try await LiveDictation.shared.stop()])
+            } catch {
+                Self.reject(call, error)
+            }
+        }
+        #else
+        call.reject("Live dictation is not available on this iPhone.", "unavailable")
+        #endif
+    }
+
+    /// Stops recording and discards everything.
+    @objc func cancelLive(_ call: CAPPluginCall) {
+        #if canImport(FluidAudio)
+        if #available(iOS 18.0, *) {
+            Task {
+                await LiveDictation.shared.cancel()
+                call.resolve()
+            }
+            return
+        }
+        #endif
+        call.resolve()
+    }
+
+    static let liveEventName = "liveTranscript"
+
+    #if canImport(FluidAudio)
+    @available(iOS 18.0, *)
+    static func livePayload(_ event: LiveDictationSession.Event) -> [String: Any] {
+        switch event {
+        case let .transcript(confirmed, volatile, ended):
+            var payload: [String: Any] = ["confirmed": confirmed, "volatile": volatile]
+            if ended { payload["ended"] = true }
+            return payload
+        case let .level(level):
+            return ["level": Double(level)]
+        }
+    }
+    #endif
+
     @objc func voices(_ call: CAPPluginCall) {
         let voices = OnDeviceVoice.voices().map { voice in
             ["id": voice.identifier, "name": voice.name, "language": voice.language, "quality": voice.quality]
@@ -197,6 +279,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         var result: [String: Any] = ["state": status.state.rawValue]
         if let engine = status.engine { result["engine"] = engine }
         if let locale = status.locale { result["locale"] = locale }
+        if status.live { result["live"] = true }
         return result
     }
 

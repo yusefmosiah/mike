@@ -42,7 +42,9 @@ enum FluidSpeechMini {
         guard #available(iOS 18.0, *), canTranscribe, modelDirectory(in: bundle) != nil else {
             return OnDeviceSpeech.Status(state: .unavailable, engine: nil, locale: nil)
         }
-        return OnDeviceSpeech.Status(state: .available, engine: engineName, locale: "en")
+        // `live`: this build can also transcribe while the person speaks
+        // (LiveDictation.swift); an older build leaves it out.
+        return OnDeviceSpeech.Status(state: .available, engine: engineName, locale: "en", live: true)
     }
 
     private static var canTranscribe: Bool {
@@ -83,6 +85,8 @@ enum FluidSpeechMini {
         static let idleLimit: Duration = .seconds(5 * 60)
 
         private var manager: AsrManager?
+        /// The loaded Core ML models behind `manager`, handed to live dictation.
+        private var models: AsrModels?
         private var running = 0
         private var idleTask: Task<Void, Never>?
         private var observers: [NSObjectProtocol] = []
@@ -126,11 +130,33 @@ enum FluidSpeechMini {
             _ = try? await manager.transcribe([Float](repeating: 0, count: 16_000), decoderState: &state)
         }
 
+        /// The warm models for a live dictation, which keeps them loaded until
+        /// `endLive`. FluidAudio's `SlidingWindowAsrManager.loadModels(_:)` only
+        /// builds a light `AsrManager` that points at these same Core ML models
+        /// (no load, no second specialisation), so there is one copy in memory
+        /// and the model `prepare` warmed is the one that runs.
+        func beginLive(modelDirectory: URL) throws -> AsrModels {
+            idleTask?.cancel()
+            _ = try loaded(modelDirectory)
+            guard let models else { throw OnDeviceSpeech.Failure.failed }
+            running += 1
+            return models
+        }
+
+        /// Whether the model is in memory (tests).
+        var isLoaded: Bool { manager != nil }
+
+        func endLive() {
+            running = max(0, running - 1)
+            scheduleUnload()
+        }
+
         private func loaded(_ directory: URL) throws -> AsrManager {
             if let manager { return manager }
             // loadLocal reads exactly this directory and never downloads.
             let models = try AsrModels.loadLocal(from: directory, version: .ultra)
             let created = AsrManager(config: .default, models: models)
+            self.models = models
             manager = created
             observe()
             return created
@@ -151,6 +177,7 @@ enum FluidSpeechMini {
             guard running == 0 else { return }
             idleTask?.cancel()
             manager = nil
+            models = nil
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []
         }

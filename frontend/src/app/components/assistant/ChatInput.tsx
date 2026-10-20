@@ -97,6 +97,7 @@ import {
     type AutocompactNotice,
 } from "@/app/lib/autocompactCommand";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
+import { LiveDictationText } from "./LiveDictationText";
 import { useDictation } from "./useDictation";
 
 export interface ChatInputHandle {
@@ -1099,6 +1100,14 @@ function ChatInputForChatImpl(
                         </div>
                     )}
 
+                    {/* The text heard so far, while the iPhone transcribes live */}
+                    {dictation.liveText && (
+                        <LiveDictationText
+                            confirmed={dictation.liveText.confirmed}
+                            volatile={dictation.liveText.volatile}
+                        />
+                    )}
+
                     {/* Input */}
                     <div className="px-4 pt-4">
                         <textarea
@@ -1221,6 +1230,14 @@ function ChatInputForChatImpl(
                                                 dictation.elapsedMs,
                                             )}
                                         </span>
+                                        <button
+                                            type="button"
+                                            aria-label="Cancel dictation"
+                                            onClick={dictation.cancel}
+                                            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-900/5 hover:text-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
                                         <button
                                             type="button"
                                             aria-label="Stop dictation"

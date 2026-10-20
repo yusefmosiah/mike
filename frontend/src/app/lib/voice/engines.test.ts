@@ -16,6 +16,10 @@ const phone = vi.hoisted(() => ({
     transcribeOnDevice: vi.fn(async (..._args: unknown[]) => "phone words"),
     fluidSpeechMiniAvailable: vi.fn(async () => false),
     prepareFluidSpeechMini: vi.fn(),
+    liveDictationAvailable: vi.fn(async () => false),
+    startLiveDictation: vi.fn(async (..._args: unknown[]) => undefined),
+    stopLiveDictation: vi.fn(async () => "final text"),
+    cancelLiveDictation: vi.fn(),
     isEnglishLanguage: vi.fn((language?: string) => !language || /^en/i.test(language)),
     FLUID_MINI_ENGINE: "fluid-mini",
     deviceSpeechSupported: vi.fn(() => false),
@@ -29,8 +33,12 @@ vi.mock("./deviceSpeech", () => phone);
 import { resetDictationVocabulary, setDictationContext } from "./dictationVocabulary";
 import {
     correctDictation,
+    cancelLiveTranscription,
     prepareTranscription,
     speechRenderPlan,
+    startLiveTranscription,
+    stopLiveTranscription,
+    wantsLiveDictation,
     synthesizeSentence,
     transcribeRecording,
 } from "./engines";
@@ -239,5 +247,55 @@ describe("speechRenderPlan", () => {
 
     it("reads the saved preferences by default", () => {
         expect(speechRenderPlan()).toEqual({ maxChars: 1200, concurrency: 3 });
+    });
+});
+
+describe("live dictation", () => {
+    it("is wanted only on the phone, with Fluid Speech Mini, in English, in a build that reports live", async () => {
+        phone.liveDictationAvailable.mockResolvedValue(true);
+        expect(await wantsLiveDictation({ engine: "device", language: "en-US" })).toBe(true);
+        expect(await wantsLiveDictation({ engine: "device" })).toBe(true);
+        expect(await wantsLiveDictation({ engine: "device", model: "apple" })).toBe(false);
+        expect(await wantsLiveDictation({ engine: "device", language: "fr-FR" })).toBe(false);
+        expect(await wantsLiveDictation({ engine: "operator" })).toBe(false);
+        phone.liveDictationAvailable.mockResolvedValue(false);
+        expect(await wantsLiveDictation({ engine: "device" })).toBe(false);
+        expect(await wantsLiveDictation()).toBe(false);
+    });
+
+    it("applies the vocabulary to the confirmed text only, and passes the level on", async () => {
+        setDictationContext("test", ["Okonkwo-Lindqvist"]);
+        let send: (event: unknown) => void = () => undefined;
+        phone.startLiveDictation.mockImplementationOnce(async (...args: unknown[]) => {
+            send = args[0] as (event: unknown) => void;
+        });
+        const onText = vi.fn();
+        const onLevel = vi.fn();
+        await startLiveTranscription({ onText, onLevel });
+        send({ kind: "text", confirmed: "ask Conquo Lindqvist", volatile: "Conquo Lindqvist now", ended: false });
+        send({ kind: "text", confirmed: "done", volatile: "", ended: true });
+        send({ kind: "level", level: 0.5 });
+        expect(onText).toHaveBeenNthCalledWith(1, { confirmed: "ask Okonkwo-Lindqvist", volatile: "Conquo Lindqvist now" }, false);
+        expect(onText).toHaveBeenNthCalledWith(2, { confirmed: "done", volatile: "" }, true);
+        expect(onLevel).toHaveBeenCalledWith(0.5);
+    });
+
+    it("tolerates a missing level handler and a vocabulary that cannot be loaded", async () => {
+        api.getDictationVocabulary.mockRejectedValueOnce(new Error("offline"));
+        resetDictationVocabulary();
+        let send: (event: unknown) => void = () => undefined;
+        phone.startLiveDictation.mockImplementationOnce(async (...args: unknown[]) => {
+            send = args[0] as (event: unknown) => void;
+        });
+        await startLiveTranscription({ onText: vi.fn() });
+        send({ kind: "level", level: 1 });
+    });
+
+    it("applies the vocabulary to the final text on stop, and cancels", async () => {
+        setDictationContext("test", ["Okonkwo-Lindqvist"]);
+        phone.stopLiveDictation.mockResolvedValueOnce("ask Conquo Lindqvist");
+        expect(await stopLiveTranscription()).toBe("ask Okonkwo-Lindqvist");
+        cancelLiveTranscription();
+        expect(phone.cancelLiveDictation).toHaveBeenCalledTimes(1);
     });
 });

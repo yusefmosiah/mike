@@ -1,6 +1,6 @@
 "use client";
 
-import { knownErrorCodeMessage } from "@/app/lib/userFacingError";
+import { errorCode, knownErrorCodeMessage } from "@/app/lib/userFacingError";
 
 /**
  * Dictation with Apple's speech recognition on the phone, in Mike's iPhone
@@ -15,6 +15,7 @@ export type DeviceSpeechState = "available" | "downloadable" | "downloading" | "
 
 interface CapacitorBridge {
     PluginHeaders?: { name: string; methods?: { name: string }[] }[];
+    addListener?: (plugin: string, event: string, callback: (data: unknown) => void) => { remove: () => unknown };
     nativePromise?: (plugin: string, method: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -360,4 +361,139 @@ export async function speakOnDevice(text: string, voice?: string, engine?: typeo
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return new Blob([bytes], { type: "audio/wav" });
+}
+
+let liveAvailable: Promise<boolean> | null = null;
+
+/**
+ * True when the app can transcribe while the person speaks: Fluid Speech Mini
+ * is available and its status says `live` (an app build from before live
+ * dictation leaves that out). A positive answer is kept; a negative one is
+ * asked again.
+ */
+export function liveDictationAvailable(): Promise<boolean> {
+    if (liveAvailable) return liveAvailable;
+    const call = nativePromise();
+    if (!call) return Promise.resolve(false);
+    const asked = call(PLUGIN, "status", { engine: FLUID_MINI_ENGINE }).then(
+        (result) =>
+            stateOf(result) === "available" &&
+            (result as { engine?: unknown }).engine === FLUID_MINI_ENGINE &&
+            (result as { live?: unknown }).live === true,
+        () => false,
+    );
+    liveAvailable = asked;
+    void asked.then((ok) => {
+        if (!ok && liveAvailable === asked) liveAvailable = null;
+    });
+    return asked;
+}
+
+/** Forgets the cached answer of `liveDictationAvailable` (tests). */
+export function resetLiveDictationAvailability(): void {
+    liveAvailable = null;
+}
+
+/** What the app reports while a live dictation runs. */
+export type LiveDictationEvent =
+    /** The whole text so far: `confirmed` will not change, `volatile` may. `ended` when an interruption stopped the dictation. */
+    | { kind: "text"; confirmed: string; volatile: string; ended: boolean }
+    /** The input level, 0 to 1. */
+    | { kind: "level"; level: number };
+
+/** A live dictation failure; `code` is the plugin's rejection code when it sent one. */
+export class LiveDictationError extends DeviceSpeechError {
+    constructor(
+        message: string,
+        readonly code?: string,
+    ) {
+        super(message);
+    }
+}
+
+export const LIVE_START_FAILURE_MESSAGE = "Could not start recording. Please try again.";
+
+function liveEventOf(data: unknown): LiveDictationEvent | null {
+    if (!data || typeof data !== "object") return null;
+    const { confirmed, volatile, level, ended } = data as Record<string, unknown>;
+    if (typeof confirmed === "string" || typeof volatile === "string") {
+        return {
+            kind: "text",
+            confirmed: typeof confirmed === "string" ? confirmed : "",
+            volatile: typeof volatile === "string" ? volatile : "",
+            ended: ended === true,
+        };
+    }
+    if (typeof level === "number" && Number.isFinite(level)) {
+        return { kind: "level", level: Math.min(1, Math.max(0, level)) };
+    }
+    return null;
+}
+
+let liveListener: { remove: () => unknown } | null = null;
+
+function removeLiveListener(): void {
+    const listener = liveListener;
+    liveListener = null;
+    try {
+        void Promise.resolve(listener?.remove()).catch(() => undefined);
+    } catch {
+        // The bridge is gone; there is nothing left to remove.
+    }
+}
+
+/**
+ * Starts recording on the phone and transcribing as the person speaks;
+ * `onEvent` hears the text so far and the input level. Resolves once
+ * recording has started. Rejects with a `LiveDictationError` whose `code` is
+ * `permission-denied` when the microphone is off for the app. Only one live
+ * dictation runs at a time: a new one replaces the last.
+ */
+export async function startLiveDictation(onEvent: (event: LiveDictationEvent) => void): Promise<void> {
+    const call = nativePromise();
+    const cap = typeof window === "undefined" ? undefined : (window as unknown as { Capacitor?: CapacitorBridge }).Capacitor;
+    if (!call || typeof cap?.addListener !== "function") throw new LiveDictationError(LIVE_START_FAILURE_MESSAGE, "unavailable");
+    removeLiveListener();
+    const listener = cap.addListener(PLUGIN, "liveTranscript", (data) => {
+        const event = liveEventOf(data);
+        if (event) onEvent(event);
+    });
+    liveListener = listener;
+    try {
+        await call(PLUGIN, "startLive", { engine: FLUID_MINI_ENGINE });
+    } catch (error) {
+        if (liveListener === listener) removeLiveListener();
+        const code = errorCode(error) ?? undefined;
+        throw new LiveDictationError(knownErrorCodeMessage(error, DEVICE_ERROR_MESSAGES, LIVE_START_FAILURE_MESSAGE), code);
+    }
+}
+
+/**
+ * Stops the live dictation and resolves the whole text. After an
+ * interruption the text kept at that point is returned. The event listener is
+ * removed either way.
+ */
+export async function stopLiveDictation(): Promise<string> {
+    const call = nativePromise();
+    removeLiveListener();
+    if (!call) throw new LiveDictationError(DEVICE_TRANSCRIBE_FAILURE_MESSAGE);
+    let result: unknown;
+    try {
+        result = await call(PLUGIN, "stopLive");
+    } catch (error) {
+        throw new LiveDictationError(
+            knownErrorCodeMessage(error, DEVICE_ERROR_MESSAGES, DEVICE_TRANSCRIBE_FAILURE_MESSAGE),
+            errorCode(error) ?? undefined,
+        );
+    }
+    const text = result && typeof result === "object" ? (result as { text?: unknown }).text : undefined;
+    return typeof text === "string" ? text : "";
+}
+
+/** Stops the live dictation and throws its text away, releasing the microphone. */
+export function cancelLiveDictation(): void {
+    removeLiveListener();
+    const call = nativePromise();
+    if (!call) return;
+    call(PLUGIN, "cancelLive").catch(() => undefined);
 }
