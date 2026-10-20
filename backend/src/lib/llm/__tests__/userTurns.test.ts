@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeConsecutiveUserTurns, USER_TURN_SEPARATOR } from "../userTurns";
+import { endAtLastUser, mergeConsecutiveUserTurns, USER_TURN_SEPARATOR } from "../userTurns";
 
 describe("mergeConsecutiveUserTurns", () => {
     it("joins back-to-back user turns with a separator and leaves alternation alone", () => {
@@ -27,5 +27,27 @@ describe("mergeConsecutiveUserTurns", () => {
             role: "user",
             content: [{ type: "text", text: "See this" }, { type: "text", text: "---" }, image, { type: "text", text: "and this" }],
         });
+    });
+});
+
+describe("endAtLastUser", () => {
+    it("drops what follows the newest user message, and leaves a history that already ends there alone", () => {
+        const history = [
+            { role: "user", content: "q1" },
+            { role: "assistant", content: "a1" },
+            { role: "user", content: "q2" },
+        ];
+        const same = endAtLastUser(history);
+        expect(same.messages).toBe(history);
+        expect(same.dropped).toBe(0);
+        expect(
+            endAtLastUser([...history, { role: "assistant", content: "partial" }, { role: "assistant", content: "more" }]),
+        ).toEqual({ messages: history, dropped: 2 });
+    });
+
+    it("has nothing to end at when there is no user message", () => {
+        const only = [{ role: "assistant", content: "a" }];
+        expect(endAtLastUser(only)).toEqual({ messages: only, dropped: 0 });
+        expect(endAtLastUser([])).toEqual({ messages: [], dropped: 0 });
     });
 });

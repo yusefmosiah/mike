@@ -92,9 +92,23 @@ export function closeHttpServer(
   });
 }
 
+/**
+ * Work the process lets finish before it stops serving, up to a deadline:
+ * in-flight assistant turns, which a restart would otherwise cut off.
+ */
+export interface ShutdownDrain {
+  /** Resolves when the work is done or the deadline has passed. */
+  wait: () => Promise<void>;
+  /** The longest `wait` may take; the forced exit allows for it on top of `timeoutMs`. */
+  maxMs: number;
+  /** The signals that drain. Default: SIGTERM, an orchestrator's stop; Ctrl-C does not wait. */
+  signals?: readonly string[];
+}
+
 export interface ShutdownOptions {
   closeServer: () => Promise<void>;
   stopBackgroundWork: () => Promise<void>;
+  drain?: ShutdownDrain;
   /** Called once, before anything is stopped (e.g. to silence respawns). */
   onStart?: () => void;
   timeoutMs?: number;
@@ -102,8 +116,10 @@ export interface ShutdownOptions {
 }
 
 /**
- * Graceful shutdown: stop accepting connections, let in-flight requests
- * drain, stop background work, flush telemetry, exit 0. Idempotent: a second
+ * Graceful shutdown: stop background work, wait for the work `drain` names
+ * (HTTP keeps being served meanwhile, so a reloading client can still attach
+ * to a turn that is finishing), stop accepting connections, let in-flight
+ * requests drain, flush telemetry, exit 0. Idempotent: a second
  * signal (Ctrl-C twice, SIGINT then SIGTERM from a supervisor) while the
  * first shutdown is running is ignored rather than racing it. A genuine
  * failure is still reported, tagged with the step that failed.
@@ -111,6 +127,7 @@ export interface ShutdownOptions {
 export function createShutdown({
   closeServer,
   stopBackgroundWork,
+  drain,
   onStart,
   timeoutMs = 15_000,
   effects = processEffects,
@@ -121,16 +138,22 @@ export function createShutdown({
     started = true;
     onStart?.();
     effects.logInfo(`Shutting down gracefully (${signal})`);
+    const draining = drain !== undefined && (drain.signals ?? ["SIGTERM"]).includes(signal);
     const forceExit = setTimeout(() => {
       effects.logError("Graceful shutdown timed out — forcing exit");
       effects.exit(1);
-    }, timeoutMs);
+    }, timeoutMs + (draining ? drain.maxMs : 0));
     forceExit.unref();
-    let stage = "shutdown-http";
+    let stage = "shutdown-workers";
     try {
-      await closeServer();
-      stage = "shutdown-workers";
+      // No new background work starts from here; the server keeps answering.
       await stopBackgroundWork();
+      if (draining) {
+        stage = "shutdown-drain";
+        await drain.wait();
+      }
+      stage = "shutdown-http";
+      await closeServer();
       stage = "shutdown-flush";
       await effects.flush();
       clearTimeout(forceExit);

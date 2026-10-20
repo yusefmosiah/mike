@@ -51,7 +51,7 @@ import {
   type ParsedCitation,
 } from "./citations";
 import { InlineCitationStream } from "./citations.inline";
-import { mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
+import { endAtLastUser, mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import { parseAskInputs } from "./tools/askInputs";
 import { moveToolActivityToInput, skillsPromptSection } from "./contextBuilders";
@@ -659,7 +659,7 @@ export async function runLLMStream(params: {
       ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
       : []),
   ];
-  const chatMessages: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
+  const turns: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")
     .map(
       (m): LlmMessage =>
@@ -684,6 +684,12 @@ export async function runLLMStream(params: {
             (part) => part.type === "image" || part.text.trim().length > 0,
           );
     }));
+  // The turn answers the newest user message; an answer that failed or was cut
+  // off and came back with the retry is not part of what it continues from.
+  const { messages: chatMessages, dropped } = endAtLastUser(turns);
+  if (dropped > 0) {
+    console.warn("[chat/stream] dropped assistant messages after the prompt", { dropped });
+  }
   // A continuation resumes the paused answer where the runtime left it, so
   // what the person answered goes with the input that resumes it.
   if (params.continuesAnswer) chatMessages.splice(0, chatMessages.length, ...moveToolActivityToInput(chatMessages));

@@ -33,3 +33,18 @@ export function mergeConsecutiveUserTurns(messages: LlmMessage[]): LlmMessage[] 
     }
     return merged;
 }
+
+/**
+ * A turn answers the person's newest message, so the history it continues from
+ * ends there. A request can carry assistant messages after that message: the
+ * client still holds the answer that failed or was cut off, and sends it with
+ * the retry. That answer is the one being replaced, not history, and a model
+ * (or the runtime, which sends the last message as the turn's input) cannot
+ * answer a conversation that ends with its own words.
+ */
+export function endAtLastUser<T extends { role: string }>(messages: T[]): { messages: T[]; dropped: number } {
+    let last = messages.length - 1;
+    while (last >= 0 && messages[last]!.role !== "user") last -= 1;
+    if (last < 0 || last === messages.length - 1) return { messages, dropped: 0 };
+    return { messages: messages.slice(0, last + 1), dropped: messages.length - 1 - last };
+}

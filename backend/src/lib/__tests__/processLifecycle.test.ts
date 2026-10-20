@@ -263,4 +263,63 @@ describe("graceful shutdown (MIKE-BACKEND-7)", () => {
     });
     expect(effects.exit).toHaveBeenCalledWith(1);
   });
+
+  it("on SIGTERM waits for the drain before it closes the server, and keeps serving meanwhile", async () => {
+    const effects = fakeEffects();
+    const order: string[] = [];
+    let finish!: () => void;
+    const shutdown = createShutdown({
+      stopBackgroundWork: async () => void order.push("workers"),
+      drain: {
+        maxMs: 90_000,
+        wait: () => new Promise<void>((resolve) => (finish = () => (order.push("drained"), resolve()))),
+      },
+      closeServer: async () => void order.push("closed"),
+      effects,
+    });
+    const done = shutdown("SIGTERM");
+    await vi.waitFor(() => expect(order).toEqual(["workers"]));
+    // A turn is still running: the server is not closed, the process not exiting.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(order).toEqual(["workers"]);
+    expect(effects.exit).not.toHaveBeenCalled();
+    finish();
+    await done;
+    expect(order).toEqual(["workers", "drained", "closed"]);
+    expect(effects.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("does not wait on SIGINT, and allows the drain its time before forcing an exit", async () => {
+    vi.useFakeTimers();
+    try {
+      const effects = fakeEffects();
+      const wait = vi.fn(() => new Promise<void>(() => {}));
+      const closeServer = vi.fn(async () => {});
+      const shutdown = createShutdown({
+        stopBackgroundWork: async () => {},
+        drain: { maxMs: 90_000, wait },
+        closeServer,
+        timeoutMs: 15_000,
+        effects,
+      });
+      await shutdown("SIGINT");
+      expect(wait).not.toHaveBeenCalled();
+      expect(closeServer).toHaveBeenCalledOnce();
+
+      const stuck = fakeEffects();
+      void createShutdown({
+        stopBackgroundWork: async () => {},
+        drain: { maxMs: 90_000, wait },
+        closeServer,
+        timeoutMs: 15_000,
+        effects: stuck,
+      })("SIGTERM");
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(stuck.exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(stuck.exit).toHaveBeenCalledWith(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

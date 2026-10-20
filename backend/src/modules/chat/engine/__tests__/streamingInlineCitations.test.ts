@@ -91,6 +91,21 @@ describe("inline citations in the stream", () => {
     expect(byChar.shown).not.toMatch(/doc-|cite/);
   });
 
+  it("completes a tag an interruption cut in half: the continuation joins the same segment, one marker", async () => {
+    // The runtime continues an answer that stopped partway (llm/pi/continuation.mts)
+    // by delivering the continuation's text right after the cut-off text, with
+    // no tool call between: the tag spans the two.
+    const cut = `The period is 90 days <cite doc="doc-aaaa1111">ninety (90) da`;
+    const rest = `ys' written notice</cite>. Next.`;
+    const joined = await turn([[cut, rest]]);
+    expect(joined.shown).toBe("The period is 90 days [1]. Next.");
+    expect(joined.final?.citations).toHaveLength(1);
+    expect(joined.final?.citations?.[0]).toMatchObject({ ref: 1, verified: true });
+    // Ending the segment between them would have dropped the tag.
+    const broken = await turn([[cut], [rest]]);
+    expect(broken.shown).not.toContain("[1]");
+  });
+
   it("sends each citation before its marker, and the verified set at the end", async () => {
     const { frames, final, result } = await turn([[`A ${NOTICE}. B <cite doc="doc-bbbb2222">landlord disputes</cite>.`]]);
     // A citation is on the wire before the content delta that holds its marker.

@@ -10,6 +10,7 @@ import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
 import { reportError } from "./lib/observability/sentry";
 import { createDb } from "./lib/db";
+import { assistantTurnsInFlight, waitForAssistantTurns } from "./lib/assistantTurnRuns";
 import { resumeInterruptedTurns } from "./turnResumers";
 import {
   closeHttpServer,
@@ -143,9 +144,16 @@ async function main(): Promise<void> {
 void main();
 
 // Graceful shutdown: on SIGTERM/SIGINT (orchestrator rollout, Ctrl-C), stop
-// accepting new connections, let in-flight requests/streams drain, stop the
-// background workers wherever they run, then exit 0. A hard timeout guards
-// against a connection or job that never drains.
+// the background workers wherever they run, and on SIGTERM wait for the
+// assistant turns still generating (HTTP keeps answering meanwhile: with one
+// instance there is nowhere else to send a reload), then stop accepting
+// connections, let in-flight requests/streams drain and exit 0. A turn still
+// running at the deadline is resumed on the next boot. A hard timeout guards
+// against a connection or job that never drains. The container's stop grace
+// period (docker-compose.yml) must outlast SHUTDOWN_TURN_DRAIN_MS plus the
+// shutdown timeout.
+const SHUTDOWN_TURN_DRAIN_MS = 90_000;
+
 async function stopBackgroundWork(): Promise<void> {
   if (WORKERS_MODE === "inline") {
     await stopAllWorkers();
@@ -171,6 +179,20 @@ const shutdown = createShutdown({
   },
   closeServer: () => closeHttpServer(server),
   stopBackgroundWork,
+  drain: {
+    maxMs: SHUTDOWN_TURN_DRAIN_MS,
+    wait: async () => {
+      const running = assistantTurnsInFlight();
+      if (running === 0) return;
+      console.log(`Waiting for ${running} assistant turn(s) to finish`);
+      const left = await waitForAssistantTurns(SHUTDOWN_TURN_DRAIN_MS);
+      console.log(
+        left === 0
+          ? "Assistant turns finished"
+          : `${left} assistant turn(s) still running at the deadline; they resume on boot`,
+      );
+    },
+  },
 });
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

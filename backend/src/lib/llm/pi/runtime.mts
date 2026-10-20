@@ -15,7 +15,10 @@
 // chat_messages) is Mike's. Tools execute through the live request's
 // `runTools`. A chat turn records how to drive it again, so after a restart
 // its run resumes into a new request; reads replay, writes are answered as
-// interrupted.
+// interrupted. Pi's own retry is off: a generation that stops partway (an
+// error, the output limit, a restart) is asked for again when nothing was
+// shown, or continued from the text already shown when something was
+// (continuation.mts), so an answer that has started is never started over.
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord";
@@ -40,6 +43,7 @@ import {
   defineExtension,
   defineTool,
   Harness,
+  LiveDoc,
   MemoryStorage,
   ProviderDoc,
   UsageDoc,
@@ -50,10 +54,22 @@ import {
   type EntryDraft,
   type EntryId,
   type EntryRecord,
+  type SettledSubmissionRecord,
   type Storage,
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
+import {
+  isBrokenStop,
+  isRecoverableFailure,
+  JOIN_HOLD_CHARS,
+  MAX_ATTEMPTS,
+  noteFor,
+  OVERLAP_WINDOW_CHARS,
+  recoveryDelayMs,
+  trimOverlap,
+  type Interruption,
+} from "./continuation.mjs";
 import { answerLanguageDrift, LANGUAGE_DRIFT_NOTE } from "./languageGuard.mjs";
 import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold } from "./compactionHooks.mjs";
 import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
@@ -227,6 +243,12 @@ type Runtime = {
   installDelegate: (description: string) => void;
   resolve: MikeModels["resolve"];
   bindings: Bindings;
+  /**
+   * Conversations whose answer a restart cut off while it was writing text,
+   * with their generation stopped before it could start the message over:
+   * their turn continues it (see `stopCutOffAnswers`).
+   */
+  cutOff: Set<number>;
 };
 
 /**
@@ -350,6 +372,11 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
         // Mike writes the summary (compactionHooks.mts) and usually compacts at
         // the owner's auto-compact threshold, well before these.
         compaction: COMPACTION_SETTINGS,
+        // A failed generation reaches `runTurn`, which retries it or continues
+        // the answer from the text already shown (continuation.mts). Pi's own
+        // retry would regenerate the whole message after the reader has
+        // seen part of it.
+        retry: { enabled: false },
         // Lookups in one round run at once; a tool that changes something
         // declares `executionMode: "sequential"` (see mikeTool), which runs
         // its whole round in call order.
@@ -365,8 +392,10 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   installTools(
     Object.values((await harness.snapshot(ToolSchemas, background)) ?? {}) as unknown as OpenAIToolSchema[],
   );
+  const turnConversations: number[] = [];
   for (const record of Object.values((await harness.snapshot(DurableTurns, background)) ?? {})) {
     bindings.resumable.add(record.conversation);
+    turnConversations.push(record.conversation);
     // A resumed parent runs its delegate call again, which finds its child
     // and binds it; until then the child's own tool calls wait like the parent's.
     const children = await harness.snapshot(SubagentChildren, String(record.conversation), background);
@@ -391,6 +420,7 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       .map((task) => task.record.conversationId as number)
       .filter((conversation) => !bindings.resumable.has(conversation)),
   );
+  const cutOff = await stopCutOffAnswers(harness, turnConversations);
   harness.resume();
   for (const id of orphans) {
     void harness
@@ -398,7 +428,39 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       .then((conversation) => conversation?.abort(background))
       .catch((error: unknown) => console.error("[pi] failed to stop an orphaned run", error));
   }
-  return { harness, installTools, installDelegate, resolve: catalog.resolve, bindings };
+  return { harness, installTools, installDelegate, resolve: catalog.resolve, bindings, cutOff };
+}
+
+/** The text of an assistant message, or of a stored partial of one. */
+function textOfMessage(message: { content?: readonly { type: string; text?: string }[] } | undefined): string {
+  return (message?.content ?? []).map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("");
+}
+
+/**
+ * A restart can cut a message off while it is writing text the reader has
+ * already seen (progress is committed every 100 ms). Left alone, Pi writes the
+ * message again from its start on resuming. Stop that generation before the
+ * scheduler resumes: Pi keeps the text it had as an aborted message, the run
+ * settles `aborted`, and the turn's driver continues the answer from it. Only
+ * a generation that is writing text, not running tools, is stopped.
+ */
+async function stopCutOffAnswers(harness: Harness, conversations: readonly number[]): Promise<Set<number>> {
+  const stopped = new Set<number>();
+  if (!conversations.length) return stopped;
+  try {
+    const generations = (await harness.inspect(background)).tasks.filter((task) => task.record.kind === "pi.generation");
+    for (const conversation of new Set(conversations)) {
+      const task = generations.find((candidate) => candidate.record.conversationId === conversation);
+      if (!task) continue;
+      const live = await harness.snapshot(LiveDoc, conversation as ConversationId, background);
+      if (live?.tools?.length || !textOfMessage(live?.generation?.message as never).trim()) continue;
+      await harness.abortTask(task.record.id, background);
+      stopped.add(conversation);
+    }
+  } catch (error) {
+    console.error("[pi] failed to stop cut-off answers", safeError(error));
+  }
+  return stopped;
 }
 
 /** Current memory, for when the thread's snapshot is not enough. Read-only. */
@@ -414,6 +476,19 @@ const readMemoryTool = (bindings: Bindings) => defineTool({
     return { content: [{ type: "text", text: await binding.readMemory() }] };
   },
 });
+
+/** Wait `ms`, or less if `signal` aborts. */
+function pauseFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 /** Settle with `work`, or reject as soon as the call is aborted (a stop, or the run ending). */
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
@@ -735,7 +810,20 @@ function delegateTool(bindings: Bindings, resolve: MikeModels["resolve"], descri
             { type: "input", content: spec.task, requestId: `subagent:${api.taskId}`, whenBusy: "reject" },
             context,
           );
-          const settled = await submission.wait(context);
+          let settled = await submission.wait(context);
+          // Pi's own retry is off (see the Harness settings): a transient
+          // failure asks the child again, as it did before.
+          for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+            const failure = settled.status === "unanswered" && settled.reason === "model_error" ? settled.detail : undefined;
+            if (typeof failure !== "string" || !isRecoverableFailure(failure) || timedOut || context.abortSignal?.aborted) break;
+            console.warn("[pi] subagent interrupted; trying again", { attempt, of: MAX_ATTEMPTS, ...safeError(new Error(failure)) });
+            await pauseFor(recoveryDelayMs(attempt - 1, failure), context.abortSignal);
+            const again = await child.submit(
+              { type: "input", content: noteFor({ kind: "retry", error: failure }), requestId: `subagent:${api.taskId}:attempt:${attempt}`, whenBusy: "reject" },
+              context,
+            );
+            settled = await again.wait(context);
+          }
           if (settled.status === "done" && settled.type === "input") {
             const answer = await api.commit((tx) => tx.entry(settled.answer), context);
             const message = answer?.model?.[0];
@@ -958,12 +1046,18 @@ async function nextEntryId(conversation: Conversation): Promise<EntryId> {
   return ((latest?.id ?? 0) + 1) as EntryId;
 }
 
+/** A note Mike sent the model itself (to retry, continue or rewrite an answer), not something the person wrote. */
+function isHarnessNote(entry: EntryRecord): boolean {
+  const message = entry.model?.[0];
+  return message?.role === "user" && userText(message.content).startsWith("<harness>");
+}
+
 async function userEntries(conversation: Conversation): Promise<EntryRecord[]> {
   const found: EntryRecord[] = [];
   let cursor: Parameters<Conversation["entries"]>[2];
   do {
     const page = await conversation.entries({ order: "ascending" }, 500, cursor, background);
-    for (const entry of page.items) if (entry.kind === "pi.user") found.push(entry);
+    for (const entry of page.items) if (entry.kind === "pi.user" && !isHarnessNote(entry)) found.push(entry);
     cursor = page.next;
   } while (cursor !== undefined);
   return found;
@@ -1281,10 +1375,75 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   let thinkingOpen = false;
   // Entries a resumed turn already replayed; their message_end is not emitted twice.
   let replayedThrough = 0;
+
+  // A message that ended broken after showing text (an error, a restart, the
+  // output limit) is continued by the next one, not rewritten: the text the
+  // reader has is the start of one answer. The continuation's first
+  // JOIN_HOLD_CHARS are held back, then shown without any repetition of the
+  // end of what was shown. No segment boundary is crossed between the two, so
+  // a `<cite>` tag cut in half is completed by the continuation.
+  let chain = ""; // the text shown by the current run of broken messages, ending in the latest
+  let joinNext = false; // the last message ended broken after showing text
+  let joining: { held: string } | undefined;
+  let recovered = false;
+  const releaseJoin = () => {
+    if (!joining) return;
+    const { held } = joining;
+    joining = undefined;
+    const text = trimOverlap(chain.slice(-OVERLAP_WINDOW_CHARS), held);
+    if (!text) return;
+    chain += text;
+    fullText += text;
+    callbacks.onContentDelta?.(text);
+  };
+  const deliver = (delta: string) => {
+    if (joining) {
+      joining.held += delta;
+      if (joining.held.length >= JOIN_HOLD_CHARS) releaseJoin();
+      return;
+    }
+    chain += delta;
+    fullText += delta;
+    callbacks.onContentDelta?.(delta);
+  };
+  const beginMessage = () => {
+    releaseJoin();
+    if (joinNext) joining = { held: "" };
+    else chain = "";
+    joinNext = false;
+  };
+  const endMessage = (message: Message | undefined) => {
+    if (message?.role !== "assistant") return;
+    releaseJoin();
+    joinNext = isBrokenStop(message.stopReason) && chain.length > 0;
+  };
+  /** The newest assistant entry whose end has been handled, for waiting out the event stream. */
+  let endedThrough = 0;
+  let ended: Array<() => void> = [];
+  const noteEnded = (id: number) => {
+    endedThrough = Math.max(endedThrough, id);
+    const waiting = ended;
+    ended = [];
+    for (const wake of waiting) wake();
+  };
+  /** Resolve once the stream has handled `entry`'s end, or after a short wait if it never does. */
+  const streamReached = (entry: number) =>
+    new Promise<void>((resolve) => {
+      if (endedThrough >= entry) return resolve();
+      const timer = setTimeout(resolve, 3_000);
+      const check = () => {
+        if (endedThrough < entry) return void ended.push(check);
+        clearTimeout(timer);
+        resolve();
+      };
+      ended.push(check);
+    });
+
   const emit = () => {
     blocks.forEach((block, index) => {
       const value = block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : undefined;
       if (value === undefined) {
+        if (block.type === "toolCall") releaseJoin();
         if (block.type === "toolCall" && thinkingOpen) {
           thinkingOpen = false;
           callbacks.onReasoningBlockEnd?.();
@@ -1302,8 +1461,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
           thinkingOpen = false;
           callbacks.onReasoningBlockEnd?.();
         }
-        fullText += delta;
-        callbacks.onContentDelta?.(delta);
+        deliver(delta);
       }
     });
   };
@@ -1312,12 +1470,18 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     blocks = message.content.map((block) => ({ ...block }) as Block);
     return true;
   };
+  // A resumed turn replays what it committed before the restart first; the
+  // stream waits for that, so the replay and the live events never interleave.
+  let replayed: () => void = () => undefined;
+  const replay = new Promise<void>((resolve) => (replayed = resolve));
   const stream = await watchEvents(harness, conversation.id, background);
   stream.start(async (events: readonly AgentEvent[]) => {
+    await replay;
     for (const event of events) {
       if (event.type === "message_start") {
         if (adopt(event.message)) {
           sent = [];
+          beginMessage();
           emit();
         }
       } else if (event.type === "message_update") {
@@ -1334,10 +1498,14 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         }
         emit();
       } else if (event.type === "message_end") {
-        if (event.entry.id <= replayedThrough) continue;
-        if (adopt(event.entry.model?.[0])) emit();
-        blocks = [];
-        sent = [];
+        if (event.entry.id > replayedThrough) {
+          const message = event.entry.model?.[0];
+          if (adopt(message)) emit();
+          endMessage(message);
+          blocks = [];
+          sent = [];
+        }
+        noteEnded(event.entry.id);
       }
     }
   });
@@ -1352,24 +1520,36 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   try {
     if (resumed) {
       // What the turn committed before the restart reaches the caller first,
-      // as if it had streamed: answers so far, and the tools they started.
-      const earlier = await conversation.entries({ minEntryId: firstEntry, order: "ascending" }, 500, undefined, background);
-      for (const entry of earlier.items) {
-        const message = entry.kind === "pi.assistant" ? entry.model?.[0] : undefined;
-        replayedThrough = Math.max(replayedThrough, entry.id);
-        // A message the crash cut off was resent whole; only finished ones count.
-        if (message?.role !== "assistant" || message.stopReason === "aborted") continue;
-        adopt(message);
-        sent = [];
-        emit();
-        for (const block of message.content) {
-          if (block.type === "toolCall") {
-            callbacks.onToolCallStart?.({ id: block.id, name: block.name, input: block.arguments as Record<string, unknown> });
+      // as if it had streamed: answers so far, and the tools they started. A
+      // message the crash cut off after it showed text is shown too, as the
+      // start of the answer its continuation completes.
+      try {
+        const earlier = await conversation.entries({ minEntryId: firstEntry, order: "ascending" }, 500, undefined, background);
+        for (const entry of earlier.items) {
+          const message = entry.kind === "pi.assistant" ? entry.model?.[0] : undefined;
+          replayedThrough = Math.max(replayedThrough, entry.id);
+          noteEnded(entry.id);
+          if (message?.role !== "assistant") continue;
+          adopt(message);
+          sent = [];
+          beginMessage();
+          emit();
+          endMessage(message);
+          if (message.stopReason !== "error" && message.stopReason !== "aborted") {
+            for (const block of message.content) {
+              if (block.type === "toolCall") {
+                callbacks.onToolCallStart?.({ id: block.id, name: block.name, input: block.arguments as Record<string, unknown> });
+              }
+            }
           }
+          blocks = [];
+          sent = [];
         }
-        blocks = [];
-        sent = [];
+      } finally {
+        replayed();
       }
+    } else {
+      replayed();
     }
     const freshThread = !resumed && history.length === 0 && (await userEntries(conversation)).length === 0;
     const content = await withTurnContext(conversation, piUserContent(input.content, vision), params.turnContext);
@@ -1384,23 +1564,107 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       },
       background,
     );
-    let settled = await submission.wait(background);
+    const settled = await submission.wait(background);
     userEntry = settled.entry ?? firstEntry;
-    const settle = async () => {
-      if (halted) throw halted.error;
-      if (settled.status !== "done" || settled.type !== "input") {
-        if (settled.reason === "model_error" && settled.detail !== undefined) {
-          throw providerError(params.model, typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail));
-        }
-        throw new Error(`The answer could not be completed (${settled.reason ?? "unanswered"})`);
-      }
-      return settled.answer;
+
+    // Generations asked for so far, the first included. A generation that
+    // stops partway is asked for again, or its answer continued from the text
+    // already shown, at most MAX_ATTEMPTS in all (continuation.mts).
+    let attempts = 1;
+    // This turn's answer was cut off by a restart that Pi was stopped from rewriting.
+    let cutOffByRestart = !!resumed && runtime.cutOff.delete(conversation.id);
+    const newestAssistantEntry = async () => {
+      const page = await conversation.entries({ order: "descending" }, 20, undefined, background);
+      return page.items.find((entry) => entry.kind === "pi.assistant" && entry.model?.[0]?.role === "assistant")?.id ?? 0;
     };
-    let answerEntry = await settle();
+    /** The answer a settled submission produced, or why it stopped short of one. */
+    const examine = async (
+      record: SettledSubmissionRecord,
+    ): Promise<{ answer: EntryId } | { interruption: Interruption; error: string; restart: boolean }> => {
+      if (halted) throw halted.error;
+      const stopped = params.abortSignal?.aborted === true;
+      if (record.status === "done" && record.type === "input") {
+        if (attempts >= MAX_ATTEMPTS || stopped) return { answer: record.answer };
+        const message = (await conversation.commit((tx) => tx.entry(record.answer), background))?.model?.[0];
+        const cutAtLimit =
+          message?.role === "assistant" &&
+          message.stopReason === "length" &&
+          !message.content.some((part) => part.type === "toolCall") &&
+          textOfMessage(message).trim() !== "";
+        if (!cutAtLimit) return { answer: record.answer };
+        await streamReached(record.answer);
+        return { interruption: { kind: "length" }, error: "output limit", restart: false };
+      }
+      const error =
+        record.reason === "model_error" && record.detail !== undefined
+          ? typeof record.detail === "string"
+            ? record.detail
+            : JSON.stringify(record.detail)
+          : undefined;
+      const restart = error === undefined && record.reason === "aborted" && cutOffByRestart && !stopped;
+      if (restart) cutOffByRestart = false;
+      if (error === undefined && !restart) throw new Error(`The answer could not be completed (${record.reason ?? "unanswered"})`);
+      const recoverable = restart || (error !== undefined && isRecoverableFailure(error));
+      if (stopped || !recoverable || attempts >= MAX_ATTEMPTS) {
+        if (recoverable && !stopped) {
+          console.warn("[pi] answer interrupted; no attempts left", { attempt: attempts, of: MAX_ATTEMPTS, shown_chars: chain.length });
+        }
+        if (error === undefined) throw new Error(`The answer could not be completed (${record.reason ?? "unanswered"})`);
+        throw providerError(params.model, error);
+      }
+      // Everything the failed message showed has reached the caller by now.
+      const newest = await newestAssistantEntry();
+      if (newest >= firstEntry) await streamReached(newest);
+      const reason = error ?? "cut off by a restart";
+      return {
+        interruption: joinNext && chain ? { kind: "interrupted", error: reason, written: chain } : { kind: "retry", error: reason },
+        error: reason,
+        restart,
+      };
+    };
+    const answerOf = async (first: SettledSubmissionRecord): Promise<EntryId> => {
+      let current = first;
+      for (;;) {
+        const step = await examine(current);
+        if ("answer" in step) return step.answer;
+        attempts += 1;
+        recovered = true;
+        console.warn("[pi] answer interrupted; trying again", {
+          attempt: attempts,
+          of: MAX_ATTEMPTS,
+          reason: step.restart ? "restart" : step.interruption.kind,
+          shown_chars: chain.length,
+          ...safeError(new Error(step.error)),
+        });
+        // A restart already cost the wait (a resumed turn replays attempts that
+        // were made before it), and the output limit is not a fault.
+        const wait = resumed || step.restart || step.interruption.kind === "length" ? 0 : recoveryDelayMs(attempts - 1, step.error);
+        if (wait > 0) await pauseFor(wait, params.abortSignal);
+        if (params.abortSignal?.aborted) throw new Error("The answer could not be completed (aborted)");
+        const next = await conversation.submit(
+          {
+            type: "input",
+            ...(turnKey ? { requestId: `turn:${turnKey}:attempt:${attempts}` } : {}),
+            content: noteFor(step.interruption),
+            whenBusy: "reject",
+          },
+          background,
+        );
+        current = await next.wait(background);
+      }
+    };
+    let answerEntry = await answerOf(settled);
     // An answer in another script than the person's message is asked for
     // again, once, in the same turn. A continuation's input is the client's
-    // own wording of the person's answers, not their language, so it is not judged.
-    if (!params.continuesAnswer && answerLanguageDrift(userText(input.content), await answerTextOf(conversation, answerEntry))) {
+    // own wording of the person's answers, not their language, so it is not
+    // judged. Nor is an answer finished by a continuation: only its end is in
+    // the last message.
+    if (
+      !params.continuesAnswer &&
+      attempts === 1 &&
+      answerLanguageDrift(userText(input.content), await answerTextOf(conversation, answerEntry))
+    ) {
+      attempts += 1;
       const again = await conversation.submit(
         {
           type: "input",
@@ -1410,8 +1674,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         },
         background,
       );
-      settled = await again.wait(background);
-      answerEntry = await settle();
+      answerEntry = await answerOf(await again.wait(background));
     }
     if (params.turn && params.conversationId) {
       await recordTurn(conversation, chatKey, params.turn, userEntry, answerEntry);
@@ -1421,7 +1684,10 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     // The committed answer is authoritative; deltas may have been coalesced into a snapshot.
     const answer = await conversation.commit((tx) => tx.entry(answerEntry), background);
     const message = answer?.model?.[0];
-    if (message?.role === "assistant") {
+    if (recovered) {
+      // The answer is the text shown, joined across the interruptions.
+      await streamReached(answerEntry);
+    } else if (message?.role === "assistant") {
       const text = message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
       if (!fullText.endsWith(text)) fullText = text;
     }
@@ -1443,7 +1709,10 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
     params.abortSignal?.removeEventListener("abort", onAbort);
     releaseKeys();
     bindings.delete(conversation.id);
+    replayed();
     await stream.stop();
+    // Text held back while joining a continuation was written: show it.
+    releaseJoin();
     // A failed or stopped turn has nothing to resume. An answered one stays
     // recorded until the caller has stored it (`finishTurnOnPi`): a crash in
     // between drives it again, and the resubmission returns the same answer.

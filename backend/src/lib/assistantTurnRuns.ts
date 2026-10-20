@@ -5,6 +5,7 @@ import {
     getStreamRun,
     resetStreamRunsForTests,
     startStreamRun,
+    unfinishedStreamRunKeys,
     type StreamRun,
 } from "./streamRuns";
 export { STREAM_RUNS_INCARNATION } from "./streamRuns";
@@ -196,6 +197,34 @@ export function requestedIncarnation(value: unknown): string | null {
     return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value)
         ? value
         : null;
+}
+
+const TURN_SURFACES: readonly AssistantTurnSurface[] = ["chat", "tabular", "word"];
+
+/** Assistant turns still generating in this process. */
+export function assistantTurnsInFlight(): number {
+    return unfinishedStreamRunKeys().filter((key) =>
+        TURN_SURFACES.some((surface) => key.startsWith(`${surface}:`)),
+    ).length;
+}
+
+/**
+ * Resolve once no assistant turn is generating, or at the deadline. Returns
+ * how many turns were still running. A shutdown waits on this so a deploy does
+ * not cut an answer off; a turn left at the deadline is resumed on boot.
+ */
+export async function waitForAssistantTurns(
+    maxMs: number,
+    pollMs = 250,
+): Promise<number> {
+    const deadline = Date.now() + maxMs;
+    for (;;) {
+        const running = assistantTurnsInFlight();
+        if (running === 0 || Date.now() >= deadline) return running;
+        await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(pollMs, Math.max(1, deadline - Date.now()))),
+        );
+    }
 }
 
 /** Test hook: forget every run. */

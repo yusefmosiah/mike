@@ -86,4 +86,33 @@ describe("runLLMStream history", () => {
       ["user", "Client called: cap at 1x fees.\n\n---\n\nAlso, Friday deadline.\n\n---\n\nUpdate the letter."],
     ]);
   });
+
+  it("ends the history at the newest prompt: the answer that failed and came back with the retry is not part of it", async () => {
+    // The runtime sends the last message as the turn's input and cannot
+    // answer a conversation that ends with an assistant message ("The last
+    // message must be the user's input").
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await runLLMStream({
+      model: "gemini-3-flash-preview",
+      apiMessages: [
+        { role: "user", content: "Draft the letter." },
+        { role: "assistant", content: "Done." },
+        { role: "user", content: "Make it shorter." },
+        { role: "assistant", content: "Certainly. Here is a shorter" },
+      ],
+      docStore: new Map(),
+      docIndex: {},
+      userId: "u1",
+      db: {} as never,
+      write: vi.fn(),
+    });
+    const params = streamChatWithTools.mock.calls[0]![0];
+    expect(params.messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Draft the letter."],
+      ["assistant", "Done."],
+      ["user", "Make it shorter."],
+    ]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped assistant messages"), { dropped: 1 });
+    warn.mockRestore();
+  });
 });

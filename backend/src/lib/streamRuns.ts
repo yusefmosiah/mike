@@ -437,6 +437,11 @@ export function attachStreamRunSse(
     };
 }
 
+/** Keys of the runs still generating (not finished): what a shutdown waits for. */
+export function unfinishedStreamRunKeys(): string[] {
+    return [...runs.values()].filter((run) => !run.finished).map((run) => run.key);
+}
+
 /** Test hook: forget every run. */
 export function resetStreamRunsForTests() {
     for (const run of [...runs.values()]) remove(run);

@@ -279,6 +279,11 @@ services:
       - WORKERS_MODE=${WORKERS_MODE:-thread}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # On SIGTERM the backend waits up to 90 s for the answers still being
+    # written (SHUTDOWN_TURN_DRAIN_MS in backend/src/index.ts) before it exits;
+    # a shorter grace period would SIGKILL it mid-answer, which is the restart
+    # this wait exists to avoid.
+    stop_grace_period: 120s
     depends_on:
       workflow-sync:
         condition: service_completed_successfully

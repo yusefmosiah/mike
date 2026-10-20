@@ -1,8 +1,11 @@
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { MemoryStorage } from "@earendil-works/pi-durable";
+import { recoveryTiming } from "./continuation.mjs";
 import { createMikeModels } from "./providers.mjs";
 import {
   abandonTurnOnPi,
@@ -40,6 +43,9 @@ const editDocument: OpenAIToolSchema = {
 
 type Seen = { users: string[]; toolResults: string[]; text: string };
 let requests: Seen[];
+/** Responses a test scripts for the next model requests, consulted before the usual ones. */
+type Scripted = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => ReturnType<typeof fauxAssistantMessage>;
+let scripted: Scripted[] = [];
 
 /** The scripted model: answers with what it was shown, and reads a document when asked to. */
 function setup(options: { tokensPerSecond?: number } = {}) {
@@ -64,6 +70,8 @@ function setup(options: { tokensPerSecond?: number } = {}) {
       text: "",
     };
     requests.push(seen);
+    const next = scripted.shift();
+    if (next) return next(ctx);
     const last = ctx.messages.at(-1);
     const firstUser = text(ctx.messages.find((m) => m.role === "user")?.content);
     if (firstUser.includes("keep reading") && !(last?.role === "toolResult" && text(last.content).startsWith("Not run"))) {
@@ -95,8 +103,9 @@ function setup(options: { tokensPerSecond?: number } = {}) {
     if (firstUser.includes("overflow me")) {
       return fauxAssistantMessage([fauxText("I")], { stopReason: "length" });
     }
-    // A provider failure on this one prompt.
-    if (last?.role === "user" && text(last.content).includes("fail now")) {
+    // A provider failure on this one prompt, and on every retry of it.
+    const person = seen.users.filter((user) => !user.startsWith("<harness>")).at(-1) ?? "";
+    if (person.includes("fail now")) {
       return fauxAssistantMessage([], { stopReason: "error", errorMessage: "upstream timed out" });
     }
     // A model that slides into Chinese, and writes English when asked again.
@@ -156,10 +165,13 @@ async function lineage(chat = "chat-1") {
 
 let current: ReturnType<typeof setup>;
 beforeEach(async () => {
+  scripted = [];
+  recoveryTiming.baseDelayMs = 5;
   current = setup();
   await resetPiRuntime(current);
 });
 afterEach(async () => {
+  recoveryTiming.baseDelayMs = 2_000;
   await resetPiRuntime();
 });
 
@@ -531,7 +543,7 @@ describe("Pi runtime: turns, branches and memory", () => {
     expect(requests).toHaveLength(sent);
   });
 
-  it("an answer cut off mid-stream restarts cleanly: the partial before the crash is not shown", async () => {
+  it("an answer cut off mid-stream by a restart is continued from the text already shown, not started over", async () => {
     current = setup({ tokensPerSecond: 40 });
     await resetPiRuntime(current);
     const durableTurn = { context: { surface: "chat" } };
@@ -541,16 +553,28 @@ describe("Pi runtime: turns, branches and memory", () => {
       durableTurn,
       callbacks: { onContentDelta: (d) => (streamed += d) },
     }).catch(() => undefined);
-    await vi.waitFor(() => expect(streamed).toContain("attempt 1"), { timeout: 2000 });
+    await vi.waitFor(() => expect(streamed.length).toBeGreaterThan(60), { timeout: 3000 });
     await resetPiRuntime(current); // died mid-answer
 
+    let written = "";
+    scripted.push((ctx) => {
+      const note = String(ctx.messages.at(-1)?.content ?? "");
+      written = /<written-so-far>\n([\s\S]*)\n<\/written-so-far>/.exec(note)?.[1] ?? "";
+      return fauxAssistantMessage([fauxText(" And that is the rest of the list.")]);
+    });
     let shown = "";
     const resumed = await turn([{ role: "user", content: "write a long list" }], identity, {
       durableTurn: { ...durableTurn, resume: true },
       callbacks: { onContentDelta: (d) => (shown += d) },
     });
-    expect(resumed.fullText).toMatch(/^attempt 2: /);
+    // The reader gets the text the crash cut off, then the rest of the same answer.
+    expect(written.startsWith("attempt 1: clause.")).toBe(true);
+    expect(streamed.startsWith(written.slice(0, 40))).toBe(true);
+    expect(resumed.fullText).toBe(`${written} And that is the rest of the list.`);
     expect(shown).toBe(resumed.fullText);
+    expect(resumed.fullText).not.toContain("attempt 2");
+    // One model request for the continuation, whose note carries the text so far.
+    expect(requests.at(-1)!.users.at(-1)).toContain("Continue from the very next character");
   }, 15_000);
 
   it("a write cut off by a restart is not run again: the model is told it was interrupted", async () => {
@@ -656,6 +680,219 @@ describe("Pi runtime: compaction", () => {
     expect(seen).toContain("https://example.com/source-1");
     expect(requests.some((request) => request.users.at(-1)?.includes("<conversation>"))).toBe(true);
   });
+});
+
+describe("Pi runtime: answers that stop partway", () => {
+  const item = (n: number) => `Item ${n} is covered here. `;
+  const items = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => item(from + index)).join("");
+  const failure = (text: string, errorMessage = "upstream timed out") =>
+    fauxAssistantMessage(text ? [fauxText(text)] : [], { stopReason: "error", errorMessage });
+  const say = (text: string) => fauxAssistantMessage([fauxText(text)]);
+  const ask = async (extra: Partial<StreamChatParams> = {}) => {
+    let shown = "";
+    const result = await turn([{ role: "user", content: "write the list" }], { user: "u1", parent: null, assistant: "a1" }, {
+      ...extra,
+      callbacks: { onContentDelta: (delta) => (shown += delta) },
+    });
+    return { shown, result };
+  };
+
+  it("a provider error after 300 characters: the reader sees them once, then the continuation", async () => {
+    const first = items(1, 12);
+    expect(first.length).toBeGreaterThan(280);
+    scripted.push(() => failure(first), () => say(items(13, 20)));
+    const { shown, result } = await ask();
+    expect(shown).toBe(items(1, 20));
+    expect(result.fullText).toBe(items(1, 20));
+    expect(requests).toHaveLength(2);
+    // The failed message is not in the model's context, so the note carries its end.
+    expect(requests[1]!.users.at(-1)).toContain("<written-so-far>");
+    expect(requests[1]!.users.at(-1)).toContain("Item 12 is covered here.");
+    expect(requests[1]!.users.at(-1)).toContain("do not repeat anything already written");
+    // The stored answer is the one continuous text.
+    const { harness } = await piRuntime();
+    const map = await lineage();
+    const conversation = (await harness.conversation(map.messages.a1.conversation as never, context))!;
+    const answer = (await conversation.entries({ order: "descending" }, 1, undefined, context)).items[0]!;
+    expect(map.messages.a1.entry).toBe(answer.id);
+  });
+
+  it("a continuation that repeats the last sentence has the overlap trimmed", async () => {
+    scripted.push(() => failure(items(1, 12)), () => say(items(12, 20)));
+    const { shown, result } = await ask();
+    expect(shown).toBe(items(1, 20));
+    expect(result.fullText).toBe(items(1, 20));
+  });
+
+  it("holds back a long continuation's start to compare it, then shows the rest as it comes", async () => {
+    const rest = items(13, 60);
+    expect(rest.length).toBeGreaterThan(1_000);
+    scripted.push(() => failure(items(1, 12)), () => say(`${item(11)}${item(12)}${rest}`));
+    const { shown } = await ask();
+    expect(shown).toBe(items(1, 12) + rest);
+  });
+
+  it("an error before any text is retried: the reader sees one answer", async () => {
+    scripted.push(() => failure(""), () => say("The whole answer."));
+    const { shown, result } = await ask();
+    expect(shown).toBe("The whole answer.");
+    expect(result.fullText).toBe("The whole answer.");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.users.at(-1)).toContain("failed before anything was written");
+  });
+
+  it("an answer that stops at the output limit is continued, and stored whole", async () => {
+    const first = items(1, 12);
+    scripted.push(
+      () => fauxAssistantMessage([fauxText(first)], { stopReason: "length" }),
+      () => say(items(13, 20)),
+    );
+    const { shown, result } = await ask();
+    expect(shown).toBe(items(1, 20));
+    expect(result.fullText).toBe(items(1, 20));
+    expect(requests).toHaveLength(2);
+    // The cut-off message is part of the context already: the note does not repeat it.
+    expect(requests[1]!.users.at(-1)).toContain("stopped at the output limit");
+    expect(requests[1]!.users.at(-1)).not.toContain("<written-so-far>");
+  });
+
+  it("an error that retrying cannot fix stops with the text so far and no continuation", async () => {
+    scripted.push(() => failure(items(1, 12), "401 unauthorized"), () => say(items(13, 20)));
+    let shown = "";
+    await expect(
+      turn([{ role: "user", content: "write the list" }], { user: "u1", parent: null, assistant: "a1" }, {
+        callbacks: { onContentDelta: (delta) => (shown += delta) },
+      }),
+    ).rejects.toThrow();
+    expect(shown).toBe(items(1, 12));
+    expect(requests).toHaveLength(1);
+  });
+
+  it("three failed attempts end the turn with the text so far", async () => {
+    scripted.push(() => failure(items(1, 12)), () => failure(items(13, 16)), () => failure(items(17, 18)), () => say("never reached"));
+    let shown = "";
+    await expect(
+      turn([{ role: "user", content: "write the list" }], { user: "u1", parent: null, assistant: "a1" }, {
+        callbacks: { onContentDelta: (delta) => (shown += delta) },
+      }),
+    ).rejects.toThrow(/timed out|upstream/i);
+    expect(requests).toHaveLength(3);
+    expect(shown).toBe(items(1, 18));
+    // The third attempt's note carries everything written across the first two.
+    expect(requests[2]!.users.at(-1)).toContain("Item 16 is covered here.");
+    expect(requests[2]!.users.at(-1)).toContain("Item 1 is covered here.");
+  });
+
+  it("a restart in the middle of a continuation continues again, from everything written so far", async () => {
+    current = setup({ tokensPerSecond: 400 });
+    await resetPiRuntime(current);
+    const durableTurn = { context: { surface: "chat" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    const first = items(1, 12);
+    scripted.push(() => failure(first), () => say(items(13, 300)));
+    let streamed = "";
+    void turn([{ role: "user", content: "write the list" }], identity, {
+      durableTurn,
+      callbacks: { onContentDelta: (delta) => (streamed += delta) },
+    }).catch(() => undefined);
+    // The error has been recovered from and the continuation is under way.
+    await vi.waitFor(() => expect(streamed.length).toBeGreaterThan(first.length + 400), { timeout: 5000 });
+    await resetPiRuntime(current); // the deploy
+
+    let note = "";
+    scripted.push((ctx) => {
+      note = String(ctx.messages.at(-1)?.content ?? "");
+      return say("Last words.");
+    });
+    let shown = "";
+    const resumed = await turn([{ role: "user", content: "write the list" }], identity, {
+      durableTurn: { ...durableTurn, resume: true },
+      callbacks: { onContentDelta: (delta) => (shown += delta) },
+    });
+    expect(resumed.fullText.startsWith(first)).toBe(true);
+    expect(resumed.fullText.endsWith("Last words.")).toBe(true);
+    expect(shown).toBe(resumed.fullText);
+    // Nothing is repeated: each item once, in order.
+    const numbers = [...resumed.fullText.matchAll(/Item (\d+) is covered here\./g)].map((match) => Number(match[1]));
+    expect(numbers).toEqual(numbers.map((_, index) => index + 1));
+    expect(numbers.length).toBeGreaterThan(20);
+    // The last request's note carries the end of everything shown before the restart.
+    expect(note).toContain(`Item ${numbers.at(-1)} is covered here.`);
+    expect(requests).toHaveLength(3);
+  }, 20_000);
+
+  it("a user's stop is not an interruption to recover from", async () => {
+    current = setup({ tokensPerSecond: 40 });
+    await resetPiRuntime(current);
+    const abort = new AbortController();
+    let shown = "";
+    const pending = turn([{ role: "user", content: "write a long list" }], { user: "u1", parent: null, assistant: "a1" }, {
+      abortSignal: abort.signal,
+      callbacks: { onContentDelta: (delta) => (shown += delta) },
+    });
+    await vi.waitFor(() => expect(shown.length).toBeGreaterThan(30), { timeout: 3000 });
+    abort.abort();
+    await expect(pending).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+  }, 15_000);
+});
+
+describe("Pi runtime: resuming in a fresh process", () => {
+  let server: http.Server;
+  let calls: number;
+  const savedBase = process.env.OLLAMA_BASE_URL;
+
+  /** An OpenAI-compatible endpoint: the first request hangs (the process dies mid-answer), the next answers. */
+  async function startEndpoint() {
+    calls = 0;
+    server = http.createServer((request, response) => {
+      request.resume();
+      calls += 1;
+      if (calls === 1) return; // never answered: the first process is gone
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const chunk = (delta: object, finish: string | null, usage?: object) =>
+        `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "lazy", choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
+      response.write(chunk({ role: "assistant", content: "Resumed answer." }, null));
+      response.write(chunk({}, "stop", { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 }));
+      response.end("data: [DONE]\n\n");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    process.env.OLLAMA_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+  }
+
+  afterEach(async () => {
+    await resetPiRuntime();
+    server?.closeAllConnections();
+    await new Promise((resolve) => server?.close(resolve));
+    if (savedBase === undefined) delete process.env.OLLAMA_BASE_URL;
+    else process.env.OLLAMA_BASE_URL = savedBase;
+  });
+
+  it("finds the model of a turn it resumes, though nothing in this process has resolved it: no `no_model`", async () => {
+    await startEndpoint();
+    const storage = current.storage;
+    // An endpoint model joins the catalog the first time something resolves it,
+    // so a new process starts without it: the previous one's turn is resumed
+    // by the scheduler before the resumer has asked for the model again.
+    const freshProcess = () => ({ storage, models: createMikeModels(createModels()) });
+    const model = "ollama/lazy";
+    await resetPiRuntime(freshProcess());
+    const durableTurn = { context: { surface: "chat" } };
+    const identity = { user: "u1", parent: null, assistant: "a1" };
+    void turn([{ role: "user", content: "write the answer" }], identity, { model, durableTurn }).catch(() => undefined);
+    await vi.waitFor(() => expect(calls).toBe(1), { timeout: 5000 });
+
+    await resetPiRuntime(freshProcess()); // the deploy
+    const { harness } = await piRuntime(); // the scheduler resumes the generation, with no resolve() before it
+    await vi.waitFor(() => expect(calls).toBe(2), { timeout: 5000 });
+    await harness.waitForIdle(context);
+
+    const resumed = await turn([{ role: "user", content: "write the answer" }], identity, {
+      model,
+      durableTurn: { ...durableTurn, resume: true },
+    });
+    expect(resumed.fullText).toBe("Resumed answer.");
+  }, 20_000);
 });
 
 describe("Pi runtime: model limits", () => {
