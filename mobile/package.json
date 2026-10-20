@@ -6,7 +6,9 @@
     "license": "AGPL-3.0-only",
     "scripts": {
         "www": "node scripts/write-www.mjs",
-        "sync": "npm run www && cap sync",
+        "speech-model": "node scripts/fetch-speech-model.mjs",
+        "sync": "npm run www && npm run speech-model && cap sync",
+        "test": "node --test scripts/*.test.mjs",
         "ios:configure": "node scripts/configure-ios.mjs",
         "ios:add": "npm run www && cap add ios && npm run ios:configure",
         "build:ios": "cap build ios",

@@ -101,8 +101,55 @@ async function toBase64(blob: Blob): Promise<string> {
     return btoa(binary);
 }
 
-/** Transcribes a recording on the phone. */
-export async function transcribeOnDevice(blob: Blob, language?: string): Promise<string> {
+/** The `engine` value that asks the plugin for Fluid Speech Mini. */
+export const FLUID_MINI_ENGINE = "fluid-mini";
+
+/** Which recogniser the "device" dictation engine uses, stored as its `model`. */
+export type DeviceDictationModel = "fluid-speech-mini" | "apple";
+export const DEVICE_DICTATION_MODELS: readonly DeviceDictationModel[] = ["fluid-speech-mini", "apple"];
+
+/** True when the language is English (an unset one is the phone's own). */
+export function isEnglishLanguage(language?: string): boolean {
+    const tag = language || (typeof navigator !== "undefined" ? navigator.language : "") || "en";
+    return /^en([-_]|$)/i.test(tag);
+}
+
+let fluidAvailable: Promise<boolean> | null = null;
+
+/**
+ * True when the app has Fluid Speech Mini: a build whose plugin knows the
+ * `engine` option (an older build ignores it and answers with Apple's status,
+ * whose `engine` is not "fluid-mini"), on iOS 18 or later, with the model in
+ * the bundle. A positive answer is kept; a negative one is asked again.
+ */
+export function fluidSpeechMiniAvailable(): Promise<boolean> {
+    if (fluidAvailable) return fluidAvailable;
+    const call = nativePromise();
+    if (!call) return Promise.resolve(false);
+    const asked = call(PLUGIN, "status", { engine: FLUID_MINI_ENGINE }).then(
+        (result) =>
+            stateOf(result) === "available" &&
+            (result as { engine?: unknown }).engine === FLUID_MINI_ENGINE,
+        () => false,
+    );
+    fluidAvailable = asked;
+    void asked.then((ok) => {
+        if (!ok && fluidAvailable === asked) fluidAvailable = null;
+    });
+    return asked;
+}
+
+/** Forgets the cached answer of `fluidSpeechMiniAvailable` (tests). */
+export function resetFluidSpeechMiniAvailability(): void {
+    fluidAvailable = null;
+}
+
+/**
+ * Transcribes a recording on the phone: with Apple's recognizer, or with
+ * Fluid Speech Mini when `engine` is `FLUID_MINI_ENGINE` (English only; it
+ * ignores `language`).
+ */
+export async function transcribeOnDevice(blob: Blob, language?: string, engine?: typeof FLUID_MINI_ENGINE): Promise<string> {
     const call = nativePromise();
     if (!call) throw new DeviceSpeechError(DEVICE_ERROR_MESSAGES.unavailable);
     let result: unknown;
@@ -110,7 +157,7 @@ export async function transcribeOnDevice(blob: Blob, language?: string): Promise
         result = await call(PLUGIN, "transcribe", {
             audio: await toBase64(blob),
             mimeType: blob.type,
-            ...languageOption(language),
+            ...(engine ? { engine } : languageOption(language)),
         });
     } catch (error) {
         throw new DeviceSpeechError(knownErrorCodeMessage(error, DEVICE_ERROR_MESSAGES, DEVICE_TRANSCRIBE_FAILURE_MESSAGE));

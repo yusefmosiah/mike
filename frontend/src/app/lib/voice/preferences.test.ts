@@ -74,8 +74,8 @@ describe("in the iPhone app", () => {
     it("dictates on the phone by default, and keeps a saved choice", () => {
         expect(defaultVoicePreferences()).toEqual(DEFAULT_VOICE_PREFERENCES);
         inApp();
-        expect(defaultVoicePreferences().transcription).toEqual({ engine: "device" });
-        expect(loadVoicePreferences()).toEqual({ transcription: { engine: "device" }, speech: { engine: "operator" } });
+        expect(defaultVoicePreferences().transcription).toEqual({ engine: "device", model: "fluid-speech-mini" });
+        expect(loadVoicePreferences()).toEqual({ transcription: { engine: "device", model: "fluid-speech-mini" }, speech: { engine: "operator" } });
         expect(parseVoicePreferences({ speech: { engine: "browser" } }).transcription.engine).toBe("device");
         saveVoicePreferences({ transcription: { engine: "operator" }, speech: { engine: "operator" } });
         expect(loadVoicePreferences().transcription.engine).toBe("operator");
@@ -83,7 +83,10 @@ describe("in the iPhone app", () => {
 
     it("reads aloud on the phone by default when the app's plugin can speak", () => {
         inApp(true);
-        expect(defaultVoicePreferences()).toEqual({ transcription: { engine: "device" }, speech: { engine: "device" } });
+        expect(defaultVoicePreferences()).toEqual({
+            transcription: { engine: "device", model: "fluid-speech-mini" },
+            speech: { engine: "device" },
+        });
     });
 
     it("offers the phone for dictation, and for read-aloud when its plugin can speak", () => {

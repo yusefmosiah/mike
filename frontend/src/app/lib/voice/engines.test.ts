@@ -11,7 +11,10 @@ const local = vi.hoisted(() => ({
 }));
 vi.mock("./browserModels", () => local);
 const phone = vi.hoisted(() => ({
-    transcribeOnDevice: vi.fn(async () => "phone words"),
+    transcribeOnDevice: vi.fn(async (..._args: unknown[]) => "phone words"),
+    fluidSpeechMiniAvailable: vi.fn(async () => false),
+    isEnglishLanguage: vi.fn((language?: string) => !language || /^en/i.test(language)),
+    FLUID_MINI_ENGINE: "fluid-mini",
     deviceSpeechSupported: vi.fn(() => false),
     deviceVoiceSupported: vi.fn(() => false),
     speakOnDevice: vi.fn(async () => new Blob(["wav"])),
@@ -39,6 +42,44 @@ describe("transcribeRecording", () => {
         expect(await transcribeRecording(blob, { engine: "device", language: "en-GB" })).toBe("phone words");
         expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, "en-GB");
         expect(api.transcribeAudio).not.toHaveBeenCalled();
+    });
+
+    describe("on the phone with Fluid Speech Mini", () => {
+        beforeEach(() => phone.fluidSpeechMiniAvailable.mockResolvedValue(true));
+
+        it("uses it by default for English", async () => {
+            expect(await transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini", language: "en-GB" })).toBe("phone words");
+            expect(phone.transcribeOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, "en-GB", "fluid-mini");
+            await transcribeRecording(blob, { engine: "device" });
+            expect(phone.transcribeOnDevice).toHaveBeenLastCalledWith(blob, undefined, "fluid-mini");
+        });
+
+        it("uses Apple's recognizer when chosen", async () => {
+            await transcribeRecording(blob, { engine: "device", model: "apple" });
+            expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, undefined);
+        });
+
+        it("uses Apple's recognizer for a language other than English", async () => {
+            await transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini", language: "fr-FR" });
+            expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, "fr-FR");
+            expect(phone.transcribeOnDevice).toHaveBeenCalledTimes(1);
+        });
+
+        it("falls back to Apple's recognizer when Fluid Speech Mini is unavailable", async () => {
+            phone.fluidSpeechMiniAvailable.mockResolvedValue(false);
+            await transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini" });
+            expect(phone.transcribeOnDevice).toHaveBeenCalledTimes(1);
+            expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, undefined);
+        });
+
+        it("falls back to Apple's recognizer when Fluid Speech Mini fails, and shows the first error if both do", async () => {
+            phone.transcribeOnDevice.mockRejectedValueOnce(new Error("fluid"));
+            expect(await transcribeRecording(blob, { engine: "device" })).toBe("phone words");
+            expect(phone.transcribeOnDevice).toHaveBeenLastCalledWith(blob, undefined);
+            phone.transcribeOnDevice.mockRejectedValueOnce(new Error("fluid")).mockRejectedValueOnce(new Error("apple"));
+            await expect(transcribeRecording(blob, { engine: "device" })).rejects.toThrow("fluid");
+        });
     });
 
     it("stays in the browser for the browser model", async () => {

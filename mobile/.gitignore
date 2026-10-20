@@ -17,3 +17,6 @@ www/server.js
 
 # Xcode per-user state for the local Swift package
 .swiftpm/
+
+# Fluid Speech Mini weights, fetched by `npm run speech-model` (never committed).
+/plugins/speech/ios/Sources/MikeSpeechPlugin/FluidSpeechMini/

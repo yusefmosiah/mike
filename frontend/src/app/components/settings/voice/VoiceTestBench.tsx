@@ -20,7 +20,7 @@ import {
 } from "@/app/lib/mikeApi";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { speakWithBrowser } from "@/app/lib/voice/browserSpeech";
-import { DeviceSpeechError, transcribeOnDevice } from "@/app/lib/voice/deviceSpeech";
+import { DeviceSpeechError, FLUID_MINI_ENGINE, transcribeOnDevice } from "@/app/lib/voice/deviceSpeech";
 import {
   BrowserModelError,
   hasBrowserModelConsent,
@@ -162,9 +162,15 @@ function Results({ rows, kind }: { rows: Row[]; kind: "speech" | "transcription"
  */
 export function VoiceTestBench({
   availability,
+  fluidSpeechMini = false,
+  appleDictation = true,
   catalog,
 }: {
   availability: VoiceAvailability;
+  /** The iPhone app has Fluid Speech Mini. */
+  fluidSpeechMini?: boolean;
+  /** Apple's recognizer works on this iPhone. */
+  appleDictation?: boolean;
   catalog: { speech: VoiceCatalogModel[]; transcription: VoiceCatalogModel[] } | null;
 }) {
   const [sentence, setSentence] = useState(DEFAULT_SENTENCE);
@@ -199,7 +205,10 @@ export function VoiceTestBench({
     ...speechModels.map((id) => ({ key: `or:${id}`, label: `OpenRouter: ${nameOf(catalog?.speech, id)}`, engine: "openrouter" as const, model: id })),
   ];
   const sttCandidates: Candidate[] = [
-    ...(availability.deviceRecognition ? [{ key: "device", label: "Apple speech on this iPhone", engine: "device" as const }] : []),
+    ...(fluidSpeechMini ? [{ key: "device-fluid", label: "Fluid Speech Mini on this iPhone", engine: "device" as const, model: "fluid-speech-mini" }] : []),
+    ...(availability.deviceRecognition && appleDictation
+      ? [{ key: "device", label: "Apple speech on this iPhone", engine: "device" as const }]
+      : []),
     ...(availability.operatorTranscription ? [{ key: "operator", label: "This server", engine: "operator" as const }] : []),
     ...(availability.webgpu && hasBrowserModelConsent("transcription")
       ? [{ key: "webgpu", label: "Whisper Base in this browser", engine: "webgpu" as const }]
@@ -292,7 +301,7 @@ export function VoiceTestBench({
       const started = performance.now();
       try {
         if (candidate.engine === "device") {
-          const text = await transcribeOnDevice(clip);
+          const text = await transcribeOnDevice(clip, undefined, candidate.model === "fluid-speech-mini" ? FLUID_MINI_ENGINE : undefined);
           update(setSttRows, candidate.key, { status: "done", latencyMs: performance.now() - started, costUsd: undefined, transcript: text });
           continue;
         }

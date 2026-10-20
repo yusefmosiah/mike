@@ -29,8 +29,11 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
   rounded corners. WebKit's own handling shrank the page's viewport and,
   on iOS 27, could leave it short after the keyboard closed, which floated
   the chat composer above the bottom of the screen.
-- `plugins/speech/` is Mike's own plugin: dictation with Apple's on-device
-  speech recognition (below).
+- `plugins/speech/` is Mike's own plugin: dictation with Fluid Speech Mini
+  (bundled in the app) or Apple's on-device speech recognition (below). The
+  app's deployment target is iOS 17: the FluidAudio package that runs
+  Fluid Speech Mini needs it; the model itself needs iOS 18 and older phones
+  use Apple's recognizer.
 - `plugins/files/` saves downloads: the web view ignores a link that
   downloads a blob, so a document's Download button opens the share sheet
   (Save to Files, AirDrop, Mail) through this plugin instead.
@@ -114,7 +117,9 @@ Keyboard > Connect Hardware Keyboard, or
 | Script | Runs | Purpose |
 |---|---|---|
 | `www` | `scripts/write-www.mjs` | Write `www/server.js` (the offline page's retry URL). |
-| `sync` | `www` + `cap sync` | Copy `www/`, write `capacitor.config.json`, update plugins (SPM). |
+| `speech-model` | `scripts/fetch-speech-model.mjs` | Fetch the Fluid Speech Mini Core ML files (about 250 MB) at the revision pinned in `scripts/speech-model.manifest.json`, check each file's SHA-256 and refuse a mismatch; a no-op when the files match. `MIKE_SKIP_SPEECH_MODEL=1` skips it (the app then reports the model unavailable and dictation uses Apple's recognizer). |
+| `sync` | `www` + `speech-model` + `cap sync` | Copy `www/`, write `capacitor.config.json`, update plugins (SPM). |
+| `test` | `node --test scripts/*.test.mjs` | Unit tests of the scripts. |
 | `ios:add` | `www` + `cap add ios` + `ios:configure` | Generate the iOS project. |
 | `ios:configure` | `scripts/configure-ios.mjs` | Apply the hardening to the generated project. |
 | `build:ios` | `cap build ios` | Signed iOS artifact (signing per firm profiles). |
@@ -125,11 +130,18 @@ Keyboard > Connect Hardware Keyboard, or
 In the app, Settings → Voice offers a "This iPhone" dictation engine, and it is
 the default there. The web app records the clip as it does for every engine
 and hands it to the `MikeSpeech` plugin (`plugins/speech/`), which transcribes
-it with Apple's speech recognition on the phone: `SpeechAnalyzer` on iOS 26
-and later, `SFSpeechRecognizer` with on-device recognition only on older
-systems. Audio never leaves the phone and never reaches Mike's backend or
-Apple. A language whose model is not on the phone shows "Download speech
-model" (a system download from Apple, started only by that click). The web
+it on the phone. The default is Fluid Speech Mini by FluidVoice (CC BY 4.0), a
+Core ML model that ships inside the app (`npm run speech-model` fetches it
+before the build; it adds about 250 MB), runs on the Neural Engine through the
+FluidAudio package, works offline from the first launch, and needs iOS 18 and
+English. Otherwise (older iOS, a build without the model, another language, or
+Apple's recognizer chosen in Settings) it is Apple's speech recognition:
+`SpeechAnalyzer` on iOS 26 and later, `SFSpeechRecognizer` with on-device
+recognition only on older systems. Audio never leaves the phone and never
+reaches Mike's backend or Apple. For Apple's recognizer, a language whose
+model is not on the phone shows "Download speech model" (a system download
+from Apple, started only by that click). The attribution for the model is in
+Settings → Voice; its LICENSE and NOTICE are bundled with it. The web
 side is `frontend/src/app/lib/voice/deviceSpeech.ts`; the plugin's methods
 and error codes are in `plugins/speech/README.md`.
 
@@ -434,7 +446,7 @@ the backend speech proxy:
 | `@capacitor/app` | declared | background/foreground listener, deep-link events. |
 | `@capacitor/preferences` | declared | non-secret settings only. |
 | `@capacitor/camera` | declared | scanner input. |
-| `@mike/speech` (`plugins/speech/`) | installed, iOS | dictation with Apple's on-device recognition. |
+| `@mike/speech` (`plugins/speech/`) | installed, iOS | dictation with Fluid Speech Mini or Apple's on-device recognition. |
 | `@mike/files` (`plugins/files/`) | installed, iOS | downloads through the share sheet. |
 | `@aparajita/capacitor-biometric-auth` | required before ship, not installed | biometric unlock. |
 | `@aparajita/capacitor-secure-storage` | required before ship, not installed | Keychain/Keystore token storage. |

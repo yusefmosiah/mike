@@ -11,7 +11,7 @@ import {
   browserVoices,
   installOnDeviceRecognition,
 } from "@/app/lib/voice/browserSpeech";
-import { deviceVoices, installDeviceSpeech } from "@/app/lib/voice/deviceSpeech";
+import { deviceVoices, installDeviceSpeech, isEnglishLanguage, type DeviceDictationModel } from "@/app/lib/voice/deviceSpeech";
 import {
   DEFAULT_KOKORO_VOICE,
   browserModelVoices,
@@ -43,6 +43,14 @@ function unavailableReason(engine: VoiceEngine): string {
       return "This browser cannot run the open model.";
   }
 }
+
+const DEVICE_MODEL_CHOICES: readonly { model: DeviceDictationModel; label: string }[] = [
+  { model: "fluid-speech-mini", label: "Fluid Speech Mini" },
+  { model: "apple", label: "Apple" },
+];
+
+/** The licence of Fluid Speech Mini (CC BY 4.0), which asks for this credit. */
+const FLUID_SPEECH_MINI_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
 
 const ENGINE_LABELS: Record<VoiceEngine, string> = {
   device: "This iPhone",
@@ -77,7 +85,7 @@ function EnginePills({
 /** Settings → Voice: engines, models, voices and a side-by-side test bench. */
 export function VoiceSettings() {
   const [preferences, setPreferences] = useVoicePreferences();
-  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, loading, error } =
+  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, fluidSpeechMini, loading, error } =
     useVoiceAvailability();
   const [systemVoices, setSystemVoices] = useState<VoiceChoice[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
@@ -86,6 +94,10 @@ export function VoiceSettings() {
   const catalog = options?.openrouter.available ? options.openrouter.catalog : null;
   const stt = preferences.transcription;
   const tts = preferences.speech;
+  const deviceModel: DeviceDictationModel =
+    fluidSpeechMini && stt.model !== "apple" ? "fluid-speech-mini" : "apple";
+  // What dictation will actually use: the model is English only.
+  const usesFluid = fluidSpeechMini && deviceModel === "fluid-speech-mini" && isEnglishLanguage(stt.language);
 
   useEffect(() => {
     if (tts.engine !== "browser") return;
@@ -153,7 +165,12 @@ export function VoiceSettings() {
               kind="transcription"
               value={stt.engine}
               available={(engine) => engineAvailable("transcription", engine, availability)}
-              onChange={(engine) => setPreferences({ ...preferences, transcription: { ...stt, engine } })}
+              onChange={(engine) => {
+                // The model belongs to the engine that named it.
+                const { model, ...rest } = stt;
+                const keep = model !== "fluid-speech-mini" && model !== "apple" ? { model } : {};
+                setPreferences({ ...preferences, transcription: { ...rest, ...keep, engine } });
+              }}
             />
             {!engineAvailable("transcription", stt.engine, availability) && (
               <p className="text-sm text-gray-700" role="status">
@@ -163,29 +180,75 @@ export function VoiceSettings() {
             {unavailableNote && <SettingsDescription>{unavailableNote}</SettingsDescription>}
           </SettingsRow>
           {stt.engine === "device" && availability.deviceRecognition && (
+            <>
+              {fluidSpeechMini && deviceStatus !== "unavailable" && (
+                <SettingsRow layout="stacked">
+                  <div className="min-w-0 space-y-1">
+                    <SettingsLabel>Recognizer</SettingsLabel>
+                    <SettingsDescription>
+                      Fluid Speech Mini understands English only; other languages use Apple&apos;s.
+                    </SettingsDescription>
+                  </div>
+                  <div role="group" aria-label="Dictation recognizer" className="flex flex-wrap gap-1.5">
+                    {DEVICE_MODEL_CHOICES.map(({ model, label }) => (
+                      <TabPillButtonUI
+                        key={model}
+                        active={deviceModel === model}
+                        onClick={() => setPreferences({ ...preferences, transcription: { ...stt, model } })}
+                      >
+                        {label}
+                      </TabPillButtonUI>
+                    ))}
+                  </div>
+                </SettingsRow>
+              )}
+              {usesFluid ? (
+                <SettingsRow>
+                  <SettingsDescription>
+                    Fluid Speech Mini runs on this iPhone and works offline; the recording never leaves it.
+                  </SettingsDescription>
+                </SettingsRow>
+              ) : (
+                <SettingsRow>
+                  <SettingsDescription>
+                    {deviceStatus === "available"
+                      ? "Apple's speech recognition runs on this iPhone; the recording never leaves it."
+                      : deviceStatus === "downloading"
+                        ? "Apple's speech model for this language is downloading."
+                        : "This iPhone can transcribe on the device after downloading Apple's speech model for this language."}
+                  </SettingsDescription>
+                  {deviceStatus === "downloadable" && (
+                    <PillButtonUI
+                      tone="white"
+                      size="sm"
+                      loading={installing}
+                      onClick={async () => {
+                        setInstalling(true);
+                        await installDeviceSpeech(stt.language);
+                        setInstalling(false);
+                        refreshDevice();
+                      }}
+                    >
+                      Download speech model
+                    </PillButtonUI>
+                  )}
+                </SettingsRow>
+              )}
+            </>
+          )}
+          {fluidSpeechMini && (
             <SettingsRow>
               <SettingsDescription>
-                {deviceStatus === "available"
-                  ? "Apple's speech recognition runs on this iPhone; the recording never leaves it."
-                  : deviceStatus === "downloading"
-                    ? "Apple's speech model for this language is downloading."
-                    : "This iPhone can transcribe on the device after downloading Apple's speech model for this language."}
-              </SettingsDescription>
-              {deviceStatus === "downloadable" && (
-                <PillButtonUI
-                  tone="white"
-                  size="sm"
-                  loading={installing}
-                  onClick={async () => {
-                    setInstalling(true);
-                    await installDeviceSpeech(stt.language);
-                    setInstalling(false);
-                    refreshDevice();
-                  }}
+                <a
+                  href={FLUID_SPEECH_MINI_LICENSE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900"
                 >
-                  Download speech model
-                </PillButtonUI>
-              )}
+                  Fluid Speech Mini by FluidVoice
+                </a>{" "}
+                (CC BY 4.0). Built on NVIDIA Parakeet TDT 0.6B v3 and Moondream Parakeet Ultra.
+              </SettingsDescription>
             </SettingsRow>
           )}
           {stt.engine === "operator" && options?.operator.transcription && (
@@ -342,7 +405,12 @@ export function VoiceSettings() {
         <SettingsHeading>Test bench</SettingsHeading>
         <SettingsCard>
           <SettingsRow layout="stacked">
-            <VoiceTestBench availability={availability} catalog={catalog} />
+            <VoiceTestBench
+              availability={availability}
+              fluidSpeechMini={fluidSpeechMini}
+              appleDictation={deviceStatus !== "unavailable"}
+              catalog={catalog}
+            />
           </SettingsRow>
         </SettingsCard>
       </section>

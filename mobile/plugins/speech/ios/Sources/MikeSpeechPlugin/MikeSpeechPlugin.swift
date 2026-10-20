@@ -25,6 +25,10 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     static let maxSpeechCharacters = 20_000
 
     @objc func status(_ call: CAPPluginCall) {
+        if Self.usesFluidMini(call) {
+            call.resolve(Self.payload(FluidSpeechMini.status()))
+            return
+        }
         let language = call.getString("language")
         Task {
             call.resolve(Self.payload(await OnDeviceSpeech.status(language: language)))
@@ -32,6 +36,11 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func install(_ call: CAPPluginCall) {
+        // Fluid Speech Mini ships in the app: there is nothing to download.
+        if Self.usesFluidMini(call) {
+            call.resolve(Self.payload(FluidSpeechMini.status()))
+            return
+        }
         let language = call.getString("language")
         Task {
             do {
@@ -57,6 +66,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let language = call.getString("language")
+        let fluidMini = Self.usesFluidMini(call)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("mike-dictation-\(UUID().uuidString)")
             .appendingPathExtension(ext)
@@ -64,7 +74,9 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             defer { try? FileManager.default.removeItem(at: url) }
             do {
                 try audio.write(to: url, options: [.atomic, .completeFileProtection])
-                let text = try await OnDeviceSpeech.transcribe(file: url, language: language)
+                let text = fluidMini
+                    ? try await FluidSpeechMini.transcribe(file: url)
+                    : try await OnDeviceSpeech.transcribe(file: url, language: language)
                 call.resolve(["text": text])
             } catch {
                 Self.reject(call, error)
@@ -114,6 +126,12 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         case "audio/mpeg", "audio/mp3": return "mp3"
         default: return nil
         }
+    }
+
+    /// Whether the call asks for Fluid Speech Mini; without `engine` it is
+    /// Apple's recognizer, so an older web build keeps working.
+    static func usesFluidMini(_ call: CAPPluginCall) -> Bool {
+        call.getString("engine") == FluidSpeechMini.engineName
     }
 
     static func payload(_ status: OnDeviceSpeech.Status) -> [String: Any] {

@@ -8,15 +8,43 @@
  */
 
 import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
-import { speakOnDevice, transcribeOnDevice } from "./deviceSpeech";
+import {
+    FLUID_MINI_ENGINE,
+    fluidSpeechMiniAvailable,
+    isEnglishLanguage,
+    speakOnDevice,
+    transcribeOnDevice,
+} from "./deviceSpeech";
 import { loadVoicePreferences, type VoicePreferences } from "./preferences";
+
+/**
+ * Dictation on the phone: Fluid Speech Mini when the app has it, the choice
+ * (`model`) is not Apple's and the language is English (the model is English
+ * only); otherwise Apple's recognizer. If Fluid Speech Mini fails, Apple's
+ * takes the recording; when that fails too, the first error is the one shown.
+ */
+async function transcribeOnPhone(blob: Blob, preferences: VoicePreferences["transcription"]): Promise<string> {
+    const wantsFluid = preferences.model !== "apple" && isEnglishLanguage(preferences.language);
+    if (!wantsFluid || !(await fluidSpeechMiniAvailable())) {
+        return transcribeOnDevice(blob, preferences.language);
+    }
+    try {
+        return await transcribeOnDevice(blob, preferences.language, FLUID_MINI_ENGINE);
+    } catch (error) {
+        try {
+            return await transcribeOnDevice(blob, preferences.language);
+        } catch {
+            throw error;
+        }
+    }
+}
 
 export async function transcribeRecording(
     blob: Blob,
     preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
 ): Promise<string> {
     if (preferences.engine === "device") {
-        return transcribeOnDevice(blob, preferences.language);
+        return transcribeOnPhone(blob, preferences);
     }
     if (preferences.engine === "webgpu") {
         const { transcribeInBrowser } = await import("./browserModels");

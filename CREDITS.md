@@ -51,6 +51,8 @@ infrastructure, and development workflow, including optional local integrations.
 | [AI SDK](https://github.com/vercel/ai) | Language-model integrations, streaming, and tool calls. |
 | [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | Connections to MCP tools and servers. |
 | [Ollama](https://github.com/ollama/ollama) | Optional local language-model inference. |
+| [Fluid Speech Mini](https://huggingface.co/FluidVoice-Labs/fluid-speech-mini-coreml) by FluidVoice, built on NVIDIA Parakeet TDT 0.6B v3 and Moondream Parakeet Ultra | On-device dictation in the iPhone app, bundled unmodified apart from one file renamed for the loader ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)). |
+| [FluidAudio](https://github.com/FluidInference/FluidAudio) | Running Fluid Speech Mini on the iPhone with Core ML (Apache-2.0). |
 | [Zod](https://github.com/colinhacks/zod) | Runtime schema validation. |
 | [PostgreSQL](https://www.postgresql.org/) | Persistent application data. |
 | [Supabase Auth (GoTrue)](https://github.com/supabase/auth) and [auth-js](https://github.com/supabase/supabase-js/tree/master/packages/core/auth-js) | The authentication server and its client library. |

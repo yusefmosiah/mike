@@ -11,9 +11,10 @@ import { deviceSpeechSupported, deviceVoiceSupported } from "./deviceSpeech";
  * browser's built-in voices and an on-device model exist on one machine and
  * not the next.
  *
- *  - "device": Apple's speech on the phone, in Mike's iPhone app: on-device
- *    recognition for dictation and Apple's voices for read-aloud (the
- *    default there).
+ *  - "device": speech on the phone, in Mike's iPhone app: on-device
+ *    recognition for dictation (the `model` is "fluid-speech-mini", the
+ *    default where the app has it, or "apple") and Apple's voices for
+ *    read-aloud (the default there).
  *  - "operator": the deployment's own speech server (the default elsewhere).
  *  - "openrouter": OpenRouter, the comparison lane; never in strict private
  *    mode (the server refuses it there too).
@@ -54,7 +55,7 @@ export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
 export function defaultVoicePreferences(): VoicePreferences {
     if (!deviceSpeechSupported()) return DEFAULT_VOICE_PREFERENCES;
     return {
-        transcription: { engine: "device" },
+        transcription: { engine: "device", model: "fluid-speech-mini" },
         speech: { engine: deviceVoiceSupported() ? "device" : DEFAULT_VOICE_PREFERENCES.speech.engine },
     };
 }

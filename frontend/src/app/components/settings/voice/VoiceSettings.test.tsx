@@ -124,4 +124,32 @@ describe("VoiceSettings in the iPhone app", () => {
         render(<VoiceSettings />);
         expect(await screen.findByText(/speech model for this language is downloading/)).toBeInTheDocument();
     });
+
+    describe("in the iPhone app with Fluid Speech Mini", () => {
+        const nativePromise = vi.fn(async (_plugin: string, method: string, args?: Record<string, unknown>) =>
+            method === "status" && args?.engine === "fluid-mini"
+                ? { state: "available", engine: "fluid-mini", locale: "en" }
+                : method === "status"
+                  ? { state: "available", engine: "speech-analyzer" }
+                  : {},
+        );
+        beforeEach(() => {
+            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "speak" }] }], nativePromise });
+        });
+        afterEach(() => vi.unstubAllGlobals());
+
+        it("chooses it by default, credits it with a link to the licence, and lets Apple's be chosen", async () => {
+            render(<VoiceSettings />);
+            const recognizer = await screen.findByRole("group", { name: "Dictation recognizer" });
+            const pills = Array.from(recognizer.querySelectorAll("button")).map((b) => [b.textContent, b.getAttribute("aria-pressed")]);
+            expect(pills).toEqual([
+                ["Fluid Speech Mini", "true"],
+                ["Apple", "false"],
+            ]);
+            const credit = screen.getByRole("link", { name: "Fluid Speech Mini by FluidVoice" });
+            expect(credit).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/");
+            fireEvent.click(screen.getByRole("button", { name: "Apple" }));
+            await waitFor(() => expect(loadVoicePreferences().transcription).toEqual({ engine: "device", model: "apple" }));
+        });
+    });
 });

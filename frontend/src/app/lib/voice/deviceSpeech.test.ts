@@ -8,7 +8,11 @@ import {
     deviceSpeechSupported,
     deviceVoices,
     deviceVoiceSupported,
+    FLUID_MINI_ENGINE,
+    fluidSpeechMiniAvailable,
     installDeviceSpeech,
+    isEnglishLanguage,
+    resetFluidSpeechMiniAvailability,
     speakOnDevice,
     transcribeOnDevice,
 } from "./deviceSpeech";
@@ -20,6 +24,7 @@ function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ na
 }
 
 afterEach(() => {
+    resetFluidSpeechMiniAvailability();
     vi.unstubAllGlobals();
     nativePromise.mockReset();
 });
@@ -191,5 +196,64 @@ describe("speakOnDevice", () => {
         await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
         nativePromise.mockResolvedValueOnce(null);
         await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
+    });
+});
+
+describe("fluidSpeechMiniAvailable", () => {
+    it("is false in a browser", async () => {
+        expect(await fluidSpeechMiniAvailable()).toBe(false);
+    });
+
+    it("is true only when the app answers for the Fluid Speech Mini engine", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini", locale: "en" });
+        expect(await fluidSpeechMiniAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "status", { engine: "fluid-mini" });
+        // A positive answer is kept.
+        expect(await fluidSpeechMiniAvailable()).toBe(true);
+        expect(nativePromise).toHaveBeenCalledTimes(1);
+    });
+
+    it("is false on an older app build, which ignores the option and answers for Apple's recognizer", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "speech-analyzer" });
+        expect(await fluidSpeechMiniAvailable()).toBe(false);
+    });
+
+    it("is false below iOS 18 or without the model, and is asked again later", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "unavailable" });
+        expect(await fluidSpeechMiniAvailable()).toBe(false);
+        nativePromise.mockRejectedValueOnce(new Error("bridge"));
+        expect(await fluidSpeechMiniAvailable()).toBe(false);
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini" });
+        expect(await fluidSpeechMiniAvailable()).toBe(true);
+    });
+});
+
+describe("transcribeOnDevice with Fluid Speech Mini", () => {
+    it("sends the engine and no language", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ text: "Hello." });
+        expect(await transcribeOnDevice(new Blob(["hi"], { type: "audio/mp4" }), "en-GB", FLUID_MINI_ENGINE)).toBe("Hello.");
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "transcribe", {
+            audio: "aGk=",
+            mimeType: "audio/mp4",
+            engine: "fluid-mini",
+        });
+    });
+});
+
+describe("isEnglishLanguage", () => {
+    it("accepts English tags and reads the phone's language when none is set", () => {
+        expect(isEnglishLanguage("en")).toBe(true);
+        expect(isEnglishLanguage("en-GB")).toBe(true);
+        expect(isEnglishLanguage("en_US")).toBe(true);
+        expect(isEnglishLanguage("fr-FR")).toBe(false);
+        expect(isEnglishLanguage("enm")).toBe(false);
+        vi.stubGlobal("navigator", { language: "de-DE" });
+        expect(isEnglishLanguage()).toBe(false);
+        vi.stubGlobal("navigator", { language: "en-AU" });
+        expect(isEnglishLanguage()).toBe(true);
     });
 });

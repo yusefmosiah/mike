@@ -7,7 +7,12 @@ import {
   onDeviceRecognitionStatus,
 } from "@/app/lib/voice/browserSpeech";
 import { browserModelsSupported } from "@/app/lib/voice/browserModels";
-import { deviceSpeechStatus, deviceVoiceSupported, type DeviceSpeechState } from "@/app/lib/voice/deviceSpeech";
+import {
+  deviceSpeechStatus,
+  deviceVoiceSupported,
+  fluidSpeechMiniAvailable,
+  type DeviceSpeechState,
+} from "@/app/lib/voice/deviceSpeech";
 import type { VoiceAvailability } from "@/app/lib/voice/preferences";
 
 export type RecognitionStatus = Awaited<ReturnType<typeof onDeviceRecognitionStatus>>;
@@ -20,6 +25,8 @@ export interface VoiceAvailabilityState {
   /** Apple's recognition on the phone, in the iPhone app. */
   deviceStatus: DeviceSpeechState;
   refreshDevice: () => void;
+  /** Fluid Speech Mini, bundled in the iPhone app (iOS 18 and later). */
+  fluidSpeechMini: boolean;
   loading: boolean;
   error: boolean;
 }
@@ -36,6 +43,7 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
   const [recognitionCheck, setRecognitionCheck] = useState(0);
   const [deviceStatus, setDeviceStatus] = useState<DeviceSpeechState>("unavailable");
   const [deviceCheck, setDeviceCheck] = useState(0);
+  const [fluidSpeechMini, setFluidSpeechMini] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -74,10 +82,20 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     };
   }, [deviceCheck]);
 
+  useEffect(() => {
+    let active = true;
+    void fluidSpeechMiniAvailable().then((ok) => {
+      if (active) setFluidSpeechMini(ok);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return {
     options,
     availability: {
-      deviceRecognition: deviceStatus !== "unavailable",
+      deviceRecognition: deviceStatus !== "unavailable" || fluidSpeechMini,
       deviceSpeech: deviceVoiceSupported(),
       operatorTranscription: !!options?.operator.transcription,
       operatorSpeech: !!options?.operator.speech,
@@ -92,6 +110,7 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     refreshRecognition: () => setRecognitionCheck((n) => n + 1),
     deviceStatus,
     refreshDevice: () => setDeviceCheck((n) => n + 1),
+    fluidSpeechMini,
     loading,
     error,
   };
