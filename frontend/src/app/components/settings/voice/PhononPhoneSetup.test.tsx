@@ -69,4 +69,17 @@ describe("PhononPhoneSetup", () => {
         await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
         expect(device.remove).toHaveBeenCalled();
     });
+
+    it("says the models are being prepared at the end of an install, with no percentage", () => {
+        render(<PhononPhoneSetup status={{ state: "installing", progress: 1, compiling: true }} chosen onChange={vi.fn()} />);
+        expect(screen.getByText("Preparing for this phone…")).toBeInTheDocument();
+        expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+    });
+
+    it("mentions the next reading's preparation only when the status says so", () => {
+        const { rerender } = render(<PhononPhoneSetup status={{ state: "available" }} chosen onChange={vi.fn()} />);
+        expect(screen.queryByText(/prepares it/)).not.toBeInTheDocument();
+        rerender(<PhononPhoneSetup status={{ state: "available", compiling: true }} chosen onChange={vi.fn()} />);
+        expect(screen.getByText(/next reading prepares it for this phone first/)).toBeInTheDocument();
+    });
 });

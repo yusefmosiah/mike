@@ -32,7 +32,14 @@ const SETUP_FAILED_MESSAGE = "Setup did not finish. Check the connection and try
  * until the user asks: first how long setup takes (a short speed test
  * against the model host), then the setup itself.
  */
-export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
+export function BrowserModelSetup({
+  kind,
+  onReadyChange,
+}: {
+  kind: BrowserModelKind;
+  /** Told whether the model is set up (consent given and loaded), as that changes. */
+  onReadyChange?: (ready: boolean) => void;
+}) {
   const spec = BROWSER_MODELS[kind];
   const [phase, setPhase] = useState<Phase>(() =>
     hasBrowserModelConsent(kind) ? { step: "ready" } : { step: "ask" },
@@ -65,8 +72,10 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
       else if (kind === "phonon") await loadBrowserPhonon(onProgress);
       else await loadBrowserSpeaker(onProgress);
       setPhase({ step: "ready" });
+      onReadyChange?.(true);
     } catch (error) {
       setBrowserModelConsent(kind, false);
+      onReadyChange?.(false);
       setPhase({ step: "failed", message: error instanceof BrowserModelError ? error.message : SETUP_FAILED_MESSAGE });
     }
   };
@@ -74,6 +83,7 @@ export function BrowserModelSetup({ kind }: { kind: BrowserModelKind }) {
   const turnOff = () => {
     setBrowserModelConsent(kind, false);
     setPhase({ step: "ask" });
+    onReadyChange?.(false);
   };
 
   return (

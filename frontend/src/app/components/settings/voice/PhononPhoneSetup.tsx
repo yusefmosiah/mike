@@ -34,6 +34,8 @@ export function PhononPhoneSetup({
   const [removing, setRemoving] = useState(false);
   const downloading = progress !== null || status.state === "installing";
   const fraction = progress ?? status.progress ?? 0;
+  // The last step of an install: Core ML prepares the models for this phone.
+  const preparing = status.state === "installing" && !!status.compiling;
 
   const download = async () => {
     setFailed(null);
@@ -59,9 +61,9 @@ export function PhononPhoneSetup({
       <div className="space-y-2">
         <SettingsDescription>
           {chosen
-            ? "Phonon reads English on this iPhone; the text never leaves it."
+            ? "The text never leaves this iPhone."
             : "Phonon is on this iPhone. Choose it above to read English with it."}
-          {status.compiling ? " The first reading prepares it for this phone and takes about ten seconds." : ""}
+          {status.compiling ? " The next reading prepares it for this phone first (about ten seconds)." : ""}
         </SettingsDescription>
         <PillButtonUI tone="white" size="sm" loading={removing} onClick={() => void remove()}>
           Remove Phonon
@@ -78,16 +80,19 @@ export function PhononPhoneSetup({
       </SettingsDescription>
       {downloading ? (
         <div className="space-y-1">
-          <p className="text-sm text-gray-700">Downloading Phonon…</p>
+          <p className="text-sm text-gray-700">{preparing ? "Preparing for this phone…" : "Downloading Phonon…"}</p>
           <div
             role="progressbar"
-            aria-label="Downloading Phonon"
+            aria-label={preparing ? "Preparing Phonon for this phone" : "Downloading Phonon"}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={Math.round(fraction * 100)}
+            aria-valuenow={preparing ? undefined : Math.round(fraction * 100)}
             className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
           >
-            <div className="h-full rounded-full bg-gray-700 transition-[width]" style={{ width: `${Math.round(fraction * 100)}%` }} />
+            <div
+              className={`h-full rounded-full bg-gray-700 ${preparing ? "w-full animate-pulse" : "transition-[width]"}`}
+              style={preparing ? undefined : { width: `${Math.round(fraction * 100)}%` }}
+            />
           </div>
         </div>
       ) : (

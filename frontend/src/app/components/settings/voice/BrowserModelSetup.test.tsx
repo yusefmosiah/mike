@@ -103,4 +103,21 @@ describe("BrowserModelSetup", () => {
         expect(await screen.findByText("Set up on this device.")).toBeInTheDocument();
         expect(models.loadSpeaker).toHaveBeenCalled();
     });
+
+    it("tells its parent when the model becomes ready, fails, or is turned off", async () => {
+        vi.stubGlobal("navigator", { userAgent: CHROME, gpu: {} });
+        const onReadyChange = vi.fn();
+        models.loadTranscriber.mockRejectedValueOnce(new Error("x"));
+        render(<BrowserModelSetup kind="transcription" onReadyChange={onReadyChange} />);
+        await setUp();
+        await screen.findByRole("alert");
+        expect(onReadyChange).toHaveBeenLastCalledWith(false);
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        models.loadTranscriber.mockResolvedValueOnce(undefined);
+        await setUp();
+        await screen.findByRole("button", { name: "Stop using it" });
+        expect(onReadyChange).toHaveBeenLastCalledWith(true);
+        fireEvent.click(screen.getByRole("button", { name: "Stop using it" }));
+        expect(onReadyChange).toHaveBeenLastCalledWith(false);
+    });
 });

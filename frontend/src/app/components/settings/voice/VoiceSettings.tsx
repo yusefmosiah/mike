@@ -12,8 +12,10 @@ import {
   installOnDeviceRecognition,
 } from "@/app/lib/voice/browserSpeech";
 import {
+  PHONON_ENGINE,
   deviceVoices,
   installDeviceSpeech,
+  speakOnDevice,
   isEnglishLanguage,
   type DeviceDictationModel,
   type DeviceSpeechModel,
@@ -26,7 +28,9 @@ import {
   browserModelVoices,
   browserSpeechKind,
   browserSpeechModel,
+  hasBrowserModelConsent,
   isPhononVoice,
+  speakWithBrowserModel,
   type BrowserSpeechModel,
 } from "@/app/lib/voice/browserModels";
 import { formatVoicePrice } from "@/app/lib/voice/pricing";
@@ -38,6 +42,7 @@ import {
 } from "@/app/lib/voice/preferences";
 import { BrowserModelSetup } from "./BrowserModelSetup";
 import { PhononPhoneSetup } from "./PhononPhoneSetup";
+import { PhononVoiceList } from "./PhononVoiceList";
 import { useVoiceAvailability } from "./useVoiceAvailability";
 import { VoiceChoiceDropdown, type VoiceChoice } from "./VoiceChoiceDropdown";
 import { VoiceTestBench } from "./VoiceTestBench";
@@ -73,8 +78,6 @@ const BROWSER_SPEECH_CHOICES: readonly { model: BrowserSpeechModel; label: strin
   { model: "phonon", label: "Phonon" },
   { model: "kokoro", label: "Kokoro" },
 ];
-
-const PHONON_VOICE_CHOICES: VoiceChoice[] = PHONON_VOICES.map(({ id, label, detail }) => ({ id, label, detail }));
 
 const CREDIT_LINK_CLASS =
   "underline underline-offset-2 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-900";
@@ -135,6 +138,7 @@ export function VoiceSettings() {
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
   const [phoneVoices, setPhoneVoices] = useState<VoiceChoice[]>([]);
   const [installing, setInstalling] = useState(false);
+  const [phononConsent, setPhononConsent] = useState(() => hasBrowserModelConsent("phonon"));
   const catalog = options?.openrouter.available ? options.openrouter.catalog : null;
   const stt = preferences.transcription;
   const tts = preferences.speech;
@@ -438,12 +442,16 @@ export function VoiceSettings() {
               <SettingsRow layout="stacked">
                 <SettingsLabel>Voice</SettingsLabel>
                 {phoneSpeechModel === "phonon" ? (
-                  <VoiceChoiceDropdown
-                    label="Read-aloud voice"
+                  <PhononVoiceList
+                    voices={PHONON_VOICES}
                     value={isPhononVoice(tts.voice) ? tts.voice : DEFAULT_PHONON_VOICE}
-                    placeholder="Choose a voice"
-                    choices={PHONON_VOICE_CHOICES}
-                    onChange={(voice) =>
+                    engine="device"
+                    synthesize={(text, voice) => speakOnDevice(text, voice, PHONON_ENGINE)}
+                    preparing={phonon.state === "available" && !!phonon.compiling}
+                    playDisabledReason={
+                      phonon.state === "available" ? undefined : "Download Phonon above to hear samples. You can still choose a voice."
+                    }
+                    onSelect={(voice) =>
                       setPreferences({ ...preferences, speech: { engine: "device", model: "phonon", voice } })
                     }
                   />
@@ -461,11 +469,11 @@ export function VoiceSettings() {
                     }
                   />
                 )}
-                <SettingsDescription>
-                  {phoneSpeechModel === "phonon"
-                    ? "Phonon's voice reads English on this iPhone; the text never leaves it."
-                    : "Apple's voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be downloaded in the iPhone's Accessibility settings, under spoken content."}
-                </SettingsDescription>
+                {phoneSpeechModel !== "phonon" && (
+                  <SettingsDescription>
+                    Apple&apos;s voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be downloaded in the iPhone&apos;s Accessibility settings, under spoken content.
+                  </SettingsDescription>
+                )}
               </SettingsRow>
               {phonon.state !== "unavailable" && <PhononCredit />}
             </>
@@ -498,15 +506,22 @@ export function VoiceSettings() {
                     </TabPillButtonUI>
                   ))}
                 </div>
-                <BrowserModelSetup key={browserSpeechKind(tts.model)} kind={browserSpeechKind(tts.model)} />
+                <BrowserModelSetup
+                  key={browserSpeechKind(tts.model)}
+                  kind={browserSpeechKind(tts.model)}
+                  onReadyChange={browserModel === "phonon" ? setPhononConsent : undefined}
+                />
                 <SettingsLabel>Voice</SettingsLabel>
                 {browserModel === "phonon" ? (
-                  <VoiceChoiceDropdown
-                    label="Read-aloud voice"
+                  <PhononVoiceList
+                    voices={PHONON_VOICES}
                     value={isPhononVoice(tts.voice) ? tts.voice : DEFAULT_PHONON_VOICE}
-                    placeholder="Choose a voice"
-                    choices={PHONON_VOICE_CHOICES}
-                    onChange={(voice) => setPreferences({ ...preferences, speech: { engine: "webgpu", model: "phonon", voice } })}
+                    engine="webgpu"
+                    synthesize={(text, voice) => speakWithBrowserModel(text, { voice, model: "phonon" })}
+                    playDisabledReason={
+                      phononConsent ? undefined : "Set up Phonon above to hear samples. You can still choose a voice."
+                    }
+                    onSelect={(voice) => setPreferences({ ...preferences, speech: { engine: "webgpu", model: "phonon", voice } })}
                   />
                 ) : (
                   <VoiceChoiceDropdown

@@ -133,10 +133,11 @@ enum PhononVoice {
         private var idleTask: Task<Void, Never>?
         private var installTask: Task<Void, Error>?
         private var progress = 0.0
+        private var compiling = false
         private var observers: [NSObjectProtocol] = []
 
         func status() -> Status {
-            if installTask != nil { return Status(state: "installing", progress: progress, compiling: false) }
+            if installTask != nil { return Status(state: "installing", progress: progress, compiling: compiling) }
             let directory = PhononModels.defaultDirectory
             guard PhononModels.isInstalled(at: directory) else {
                 return Status(state: "not-installed", progress: nil, compiling: false)
@@ -144,17 +145,23 @@ enum PhononVoice {
             return Status(state: "available", progress: nil, compiling: phonon == nil && Phonon.needsCompiling(directory))
         }
 
-        /// Downloads the model. A second call while one is running joins it.
+        /// Downloads the model, then loads it once so Core ML compiles it for
+        /// this phone (about ten seconds) as part of the install rather than on
+        /// the first reading; the loaded model is kept for that reading. A
+        /// second call while one is running joins it.
         func install() async throws {
             if let installTask {
                 try await installTask.value
                 return
             }
             progress = 0
+            compiling = false
             let task = Task<Void, Error> {
                 _ = try await PhononModels.download(from: PhononVoice.modelBaseURL) { fraction in
                     Task { await Runtime.shared.setProgress(fraction) }
                 }
+                try Task.checkCancellation()
+                try await Runtime.shared.compile()
             }
             installTask = task
             defer { installTask = nil }
@@ -163,6 +170,14 @@ enum PhononVoice {
             } catch {
                 throw Failure.failed
             }
+        }
+
+        private func compile() async throws {
+            progress = 1
+            compiling = true
+            defer { compiling = false }
+            _ = try await loaded()
+            scheduleUnload()
         }
 
         private func setProgress(_ fraction: Double) {

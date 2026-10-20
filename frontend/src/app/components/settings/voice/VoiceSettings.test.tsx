@@ -183,7 +183,7 @@ describe("VoiceSettings read-aloud with Phonon", () => {
                 ["Phonon", "true"],
                 ["Kokoro", "false"],
             ]);
-            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("Harper");
+            expect(screen.getByRole("radio", { name: /Harper/ })).toBeChecked();
             expect(screen.getByText(/Phonon 31M runs in this browser/)).toHaveTextContent("about 65 MB");
             expect(screen.getByRole("link", { name: "Phonon by Gradium" })).toHaveAttribute(
                 "href",
@@ -203,8 +203,7 @@ describe("VoiceSettings read-aloud with Phonon", () => {
             expect(screen.queryByRole("link", { name: "Phonon by Gradium" })).not.toBeInTheDocument();
             fireEvent.click(screen.getByRole("button", { name: "Phonon" }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "phonon" }));
-            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
-            await userEvent.click(await screen.findByRole("menuitem", { name: /Miles/ }));
+            await userEvent.click(screen.getByRole("radio", { name: /Miles/ }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "phonon", voice: "Miles" }));
             fireEvent.click(screen.getByRole("button", { name: "Kokoro" }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "webgpu", model: "kokoro" }));
@@ -253,14 +252,17 @@ describe("VoiceSettings read-aloud with Phonon", () => {
             fireEvent.click(within(voices).getByRole("button", { name: "Phonon" }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "phonon" }));
             expect(await screen.findByText(/Phonon is not on this iPhone yet/)).toHaveTextContent("about 160 MB");
+            expect(screen.getByRole("button", { name: "Play a sample of Harper" })).toBeDisabled();
+            expect(screen.getByText(/Download Phonon above to hear samples/)).toBeInTheDocument();
             expect(nativePromise).not.toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" });
             expect(screen.getByRole("link", { name: "Phonon by Gradium" })).toBeInTheDocument();
 
             fireEvent.click(screen.getByRole("button", { name: "Download Phonon" }));
             await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" }));
             expect(await screen.findByRole("button", { name: "Remove Phonon" })).toBeInTheDocument();
-            expect(screen.getByText(/Phonon reads English on this iPhone/)).toBeInTheDocument();
-            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("Harper");
+            expect(screen.getByText(/The text never leaves this iPhone/)).toBeInTheDocument();
+            expect(screen.getByRole("radio", { name: /Harper/ })).toBeChecked();
+            expect(screen.getByRole("button", { name: "Play a sample of Harper" })).toBeEnabled();
 
             fireEvent.click(screen.getByRole("button", { name: "Remove Phonon" }));
             await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "remove", { engine: "phonon" }));
@@ -277,9 +279,8 @@ describe("VoiceSettings read-aloud with Phonon", () => {
                     ["Apple", "false"],
                 ]),
             );
-            expect(screen.getByText(/takes about ten seconds/)).toBeInTheDocument();
-            await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
-            await userEvent.click(await screen.findByRole("menuitem", { name: /Maeve/ }));
+            expect(screen.getByText(/next reading prepares it/)).toBeInTheDocument();
+            await userEvent.click(screen.getByRole("radio", { name: /Maeve/ }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "phonon", voice: "Maeve" }));
 
             fireEvent.click(within(voices).getByRole("button", { name: "Apple" }));
