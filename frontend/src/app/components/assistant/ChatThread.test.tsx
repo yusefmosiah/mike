@@ -157,7 +157,12 @@ vi.mock("./AssistantMessage", () => ({
     ),
 }));
 
+const resizeCallbacks: (() => void)[] = [];
+
 class ResizeObserverMock {
+    constructor(callback: () => void) {
+        resizeCallbacks.push(callback);
+    }
     observe() {}
     unobserve() {}
     disconnect() {}
@@ -225,6 +230,7 @@ function renderThread(overrides: Partial<ChatThreadProps> = {}) {
 }
 
 beforeEach(() => {
+    resizeCallbacks.length = 0;
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     Element.prototype.scrollTo = vi.fn();
 });
@@ -264,6 +270,56 @@ describe("ChatThread layout", () => {
         expect(
             document.querySelector('[data-slot="chat-composer"]')!.className,
         ).toContain("px-3");
+    });
+
+    it("pushes the thread up as the composer grows instead of covering it", () => {
+        renderThread();
+        const composer = document.querySelector<HTMLElement>(
+            '[data-slot="chat-composer"]',
+        )!;
+        const content = document.querySelector<HTMLElement>(
+            '[data-slot="chat-messages-content"]',
+        )!;
+        const scroller = document.querySelector<HTMLElement>(
+            '[data-slot="chat-messages-scroller"]',
+        )!;
+        let composerHeight = 0;
+        Object.defineProperty(composer, "offsetHeight", {
+            get: () => composerHeight,
+        });
+        // Scrolled to the end of a 1000px thread in a 400px viewport.
+        Object.defineProperty(scroller, "clientHeight", { value: 400 });
+        let scrollHeight = 1000;
+        Object.defineProperty(scroller, "scrollHeight", {
+            get: () => scrollHeight,
+        });
+        scroller.scrollTop = 600;
+        const resize = (height: number) =>
+            act(() => {
+                composerHeight = height;
+                for (const callback of resizeCallbacks) callback();
+            });
+        const scrollTo = vi.mocked(Element.prototype.scrollTo);
+
+        resize(100);
+        expect(content.style.paddingBottom).toContain("116px");
+
+        scrollTo.mockClear();
+        scrollHeight = 1000;
+        resize(220);
+        expect(content.style.paddingBottom).toContain("236px");
+        expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: "auto" });
+
+        // Shrinking back restores the resting padding and scrolls nothing.
+        scrollTo.mockClear();
+        resize(100);
+        expect(content.style.paddingBottom).toContain("116px");
+        expect(scrollTo).not.toHaveBeenCalled();
+
+        // A reader further up the thread is not moved.
+        scroller.scrollTop = 100;
+        resize(220);
+        expect(scrollTo).not.toHaveBeenCalled();
     });
 
     it("leaves the composer out until access resolves", () => {

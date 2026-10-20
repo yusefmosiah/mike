@@ -343,12 +343,30 @@ export function ChatThread({
     const [showScrollButton, setShowScrollButton] = useState(false);
     const scrollButtonVisibleRef = useRef(false);
     const [inputHeight, setInputHeight] = useState(0);
+    // The composer's resting height (the smallest seen). The thread's bottom
+    // padding is sized for it; as the composer grows with a long draft, the
+    // padding grows by the same amount, so the composer pushes the thread up
+    // rather than covering its end.
+    const [restingInputHeight, setRestingInputHeight] = useState<
+        number | null
+    >(null);
+    const composerGrowth =
+        restingInputHeight === null ? 0 : inputHeight - restingInputHeight;
     const [minHeight, setMinHeight] = useState("0px");
 
     useEffect(() => {
         const el = measuredInputRef.current;
         if (!el) return;
-        const update = () => setInputHeight(el.offsetHeight);
+        const update = () => {
+            const height = el.offsetHeight;
+            setInputHeight(height);
+            // Not laid out (a hidden tab, or a test DOM): no resting height.
+            if (height > 0) {
+                setRestingInputHeight((resting) =>
+                    resting === null || height < resting ? height : resting,
+                );
+            }
+        };
         const observer = new ResizeObserver(update);
         observer.observe(el);
         update();
@@ -393,6 +411,25 @@ export function ChatThread({
             window.removeEventListener("resize", update);
         };
     }, [messages.length]);
+
+    // A reader at the end of the thread stays there as the composer grows:
+    // the extra padding scrolls in rather than opening a gap above the
+    // composer. Shrinking needs nothing; the browser clamps the scroll.
+    const composerGrowthRef = useRef(composerGrowth);
+    useLayoutEffect(() => {
+        const grew = composerGrowth - composerGrowthRef.current;
+        composerGrowthRef.current = composerGrowth;
+        const c = messagesContainerRef.current;
+        if (grew <= 0 || !c) return;
+        const viewport = scrollViewportOf(c);
+        const fromEnd =
+            viewport.scrollHeight - viewport.height - viewport.scrollTop;
+        if (fromEnd > grew + FOLLOW_STREAM_THRESHOLD_PX) return;
+        viewport.scrollTo({
+            top: viewport.scrollHeight - viewport.height,
+            behavior: "auto",
+        });
+    }, [composerGrowth]);
 
     // While an answer streams, keep its newest text in view, as long as the
     // reader is at the end of the thread. Scrolling up stops following and
@@ -764,7 +801,7 @@ export function ChatThread({
                     style={{
                         paddingTop: layout.paddingTop,
                         // The composer's gap from the bottom of the screen.
-                        paddingBottom: `calc(${DEFAULT_ASSISTANT_BOTTOM_PADDING}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px)`,
+                        paddingBottom: `calc(${DEFAULT_ASSISTANT_BOTTOM_PADDING + composerGrowth}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px)`,
                     }}
                 >
                     {showEmptyState ? (
