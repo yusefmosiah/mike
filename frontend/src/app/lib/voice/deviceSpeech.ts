@@ -258,6 +258,17 @@ export function fluidSpeechMiniAvailable(): Promise<boolean> {
     return asked;
 }
 
+/**
+ * Asks the app to load Fluid Speech Mini now, while the person speaks, so the
+ * transcription does not wait for it. Fire and forget: an app build without
+ * `prepare` refuses the call, and the transcription then loads the model.
+ */
+export function prepareFluidSpeechMini(): void {
+    const call = nativePromise();
+    if (!call) return;
+    call(PLUGIN, "prepare", { engine: FLUID_MINI_ENGINE }).catch(() => undefined);
+}
+
 /** Forgets the cached answer of `fluidSpeechMiniAvailable` (tests). */
 export function resetFluidSpeechMiniAvailability(): void {
     fluidAvailable = null;

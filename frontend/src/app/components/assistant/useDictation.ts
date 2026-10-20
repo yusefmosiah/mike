@@ -9,7 +9,7 @@ import {
 } from "@/app/lib/voice/browserSpeech";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
-import { correctDictation, transcribeRecording } from "@/app/lib/voice/engines";
+import { correctDictation, prepareTranscription, transcribeRecording } from "@/app/lib/voice/engines";
 import { loadUserVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 
@@ -167,6 +167,8 @@ export function useDictation({
             // Fetch the person's vocabulary while they speak; a failure only
             // means dictation runs without it.
             void loadUserVocabulary().catch(() => undefined);
+            // Load the on-device model while they speak, not after.
+            void prepareTranscription().catch(() => undefined);
             if (loadVoicePreferences().transcription.engine === "browser") {
                 try {
                     browserSessionRef.current = startOnDeviceRecognition(

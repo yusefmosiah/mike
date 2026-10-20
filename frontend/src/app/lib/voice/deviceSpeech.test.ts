@@ -13,6 +13,7 @@ import {
     installDeviceSpeech,
     installPhonon,
     isEnglishLanguage,
+    prepareFluidSpeechMini,
     PHONON_ENGINE,
     PHONON_INSTALL_FAILURE_MESSAGE,
     phononAvailable,
@@ -247,6 +248,21 @@ describe("fluidSpeechMiniAvailable", () => {
         expect(await fluidSpeechMiniAvailable()).toBe(false);
         nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini" });
         expect(await fluidSpeechMiniAvailable()).toBe(true);
+    });
+});
+
+describe("prepareFluidSpeechMini", () => {
+    it("does nothing in a browser", () => {
+        prepareFluidSpeechMini();
+        expect(nativePromise).not.toHaveBeenCalled();
+    });
+
+    it("asks the app to load the model, and ignores an app build that cannot", async () => {
+        inApp();
+        nativePromise.mockRejectedValueOnce(new Error("UNIMPLEMENTED"));
+        prepareFluidSpeechMini();
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "prepare", { engine: "fluid-mini" });
+        await Promise.resolve();
     });
 });
 

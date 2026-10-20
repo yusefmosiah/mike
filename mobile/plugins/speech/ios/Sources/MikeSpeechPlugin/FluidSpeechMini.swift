@@ -11,8 +11,9 @@ import FluidAudio
 /// runs on the Neural Engine through the FluidAudio package. English only.
 /// Nothing leaves the phone, and neither audio nor text is logged.
 ///
-/// Needs iOS 18. The model loads on the first dictation and is kept while the
-/// app is in the foreground; it is dropped on a memory warning, when the app
+/// Needs iOS 18. The model loads when a dictation starts recording (or, at the
+/// latest, when it is transcribed) and is kept while the app is in the
+/// foreground; it is dropped on a memory warning, when the app
 /// goes to the background, and after five idle minutes.
 enum FluidSpeechMini {
     /// The `engine` value the web app sends.
@@ -64,6 +65,17 @@ enum FluidSpeechMini {
         #endif
     }
 
+    /// Loads the model ahead of a transcription (when recording starts), so
+    /// that the seconds it takes overlap with the person speaking. Does
+    /// nothing when the model is already loaded or cannot run here.
+    static func prepare(in bundle: Bundle = .main) async {
+        guard #available(iOS 18.0, *) else { return }
+        #if canImport(FluidAudio)
+        guard let directory = modelDirectory(in: bundle) else { return }
+        await Runtime.shared.prepare(modelDirectory: directory)
+        #endif
+    }
+
     #if canImport(FluidAudio)
     @available(iOS 18.0, *)
     actor Runtime {
@@ -84,7 +96,7 @@ enum FluidSpeechMini {
             }
             let manager: AsrManager
             do {
-                manager = try await loaded(modelDirectory)
+                manager = try loaded(modelDirectory)
             } catch {
                 throw OnDeviceSpeech.Failure.failed
             }
@@ -97,7 +109,24 @@ enum FluidSpeechMini {
             }
         }
 
-        private func loaded(_ directory: URL) async throws -> AsrManager {
+        /// Loads the model and runs it once on a second of silence: Core ML
+        /// specialises a model for the Neural Engine on its first prediction,
+        /// not when it is loaded, and that first prediction is the slow part.
+        func prepare(modelDirectory: URL) async {
+            guard manager == nil else { return }
+            idleTask?.cancel()
+            running += 1
+            defer {
+                running -= 1
+                scheduleUnload()
+            }
+            // A failure here surfaces, with its code, on the transcription.
+            guard let manager = try? loaded(modelDirectory) else { return }
+            var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
+            _ = try? await manager.transcribe([Float](repeating: 0, count: 16_000), decoderState: &state)
+        }
+
+        private func loaded(_ directory: URL) throws -> AsrManager {
             if let manager { return manager }
             // loadLocal reads exactly this directory and never downloads.
             let models = try AsrModels.loadLocal(from: directory, version: .ultra)

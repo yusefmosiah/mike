@@ -14,6 +14,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "install", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "prepare", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "transcribe", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voices", returnType: CAPPluginReturnPromise),
@@ -68,6 +69,15 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
                 Self.reject(call, error)
             }
         }
+    }
+
+    /// Starts loading Fluid Speech Mini while the person is still speaking.
+    /// Answers at once; the transcription waits for the load if it is not done.
+    @objc func prepare(_ call: CAPPluginCall) {
+        if Self.usesFluidMini(call) {
+            Task { await FluidSpeechMini.prepare() }
+        }
+        call.resolve()
     }
 
     /// Deletes Phonon's downloaded model. Nothing else can be removed.

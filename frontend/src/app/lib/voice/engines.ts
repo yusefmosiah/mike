@@ -12,6 +12,7 @@ import {
     FLUID_MINI_ENGINE,
     PHONON_ENGINE,
     fluidSpeechMiniAvailable,
+    prepareFluidSpeechMini,
     phononAvailable,
     isEnglishLanguage,
     speakOnDevice,
@@ -41,8 +42,7 @@ async function transcribeOnPhone(
         terms.length > 0
             ? transcribeOnDevice(blob, preferences.language, undefined, terms)
             : transcribeOnDevice(blob, preferences.language);
-    const wantsFluid = preferences.model !== "apple" && isEnglishLanguage(preferences.language);
-    if (!wantsFluid || !(await fluidSpeechMiniAvailable())) {
+    if (!wantsFluidSpeechMini(preferences) || !(await fluidSpeechMiniAvailable())) {
         return withApple();
     }
     try {
@@ -54,6 +54,23 @@ async function transcribeOnPhone(
             throw error;
         }
     }
+}
+
+/** True when this dictation would go to Fluid Speech Mini, if the app has it. */
+function wantsFluidSpeechMini(preferences: VoicePreferences["transcription"]): boolean {
+    return preferences.model !== "apple" && isEnglishLanguage(preferences.language);
+}
+
+/**
+ * Called when recording starts: an engine whose model takes a while to load
+ * (Fluid Speech Mini on the phone) starts loading it, so the wait overlaps
+ * with the person speaking rather than following it.
+ */
+export async function prepareTranscription(
+    preferences: VoicePreferences["transcription"] = loadVoicePreferences().transcription,
+): Promise<void> {
+    if (preferences.engine !== "device" || !wantsFluidSpeechMini(preferences)) return;
+    if (await fluidSpeechMiniAvailable()) prepareFluidSpeechMini();
 }
 
 /** The vocabulary for this dictation: the person's list (fetched if need be) and the page's names. */

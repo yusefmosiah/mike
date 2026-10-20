@@ -15,6 +15,7 @@ vi.mock("./browserModels", () => local);
 const phone = vi.hoisted(() => ({
     transcribeOnDevice: vi.fn(async (..._args: unknown[]) => "phone words"),
     fluidSpeechMiniAvailable: vi.fn(async () => false),
+    prepareFluidSpeechMini: vi.fn(),
     isEnglishLanguage: vi.fn((language?: string) => !language || /^en/i.test(language)),
     FLUID_MINI_ENGINE: "fluid-mini",
     deviceSpeechSupported: vi.fn(() => false),
@@ -26,7 +27,13 @@ const phone = vi.hoisted(() => ({
 vi.mock("./deviceSpeech", () => phone);
 
 import { resetDictationVocabulary, setDictationContext } from "./dictationVocabulary";
-import { correctDictation, speechRenderPlan, synthesizeSentence, transcribeRecording } from "./engines";
+import {
+    correctDictation,
+    prepareTranscription,
+    speechRenderPlan,
+    synthesizeSentence,
+    transcribeRecording,
+} from "./engines";
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -136,6 +143,24 @@ describe("transcribeRecording", () => {
     it("stays in the browser for the browser model", async () => {
         expect(await transcribeRecording(blob, { engine: "webgpu" })).toBe("local words");
         expect(api.transcribeAudio).not.toHaveBeenCalled();
+    });
+});
+
+describe("prepareTranscription", () => {
+    it("starts loading Fluid Speech Mini on the phone for English", async () => {
+        phone.fluidSpeechMiniAvailable.mockResolvedValueOnce(true);
+        await prepareTranscription({ engine: "device", language: "en-US" });
+        expect(phone.prepareFluidSpeechMini).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing when Fluid Speech Mini would not transcribe", async () => {
+        phone.fluidSpeechMiniAvailable.mockResolvedValue(false);
+        await prepareTranscription({ engine: "device" });
+        await prepareTranscription({ engine: "device", model: "apple" });
+        await prepareTranscription({ engine: "device", language: "fr-FR" });
+        await prepareTranscription({ engine: "operator" });
+        await prepareTranscription();
+        expect(phone.prepareFluidSpeechMini).not.toHaveBeenCalled();
     });
 });
 

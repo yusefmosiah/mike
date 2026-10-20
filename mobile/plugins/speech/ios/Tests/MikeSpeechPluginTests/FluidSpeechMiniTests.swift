@@ -44,6 +44,29 @@ final class FluidSpeechMiniTests: XCTestCase {
         print("FLUID-MINI second call: \(Date().timeIntervalSince(again)) s")
     }
 
+    func testPreparingLoadsTheModelBeforeTheTranscription() async throws {
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Fluid Speech Mini needs iOS 18") }
+        let bundle = try XCTUnwrap(pluginBundle)
+        guard FluidSpeechMini.modelDirectory(in: bundle) != nil else { throw XCTSkip("model not fetched") }
+        await FluidSpeechMini.Runtime.shared.unload()
+        let clip = Bundle.module.resourceURL!.appendingPathComponent("Fixtures/dictation.m4a")
+
+        let preparing = Date()
+        await FluidSpeechMini.prepare(in: bundle)
+        print("FLUID-MINI prepare (model load): \(Date().timeIntervalSince(preparing)) s")
+        let transcribing = Date()
+        let text = try await FluidSpeechMini.transcribe(file: clip, in: bundle)
+        print("FLUID-MINI transcribe after prepare: \(Date().timeIntervalSince(transcribing)) s")
+        XCTAssertTrue(text.hasPrefix("Hello, this is a test of dictation."))
+    }
+
+    func testPreparingWithoutTheModelDoesNothing() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("empty-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        await FluidSpeechMini.prepare(in: try XCTUnwrap(Bundle(url: directory)))
+    }
+
     func testRejectsAnUnreadableRecording() async throws {
         guard #available(iOS 18.0, *) else { throw XCTSkip("Fluid Speech Mini needs iOS 18") }
         let bundle = try XCTUnwrap(pluginBundle)
