@@ -13,6 +13,10 @@
     ./vault.nix
     ./staging.nix
     ./gate.nix
+    # Choir off-host backup target (Choir owner, 2026-10-20; handover:
+    # go-choir docs/reports/node-a-backup-handover-2026-10-20.md). Ciphertext
+    # only; loopback rest-server reached through a restricted ssh forward.
+    ./choir-backup-target.nix
   ];
 
   boot.loader.efi.canTouchEfiVariables = true;
@@ -53,6 +57,17 @@
   };
 
   environment.systemPackages = with pkgs; [ git vim curl htop ];
+
+  services.choirBackupTarget = {
+    enable = true;
+    nodeBPublicKeys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILivRWaikcbZzRs6qO4yhmvl+WDqVZjXKsjFVZIHHC3R node-b-offhost-backup" ];
+    # /data does not exist on this host; /srv is a btrfs subvolume.
+    dataDir = "/srv/choir-backup";
+    # Quotas (qgroups) are off on this filesystem and slow btrfs with many
+    # snapshots (the workstation snapshots); rest-server's --max-size (95%
+    # of quotaGiB) is the limit instead.
+    enforceBtrfsQuota = false;
+  };
 
   time.timeZone = "UTC";
   system.stateVersion = "25.11";
