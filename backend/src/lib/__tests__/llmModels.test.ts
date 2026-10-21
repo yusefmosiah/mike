@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
+import { resetModelRegistryCache } from "../llm/registry";
 import {
     CLAUDE_MAIN_MODELS,
     GEMINI_MAIN_MODELS,
@@ -145,6 +146,36 @@ describe("resolveModel", () => {
         expect(resolveModel("gpt-5.4-lite", DEFAULT_MAIN_MODEL)).toBe(
             "gpt-5.4-mini",
         );
+    });
+
+    describe("River's DeepSeek V4.1 Flash", () => {
+        const originalConfig = process.env.MIKE_MODEL_CONFIG_JSON;
+        afterEach(() => {
+            if (originalConfig === undefined) delete process.env.MIKE_MODEL_CONFIG_JSON;
+            else process.env.MIKE_MODEL_CONFIG_JSON = originalConfig;
+            resetModelRegistryCache();
+        });
+
+        it("moves a saved selection to the 1017 release once it is declared", () => {
+            process.env.MIKE_MODEL_CONFIG_JSON = JSON.stringify({
+                models: [
+                    {
+                        id: "river/deepseek-v4.1-flash-1017",
+                        provider: "openai-compatible",
+                        location: "cloud",
+                        baseUrl: "https://api.river.ai/v1",
+                        apiModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                    },
+                ],
+            });
+            resetModelRegistryCache();
+            expect(
+                resolveModel("river/deepseek-v4.1-flash", DEFAULT_MAIN_MODEL),
+            ).toBe("river/deepseek-v4.1-flash-1017");
+            expect(
+                resolveModel("river/deepseek-v4.1-flash-1017", DEFAULT_MAIN_MODEL),
+            ).toBe("river/deepseek-v4.1-flash-1017");
+        });
     });
 
     it("accepts namespaced OpenRouter model ids", () => {

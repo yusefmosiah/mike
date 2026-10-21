@@ -322,10 +322,11 @@ describe("configured model limits and reasoning", () => {
   it("turns reasoning off only for a model that declares it can, with its off value", async () => {
     declare([
       {
-        id: "river/deepseek-v4.1-flash",
+        id: "river/deepseek-v4.1-flash-1017",
         provider: "openai-compatible",
         location: "cloud",
         baseUrl,
+        apiModel: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
         contextWindow: 1_048_576,
         maxOutputTokens: 384_000,
         reasoning: { efforts: ["high", "max"], default: "high", canDisable: true, offValue: "none" },
@@ -333,11 +334,43 @@ describe("configured model limits and reasoning", () => {
     ]);
     const base = createModels();
     const { models, resolve } = createMikeModels(base);
-    const ref = resolve("river/deepseek-v4.1-flash");
+    const ref = resolve("river/deepseek-v4.1-flash-1017");
     const model = base.getModel(ref.provider, ref.modelId)!;
     await models.completeSimple(model, context());
     await models.completeSimple(model, context(), { reasoning: "low" });
     expect(seen.map((request) => request.body.reasoning_effort)).toEqual(["none", "high"]);
+    expect(seen.map((request) => request.body.model)).toEqual([
+      "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    ]);
+  });
+
+  it("sends no effort field to a model that reasons without one, such as River's Nemotron", async () => {
+    declare([
+      {
+        id: "river/nemotron-3.5-super",
+        provider: "openai-compatible",
+        location: "cloud",
+        baseUrl,
+        apiModel: "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
+        supportsVision: true,
+        contextWindow: 1_048_576,
+        maxOutputTokens: 131_072,
+        reasoning: { efforts: ["high"], param: "none" },
+      },
+    ]);
+    const base = createModels();
+    const { models, resolve } = createMikeModels(base);
+    const ref = resolve("river/nemotron-3.5-super");
+    const model = base.getModel(ref.provider, ref.modelId)!;
+    expect(model).toMatchObject({ contextWindow: 1_048_576, maxTokens: 131_072, reasoning: true });
+    await models.completeSimple(model, context());
+    await models.completeSimple(model, context(), { reasoning: "max" });
+    expect(seen.map((request) => request.body.model)).toEqual([
+      "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
+      "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
+    ]);
+    expect(seen.every((request) => !("reasoning_effort" in request.body) && !("reasoning" in request.body))).toBe(true);
   });
 
   it("registers every declared model at once, warning once about each that declares no window", () => {

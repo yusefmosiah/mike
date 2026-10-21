@@ -3,7 +3,7 @@
 // map from Mike model id to a token count; a model missing from the map uses
 // the runtime's default for its context window.
 import type { Db } from "../../lib/db";
-import { autocompactPolicy, contextWindow, resolveModel } from "../../lib/llm";
+import { LEGACY_MODEL_IDS, autocompactPolicy, contextWindow, resolveModel } from "../../lib/llm";
 import { resolveRequestedModel } from "../../lib/routerModels";
 import { UserFacingError } from "../../lib/userFacingError";
 import { failure, internalFailure, ok, type ServiceResult } from "../../lib/serviceResult";
@@ -31,15 +31,23 @@ function isMissingColumn(error: unknown): boolean {
     );
 }
 
-/** Keep only well-formed entries: a stored map is data, not trusted shape. */
+/**
+ * Keep only well-formed entries: a stored map is data, not trusted shape.
+ * A threshold saved under a renamed model id moves to the current id, unless
+ * the current id has its own; the next write then drops the old key.
+ */
 function normalizeMap(value: unknown): Record<string, number> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     const map: Record<string, number> = {};
+    const legacy: Record<string, number> = {};
     for (const [model, tokens] of Object.entries(value as Record<string, unknown>)) {
         if (typeof tokens === "number" && Number.isInteger(tokens) && tokens > 0) {
-            map[model] = tokens;
+            const current = Object.hasOwn(LEGACY_MODEL_IDS, model) ? LEGACY_MODEL_IDS[model] : undefined;
+            if (current) legacy[current] = tokens;
+            else map[model] = tokens;
         }
     }
+    for (const [model, tokens] of Object.entries(legacy)) map[model] ??= tokens;
     return map;
 }
 

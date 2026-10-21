@@ -71,6 +71,24 @@ describe("getAutocompactTokensFor", () => {
     });
 });
 
+describe("a threshold saved under a renamed model id", () => {
+    const OLD = "river/deepseek-v4.1-flash";
+    const NEW = "river/deepseek-v4.1-flash-1017";
+
+    it("applies to the current id, unless the current id has its own", async () => {
+        expect(await getAutocompactTokensFor(profileDb({ data: { autocompact_tokens: { [OLD]: 600_000 } }, error: null }).db, "u", NEW)).toBe(600_000);
+        expect(
+            await getAutocompactTokensFor(profileDb({ data: { autocompact_tokens: { [NEW]: 700_000, [OLD]: 600_000 } }, error: null }).db, "u", NEW),
+        ).toBe(700_000);
+    });
+
+    it("is rewritten under the current id on the next save", async () => {
+        const { db, updates } = profileDb({ data: { autocompact_tokens: { [OLD]: 600_000 } }, error: null });
+        expect(await setAutocompactTokens(db, "u", MODEL, 421_000)).toMatchObject({ ok: true });
+        expect(updates[0].autocompact_tokens).toEqual({ [NEW]: 600_000, [MODEL]: 421_000 });
+    });
+});
+
 describe("getAutocompactSetting", () => {
     it("reports the person's value and the model's default", async () => {
         const { db } = profileDb({ data: { autocompact_tokens: { [MODEL]: 300_000 } }, error: null });

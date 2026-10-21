@@ -96,6 +96,22 @@ describe("useSelectedModel", () => {
         expect(result.current[0]).toBe("local-qwen");
     });
 
+    it("moves a chat saved on River's retired DeepSeek V4.1 Flash to its 1017 release", () => {
+        const { result } = renderHook(() =>
+            useSelectedModel({
+                chatModel: "river/deepseek-v4.1-flash",
+                configuredModelIds: [
+                    "river/deepseek-v4.1-flash-1017",
+                    "river/nemotron-3.5-super",
+                    "river/glm-5.3-flash",
+                ],
+                apiKeys: keys,
+            }),
+        );
+
+        expect(result.current[0]).toBe("river/deepseek-v4.1-flash-1017");
+    });
+
     it("uses a chat router model while it remains in the saved list", () => {
         const { result } = renderHook(() =>
             useSelectedModel({
@@ -173,6 +189,12 @@ describe("canonicalModelId", () => {
             "gemini-3.5-flash-lite",
         );
         expect(canonicalModelId("gpt-5.4-lite")).toBe("gpt-5.4-mini");
+        expect(canonicalModelId("river/deepseek-v4.1-flash")).toBe(
+            "river/deepseek-v4.1-flash-1017",
+        );
+        expect(canonicalModelId("river/deepseek-v4.1-flash-1017")).toBe(
+            "river/deepseek-v4.1-flash-1017",
+        );
         expect(canonicalModelId("claude-fable-5")).toBe("claude-fable-5");
     });
 });

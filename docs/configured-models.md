@@ -105,13 +105,13 @@ listed under their own heading with their real limits and reasoning controls:
 {
   "models": [
     {
-      "id": "river/deepseek-v4.1-flash",
-      "label": "DeepSeek V4.1 Flash",
+      "id": "river/deepseek-v4.1-flash-1017",
+      "label": "DeepSeek V4.1 Flash 1017",
       "group": "River",
       "provider": "openai-compatible",
       "location": "cloud",
       "baseUrl": "https://api.river.ai/v1",
-      "apiModel": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "apiModel": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
       "apiKeyEnv": "RIVER_API_KEY",
       "supportsVision": true,
       "contextWindow": 1048576,
@@ -121,6 +121,23 @@ listed under their own heading with their real limits and reasoning controls:
         "default": "high",
         "canDisable": true,
         "offValue": "none"
+      }
+    },
+    {
+      "id": "river/nemotron-3.5-super",
+      "label": "Nemotron 3.5 Super",
+      "group": "River",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://api.river.ai/v1",
+      "apiModel": "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
+      "apiKeyEnv": "RIVER_API_KEY",
+      "supportsVision": true,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
+      "reasoning": {
+        "efforts": ["high"],
+        "param": "none"
       }
     },
     {
@@ -143,6 +160,14 @@ listed under their own heading with their real limits and reasoning controls:
   ]
 }
 ```
+
+River documents no reasoning control for Nemotron, so it is declared with
+`"param": "none"`: it reasons, and Mike sends it no effort field.
+
+An earlier version of this example declared `river/deepseek-v4.1-flash`
+(River's original `deepseek-ai/DeepSeek-V4.1-Flash`). Mike reads that id as
+`river/deepseek-v4.1-flash-1017`, so chats and preferences saved with it move
+to the 1017 release once it is declared.
 
 Add `"cost": { "input": …, "output": …, "cacheRead": … }` with River's
 current per-million-token prices to see each turn's spend.

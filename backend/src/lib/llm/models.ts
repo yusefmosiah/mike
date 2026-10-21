@@ -402,6 +402,9 @@ export function providerForModel(model: string): Provider {
 export const LEGACY_MODEL_IDS: Record<string, string> = {
     "gemini-3.1-flash-lite-preview": "gemini-3.5-flash-lite",
     "gpt-5.4-lite": "gpt-5.4-mini",
+    // The River selection replaced DeepSeek V4.1 Flash with its 1017 release
+    // (docs/configured-models.md).
+    "river/deepseek-v4.1-flash": "river/deepseek-v4.1-flash-1017",
 };
 
 export function resolveModel(
