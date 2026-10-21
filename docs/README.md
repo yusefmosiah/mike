@@ -10,6 +10,11 @@
   constraints, and proposed course
 - [Whole-project accounting](../goals/TRIAGE.md) — all phases/missions, omitted
   requests, inherited release obligations, evidence levels and dependencies
+- [How this fork differs from upstream](reports/fork-divergence-2026-10-21.md) —
+  every change since the fork, bucketed, plus upstream's changes, a sync plan
+  and the PRs we could contribute back
+- [Watching upstream](upstream-watch.md) — every upstream addition since the
+  fork, what we think of it, and how we prepare to give speech back
 - [Program accounting letter](reports/mike-program-accounting-2026-10-07.md) —
   readable explanation of the standing state and proposed course
 - [Troubleshooting](troubleshooting.md) — common local and production problems
