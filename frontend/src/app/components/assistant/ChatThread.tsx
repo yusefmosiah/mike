@@ -29,6 +29,7 @@ import {
     type EditedPrompt,
 } from "./ChatInput";
 import { ChatInputPrompt } from "./ChatInputPrompt";
+import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import {
     generatingNotice,
     threadHasOtherAuthors,
@@ -101,6 +102,12 @@ export interface ChatThreadProps {
     onDocumentClick?: (document: Document) => void;
     /** Remounts the composer when it changes (a fresh draft). */
     chatInputKey?: string;
+    /**
+     * A voice session owned by the page, which outlives this thread's
+     * composer (the new-chat screen's voice mode carries on here). Without
+     * it, the composer runs voice mode itself once the thread has an id.
+     */
+    voiceSession?: UseVoiceChatResult;
     /** Extra composer settings, such as the project the chat belongs to. */
     chatInputProps?: Pick<
         ChatInputProps,
@@ -279,6 +286,7 @@ export function ChatThread({
     chatReasoningLevel,
     onDocumentClick,
     chatInputKey,
+    voiceSession,
     chatInputProps,
     onEditBranch,
     onNavigateSibling,
@@ -915,7 +923,13 @@ export function ChatThread({
                                     editTarget={editingMessage}
                                     onEditSubmit={submitEdit}
                                     onEditCancel={() => setEditing(null)}
-                                    voice={chatId ? { chatId, messages } : undefined}
+                                    voice={
+                                        voiceSession
+                                            ? { session: voiceSession }
+                                            : chatId
+                                              ? { chatId, messages }
+                                              : undefined
+                                    }
                                 />
                             </ChatInputPrompt>
                         </div>

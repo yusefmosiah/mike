@@ -74,11 +74,11 @@ afterEach(() => {
  * prompt and an empty answer and starts loading; `stream` grows the answer;
  * `finish` ends loading.
  */
-function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?: string } = {}) {
+function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?: string | null } = {}) {
     const sent: string[] = [];
     const cancelResponse = vi.fn();
     const hook = renderHook(
-        ({ chatId }: { chatId: string }) => {
+        ({ chatId }: { chatId: string | null }) => {
             const [messages, setMessages] = useState<Message[]>([
                 { id: "u0", role: "user", content: "Earlier" },
                 { id: "a0", role: "assistant", content: "An earlier answer." },
@@ -109,7 +109,7 @@ function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?:
             });
             return { voice, setMessages, setLoading };
         },
-        { initialProps: { chatId: options.chatId ?? "chat-1" } },
+        { initialProps: { chatId: options.chatId === undefined ? "chat-1" : options.chatId } },
     );
     const updateAnswer = (update: (answer: Message) => Message) =>
         act(() =>
@@ -535,6 +535,38 @@ describe("useVoiceChat", () => {
         await act(() => view.result.current.voice.start());
         view.unmount();
         expect(calls("voiceStop")).toHaveLength(2);
+    });
+
+    it("carries on in the chat its first turn created on the new-chat screen", async () => {
+        const view = await started({ chatId: null });
+        emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+        expect(view.sent).toEqual(["what notice"]);
+        // The server created the chat for that turn; the page adopts its id.
+        view.rerender({ chatId: "chat-new" });
+        expect(view.result.current.voice.phase).toBe("on");
+        expect(calls("voiceStop")).toEqual([]);
+        view.stream(ANSWER.slice(0, 120));
+        expect(calls("voiceSpeak")).not.toHaveLength(0);
+        // What was heard is recorded against the adopted chat.
+        emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+        emit({ type: "bargeIn", turnId: "t1" });
+        expect(recordMock).toHaveBeenCalledWith("chat-new", "a1", "Under the lease, the tenant must give");
+        // Only that one chat: moving on from it ends voice mode as usual.
+        view.rerender({ chatId: "chat-other" });
+        expect(view.result.current.voice.phase).toBe("off");
+    });
+
+    it("ends voice mode on the new-chat screen when another chat opens before a turn is sent", async () => {
+        const view = await started({ chatId: null });
+        view.rerender({ chatId: "chat-2" });
+        expect(view.result.current.voice.phase).toBe("off");
+        expect(calls("voiceStop")).toHaveLength(1);
+    });
+
+    it("ends voice mode when leaving a chat for the new-chat screen", async () => {
+        const view = await started();
+        view.rerender({ chatId: null });
+        expect(view.result.current.voice.phase).toBe("off");
     });
 
     it("ignores a late `ended` from the session before, and releases an engine that started after an end (W1)", async () => {

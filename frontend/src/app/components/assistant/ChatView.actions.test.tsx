@@ -31,6 +31,8 @@ const { push, renameChat, deleteChat, setCurrentChatId, setNewChatMessages } =
     }));
 
 const addDoc = vi.hoisted(() => vi.fn());
+// The `voice` each rendered composer was given.
+const composerVoices = vi.hoisted(() => [] as unknown[]);
 
 const activeChat: Chat = {
     id: "chat-1",
@@ -78,12 +80,14 @@ const spreadsheet = {
 } as Document;
 vi.mock("./ChatInput", () => ({
     ChatInput: ({
-        onDocumentClick, ref,
+        onDocumentClick, ref, voice,
     }: {
         onDocumentClick?: (document: Document) => void;
         ref?: Ref<ChatInputHandle>;
+        voice?: unknown;
     }) => {
-        useImperativeHandle(ref, () => ({ addDoc, addFiles: vi.fn(), startWorkflow: vi.fn(), startWorkflowDocumentSelection: vi.fn() }));
+        composerVoices.push(voice);
+        useImperativeHandle(ref, () => ({ addDoc, addFiles: vi.fn(), startWorkflow: vi.fn(), startWorkflowDocumentSelection: vi.fn(), sendVoice: vi.fn(() => false) }));
         return <button onClick={() => onDocumentClick?.(spreadsheet)}>
             Open Budget.xlsx
         </button>;
@@ -530,6 +534,36 @@ describe("ChatView responses waiting on the user", () => {
             "data-awaiting-input",
             "false",
         );
+    });
+});
+
+describe("ChatView voice mode", () => {
+    it("gives the new-chat composer and the thread's after it one voice session", () => {
+        const view = (messages: Message[], initial: boolean, chatId: string | null) => (
+            <PageChromeContext.Provider value={{ mobileActionsContainer: null }}>
+                <ChatView
+                    chatId={chatId}
+                    onInitialSubmit={initial ? vi.fn() : undefined}
+                    chat={null}
+                    messages={messages}
+                    isResponseLoading={!initial}
+                    handleChat={vi.fn()}
+                    cancel={vi.fn()}
+                    onNewChat={vi.fn()}
+                />
+            </PageChromeContext.Provider>
+        );
+        composerVoices.length = 0;
+        const { rerender } = render(view([], true, null));
+        const onNewChatScreen = composerVoices.at(-1) as { session: { start: unknown } };
+        rerender(view([{ role: "user", content: "What notice is owed?", voice: true }], false, null));
+        const inThread = composerVoices.at(-1) as { session: { start: unknown } };
+        rerender(view([{ role: "user", content: "What notice is owed?", voice: true }], false, "chat-new"));
+        const inCreatedChat = composerVoices.at(-1) as { session: { start: unknown } };
+        // The same session (its stable `start`) throughout: nothing restarts.
+        expect(onNewChatScreen.session.start).toEqual(expect.any(Function));
+        expect(inThread.session.start).toBe(onNewChatScreen.session.start);
+        expect(inCreatedChat.session.start).toBe(onNewChatScreen.session.start);
     });
 });
 

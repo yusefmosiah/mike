@@ -71,7 +71,10 @@ export const INTERRUPT_WAIT_MS = 500;
 export const VOICE_SEND_FAILURE_MESSAGE = "Could not send what you said. Voice mode has ended.";
 
 export interface UseVoiceChatOptions {
-    /** The thread; voice mode ends when it changes. */
+    /**
+     * The thread; voice mode ends when it changes. None on the new-chat
+     * screen: the first turn creates the chat, and voice mode carries on in it.
+     */
     chatId: string | null | undefined;
     messages: Message[];
     /** True while an answer streams into the thread. */
@@ -221,6 +224,9 @@ export function useVoiceChat({
     // Words of a turn spoken over before they were sent: they open the next turn.
     const carryRef = useRef("");
     const sendTimerRef = useRef<number | null>(null);
+    // A turn was sent with no chat yet (the new-chat screen): the chat it
+    // creates is this conversation's, not a different thread.
+    const awaitingChatRef = useRef(false);
 
     const latest = useRef({ chatId, messages, isResponseLoading, send, cancelResponse, config });
     useEffect(() => {
@@ -290,6 +296,7 @@ export function useVoiceChat({
         previousRef.current = null;
         pendingRef.current = null;
         carryRef.current = "";
+        awaitingChatRef.current = false;
         setPartial("");
         setInstallProgress(null);
         setEngineState("listening");
@@ -521,6 +528,7 @@ export function useVoiceChat({
             return;
         }
         pending.sent = true;
+        if (!latest.current.chatId) awaitingChatRef.current = true;
         clearSendTimer();
         const session = sessionRef.current;
         sendTimerRef.current = window.setTimeout(() => {
@@ -573,8 +581,20 @@ export function useVoiceChat({
         return () => setVoiceModeActive(false);
     }, [voiceOn]);
 
-    // Leaving the thread, or the page, ends voice mode and releases the microphone.
-    useEffect(() => () => stop(), [chatId, stop]);
+    // Leaving the thread ends voice mode and releases the microphone, except
+    // for the chat that a turn spoken on the new-chat screen just created:
+    // the conversation carries on in it.
+    const thread = chatId || null;
+    useEffect(() => {
+        // In the chat now; a later change of thread is leaving it.
+        if (thread) awaitingChatRef.current = false;
+        return () => {
+            if (!thread && awaitingChatRef.current) return;
+            stop();
+        };
+    }, [thread, stop]);
+    // Leaving the page does too.
+    useEffect(() => () => stop(), [stop]);
 
     return {
         supported,

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { formatDownloadSize, VoiceModePanel } from "./VoiceModePanel";
 import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
+import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
 
 function voice(overrides: Partial<UseVoiceChatResult> = {}) {
     return {
@@ -86,5 +87,16 @@ describe("VoiceModePanel", () => {
         expect(screen.getByText("Preparing for this phone…")).toBeInTheDocument();
         rerender(<VoiceModePanel voice={voice({ phase: "installing", installProgress: null })} />);
         expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
+    });
+
+    it("has the composer's surface and resting envelope in every step, including while starting", () => {
+        const { rerender } = render(<VoiceModePanel voice={voice({ phase: "checking" })} />);
+        for (const phase of ["checking", "starting", "setup", "installing", "on"] as const) {
+            rerender(<VoiceModePanel voice={voice({ phase })} />);
+            const frame = document.querySelector("[data-slot='voice-mode-panel']");
+            for (const name of [...CHAT_COMPOSER_SURFACE_CLASS.split(" "), "min-h-[100px]", "pt-4", "pl-4", "pr-2.5", "pb-2.5"]) {
+                expect(frame).toHaveClass(name);
+            }
+        }
     });
 });

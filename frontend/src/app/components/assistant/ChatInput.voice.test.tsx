@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
@@ -5,7 +6,8 @@ import type * as MikeApiModule from "@/app/lib/mikeApi";
 import type * as ModelToggleModule from "./ModelToggle";
 import { isModelAvailable } from "@/app/lib/modelAvailability";
 import type { Message } from "../shared/types";
-import { ChatInput } from "./ChatInput";
+import { useVoiceChat } from "@/app/hooks/useVoiceChat";
+import { ChatInput, type ChatInputHandle } from "./ChatInput";
 
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     ...(await importOriginal<typeof MikeApiModule>()),
@@ -190,5 +192,139 @@ describe("ChatInput voice mode", () => {
         });
         expect(await screen.findByRole("alert")).toHaveTextContent("microphone is off");
         expect(screen.queryByRole("region", { name: /Voice mode/ })).toBeNull();
+    });
+});
+
+/**
+ * The assistant page in miniature: the voice session belongs to the page, the
+ * new-chat composer gives way to the thread's once a message is sent, and the
+ * chat's id arrives once the server has created it.
+ */
+function NewChatPage({ onSubmit }: { onSubmit: (message: Message) => void }) {
+    const inputRef = useRef<ChatInputHandle>(null);
+    const [chatId, setChatId] = useState<string | null>(null);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [loading, setLoading] = useState(false);
+    const session = useVoiceChat({
+        chatId,
+        messages,
+        isResponseLoading: loading,
+        send: (text) => inputRef.current?.sendVoice(text) ?? false,
+        cancelResponse: () => setLoading(false),
+    });
+    const submit = (message: Message) => {
+        onSubmit(message);
+        setMessages([message, { role: "assistant", content: "", events: [] }]);
+        setLoading(true);
+    };
+    const shared = {
+        ref: inputRef,
+        chatModel: "gpt-5.6-luna",
+        chatReasoningLevel: "high" as const,
+        onSubmit: submit,
+        onCancel: () => setLoading(false),
+        canSend: true,
+        voice: { session },
+    };
+    return (
+        <>
+            {messages.length === 0 ? (
+                <ChatInput key="new-chat" {...shared} isLoading={false} />
+            ) : (
+                <ChatInput key="thread" {...shared} chatKey={chatId} isLoading={loading} />
+            )}
+            <button type="button" onClick={() => setChatId("chat-new")}>
+                Chat created
+            </button>
+            <button
+                type="button"
+                onClick={() =>
+                    setMessages((prev) => [
+                        prev[0],
+                        { id: "a1", role: "assistant", content: "", events: [{ type: "content", text: "Ninety days." }] },
+                    ])
+                }
+            >
+                Answer arrives
+            </button>
+            <button type="button" onClick={() => setLoading(false)}>
+                Answer ends
+            </button>
+        </>
+    );
+}
+
+describe("ChatInput voice mode owned by the page", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "voiceStatus" ? { available: true, missing: [], downloadBytes: 0 } : undefined,
+        );
+        vi.mocked(useUserProfile).mockReturnValue({
+            profile: { openRouterModels: [], vercelModels: [], openCodeGoModels: [], apiKeys: {} },
+            loading: false,
+            apiKeysDegraded: false,
+            persistChatModelSelection: vi.fn(),
+            persistChatReasoningSelection: vi.fn(),
+        } as never);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("offers voice mode on the new-chat screen only where the app has the voice engine", () => {
+        const { unmount } = render(<NewChatPage onSubmit={vi.fn()} />);
+        expect(screen.queryByRole("button", { name: "Start voice mode" })).toBeNull();
+        unmount();
+        inApp();
+        render(<NewChatPage onSubmit={vi.fn()} />);
+        expect(screen.getByRole("button", { name: "Start voice mode" })).toBeEnabled();
+    });
+
+    it("sends the first spoken turn to create the chat, and carries on in it without a second tap", async () => {
+        inApp();
+        const onSubmit = vi.fn();
+        render(<NewChatPage onSubmit={onSubmit} />);
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Start voice mode" }));
+        });
+        await screen.findByText("Listening");
+
+        act(() => emitNative({ type: "turn", turnId: "t1", text: "what notice is owed", audioMs: 1200 }));
+        await waitFor(() =>
+            expect(onSubmit).toHaveBeenCalledWith({
+                role: "user",
+                content: "what notice is owed",
+                model: "gpt-5.6-luna",
+                reasoning: "high",
+                voice: true,
+            }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Chat created" }));
+        // The thread's composer has replaced the new-chat one, the chat has
+        // its id, and voice mode is still on, its End control focused.
+        expect(screen.getByRole("region", { name: "Voice mode" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "End" })).toHaveFocus();
+        expect(document.querySelectorAll("[data-slot='chat-input-surface']")).toHaveLength(1);
+        expect(document.querySelector("[data-slot='chat-input-surface']")).toHaveAttribute("hidden");
+
+        fireEvent.click(screen.getByRole("button", { name: "Answer arrives" }));
+        fireEvent.click(screen.getByRole("button", { name: "Answer ends" }));
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "voiceSpeak", {
+            turnId: "t1",
+            clauseId: 0,
+            text: "Ninety days.",
+            final: true,
+        });
+        expect(nativePromise).not.toHaveBeenCalledWith("MikeSpeech", "voiceStop", undefined);
+        expect(screen.getByRole("region", { name: "Voice mode" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Start voice mode" })).toBeNull();
+
+        act(() => screen.getByRole("button", { name: "End" }).click());
+        expect(screen.queryByRole("region", { name: "Voice mode" })).toBeNull();
+        expect(screen.getByRole("combobox")).toHaveFocus();
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "voiceStop", undefined);
     });
 });

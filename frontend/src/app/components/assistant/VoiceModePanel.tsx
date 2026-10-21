@@ -3,8 +3,8 @@
 import { useEffect, useRef } from "react";
 import { AudioLines, Loader2, Mic, PhoneOff } from "lucide-react";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
-import { LIQUID_GLASS_TRANSLUCENT_CLASS } from "@/app/components/ui/liquid-surface";
 import { cn } from "@/app/lib/utils";
+import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
 import type { UseVoiceChatResult, VoiceActivity } from "@/app/hooks/useVoiceChat";
 
 /** A download size as said before it starts: "about 450 MB", "about 1.2 GB". */
@@ -53,7 +53,16 @@ function ActivityShape({ activity }: { activity: VoiceActivity }) {
     );
 }
 
-/** Shared frame: same surface and height whatever the panel shows, so nothing jumps. */
+/**
+ * Shared frame: the composer's shape whatever the panel shows, so nothing
+ * jumps when one replaces the other. Same surface; the composer's resting
+ * height (100px: its borders, pt-4 above the textarea's line box, then
+ * py-2.5 around its h-8 controls), its text's inset on the left and its
+ * controls' inset on the right and bottom, so End lines up with Send. In the
+ * iPhone app, edge to edge, globals.css gives both the display's corner
+ * radius and the deeper insets. Where the words would be squeezed beside
+ * End, End wraps below them, to the bottom right, where Send sits.
+ */
 function Frame({ children, label, phase }: { children: React.ReactNode; label: string; phase: string }) {
     const ref = useRef<HTMLElement>(null);
     // The control that started voice mode is gone: focus moves to the one
@@ -67,8 +76,8 @@ function Frame({ children, label, phase }: { children: React.ReactNode; label: s
             aria-label={label}
             data-slot="voice-mode-panel"
             className={cn(
-                "flex min-h-[104px] w-full flex-wrap items-center gap-3 rounded-[21px] px-4 py-3",
-                LIQUID_GLASS_TRANSLUCENT_CLASS,
+                "flex min-h-[100px] w-full flex-wrap items-center gap-3 pb-2.5 pl-4 pr-2.5 pt-4",
+                CHAT_COMPOSER_SURFACE_CLASS,
             )}
         >
             {children}
@@ -181,7 +190,7 @@ export function VoiceModePanel({
     return (
         <Frame label="Voice mode" phase={phase}>
             <ActivityShape activity={activity} />
-            <div className="min-w-0 flex-1 basis-40">
+            <div className="min-w-0 flex-1 basis-32">
                 <p className="text-sm font-medium text-gray-900" data-testid="voice-activity">
                     {ACTIVITY_LABELS[activity]}
                 </p>

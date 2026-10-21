@@ -73,6 +73,7 @@ import {
 import { can, roleFrom } from "@/app/lib/permissions";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useDictationContext } from "@/app/lib/voice/dictationVocabulary";
+import { useVoiceChat } from "@/app/hooks/useVoiceChat";
 import {
     createBranch,
     deleteDocument,
@@ -909,6 +910,18 @@ export function ChatView({
 
     const chatInputRef = useRef<ChatInputHandle | null>(null);
 
+    // Voice mode lives here, not in the composer: the new-chat screen's
+    // composer gives way to the thread's when the first spoken turn is sent,
+    // and the conversation carries on into the chat that turn creates. Each
+    // turn goes through whichever composer is on screen, with its model.
+    const voiceSession = useVoiceChat({
+        chatId,
+        messages,
+        isResponseLoading,
+        send: (text) => chatInputRef.current?.sendVoice(text) ?? false,
+        cancelResponse: cancel,
+    });
+
     useEffect(() => {
         if (panelMounted && window.innerWidth < 768) {
             document.body.style.overflow = "hidden";
@@ -1083,6 +1096,7 @@ export function ChatView({
                         onEditQuickActions={() =>
                             setQuickActionsModalOpen(true)
                         }
+                        voiceSession={voiceSession}
                     />
                 ) : (
                     <ChatThread
@@ -1098,6 +1112,7 @@ export function ChatView({
                         isHost={!!chat && !!viewerId && chat.user_id === viewerId}
                         siblingById={siblingById}
                         chatInputRef={chatInputRef}
+                        voiceSession={voiceSession}
                         onSubmit={handleChat}
                         onCancel={cancel}
                         chatModel={chatModel}

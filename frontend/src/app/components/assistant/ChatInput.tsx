@@ -67,10 +67,8 @@ import {
 import type { Document, Message, MessageFile, Workflow } from "../shared/types";
 import type { DirectoryTab } from "../shared/useDirectoryData";
 import { cn } from "@/app/lib/utils";
-import {
-    LIQUID_GLASS_FLAT_CLASS,
-    LIQUID_GLASS_TRANSLUCENT_CLASS,
-} from "@/app/components/ui/liquid-surface";
+import { LIQUID_GLASS_FLAT_CLASS } from "@/app/components/ui/liquid-surface";
+import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
 import {
     UploadBatchError,
     failedUploadMessage,
@@ -100,7 +98,7 @@ import {
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
-import { useVoiceChat } from "@/app/hooks/useVoiceChat";
+import { useVoiceChat, type UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { VoiceModePanel } from "./VoiceModePanel";
 
 export interface ChatInputHandle {
@@ -115,7 +113,24 @@ export interface ChatInputHandle {
         prompt?: string,
         options?: { initialDocumentTab?: DirectoryTab },
     ) => void;
+    /**
+     * Sends words heard in voice mode like a typed message, with this
+     * composer's model, marked as voice. False when they could not be sent
+     * (the composer says why). For a voice session owned above the composer.
+     */
+    sendVoice: (text: string) => boolean;
 }
+
+/**
+ * Hands-free voice mode in a composer. Either the composer runs it for a
+ * thread (`chatId` and `messages`), or a parent that outlives the composer
+ * does (`session`, the parent's `useVoiceChat`, whose `send` is this
+ * composer's `sendVoice`): the new-chat screen's composer is replaced by
+ * the thread's once the first turn is sent, and voice mode carries on.
+ */
+export type ChatInputVoice =
+    | { chatId: string; messages: Message[] }
+    | { session: UseVoiceChatResult };
 
 /** A prompt as edited in the composer: its new text and files. */
 export type EditedPrompt = { content: string; files: MessageFile[] };
@@ -198,11 +213,10 @@ export interface ChatInputProps {
     onEditSubmit?: (edited: EditedPrompt) => Promise<void>;
     onEditCancel?: () => void;
     /**
-     * Offers hands-free voice mode in this thread (in the iPhone app, when
-     * its voice engine is there): the thread's id and messages, for the
-     * answers to speak.
+     * Offers hands-free voice mode (in the iPhone app, when its voice engine
+     * is there): see `ChatInputVoice`.
      */
-    voice?: { chatId: string; messages: Message[] };
+    voice?: ChatInputVoice;
 }
 
 /**
@@ -729,6 +743,8 @@ function ChatInputForChatImpl(
             }
             setDocSelectorOpen(true);
         },
+        // Called at send time, after render: the latest model and gates.
+        sendVoice: (text) => sendVoice(text),
     }));
 
     useEffect(() => {
@@ -898,13 +914,16 @@ function ChatInputForChatImpl(
         onSubmit({ role: "user", content: text, model, reasoning: reasoningLevel, voice: true });
         return true;
     };
-    const voiceChat = useVoiceChat({
-        chatId: voice?.chatId,
-        messages: voice?.messages ?? NO_MESSAGES,
+    const sharedVoice = voice && "session" in voice ? voice.session : null;
+    const ownVoice = voice && "chatId" in voice ? voice : null;
+    const composerVoice = useVoiceChat({
+        chatId: ownVoice?.chatId,
+        messages: ownVoice?.messages ?? NO_MESSAGES,
         isResponseLoading: isLoading,
         send: sendVoice,
         cancelResponse: onCancel,
     });
+    const voiceChat = sharedVoice ?? composerVoice;
     const voiceActive = voiceChat.phase !== "off";
     // Back to the composer when voice mode ends, unless focus went elsewhere.
     const wasVoiceActive = useRef(false);
@@ -1066,10 +1085,7 @@ function ChatInputForChatImpl(
                     ref={surfaceRef}
                     hidden={voiceActive}
                     data-slot="chat-input-surface"
-                    className={cn(
-                        "rounded-[21px]",
-                        LIQUID_GLASS_TRANSLUCENT_CLASS,
-                    )}
+                    className={CHAT_COMPOSER_SURFACE_CLASS}
                 >
                     {editTarget && (
                         <div className="flex items-center justify-between gap-2 pl-3 pr-1.5 pt-1.5 text-xs text-gray-600">

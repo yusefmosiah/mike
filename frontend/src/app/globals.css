@@ -765,8 +765,9 @@
     /* Three layers: the thread, the composer above it, the keyboard above
        the composer. Here the composer is more opaque than the translucent
        glass elsewhere, and its shadow falls upward onto the thread: below it
-       is only the edge of the screen, or the keyboard. */
-    :root[data-display-edge] [data-document-scroll] [data-slot="chat-input-surface"] {
+       is only the edge of the screen, or the keyboard. The voice mode panel
+       stands in for the composer and takes the same shape. */
+    :root[data-display-edge] [data-document-scroll] :is([data-slot="chat-input-surface"], [data-slot="voice-mode-panel"]) {
         --chat-composer-bottom-radius: calc(var(--display-corner-radius, 55px) - var(--chat-composer-gap));
         position: relative;
         border-radius: 21px 21px var(--chat-composer-bottom-radius) var(--chat-composer-bottom-radius);
@@ -805,6 +806,14 @@
 
     :root[data-display-edge] [data-document-scroll] [data-slot="chat-send-button"] {
         border-radius: 9999px;
+    }
+
+    /* The voice mode panel keeps the composer's envelope at rest: its text's
+       inset, and the controls' deeper insets above. Its 100px resting height
+       grows by as much as the controls' bottom inset does. */
+    :root[data-display-edge] [data-document-scroll] [data-slot="voice-mode-panel"] {
+        padding: 1rem 1.4375rem 1.4375rem 1rem;
+        min-height: calc(100px - 0.625rem + 1.4375rem);
     }
 }
 

@@ -7,6 +7,7 @@ import { useAuth } from "@/app/contexts/AuthContext";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { MikeIcon } from "@/app/components/chat/mike-icon";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import type { Document, Message, QuickAction } from "../shared/types";
 import {
     LIQUID_GLASS_HOVER_CLASS,
@@ -19,6 +20,11 @@ interface InitialViewProps {
     onDocumentClick?: (document: Document) => void;
     quickActions: QuickAction[];
     onEditQuickActions: () => void;
+    /**
+     * The page's voice session: speaking the first turn here creates the
+     * chat, and voice mode carries on in it.
+     */
+    voiceSession?: UseVoiceChatResult;
 }
 
 const ICON_SIZE = 30;
@@ -29,6 +35,7 @@ export function InitialView({
     inputRef,
     quickActions,
     onEditQuickActions,
+    voiceSession,
 }: InitialViewProps) {
     const { user } = useAuth();
     const { profile } = useUserProfile();
@@ -121,6 +128,7 @@ export function InitialView({
                     onDocumentClick={onDocumentClick}
                     onCancel={() => {}}
                     isLoading={false}
+                    voice={voiceSession ? { session: voiceSession } : undefined}
                 />
             </div>
 
