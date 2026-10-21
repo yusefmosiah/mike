@@ -29,6 +29,9 @@ final class VoiceAudioEngine: @unchecked Sendable {
     private let lock = NSLock()
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
+    /// Whether the graph uses the system's echo cancellation. On by default;
+    /// off only where it cannot start (a Mac with headphones, for one).
+    private var voiceProcessing = true
     /// The microphone format the current tap was built for.
     private var inputFormat: AVAudioFormat?
     /// When recent rebuilds happened, to stop a rebuild loop.
@@ -91,6 +94,7 @@ final class VoiceAudioEngine: @unchecked Sendable {
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try session.setActive(true)
         } catch {
+            VoiceMode.log.error("voice: audio session setup failed")
             restoreSession()
             throw OnDeviceSpeech.Failure.failed
         }
@@ -99,12 +103,23 @@ final class VoiceAudioEngine: @unchecked Sendable {
         ended = false
         paused = false
         epoch = 0
+        voiceProcessing = true
         do {
             try buildGraph()
         } catch {
             teardownGraph()
-            restoreSession()
-            throw error
+            // The echo canceller can fail to initialise (seen on a Mac: err
+            // -10875). Listening without it beats not listening: headphones
+            // need none, and the barge-in rule ignores the answer's own words.
+            VoiceMode.log.error("voice: audio graph failed with echo cancellation, retrying without it")
+            voiceProcessing = false
+            do {
+                try buildGraph()
+            } catch {
+                teardownGraph()
+                restoreSession()
+                throw error
+            }
         }
         observe()
     }
@@ -214,19 +229,22 @@ final class VoiceAudioEngine: @unchecked Sendable {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         // Voice processing before any format is read: it changes them.
-        do {
-            try input.setVoiceProcessingEnabled(true)
-        } catch {
-            throw OnDeviceSpeech.Failure.unavailable
+        if voiceProcessing {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                VoiceMode.log.error("voice: echo cancellation unavailable")
+                throw OnDeviceSpeech.Failure.unavailable
+            }
+            // Other apps' audio is ducked as little as voice processing allows.
+            input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
         }
-        // Other apps' audio is ducked as little as voice processing allows.
-        input.voiceProcessingOtherAudioDuckingConfiguration = .init(enableAdvancedDucking: false, duckingLevel: .min)
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw OnDeviceSpeech.Failure.unavailable }
         guard let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: mono, to: Self.microphoneFormat)
         else { throw OnDeviceSpeech.Failure.failed }
-        VoiceMode.log.info("voice mic: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, format \(format.commonFormat.rawValue, privacy: .public), interleaved \(format.isInterleaved, privacy: .public)")
+        VoiceMode.log.info("voice mic: echo cancellation \(self.voiceProcessing ? "on" : "off", privacy: .public), \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, format \(format.commonFormat.rawValue, privacy: .public), interleaved \(format.isInterleaved, privacy: .public)")
         let deliver = self.deliver
         let resampler = Resampler(converter: converter, mono: mono)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
@@ -241,7 +259,9 @@ final class VoiceAudioEngine: @unchecked Sendable {
         do {
             try engine.start()
         } catch {
+            VoiceMode.log.error("voice: audio engine failed to start")
             input.removeTap(onBus: 0)
+            if voiceProcessing { try? input.setVoiceProcessingEnabled(false) }
             throw OnDeviceSpeech.Failure.failed
         }
         // A player the policy is holding stays held; its timeline starts on resume.

@@ -363,13 +363,19 @@ actor VoiceEngine {
             if Self.startGate.current != ticket { throw OnDeviceSpeech.Failure.cancelled }
         }
         if running { await stop(reason: .stopped, report: false) }
-        guard await VoiceMode.status().available,
-              let fluidDirectory = FluidSpeechMini.modelDirectory() else {
+        let status = await VoiceMode.status()
+        guard status.available, let fluidDirectory = FluidSpeechMini.modelDirectory() else {
+            VoiceMode.log.error("voice start: unavailable (device supported \(VoiceMode.canRunHere, privacy: .public), missing \(status.missing.joined(separator: ","), privacy: .public))")
             throw OnDeviceSpeech.Failure.unavailable
         }
         try stillWanted()
         let audio = VoiceAudioEngine()
-        try await audio.prepare()
+        do {
+            try await audio.prepare()
+        } catch {
+            VoiceMode.log.error("voice start: microphone permission denied")
+            throw error
+        }
         try stillWanted()
 
         let started = ContinuousClock.now
