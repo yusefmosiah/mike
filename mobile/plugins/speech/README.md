@@ -58,6 +58,24 @@ stopping there cut every chunk off after about 13 seconds.
 | `voices` | none | `{ voices: [{ id, name, language, quality }] }`; `quality` is `default`, `enhanced` or `premium` |
 | `speak` | `text` (up to 20,000 characters), `voice?` (an `id`, or a Phonon voice name with `engine: "phonon"`), `language?`, `engine?` (`"phonon"`; rejects `not-installed` until the model is downloaded) | `{ audio, mimeType: "audio/wav" }`, 16-bit mono PCM from `AVSpeechSynthesizer.write` |
 
+Hands-free voice mode (`docs/voice-chat.md`, contract in
+`docs/voice-chat-contract.md`): `voiceStatus`, `voiceInstall`, `voiceStart`,
+`voiceStop`, `voiceSpeak`, `voiceEndAnswer` and `voiceCancelAnswer`, with every
+event on the `voiceEvent` listener. One `AVAudioEngine` with Apple's voice
+processing (`VoiceAudioEngine.swift`); Silero VAD, Parakeet EOU 120M (320 ms,
+re-armed on every `<EOU>`, `EouStream.swift`) and Smart Turn v3.2
+(`SmartTurn.swift`) feed the pure `TurnPolicy`; a committed turn is
+transcribed by the warm Fluid Speech Mini; answers are spoken clause by clause
+through Phonon into the engine's player node (`ClauseQueue.swift`,
+`VoiceEngine.swift`). `voiceInstall` downloads VAD, EOU and Smart Turn from
+their upstream Hugging Face repositories at pinned commits, each file checked
+against its SHA-256 (`VoiceModels.swift`), into Application Support, plus
+Phonon through its own install. The tests in `TurnPolicyTests`,
+`ClauseQueueTests`, `VoiceContractTests` and `VoiceModelsTests` need nothing;
+`VoiceModelIntegrationTests` runs the models on the fixture clip when
+`TEST_RUNNER_MIKE_VOICE_MODELS` names a directory holding them (`vad/`,
+`eou/`, `smart-turn/`, laid out as the install writes them).
+
 Rejections carry a `code`: `not-installed`, `unavailable`, `permission-denied`
 (speech recognition turned off, older iOS only), `unsupported-audio` (WebM,
 unreadable), `invalid-audio`, `too-long` (over 25 MB, or text over 20,000

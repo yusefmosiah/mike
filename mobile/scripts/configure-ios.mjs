@@ -49,7 +49,7 @@ const has = (key) => {
 };
 
 const strings = {
-  NSMicrophoneUsageDescription: "Mike uses the microphone when you dictate a message.",
+  NSMicrophoneUsageDescription: "The microphone is used when you dictate a message or talk in voice mode.",
   NSSpeechRecognitionUsageDescription: "Mike turns your dictation into text on this iPhone. The recording never leaves it.",
   NSCameraUsageDescription: "Mike uses the camera when you scan a document.",
   NSPhotoLibraryUsageDescription: "Mike opens your photo library when you choose a picture to attach.",

@@ -143,6 +143,35 @@ enum FluidSpeechMini {
             return models
         }
 
+        /// Transcribes 16 kHz mono samples with the loaded model: voice mode's
+        /// final pass over one VAD-bounded utterance. The caller holds the model
+        /// with `beginLive` (voice mode does for its whole run), so this never
+        /// loads a second copy. Shorter clips are padded with silence to the
+        /// model's one-second minimum.
+        func transcribe(samples: [Float], modelDirectory: URL) async throws -> String {
+            idleTask?.cancel()
+            running += 1
+            defer {
+                running -= 1
+                scheduleUnload()
+            }
+            let manager: AsrManager
+            do {
+                manager = try loaded(modelDirectory)
+            } catch {
+                throw OnDeviceSpeech.Failure.failed
+            }
+            var audio = samples
+            if audio.count < 16_000 { audio.append(contentsOf: [Float](repeating: 0, count: 16_000 - audio.count)) }
+            do {
+                var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
+                return try await manager.transcribe(audio, decoderState: &state).text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                throw OnDeviceSpeech.Failure.failed
+            }
+        }
+
         /// Whether the model is in memory (tests).
         var isLoaded: Bool { manager != nil }
 

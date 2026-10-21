@@ -1,0 +1,156 @@
+import Foundation
+
+// Hands-free voice mode: the plugin side of docs/voice-chat-contract.md.
+// These types are pure (no audio, no models) so the contract's encoding is
+// tested on its own. Change them only together with the contract.
+
+/// The thresholds the web app passes to `voiceStart`. Every field is optional
+/// on the wire; a missing or unusable value keeps the default.
+struct VoiceConfig: Equatable, Sendable {
+    /// Speech probability at or above which a VAD frame is speech.
+    var vadThreshold: Float = 0.5
+    /// Silence that opens the end-of-turn check.
+    var pauseMs: Int = 250
+    /// At or above: Smart Turn says the turn is complete.
+    var smartTurnThreshold: Float = 0.5
+    /// The turn ends after this much silence whatever the models say.
+    var maxSilenceMs: Int = 2000
+    /// VAD speech needed for a barge-in.
+    var bargeInSpeechMs: Int = 300
+    /// Words not in the clause being played needed for a barge-in.
+    var bargeInWords: Int = 2
+    /// Speech without qualifying words for this long: resume playback.
+    var falseStartMs: Int = 1500
+    /// A single turn is cut here.
+    var maxTurnMs: Int = 60_000
+
+    static let defaults = VoiceConfig()
+    /// The longest turn accepted (the final pass and the audio kept for it scale with it).
+    static let maxTurnLimitMs = 120_000
+
+    /// Reads the wire object; ignores unknown keys, wrong types and values
+    /// out of range, so a newer web build cannot break an older engine.
+    init(_ object: [String: Any]? = nil) {
+        guard let object else { return }
+        func number(_ key: String) -> Double? {
+            switch object[key] {
+            case let value as NSNumber where CFGetTypeID(value) != CFBooleanGetTypeID():
+                let double = value.doubleValue
+                return double.isFinite ? double : nil
+            default: return nil
+            }
+        }
+        func probability(_ key: String) -> Float? {
+            guard let value = number(key), value > 0, value < 1 else { return nil }
+            return Float(value)
+        }
+        func millis(_ key: String, _ range: ClosedRange<Double>) -> Int? {
+            guard let value = number(key), range.contains(value) else { return nil }
+            return Int(value.rounded())
+        }
+        if let value = probability("vadThreshold") { vadThreshold = value }
+        if let value = millis("pauseMs", 0...10_000) { pauseMs = value }
+        if let value = probability("smartTurnThreshold") { smartTurnThreshold = value }
+        if let value = millis("maxSilenceMs", 100...30_000) { maxSilenceMs = value }
+        if let value = millis("bargeInSpeechMs", 0...10_000) { bargeInSpeechMs = value }
+        if let value = number("bargeInWords"), (0...20).contains(value) { bargeInWords = Int(value.rounded()) }
+        if let value = millis("falseStartMs", 0...30_000) { falseStartMs = value }
+        if let value = millis("maxTurnMs", 1_000...Double(Self.maxTurnLimitMs)) { maxTurnMs = value }
+    }
+}
+
+/// The states the web app sees (`voiceEvent` `{ type: "state" }`).
+enum VoiceState: String, Equatable, Sendable {
+    case listening
+    case userSpeaking = "user-speaking"
+    case confirmingEnd = "confirming-end"
+    case thinking
+    case speaking
+}
+
+/// Why voice mode ended on its own or was stopped.
+enum VoiceEndReason: String, Equatable, Sendable {
+    case stopped
+    case interruption
+    case route
+    case error
+}
+
+/// Every event the engine sends on the `voiceEvent` listener.
+enum VoiceEvent: Equatable, Sendable {
+    case install(fraction: Double)
+    case state(VoiceState)
+    case partial(text: String)
+    case turn(turnId: String, text: String, audioMs: Int)
+    case bargeIn(turnId: String)
+    case clauseStarted(turnId: String, clauseId: Int)
+    case clausePlayed(turnId: String, clauseId: Int)
+    case interrupted(turnId: String, clauseId: Int, fraction: Double)
+    case answerFinished(turnId: String)
+    case ended(VoiceEndReason)
+    case metrics(turnId: String, stages: [String: Double])
+
+    static let listenerName = "voiceEvent"
+
+    /// The object `notifyListeners` sends: always a `type`, then the fields
+    /// the contract lists for it.
+    var payload: [String: Any] {
+        switch self {
+        case let .install(fraction):
+            return ["type": "install", "fraction": min(1, max(0, fraction))]
+        case let .state(state):
+            return ["type": "state", "state": state.rawValue]
+        case let .partial(text):
+            return ["type": "partial", "text": text]
+        case let .turn(turnId, text, audioMs):
+            return ["type": "turn", "turnId": turnId, "text": text, "audioMs": audioMs]
+        case let .bargeIn(turnId):
+            return ["type": "bargeIn", "turnId": turnId]
+        case let .clauseStarted(turnId, clauseId):
+            return ["type": "clauseStarted", "turnId": turnId, "clauseId": clauseId]
+        case let .clausePlayed(turnId, clauseId):
+            return ["type": "clausePlayed", "turnId": turnId, "clauseId": clauseId]
+        case let .interrupted(turnId, clauseId, fraction):
+            return ["type": "interrupted", "turnId": turnId, "clauseId": clauseId, "fraction": min(1, max(0, fraction))]
+        case let .answerFinished(turnId):
+            return ["type": "answerFinished", "turnId": turnId]
+        case let .ended(reason):
+            return ["type": "ended", "reason": reason.rawValue]
+        case let .metrics(turnId, stages):
+            return ["type": "metrics", "turnId": turnId, "stages": stages.mapValues { ($0 * 10).rounded() / 10 }]
+        }
+    }
+}
+
+/// The models voice mode needs, by the names `voiceStatus` reports in `missing`.
+enum VoiceModelName: String, CaseIterable, Sendable {
+    case vad
+    case eou
+    case smartTurn = "smart-turn"
+    case phonon
+    case fluidMini = "fluid-mini"
+}
+
+/// Words compared for barge-in: lower case, letters and digits only, so the
+/// clause the web app sent ("Clause 4, the tenant's duty.") and the EOU
+/// partial ("clause four the tenants duty") meet where they can.
+enum VoiceWords {
+    static func normalised(_ text: String) -> [String] {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        var words: [String] = []
+        var current = ""
+        for scalar in folded.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                current.unicodeScalars.append(scalar)
+            } else if scalar == "'" || scalar == "\u{2019}" {
+                // "tenant's" and "tenants" are the same word to the comparison.
+                continue
+            } else if !current.isEmpty {
+                words.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { words.append(current) }
+        return words
+    }
+}

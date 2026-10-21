@@ -32,12 +32,15 @@ enum PhononVoice {
     enum Failure: Error {
         case empty
         case notInstalled
+        /// Hands-free voice mode holds the voice; read-aloud waits for it to end.
+        case busy
         case failed
 
         var code: String {
             switch self {
             case .empty: return "empty-text"
             case .notInstalled: return "not-installed"
+            case .busy: return "busy"
             case .failed: return "failed"
             }
         }
@@ -81,6 +84,16 @@ enum PhononVoice {
         guard #available(iOS 18.0, *), canSpeak else { throw Failure.failed }
         #if canImport(PhononTTS)
         try await Runtime.shared.install()
+        #endif
+    }
+
+    /// Whether hands-free voice mode holds the voice (read-aloud and removal wait).
+    static func inVoiceMode() async -> Bool {
+        guard #available(iOS 18.0, *) else { return false }
+        #if canImport(PhononTTS)
+        return await Runtime.shared.inVoiceMode
+        #else
+        return false
         #endif
     }
 
@@ -130,6 +143,8 @@ enum PhononVoice {
 
         private var phonon: Phonon?
         private var running = 0
+        /// Voice mode's hold on the instance (0 or 1).
+        private var voiceHolds = 0
         private var idleTask: Task<Void, Never>?
         private var installTask: Task<Void, Error>?
         private var progress = 0.0
@@ -199,7 +214,12 @@ enum PhononVoice {
             }
         }
 
+        /// Whether voice mode is using the instance (read-aloud refuses then).
+        var inVoiceMode: Bool { voiceHolds > 0 }
+
         func synthesize(_ text: String, voice: String?) async throws -> [Float] {
+            // Fail fast rather than queue behind (or re-voice) a conversation.
+            guard voiceHolds == 0 else { throw Failure.busy }
             idleTask?.cancel()
             running += 1
             defer {
@@ -214,12 +234,45 @@ enum PhononVoice {
             } catch {
                 throw Failure.failed
             }
+            // Voice mode may have started while the model loaded.
+            guard voiceHolds == 0 else { throw Failure.busy }
             do {
                 if let voice, voice != tts.voice, tts.voices.contains(voice) { try await tts.setVoice(voice) }
+                guard voiceHolds == 0 else { throw Failure.busy }
                 return try await tts.synthesize(text)
+            } catch let failure as Failure {
+                throw failure
             } catch {
                 throw Failure.failed
             }
+        }
+
+        /// The loaded model for hands-free voice mode, which streams clauses
+        /// through it into its own audio engine. The model stays loaded until
+        /// `endVoice` (a memory warning does not drop it mid-conversation).
+        /// Voice mode and read-aloud share this one instance; Phonon serialises
+        /// their calls.
+        func beginVoice(voice: String?) async throws -> Phonon {
+            idleTask?.cancel()
+            let tts: Phonon
+            do {
+                tts = try await loaded()
+            } catch let failure as Failure {
+                throw failure
+            } catch {
+                throw Failure.failed
+            }
+            running += 1
+            voiceHolds += 1
+            if let voice, voice != tts.voice, tts.voices.contains(voice) { try? await tts.setVoice(voice) }
+            return tts
+        }
+
+        func endVoice() {
+            guard voiceHolds > 0 else { return }
+            voiceHolds -= 1
+            running = max(0, running - 1)
+            scheduleUnload()
         }
 
         private func loaded() async throws -> Phonon {

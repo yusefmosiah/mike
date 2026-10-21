@@ -1,5 +1,11 @@
 import Capacitor
 import Foundation
+#if canImport(FluidAudio)
+import FluidAudio
+#endif
+#if canImport(PhononTTS)
+import PhononTTS
+#endif
 
 /// Apple's speech on the phone, for the web app's "This iPhone" engines
 /// (frontend/src/app/lib/voice/deviceSpeech.ts): dictation with on-device
@@ -21,7 +27,15 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stopLive", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelLive", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voices", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceInstall", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceStop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceSpeak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceEndAnswer", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceCancelAnswer", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceRemove", returnType: CAPPluginReturnPromise)
     ]
 
     /// About half an hour of the web view's AAC recording.
@@ -90,6 +104,10 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         Task {
+            guard await !PhononVoice.inVoiceMode() else {
+                call.reject("The voice is in use by voice mode.", "busy")
+                return
+            }
             await PhononVoice.remove()
             call.resolve(await PhononVoice.status().payload)
         }
@@ -247,6 +265,155 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Reading aloud on this iPhone failed.", failure.code)
             }
         }
+    }
+
+    // MARK: - Hands-free voice mode (docs/voice-chat-contract.md)
+
+    /// Voice calls run one after another in the order the web app made them,
+    /// so clause 1 can never overtake clause 0, nor a cancel the start it follows.
+    private lazy var voiceCalls: AsyncStream<@Sendable () async -> Void>.Continuation = {
+        let (stream, continuation) = AsyncStream.makeStream(of: (@Sendable () async -> Void).self)
+        Task {
+            for await work in stream { await work() }
+        }
+        return continuation
+    }()
+
+    private func sendVoiceEvent(_ event: VoiceEvent) {
+        notifyListeners(VoiceEvent.listenerName, data: event.payload)
+    }
+
+    /// `{ available, missing, downloadBytes }`.
+    @objc func voiceStatus(_ call: CAPPluginCall) {
+        Task { call.resolve(await VoiceMode.status().payload) }
+    }
+
+    /// Downloads and prepares the missing models; progress arrives as
+    /// `voiceEvent` `{ type: "install", fraction }`.
+    @objc func voiceInstall(_ call: CAPPluginCall) {
+        let send: @Sendable (VoiceEvent) -> Void = { [weak self] event in self?.sendVoiceEvent(event) }
+        Task {
+            guard VoiceMode.canRunHere else {
+                call.reject("Voice mode is not available on this iPhone.", "unavailable")
+                return
+            }
+            do {
+                try await VoiceMode.install { fraction in send(.install(fraction: fraction)) }
+                call.resolve(["available": await VoiceMode.status().available])
+            } catch {
+                call.reject("The voice models could not be downloaded.", "failed")
+            }
+        }
+    }
+
+    /// Loads and warms every model, asks for the microphone if needed, and
+    /// resolves once the engine is listening.
+    @objc func voiceStart(_ call: CAPPluginCall) {
+        let config = VoiceConfig(call.options["config"] as? [String: Any])
+        let voice = call.getString("voice")
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            let send: @Sendable (VoiceEvent) -> Void = { [weak self] event in self?.sendVoiceEvent(event) }
+            voiceCalls.yield {
+                do {
+                    try await VoiceEngine.shared.start(config: config, voice: voice, emit: send)
+                    call.resolve()
+                } catch {
+                    let failure = error as? OnDeviceSpeech.Failure ?? .failed
+                    call.reject("Voice mode could not start.", failure.code)
+                }
+            }
+            return
+        }
+        #endif
+        call.reject("Voice mode is not available on this iPhone.", "unavailable")
+    }
+
+    /// Ends any answer being spoken and releases the audio. A start still
+    /// loading is told at once (not after it, through the queue) and rejects
+    /// with `cancelled` without opening the microphone.
+    @objc func voiceStop(_ call: CAPPluginCall) {
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            VoiceEngine.cancelPendingStart()
+            voiceCalls.yield {
+                await VoiceEngine.shared.stop(reason: .stopped)
+                call.resolve()
+            }
+            return
+        }
+        #endif
+        call.resolve()
+    }
+
+    /// Deletes the downloaded voice-mode models (VAD, EOU, Smart Turn; Phonon
+    /// has its own `remove`) and resolves the new `voiceStatus` payload.
+    /// Rejects with `busy` while voice mode runs.
+    @objc func voiceRemove(_ call: CAPPluginCall) {
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            voiceCalls.yield {
+                if await VoiceEngine.shared.isRunning {
+                    call.reject("Voice mode is in use.", "busy")
+                    return
+                }
+                await VoiceMode.remove()
+                call.resolve(await VoiceMode.status().payload)
+            }
+            return
+        }
+        #endif
+        Task {
+            await VoiceMode.remove()
+            call.resolve(await VoiceMode.status().payload)
+        }
+    }
+
+    /// Queues one clause of the current answer. Resolves at once.
+    @objc func voiceSpeak(_ call: CAPPluginCall) {
+        guard let turnId = call.getString("turnId"), let clauseId = call.getInt("clauseId"), clauseId >= 0,
+              let text = call.getString("text") else {
+            call.reject("A clause needs a turn, an id and text.", "failed")
+            return
+        }
+        call.resolve()
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            voiceCalls.yield { await VoiceEngine.shared.speak(turnId: turnId, clauseId: clauseId, text: text) }
+        }
+        #endif
+    }
+
+    /// No more clauses for this turn. Resolves at once.
+    @objc func voiceEndAnswer(_ call: CAPPluginCall) {
+        guard let turnId = call.getString("turnId") else {
+            call.reject("No turn given.", "failed")
+            return
+        }
+        call.resolve()
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            voiceCalls.yield { await VoiceEngine.shared.endAnswer(turnId: turnId) }
+        }
+        #endif
+    }
+
+    /// Drops the answer; resolves once playback has stopped.
+    @objc func voiceCancelAnswer(_ call: CAPPluginCall) {
+        guard let turnId = call.getString("turnId") else {
+            call.reject("No turn given.", "failed")
+            return
+        }
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            voiceCalls.yield {
+                await VoiceEngine.shared.cancelAnswer(turnId: turnId)
+                call.resolve()
+            }
+            return
+        }
+        #endif
+        call.resolve()
     }
 
     /// The extension AVAudioFile needs to read the web view's recording.

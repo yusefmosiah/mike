@@ -37,6 +37,10 @@ enum OnDeviceSpeech {
         case notInstalled
         case unreadableAudio
         case permissionDenied
+        /// Hands-free voice mode: `voiceStop` came before `voiceStart` finished.
+        case cancelled
+        /// Hands-free voice mode: refused while a conversation runs.
+        case busy
         case failed
 
         var code: String {
@@ -45,6 +49,8 @@ enum OnDeviceSpeech {
             case .notInstalled: return "not-installed"
             case .unreadableAudio: return "unsupported-audio"
             case .permissionDenied: return "permission-denied"
+            case .cancelled: return "cancelled"
+            case .busy: return "busy"
             case .failed: return "failed"
             }
         }

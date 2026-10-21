@@ -420,6 +420,7 @@ the loop running, not reasons to build it in stages.
 | Memory and heat over a long conversation | 20 minutes of conversation on the oldest supported iPhone |
 | Clause seams sound choppy | Listening comparison of whole sentences against clauses, with and without a trailing comma and crossfade |
 | What was heard drifts | Interrupt at random points; compare the estimate with alignment of the played audio |
+| Side conversations start turns or barge in | Count them on the device; if common, score each final turn with Pipecat's Audience (addressee classifier, 33M, Apache-2.0, Core ML, about 6 ms; built for games, so measure on our speech) with two cards, the assistant and someone else in the room, and drop turns addressed elsewhere |
 | Tool turns feel slow | Stage timings on real legal questions with retrieval |
 | Licences | Fluid Speech Mini CC BY 4.0 (credit needed); Parakeet EOU and Nemotron under NVIDIA's Open Model License (read before shipping); Smart Turn BSD-2; Silero MIT; Phonon 31m Apache 2.0 |
 
@@ -447,6 +448,157 @@ are an order to write the code in, not stages to ship:
    - fixed phrases while a tool runs.
 5. **Android, then the browser,** on the same conversation code and event
    traces.
+
+## As built (native)
+
+The iPhone voice engine is in `mobile/plugins/speech/ios/Sources/MikeSpeechPlugin/`
+(`VoiceAudioEngine`, `EouStream`, `SmartTurn`, `TurnPolicy`, `ClauseQueue`,
+`VoiceEngine`, `VoiceModels`, `VoiceContract`) and implements
+`docs/voice-chat-contract.md`. It has run in the iOS simulator only (unit
+tests, and the listening models on the fixture clip); nothing has been tried
+on a device yet, so every threshold above is still untuned. Where it differs
+from the design:
+
+- **Smart Turn needs no feature code.** The Core ML port
+  (`aufklarer/Smart-Turn-v3.2-CoreML`) has the Whisper front-end inside the
+  model: zero-mean, unit-variance normalisation of the window and an 80-bin
+  log-mel (n_fft 400, hop 160). Its input is raw 16 kHz audio,
+  `audio [1, 128000]`, with the most recent sample last and zeros in front.
+  So there is no Accelerate log-mel to write or check against a reference;
+  the tests check the window instead (its length, alignment and truncation).
+- **The EOU model runs outside `StreamingEouAsrManager`.** The manager reports
+  `<EOU>` only after its own 1.28 s debounce, and it hides the per-chunk
+  token. `EouStream` drives FluidAudio's public pieces (the NeMo mel
+  spectrogram, the 320 ms loopback encoder, `RnntDecoder`, `Tokenizer`) chunk
+  by chunk, as the manager does internally. On every `<EOU>` it re-arms:
+  - it starts fresh encoder caches and decoder state;
+  - it replays the audio from just after the last decoded token's 80 ms frame;
+  - it keeps the text so far.
+  `<EOU>` is a candidate only if that state decoded words. An `<EOU>` with no
+  words moves on one 320 ms shift, so the stream always advances. On the
+  fixture clip with 1.5 s of silence inserted mid-sentence, the words after
+  the pause are kept and none is decoded twice (`VoiceModelIntegrationTests`).
+- **The VAD resolution is 256 ms.** FluidAudio's Silero model takes a fixed
+  4096-sample block (plus 64 samples of context), so a smaller hop would need
+  another model. `TurnPolicy` applies its own hysteresis to the raw
+  probabilities, with the threshold for speech and the threshold minus 0.15
+  for silence. It times silence from the start of the first silent block, so
+  a pause is known at the end of that block, not one block later. As a
+  result:
+  - `pauseMs` below 256 has the effect of 256;
+  - `bargeInSpeechMs: 300` needs two speech blocks, so 512 ms.
+- **Barge-in compares against two clauses.** The partial's words are
+  normalised (case, accents and apostrophes folded; letters and digits only).
+  A word is foreign only if it is in neither the clause playing nor the one
+  before it, because the EOU stream lags by about half a second and echo of
+  the previous clause is still arriving when the next one starts. Words count
+  from the start of the speech run, and up to `falseStartMs` after it, because
+  the words of a short "stop" arrive after the VAD has seen it end.
+- **False starts:**
+  - when (a) holds without (b), playback is paused;
+  - playback resumes `falseStartMs` after the speech began if the words never
+    came;
+  - this happens at most once per speech run;
+  - while thinking there is nothing to pause, so only a full barge-in counts.
+- **The committed turn is not a barge-in candidate.** Its last words often
+  reach the EOU stream after the commit, and earlier they could have
+  interrupted the answer they asked for. Only a new speech onset can barge in.
+- **What is transcribed:**
+  - the final pass gets the VAD bounds widened by 200 ms before and 300 ms
+    after;
+  - audio under 1 s is padded with silence (FluidAudio's minimum);
+  - an empty result sends no `turn`, and the engine goes back to listening;
+  - while the final pass runs, no timers run.
+- **A cut turn.** A turn cut at `maxTurnMs` while the person is still speaking
+  is committed. The speech that follows counts as a new run, so it can barge
+  in on the answer to the cut turn.
+- **Speaking:**
+  - Phonon is the read-aloud instance (`PhononVoice.Runtime.beginVoice`), held
+    for the whole conversation and warmed at start with one word.
+  - The engine holds each 80 ms chunk until the next one arrives, so the last
+    chunk of a clause is known. Each clause gets a 5 ms fade in and a 5 ms fade
+    out. Clauses never overlap, so these are fades, not a crossfade.
+  - Each chunk is scheduled at an explicit sample time on the player node's
+    timeline: straight after the previous chunk, or 30 ms ahead of the render
+    position after an underrun. The clause's sample ranges are therefore
+    exact.
+  - The played-sample clock is the player time at `lastRenderTime`, less the
+    session's output latency and IO buffer, so `clauseStarted` and
+    `interrupted.fraction` describe what was heard.
+  - If an answer is interrupted while its clause is still being synthesised,
+    `fraction` is measured against the samples generated so far.
+- **The one-ahead rule.** A clause starts synthesising only when every clause
+  before it has started playing and no other synthesis is running.
+- **Graph rebuilds.** A configuration change rebuilds the graph, which empties
+  the player. Clauses not fully heard are synthesised again from their start,
+  and `clauseStarted` is not sent twice. If the input is gone the engine ends
+  with `route`.
+- **Why voice mode ends:**
+  - `interruption`: calls, Siri, a media-services reset, and the app going to
+    the background (voice mode is foreground only);
+  - `route`: no input left;
+  - `error`: a model failed while listening.
+- **Session options.** `.voiceChat` with `.defaultToSpeaker` and
+  `.allowBluetoothHFP`. `.bluetoothHighQualityRecording` is not set until it
+  is tested with AirPods. Other audio is ducked at
+  `AVAudioVoiceProcessingOtherAudioDuckingConfiguration` level `.min`, with
+  advanced ducking off.
+- **`voiceStatus.available`:**
+  - also requires at least 5 GB of physical memory (a 6 GB iPhone), from the
+    memory table above;
+  - `fluid-mini` can be reported missing but cannot be downloaded (it ships in
+    the app);
+  - `downloadBytes` is about 405 MB when nothing is installed: VAD 1.1 MB,
+    EOU 224 MB (the `320ms` folder only), Smart Turn 16.8 MB and Phonon
+    163 MB.
+- **Downloads.** Each model comes from its upstream repository at a pinned
+  commit, and every file is checked against a SHA-256 recorded in
+  `VoiceModels.swift`. The files are staged and moved into
+  `Application Support/MikeVoice/models/<name>/`, which is excluded from
+  backup. Each model is then loaded once so Core ML prepares it. Phonon uses
+  its existing install.
+- **Metrics stages (ms):**
+  - `endOfSpeechToCommit`, on the audio clock;
+  - `smartTurn`, the inference that decided;
+  - `finalPass`;
+  - `utterance`, the length of the VAD-bounded speech;
+  - `firstClauseSynthesis`;
+  - `commitToFirstAudio`, from `turn` to the first heard sample of the first
+    clause, polled every 10 ms.
+
+  They are sent once per turn: at first audio, or when the turn ends without
+  any. `os_log` gets stage names and numbers only, never text or audio.
+- **Call order.** The plugin runs the voice calls one after another, in the
+  order the web app made them, so a clause cannot overtake an earlier one.
+- **`voiceSpeak.final` is ignored.** The contract does not say what it means.
+  The answer ends only with `voiceEndAnswer`. The contract should define
+  `final` or drop it.
+- **`voiceRemove()`.** Takes no arguments. It deletes the VAD, EOU and Smart
+  Turn models, cancels an install in progress, and resolves the
+  `voiceStatus` payload. Phonon keeps its own `remove`. Interrupted
+  downloads leave `<name>.partial-<rev12>` staging folders; each install
+  deletes the ones from other commits.
+- **Rejection codes added:**
+  - `busy`: returned by `voiceRemove`, by read-aloud `speak`, and by Phonon
+    `remove` while voice mode runs. Read-aloud never re-voices or queues
+    behind a conversation.
+  - `cancelled`: `voiceStart` lost to a `voiceStop` sent after it. Stop
+    takes effect at once, even while the start is waiting for models.
+- **The audio graph.** Rebuilds bump an epoch. A clause synthesised for an
+  older graph is dropped, not scheduled. While playback is held for a
+  possible barge-in, the played position is cached, because the player has
+  no clock while paused. A rebuild keeps the hold. Every hold is released
+  when the turn commits or the answer ends. Audio-session notifications are
+  handled on one serial queue, never under the rebuild lock. A failed
+  rebuild ends voice mode only after 250 ms, so a concurrent interruption
+  gives the reason. The background still ends with `interruption`; there is
+  no separate `background` reason.
+- **Limits.**
+  - The microphone stream keeps the newest 200 buffers. Dropped audio is
+    reported as the metrics stage `micDroppedMs`.
+  - The transcript held outside a turn is capped at 200 words.
+  - `maxTurnMs` is capped at 120 000. A larger value falls back to the
+    default.
 
 ## Sources
 
