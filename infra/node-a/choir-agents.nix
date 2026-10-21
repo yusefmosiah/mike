@@ -33,6 +33,7 @@ let
   index = 200;
   subnet = "10.77.${toString index}";
   proxyUrl = "http://${subnet}.1:3128";
+  tmpDir = "/home/agent/.tmp";
   stateDir = "/var/lib/microvms/${name}";
   # 6 GiB beside the workstations' 18: 24 of the host's 31.
   vcpu = 4;
@@ -52,6 +53,10 @@ let
     NODE_USE_ENV_PROXY = "1";
     # Claude Code's bundled ripgrep is not built for NixOS.
     USE_BUILTIN_RIPGREP = "0";
+    # / and /tmp are a ~3 GB RAM-backed rootfs; go-choir's links fill it.
+    # Temporary files go on the home disk instead.
+    TMPDIR = tmpDir;
+    GOTMPDIR = tmpDir;
     PKG_CONFIG_PATH = "${gpkgs.icu.dev}/lib/pkgconfig";
     CGO_CFLAGS = "-I${gpkgs.icu.dev}/include";
     CGO_CXXFLAGS = "-I${gpkgs.icu.dev}/include";
@@ -137,7 +142,7 @@ let
         shell = pkgs.bashInteractive;
         openssh.authorizedKeys.keys = [ ownerKey ];
       };
-      systemd.tmpfiles.rules = [ "d /home/agent 0700 agent users -" ];
+      systemd.tmpfiles.rules = [ "d /home/agent 0700 agent users -" "d ${tmpDir} 0700 agent users -" ];
 
       services.openssh = {
         enable = true;
