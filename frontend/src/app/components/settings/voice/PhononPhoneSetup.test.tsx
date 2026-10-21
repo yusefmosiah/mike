@@ -70,6 +70,18 @@ describe("PhononPhoneSetup", () => {
         expect(device.remove).toHaveBeenCalled();
     });
 
+    it("says why the model could not be removed", async () => {
+        device.remove.mockRejectedValueOnce(new DeviceSpeechError("Turn off voice mode before removing Phonon."));
+        const onChange = vi.fn();
+        render(<PhononPhoneSetup status={{ state: "available" }} chosen onChange={onChange} />);
+        fireEvent.click(screen.getByRole("button", { name: "Remove Phonon" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("Turn off voice mode before removing Phonon.");
+        await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+        device.remove.mockRejectedValueOnce("odd");
+        fireEvent.click(screen.getByRole("button", { name: "Remove Phonon" }));
+        await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not remove Phonon. Please try again."));
+    });
+
     it("says the models are being prepared at the end of an install, with no percentage", () => {
         render(<PhononPhoneSetup status={{ state: "installing", progress: 1, compiling: true }} chosen onChange={vi.fn()} />);
         expect(screen.getByText("Preparing for this phone…")).toBeInTheDocument();

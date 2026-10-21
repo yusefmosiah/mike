@@ -2494,6 +2494,26 @@ export async function stopChatTurn(
     );
 }
 
+/** The longest spoken text the server keeps. */
+export const MAX_SPOKEN_TEXT_CHARS = 20_000;
+
+/**
+ * Records that a voice answer was interrupted and what the person heard of it
+ * (empty when nothing was). The next turn's history replays that, not the
+ * whole answer.
+ */
+export async function recordSpokenAnswer(
+    chatId: string,
+    messageId: string,
+    spokenText: string,
+): Promise<void> {
+    await apiRequest(`/chat/${chatId}/messages/${messageId}/spoken`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spokenText: spokenText.slice(0, MAX_SPOKEN_TEXT_CHARS) }),
+    });
+}
+
 export async function renameChat(chatId: string, title: string): Promise<void> {
     await apiRequest(`/chat/${chatId}`, {
         method: "PATCH",
@@ -2748,6 +2768,8 @@ export async function streamChat(payload: {
      * (setChatLeaf); the server reuses the row instead of inserting a sibling.
      */
     link_only_to_message_id?: string;
+    /** A voice-mode turn: the server asks for a short spoken answer. */
+    voice?: boolean;
     signal?: AbortSignal;
 }): Promise<Response> {
     const { signal, ...body } = payload;
@@ -2780,6 +2802,8 @@ export async function streamProjectChat(payload: {
     ask_inputs_response?: AskInputsResponsePayload;
     /** Regenerate: the existing prompt row the answer should hang from. */
     link_only_to_message_id?: string;
+    /** A voice-mode turn: the server asks for a short spoken answer. */
+    voice?: boolean;
     signal?: AbortSignal;
 }): Promise<Response> {
     const { projectId, signal, ...body } = payload;

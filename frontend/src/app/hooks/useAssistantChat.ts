@@ -448,6 +448,7 @@ export function useAssistantChat({
                   attachedDocs.length > 0 ? attachedDocs : undefined,
                 ask_inputs_response: opts?.askInputsResponse,
                 link_only_to_message_id: opts?.linkOnlyToMessageId,
+                voice: message.voice || undefined,
                 signal: controller.signal,
               })
             : streamChat({
@@ -457,6 +458,7 @@ export function useAssistantChat({
                 reasoning,
                 ask_inputs_response: opts?.askInputsResponse,
                 link_only_to_message_id: opts?.linkOnlyToMessageId,
+                voice: message.voice || undefined,
                 signal: controller.signal,
               }),
         turn,

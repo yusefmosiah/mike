@@ -45,6 +45,7 @@ import { PhononPhoneSetup } from "./PhononPhoneSetup";
 import { PhononVoiceList } from "./PhononVoiceList";
 import { useVoiceAvailability } from "./useVoiceAvailability";
 import { VoiceChoiceDropdown, type VoiceChoice } from "./VoiceChoiceDropdown";
+import { VoiceModeSetup } from "./VoiceModeSetup";
 import { VoiceTestBench } from "./VoiceTestBench";
 import { VocabularySection } from "./VocabularySection";
 
@@ -538,6 +539,8 @@ export function VoiceSettings() {
           )}
         </SettingsCard>
       </section>
+
+      <VoiceModeSetup />
 
       <section className="space-y-3">
         <SettingsHeading>Test bench</SettingsHeading>

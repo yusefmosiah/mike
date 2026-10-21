@@ -397,6 +397,25 @@ describe("useAssistantChat SSE parsing", () => {
         });
     });
 
+    it("marks a voice turn as voice, in a project chat and in a standalone one", async () => {
+        fetchMock.mockImplementation(async () => sseResponse(["data: [DONE]\n\n"]));
+        const project = renderHook(() => useAssistantChat({ chatId: "chat-1", projectId: "project-1" }));
+        await act(async () => {
+            await project.result.current.handleChat({ ...userMessage(), voice: true });
+        });
+        const standalone = renderHook(() => useAssistantChat({ chatId: "chat-2" }));
+        await act(async () => {
+            await standalone.result.current.handleChat({ ...userMessage(), voice: true });
+        });
+        await act(async () => {
+            await standalone.result.current.handleChat(userMessage("typed"));
+        });
+        const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+        expect(bodies[0]).toMatchObject({ voice: true });
+        expect(bodies[1]).toMatchObject({ voice: true });
+        expect(bodies[2]).not.toHaveProperty("voice");
+    });
+
     it("reassembles an event split across chunk boundaries", async () => {
         const { assistant, result } = await sendAndGetAssistant([
             'data: {"type":"content_delta","te',

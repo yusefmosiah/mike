@@ -221,14 +221,18 @@ export async function installPhonon(onProgress?: (fraction: number) => void): Pr
     return status;
 }
 
+export const PHONON_BUSY_MESSAGE = "Turn off voice mode before removing Phonon.";
+
 /** Deletes Phonon's model from the phone; reading aloud then uses Apple's voices. */
 export async function removePhonon(): Promise<PhononStatus> {
     const call = nativePromise();
     if (!call) return UNAVAILABLE;
     try {
         await call(PLUGIN, "remove", { engine: PHONON_ENGINE });
-    } catch {
-        // The status below says what is left.
+    } catch (error) {
+        // Voice mode is reading with Phonon: nothing was removed.
+        if (errorCode(error) === "busy") throw new DeviceSpeechError(PHONON_BUSY_MESSAGE);
+        // Otherwise the status below says what is left.
     }
     resetPhononAvailability();
     return phononStatus();
@@ -339,6 +343,7 @@ export async function deviceVoices(): Promise<DeviceVoice[]> {
 export const DEVICE_SPEAK_FAILURE_MESSAGE = "Could not read this aloud on this iPhone. Please try again.";
 const DEVICE_SPEAK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
     "too-long": "This is too long to read aloud on this iPhone at once.",
+    busy: "Read-aloud is off while voice mode is on.",
 };
 
 /**

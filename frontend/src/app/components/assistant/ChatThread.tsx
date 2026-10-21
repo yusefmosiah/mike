@@ -915,6 +915,7 @@ export function ChatThread({
                                     editTarget={editingMessage}
                                     onEditSubmit={submitEdit}
                                     onEditCancel={() => setEditing(null)}
+                                    voice={chatId ? { chatId, messages } : undefined}
                                 />
                             </ChatInputPrompt>
                         </div>

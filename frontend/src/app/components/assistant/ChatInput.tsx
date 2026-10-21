@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
     ArrowRight,
+    AudioLines,
     Check,
     Loader2,
     Mic,
@@ -99,6 +100,8 @@ import {
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
+import { useVoiceChat } from "@/app/hooks/useVoiceChat";
+import { VoiceModePanel } from "./VoiceModePanel";
 
 export interface ChatInputHandle {
     addDoc: (doc: Document) => void;
@@ -194,6 +197,12 @@ export interface ChatInputProps {
     editTarget?: Message | null;
     onEditSubmit?: (edited: EditedPrompt) => Promise<void>;
     onEditCancel?: () => void;
+    /**
+     * Offers hands-free voice mode in this thread (in the iPhone app, when
+     * its voice engine is there): the thread's id and messages, for the
+     * answers to speak.
+     */
+    voice?: { chatId: string; messages: Message[] };
 }
 
 /**
@@ -220,6 +229,8 @@ function placeholderFor({
     if (!chatLoading) return "How can I help?";
     return isLoading ? "A response is still arriving…" : "Loading this chat…";
 }
+
+const NO_MESSAGES: Message[] = [];
 
 /** Recording length as mm:ss for the dictation indicator. */
 function formatDictationTime(elapsedMs: number): string {
@@ -252,6 +263,7 @@ function ChatInputForChatImpl(
         editTarget = null,
         onEditSubmit,
         onEditCancel,
+        voice,
     }: ChatInputProps,
     ref: ForwardedRef<ChatInputHandle>,
 ) {
@@ -871,6 +883,41 @@ function ChatInputForChatImpl(
         });
     };
 
+    // Voice mode: each turn the engine hears is sent like a typed message,
+    // with the composer's model, marked as voice.
+    const sendVoice = (text: string): boolean => {
+        if (!composerOpen || !canStop) return false;
+        if (!model) {
+            setModelRequiredWarning(true);
+            return false;
+        }
+        if (apiKeys && !isModelAvailable(model, apiKeys, configuredModelIds)) {
+            setApiKeyModalProvider(getModelProvider(model));
+            return false;
+        }
+        onSubmit({ role: "user", content: text, model, reasoning: reasoningLevel, voice: true });
+        return true;
+    };
+    const voiceChat = useVoiceChat({
+        chatId: voice?.chatId,
+        messages: voice?.messages ?? NO_MESSAGES,
+        isResponseLoading: isLoading,
+        send: sendVoice,
+        cancelResponse: onCancel,
+    });
+    const voiceActive = voiceChat.phase !== "off";
+    // Back to the composer when voice mode ends, unless focus went elsewhere.
+    const wasVoiceActive = useRef(false);
+    useEffect(() => {
+        const ended = wasVoiceActive.current && !voiceActive;
+        wasVoiceActive.current = voiceActive;
+        if (!ended) return;
+        const focused = document.activeElement;
+        if (!focused || focused === document.body) textareaRef.current?.focus();
+    }, [voiceActive]);
+    const voiceOffered =
+        !!voice && voiceChat.supported && composerOpen && !editTarget && !dictation.recording;
+
     const selectSlashWorkflow = (workflow: Workflow) => {
         if (!workflowSlashCommand(workflow)) return;
         setSelectedWorkflow({
@@ -1014,8 +1061,10 @@ function ChatInputForChatImpl(
                         onSelectCommand={selectSlashCommand}
                     />
                 )}
+                {voiceActive && <VoiceModePanel voice={voiceChat} />}
                 <div
                     ref={surfaceRef}
+                    hidden={voiceActive}
                     data-slot="chat-input-surface"
                     className={cn(
                         "rounded-[21px]",
@@ -1274,6 +1323,18 @@ function ChatInputForChatImpl(
                                     onReasoningChange={handleReasoningChange}
                                 />
                             )}
+                            {voiceOffered && (
+                                <button
+                                    type="button"
+                                    aria-label="Start voice mode"
+                                    title="Start voice mode"
+                                    onClick={() => void voiceChat.start()}
+                                    disabled={isLoading || dictation.busy}
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-default disabled:text-gray-300"
+                                >
+                                    <AudioLines className="h-3.5 w-3.5" aria-hidden="true" />
+                                </button>
+                            )}
                             {composerOpen &&
                                 (dictation.recording ? (
                                     <div className="flex h-8 items-center gap-1.5 pl-1.5 pr-0.5">
@@ -1379,6 +1440,10 @@ function ChatInputForChatImpl(
                 </div>
             </div>
 
+            {/* Only that voice mode began or ended: the live words would talk over the answer. */}
+            <span aria-live="polite" className="sr-only">
+                {voiceChat.announcement}
+            </span>
             <input
                 ref={localFileInputRef}
                 type="file"
@@ -1439,10 +1504,16 @@ function ChatInputForChatImpl(
             />
             <UploadOverlay
                 open={isDraggingFiles}
-                warning={uploadWarning ?? dictation.error}
+                warning={
+                    uploadWarning ??
+                    dictation.error ??
+                    // Setup shows its own failures in the panel.
+                    (voiceChat.phase === "setup" ? null : voiceChat.error)
+                }
                 onWarningClose={() => {
                     setUploadWarning(null);
                     dictation.clearError();
+                    voiceChat.clearError();
                 }}
             />
         </>

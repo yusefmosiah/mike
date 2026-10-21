@@ -5,6 +5,7 @@ import { synthesizeSpeech } from "@/app/lib/mikeApi";
 import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { saveVoicePreferences } from "@/app/lib/voice/preferences";
 import { splitIntoReadAloudSentences, useReadAloud } from "./useReadAloud";
+import { setVoiceModeActive } from "@/app/lib/voice/voiceMode";
 import { readAloudTitle } from "./readAloudShared";
 
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
@@ -106,6 +107,17 @@ describe("splitIntoReadAloudSentences", () => {
         const sentences = splitIntoReadAloudSentences(text);
         expect(sentences).toHaveLength(1_000);
         expect(sentences.join(" ")).toBe(text);
+    });
+});
+
+describe("useReadAloud while voice mode is on", () => {
+    it("stops a reading when voice mode starts, and offers none until it ends", async () => {
+        const { result } = await startReading();
+        act(() => setVoiceModeActive(true));
+        await waitFor(() => expect(result.current.status).toBe("idle"));
+        expect(result.current.available).toBe(false);
+        act(() => setVoiceModeActive(false));
+        expect(result.current.available).toBe(true);
     });
 });
 

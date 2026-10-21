@@ -27,6 +27,7 @@ import {
     phononAvailable,
     phononStatus,
     removePhonon,
+    PHONON_BUSY_MESSAGE,
     resetFluidSpeechMiniAvailability,
     resetPhononAvailability,
     speakOnDevice,
@@ -219,6 +220,8 @@ describe("speakOnDevice", () => {
         inApp();
         nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "too-long" }));
         await expect(speakOnDevice("Hi.")).rejects.toThrow("This is too long to read aloud on this iPhone at once.");
+        nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "busy" }));
+        await expect(speakOnDevice("Hi.")).rejects.toThrow("Read-aloud is off while voice mode is on.");
         nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "failed" }));
         await expect(speakOnDevice("Hi.")).rejects.toBeInstanceOf(DeviceSpeechError);
         nativePromise.mockResolvedValueOnce({ audio: "" });
@@ -486,6 +489,15 @@ describe("installPhonon and removePhonon", () => {
             return { state: "unavailable" };
         });
         expect(await removePhonon()).toEqual({ state: "unavailable" });
+    });
+
+    it("refuses to remove Phonon while voice mode reads with it", async () => {
+        inApp();
+        nativePromise.mockImplementation(async (_plugin: string, method: string) => {
+            if (method === "remove") throw Object.assign(new Error("busy"), { code: "busy" });
+            return { state: "available", engine: "phonon" };
+        });
+        await expect(removePhonon()).rejects.toThrow(PHONON_BUSY_MESSAGE);
     });
 });
 

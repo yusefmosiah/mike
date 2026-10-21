@@ -5,6 +5,7 @@ import { BrowserModelError } from "@/app/lib/voice/browserModels";
 import { DeviceSpeechError } from "@/app/lib/voice/deviceSpeech";
 import { speechRenderPlan, synthesizeSentence } from "@/app/lib/voice/engines";
 import { useVoicePreferences, type VoicePreferences } from "@/app/lib/voice/preferences";
+import { subscribeVoiceMode, useVoiceModeActive } from "@/app/lib/voice/voiceMode";
 import {
     chunkSentences,
     decodeToMono,
@@ -71,7 +72,22 @@ export function useReadAloud(text: string): UseReadAloud {
     );
     const audio = useAudioReadAloud(browser ? "" : text, preferences.speech, speed, rememberSpeed);
     const spoken = useBrowserReadAloud(browser ? text : "", preferences.speech.voice, speed, rememberSpeed);
-    return browser ? spoken : audio;
+    const reading = browser ? spoken : audio;
+    // Voice mode owns the audio: a reading stops when it starts, and none can
+    // be started while it is on.
+    const voiceMode = useVoiceModeActive();
+    const stopReading = useRef(reading.stop);
+    useEffect(() => {
+        stopReading.current = reading.stop;
+    });
+    useEffect(
+        () =>
+            subscribeVoiceMode((on) => {
+                if (on) stopReading.current();
+            }),
+        [],
+    );
+    return voiceMode ? { ...reading, available: false } : reading;
 }
 
 type MediaAction = "play" | "pause" | "stop" | "seekto" | "seekbackward" | "seekforward";

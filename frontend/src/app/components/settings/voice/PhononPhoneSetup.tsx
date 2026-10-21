@@ -50,8 +50,13 @@ export function PhononPhoneSetup({
   };
 
   const remove = async () => {
+    setFailed(null);
     setRemoving(true);
-    await removePhonon();
+    try {
+      await removePhonon();
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : "Could not remove Phonon. Please try again.");
+    }
     setRemoving(false);
     onChange();
   };
@@ -68,6 +73,11 @@ export function PhononPhoneSetup({
         <PillButtonUI tone="white" size="sm" loading={removing} onClick={() => void remove()}>
           Remove Phonon
         </PillButtonUI>
+        {failed && (
+          <p className="text-sm text-red-600" role="alert">
+            {failed}
+          </p>
+        )}
       </div>
     );
   }

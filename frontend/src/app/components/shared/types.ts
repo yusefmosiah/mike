@@ -402,6 +402,11 @@ export interface Message {
    * next message that does ask sees it in the history.
    */
   noResponse?: boolean;
+  /**
+   * Said in voice mode (client only): the turn is sent with `voice: true`, so
+   * the server asks for a short answer meant to be spoken.
+   */
+  voice?: boolean;
 }
 
 /** A person on a shared thread: who sent a prompt, or who is generating. */
