@@ -27,7 +27,7 @@ let
   # ws-owner belongs to the owner (WORKSTATION_USER_IDS); ws-01 and up are the
   # pool the backend hands out, one per account (WORKSTATION_POOL in
   # staging.nix, recorded in workstation_assignments). Memory is not
-  # overcommitted: 6 + 4 x 3 GiB of the host's 31, and 6 more for the Choir
+  # overcommitted: 6 + 4 x 3 GiB of the host's 31, and 10 more for the Choir
   # agents VM (choir-agents.nix).
   workstations = {
     ws-owner = { index = 1; vcpu = 4; mem = 6144; homeMiB = 65536; directEgress = false; };

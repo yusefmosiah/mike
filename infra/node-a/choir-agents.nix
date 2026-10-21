@@ -35,9 +35,12 @@ let
   proxyUrl = "http://${subnet}.1:3128";
   tmpDir = "/home/agent/.tmp";
   stateDir = "/var/lib/microvms/${name}";
-  # 6 GiB beside the workstations' 18: 24 of the host's 31.
-  vcpu = 4;
-  mem = 6144;
+  # 10 GiB beside the workstations' 18: 28 of the host's 31 (owner,
+  # 2026-10-21). The workstations idle far below their 18, and if memory runs
+  # out the OOM killer picks the largest guest, this one. CPU is shared: the
+  # workstations sit near idle.
+  vcpu = 8;
+  mem = 10240;
   homeMiB = 131072;
   ownerKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILN3IIn6TzBBExWiJTJ7aDlA/LlEMXvjFlSfkKkV02TZ wiz@choiros-ovh";
 
@@ -187,7 +190,7 @@ let
           Type = "forking";
           User = "agent";
           WorkingDirectory = "/home/agent/go-choir";
-          ExecStart = "${pkgs.tmux}/bin/tmux new-session -d -s remote-control claude remote-control --spawn worktree --capacity 4";
+          ExecStart = "${pkgs.tmux}/bin/tmux new-session -d -s remote-control claude remote-control --spawn worktree --capacity 6";
           ExecStop = "${pkgs.tmux}/bin/tmux kill-session -t remote-control";
           Restart = "always";
           RestartSec = 60;
