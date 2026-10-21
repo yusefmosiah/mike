@@ -34,6 +34,9 @@ fi
 
 compose() { docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" "$@"; }
 
+# One stack at a time (scripts/one-stack.sh).
+"$REPO_DIR/scripts/one-stack.sh" "$PROJECT"
+
 if [[ "${STACK_TEST_FRESH:-}" == "1" ]]; then
     compose down -v --remove-orphans
 fi

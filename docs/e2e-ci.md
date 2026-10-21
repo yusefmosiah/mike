@@ -206,7 +206,17 @@ model to be *chosen*, such as creating a tabular review, find one for an
 account with no keys or saved router models. The stub above serves it; the
 LLM specs pick their own.
 
-If your development stack already holds ports 3000 and 3001, move the servers
+Only one of this repository's Docker stacks runs at a time. Playwright
+(locally), `npm run test:e2e:local` and `npm run test:stack` each run
+`scripts/one-stack.sh` first, which stops every other running Compose project
+named `mike` or `mike-*`: the development stack, `mike-e2e`,
+`mike-stack-test`. They are stopped, not removed, so their data stays;
+`docker compose -p <name> start` brings one back. Without this, Playwright
+reuses the development stack's frontend and backend on ports 3000 and 3001
+and tests that build instead of this checkout. Set `MIKE_ONE_STACK=0` to keep
+the others running.
+
+If something else already holds ports 3000 and 3001, move the servers
 Playwright starts: `E2E_API_PORT=3201 E2E_WEB_PORT=3100 npm run test:e2e`.
 Local storage's CORS rule (`docker/storage-cors.json`) allows the web app on
 3000 and on 3100, so uploads work with that override; another web port needs

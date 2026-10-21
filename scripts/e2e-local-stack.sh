@@ -41,6 +41,10 @@ export STORAGE_CONSOLE_PORT="${E2E_STORAGE_CONSOLE_PORT:-21491}"
 export AUTH_PUBLIC_URL="http://localhost:$AUTH_PORT"
 compose() { docker compose -p mike-e2e -f "$ROOT/docker-compose.yml" "$@"; }
 
+# One stack at a time: the development stack's servers on :3000 and :3001
+# would otherwise be reused by Playwright in place of this checkout's.
+"$ROOT/scripts/one-stack.sh" mike-e2e
+
 # Idempotent: if the stack is already up this is a no-op.
 compose up -d --wait db auth storage
 compose up createbucket >/dev/null
@@ -97,7 +101,7 @@ serve) cd "$BACKEND" && exec npm run dev ;;
 esac
 
 echo "NOTE: Playwright reuses servers already listening on :3000 and :3001."
-echo "Stop any that point at another stack (such as docker compose's) first."
+echo "Other Docker stacks were stopped above; stop any other dev server there first."
 
 cd "$ROOT"
 exec npx playwright test "$@"

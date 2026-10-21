@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -25,6 +26,12 @@ const WEB_PORT = process.env.E2E_WEB_PORT ?? "3000";
 const STUB_MODEL_PORT = process.env.E2E_STUB_MODEL_PORT ?? "21434";
 
 if (!process.env.CI) {
+    /* One Docker stack at a time, before the web servers below are checked:
+       Playwright would reuse the development stack's :3000 and :3001 in place
+       of this checkout's servers. Once, in the runner, not in each worker. */
+    if (process.env.TEST_WORKER_INDEX === undefined) {
+        execFileSync("bash", ["scripts/one-stack.sh", "mike-e2e"], { cwd: __dirname, stdio: "inherit" });
+    }
     process.env.AUTH_URL ??= `http://localhost:${process.env.E2E_AUTH_PORT ?? "21421"}`;
     process.env.AUTH_SERVICE_KEY ??=
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJtaWtlLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.uD8koYAMq_1hAlVmm1t5PYasyb98YME7G_UYVa5ME1Y";
