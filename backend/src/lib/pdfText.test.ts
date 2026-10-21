@@ -616,14 +616,13 @@ describe("extractPdfText scanned pages", () => {
       ocrMocks.recognize.mockImplementation(() => new Promise(() => {}));
 
       const extraction = extract(new ArrayBuffer(8));
-      for (
-        let tick = 0;
-        tick < 200 && ocrMocks.recognize.mock.calls.length === 0;
-        tick++
-      ) {
-        await vi.advanceTimersByTimeAsync(1);
-      }
-      expect(ocrMocks.recognize).toHaveBeenCalledTimes(1);
+      // The OCR modules load through real dynamic imports, which fake timers
+      // do not drive: wait in real time (advancing 1 ms of fake time per
+      // check), not for a fixed number of ticks a loaded runner can outlast.
+      await vi.waitFor(
+        () => expect(ocrMocks.recognize).toHaveBeenCalledTimes(1),
+        { timeout: 10_000, interval: 1 },
+      );
       await vi.advanceTimersByTimeAsync(30_000);
       const text = await extraction;
 
