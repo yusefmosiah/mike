@@ -95,7 +95,7 @@ let
         exec "$HOME/.local/bin/claude" "$@"
       '';
       tools = with pkgs; [
-        bashInteractive coreutils curl diffutils dolt file findutils gcc git
+        bashInteractive coreutils curl diffutils dolt file findutils gcc gh git
         gnugrep gnumake gnused gnutar go gzip icu jq nodejs_22 pkg-config
         pnpm procps python3 ripgrep tmux unzip which xz zip
       ];
