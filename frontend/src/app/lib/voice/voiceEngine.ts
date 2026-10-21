@@ -29,10 +29,17 @@ export interface VoiceConfig {
     /** A single turn is cut here, 60000 ms (at most 120000; a larger value falls back to the default). */
     maxTurnMs: number;
     /**
-     * Once the person's voice is learned, speech scoring below this against it
-     * is another voice and neither interrupts nor is sent, 0.35 (0 turns it off).
+     * The speaker model that decides whether speech is the person's, "wespeaker";
+     * "both" averages the two, "off" checks and learns nothing.
+     */
+    speakerModel: "wespeaker" | "campplus" | "both" | "off";
+    /**
+     * Once the person's voice is learned, speech with a WeSpeaker score below
+     * this is another voice and neither interrupts nor is sent, 0.35.
      */
     speakerThreshold: number;
+    /** The same for CAM++, whose scores run higher for every voice, 0.55. */
+    campplusThreshold: number;
 }
 
 export type VoiceEngineState = "listening" | "user-speaking" | "confirming-end" | "thinking" | "speaking";
@@ -60,7 +67,7 @@ export type VoiceEvent =
 export interface VoiceStatus {
     /** Every model voice mode needs is installed and this device can run it. */
     available: boolean;
-    /** Models still to download ("vad", "eou", "smart-turn", "speaker", "phonon", "fluid-mini"). */
+    /** Models still to download ("vad", "eou", "smart-turn", "speaker", "speaker-campplus", "phonon", "fluid-mini"). */
     missing: string[];
     /** Their total size. */
     downloadBytes: number;

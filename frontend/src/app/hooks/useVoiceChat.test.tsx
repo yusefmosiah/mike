@@ -173,6 +173,13 @@ describe("useVoiceChat", () => {
         expect(addListener).toHaveBeenCalledWith("MikeSpeech", "voiceEvent", expect.any(Function));
     });
 
+    it("passes the chosen speaker model to the engine", async () => {
+        window.localStorage.setItem("mike.voice.speakerModel.v1", "campplus");
+        await started();
+        expect(calls("voiceStart")).toEqual([{ config: { speakerModel: "campplus", pauseMs: 300 } }]);
+        window.localStorage.removeItem("mike.voice.speakerModel.v1");
+    });
+
     it("leaves out a voice that is not Phonon's", async () => {
         window.localStorage.setItem(VOICE_PREFERENCES_KEY, JSON.stringify({ speech: { engine: "device", voice: "com.apple.Samantha" } }));
         await started();

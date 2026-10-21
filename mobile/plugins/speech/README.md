@@ -68,9 +68,9 @@ re-armed on every `<EOU>`, `EouStream.swift`) and Smart Turn v3.2
 (`SmartTurn.swift`) feed the pure `TurnPolicy`; a committed turn is
 transcribed by the warm Fluid Speech Mini; answers are spoken clause by clause
 through Phonon into the engine's player node (`ClauseQueue.swift`,
-`VoiceEngine.swift`). The WeSpeaker speaker model learns the person's voice
+`VoiceEngine.swift`). The WeSpeaker and CAM++ speaker models learn the person's voice
 and keeps other voices from barging in or being sent (`SpeakerEmbedder.swift`,
-`SpeakerProfile.swift`). `voiceInstall` downloads VAD, the speaker model, EOU
+`SpeakerProfile.swift`). `voiceInstall` downloads VAD, the speaker models, EOU
 and Smart Turn from
 their upstream Hugging Face repositories at pinned commits, each file checked
 against its SHA-256 (`VoiceModels.swift`), into Application Support, plus
@@ -79,7 +79,7 @@ Phonon through its own install. The tests in `TurnPolicyTests`,
 `SpeakerProfileTests` need nothing;
 `VoiceModelIntegrationTests` runs the models on the fixture clip when
 `TEST_RUNNER_MIKE_VOICE_MODELS` names a directory holding them (`vad/`,
-`eou/`, `smart-turn/`, `speaker/`, laid out as the install writes them).
+`eou/`, `smart-turn/`, `speaker/`, `speaker-campplus/`, laid out as the install writes them).
 
 Rejections carry a `code`: `not-installed`, `unavailable`, `permission-denied`
 (speech recognition turned off, older iOS only), `unsupported-audio` (WebM,

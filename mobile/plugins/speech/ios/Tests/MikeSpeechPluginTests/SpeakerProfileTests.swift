@@ -2,7 +2,8 @@ import XCTest
 @testable import MikeSpeechPlugin
 
 /// Learning the person's voice and judging speech against it, on synthetic
-/// embeddings: a voice is a random direction, its turns that direction plus noise.
+/// embeddings: a voice is a random direction per model, its turns that
+/// direction plus noise.
 final class SpeakerProfileTests: XCTestCase {
     private struct Voices {
         private var seed: UInt64
@@ -14,24 +15,39 @@ final class SpeakerProfileTests: XCTestCase {
             return Float(Int64(bitPattern: seed >> 11) % 2001 - 1000) / 1000
         }
 
-        mutating func voice() -> [Float] { (0..<SpeakerProfile.dimensions).map { _ in next() } }
+        /// A voice as both models hear it.
+        mutating func voice() -> SpeakerEmbeddings {
+            Dictionary(uniqueKeysWithValues: SpeakerModelKind.allCases.map { kind in
+                (kind, (0..<kind.dimensions).map { _ in next() })
+            })
+        }
 
         /// A turn in `voice`: about 0.9 alike to it, 0.8 to its other turns.
-        mutating func turn(_ voice: [Float]) -> [Float] { voice.map { $0 + 0.5 * next() } }
+        mutating func turn(_ voice: SpeakerEmbeddings, noise: Float = 0.5) -> SpeakerEmbeddings {
+            voice.mapValues { vector in vector.map { $0 + noise * next() } }
+        }
     }
 
-    private let threshold: Float = 0.35
+    private let rule = SpeakerRule()
 
-    func testTheVoiceIsLearnedFromThreeAlikeTurnsOfAtLeastOneAndAHalfSeconds() {
+    private func learned(_ voices: inout Voices, _ person: SpeakerEmbeddings, rule: SpeakerRule? = nil) -> SpeakerProfile {
+        var profile = SpeakerProfile()
+        for _ in 0..<SpeakerProfile.enrolTurns { _ = profile.learn(voices.turn(person), audioMs: 2000, rule: rule ?? self.rule) }
+        return profile
+    }
+
+    func testTheVoiceIsLearnedFromThreeAlikeTurnsOfAtLeastOneAndAHalfSecondsInBothModels() {
         var voices = Voices(seed: 1)
         let person = voices.voice()
         var profile = SpeakerProfile()
-        XCTAssertFalse(profile.learn(voices.turn(person), audioMs: 1400, threshold: threshold), "too short to learn from")
-        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold))
-        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold))
+        XCTAssertFalse(profile.learn(voices.turn(person), audioMs: 1400, rule: rule), "too short to learn from")
+        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, rule: rule))
+        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, rule: rule))
         XCTAssertFalse(profile.learned)
-        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold))
+        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, rule: rule))
         XCTAssertTrue(profile.learned)
+        XCTAssertEqual(profile.centroid(.wespeaker)?.count, 256)
+        XCTAssertEqual(profile.centroid(.campplus)?.count, 192)
         XCTAssertTrue(profile.candidates.isEmpty)
     }
 
@@ -40,66 +56,91 @@ final class SpeakerProfileTests: XCTestCase {
         let person = voices.voice()
         let television = voices.voice()
         var profile = SpeakerProfile()
-        _ = profile.learn(voices.turn(television), audioMs: 3000, threshold: threshold)
-        _ = profile.learn(voices.turn(person), audioMs: 3000, threshold: threshold)
-        _ = profile.learn(voices.turn(television), audioMs: 3000, threshold: threshold)
+        _ = profile.learn(voices.turn(television), audioMs: 3000, rule: rule)
+        _ = profile.learn(voices.turn(person), audioMs: 3000, rule: rule)
+        _ = profile.learn(voices.turn(television), audioMs: 3000, rule: rule)
         XCTAssertFalse(profile.learned, "two alike turns are not enough")
-        _ = profile.learn(voices.turn(person), audioMs: 3000, threshold: threshold)
-        _ = profile.learn(voices.turn(person), audioMs: 3000, threshold: threshold)
+        _ = profile.learn(voices.turn(person), audioMs: 3000, rule: rule)
+        _ = profile.learn(voices.turn(person), audioMs: 3000, rule: rule)
         XCTAssertTrue(profile.learned)
-        guard case .match = profile.check(voices.turn(person), audioMs: 2000, threshold: threshold) else {
-            return XCTFail("the person's voice was learned")
-        }
-        guard case .mismatch = profile.check(voices.turn(television), audioMs: 2000, threshold: threshold) else {
-            return XCTFail("the television's was not")
-        }
+        XCTAssertEqual(profile.check(voices.turn(person), audioMs: 2000, rule: rule).outcome, .match)
+        XCTAssertEqual(profile.check(voices.turn(television), audioMs: 2000, rule: rule).outcome, .mismatch)
     }
 
     func testOnlyTheLastSixLearningTurnsAreKept() {
         var voices = Voices(seed: 3)
         var profile = SpeakerProfile()
-        for _ in 0..<8 { _ = profile.learn(voices.turn(voices.voice()), audioMs: 2000, threshold: threshold) }
+        for _ in 0..<8 { _ = profile.learn(voices.turn(voices.voice()), audioMs: 2000, rule: rule) }
         XCTAssertFalse(profile.learned)
         XCTAssertEqual(profile.candidates.count, SpeakerProfile.maxCandidates)
     }
 
-    func testSpeechIsNotJudgedBeforeTheVoiceIsLearnedOrWhenTooShortOrWhenOff() {
+    func testSpeechIsNotJudgedBeforeTheVoiceIsLearnedOrWhenTooShort() {
         var voices = Voices(seed: 4)
         let person = voices.voice()
-        var profile = SpeakerProfile()
-        XCTAssertEqual(profile.check(voices.voice(), audioMs: 5000, threshold: threshold), .unknown)
-        for _ in 0..<3 { _ = profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold) }
+        XCTAssertEqual(SpeakerProfile().check(voices.voice(), audioMs: 5000, rule: rule), .unknown)
+        let profile = learned(&voices, person)
         let stranger = voices.voice()
-        XCTAssertEqual(profile.check(stranger, audioMs: 900, threshold: threshold), .unknown)
-        XCTAssertEqual(profile.check(stranger, audioMs: 5000, threshold: 0), .unknown)
-        XCTAssertEqual(profile.check([1, 2, 3], audioMs: 5000, threshold: threshold), .unknown, "a malformed embedding")
-        guard case let .mismatch(similarity) = profile.check(stranger, audioMs: 1000, threshold: threshold) else {
-            return XCTFail("a stranger at a second of speech")
+        let short = profile.check(stranger, audioMs: 900, rule: rule)
+        XCTAssertEqual(short.outcome, .unknown)
+        XCTAssertEqual(short.similarities.count, 2, "scores are still given, for the log")
+        XCTAssertEqual(profile.check([.wespeaker: [1, 2, 3]], audioMs: 5000, rule: rule).outcome, .unknown, "a malformed embedding")
+        let verdict = profile.check(stranger, audioMs: 1000, rule: rule)
+        XCTAssertEqual(verdict.outcome, .mismatch)
+        XCTAssertLessThan(verdict.margin ?? 0, 0)
+    }
+
+    func testEachDeciderUsesItsOwnModelsAndThresholds() throws {
+        var voices = Voices(seed: 7)
+        let person = voices.voice()
+        let profile = learned(&voices, person)
+        // The person as WeSpeaker hears them; a stranger as CAM++ does.
+        let mixed: SpeakerEmbeddings = [.wespeaker: voices.turn(person)[.wespeaker]!, .campplus: voices.voice()[.campplus]!]
+        func verdict(_ decider: SpeakerDecider) -> SpeakerProfile.Verdict {
+            profile.check(mixed, audioMs: 2000, rule: SpeakerRule(decider: decider))
         }
-        XCTAssertLessThan(similarity, threshold)
+        XCTAssertEqual(verdict(.wespeaker).outcome, .match)
+        XCTAssertEqual(verdict(.campplus).outcome, .mismatch)
+        let wespeaker = try XCTUnwrap(verdict(.wespeaker).similarities[.wespeaker])
+        let campplus = try XCTUnwrap(verdict(.wespeaker).similarities[.campplus])
+        let both = try XCTUnwrap(verdict(.both).margin)
+        XCTAssertEqual(both, ((wespeaker - 0.35) + (campplus - 0.55)) / 2, accuracy: 1e-5, "the mean of the two margins")
+        let only: SpeakerEmbeddings = [.wespeaker: mixed[.wespeaker]!]
+        XCTAssertEqual(profile.check(only, audioMs: 2000, rule: SpeakerRule(decider: .both)).outcome, .match, "a missing model is left out")
+        XCTAssertEqual(profile.check(only, audioMs: 2000, rule: SpeakerRule(decider: .campplus)).outcome, .unknown)
     }
 
     func testALearnedVoiceAdaptsOnlyFromCloseMatches() {
         var voices = Voices(seed: 5)
         let person = voices.voice()
-        var profile = SpeakerProfile()
-        for _ in 0..<3 { _ = profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold) }
-        let learned = profile.centroid
-        XCTAssertFalse(profile.learn(voices.voice(), audioMs: 2000, threshold: threshold), "a stranger teaches nothing")
-        XCTAssertEqual(profile.centroid, learned)
-        XCTAssertFalse(profile.learn(voices.turn(person), audioMs: 1000, threshold: threshold), "nor a short turn")
-        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold))
-        XCTAssertNotEqual(profile.centroid, learned)
-        let length = profile.centroid!.reduce(0) { $0 + $1 * $1 }.squareRoot()
+        var profile = learned(&voices, person)
+        let before = profile.centroid(.wespeaker)
+        XCTAssertFalse(profile.learn(voices.voice(), audioMs: 2000, rule: rule), "a stranger teaches nothing")
+        XCTAssertEqual(profile.centroid(.wespeaker), before)
+        XCTAssertFalse(profile.learn(voices.turn(person), audioMs: 1000, rule: rule), "nor a short turn")
+        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, rule: rule))
+        XCTAssertNotEqual(profile.centroid(.wespeaker), before)
+        let length = profile.centroid(.wespeaker)!.reduce(0) { $0 + $1 * $1 }.squareRoot()
         XCTAssertEqual(length, 1, accuracy: 1e-4)
     }
 
+    func testAModelMissingWhenTheVoiceWasLearnedStartsFromALaterMatch() {
+        var voices = Voices(seed: 8)
+        let person = voices.voice()
+        var profile = SpeakerProfile()
+        for _ in 0..<3 { _ = profile.learn(voices.turn(person).filter { $0.key == .wespeaker }, audioMs: 2000, rule: rule) }
+        XCTAssertNil(profile.centroid(.campplus))
+        XCTAssertTrue(profile.learn(voices.turn(person, noise: 0.2), audioMs: 2000, rule: rule))
+        XCTAssertEqual(profile.centroid(.campplus)?.count, 192)
+    }
+
     func testCosineAndNormalisationRejectUnusableVectors() {
-        let zero = [Float](repeating: 0, count: SpeakerProfile.dimensions)
+        let zero = [Float](repeating: 0, count: 256)
         var unit = zero
         unit[0] = 1
         XCTAssertNil(SpeakerProfile.normalised(zero))
-        XCTAssertNil(SpeakerProfile.normalised([1, 0]))
+        XCTAssertNil(SpeakerProfile.normalised([1, 0], kind: .wespeaker))
+        XCTAssertNil(SpeakerProfile.cosine(unit, [1, 0]), "different lengths")
         var nan = unit
         nan[1] = .nan
         XCTAssertNil(SpeakerProfile.cosine(unit, nan))
@@ -112,11 +153,11 @@ final class SpeakerProfileTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         XCTAssertEqual(SpeakerStore.load(from: url), SpeakerProfile(), "nothing saved is an empty profile")
         var voices = Voices(seed: 6)
-        let person = voices.voice()
-        var profile = SpeakerProfile()
-        for _ in 0..<3 { _ = profile.learn(voices.turn(person), audioMs: 2000, threshold: threshold) }
+        let profile = learned(&voices, voices.voice())
         SpeakerStore.save(profile, to: url)
         XCTAssertEqual(SpeakerStore.load(from: url), profile)
+        try Data(#"{"version":1,"centroid":[1]}"#.utf8).write(to: url)
+        XCTAssertEqual(SpeakerStore.load(from: url), SpeakerProfile(), "an older profile is learned again")
         try Data("not json".utf8).write(to: url)
         XCTAssertEqual(SpeakerStore.load(from: url), SpeakerProfile(), "a damaged file is forgotten")
         SpeakerStore.remove(at: url)

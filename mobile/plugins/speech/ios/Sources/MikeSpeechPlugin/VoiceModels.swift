@@ -15,6 +15,8 @@ import Foundation
 /// - Smart Turn v3.2 (BSD-2-Clause), aufklarer's Core ML port.
 /// - WeSpeaker ResNet34-LM (CC BY 4.0, pyannote's VoxCeleb model),
 ///   FluidAudio's Core ML conversion: the voice voice mode listens to.
+/// - CAM++ (FunASR's model licence; Apache 2.0 on ModelScope), Fluid
+///   Inference's Core ML conversion: the same, to compare and combine.
 ///
 /// Nothing is uploaded; only these public files are fetched, and no user
 /// content is sent.
@@ -108,8 +110,32 @@ enum VoiceModels {
             File(path: "wespeaker_v2.mlmodelc/weights/weight.bin", size: 7_243_904, sha256: "34004f6798d35cad7071e2fdc67e63faaa782f53697e1cb49bcb452cf81ae151"),
         ])
 
+    static let speakerCampplus = Model(
+        name: .speakerCampplus,
+        repository: "FluidInference/campplus-coreml",
+        revision: "321b18e270a4e19e69ef4a13d179b4eac07cec6a",
+        folder: "",
+        files: [
+            File(path: "CamPlusPlus.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "be20481d48572c431a3ed23606956706d4e224a0c7994ae1ab1920813edafe5f"),
+            File(path: "CamPlusPlus.mlmodelc/coremldata.bin", size: 337, sha256: "800dc33d00a27621ead3e315fe93ec15a1800aa5d4a111c064cb1c44aeebbf3a"),
+            File(path: "CamPlusPlus.mlmodelc/model.mil", size: 971_728, sha256: "8605afe81896c1c23d1670132817b580dac9d3789b5805a68c6463412c50c52b"),
+            File(path: "CamPlusPlus.mlmodelc/weights/weight.bin", size: 13_854_912, sha256: "058c317b6a768cac30fcf89b46676d7df1aa1915357c44ecc7ada4e5b7c11590"),
+            File(path: "CamPlusPreprocessor.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "11e99d94be389165098b54c5de6f8745ed44de70f6fd294a20ca9548c626df77"),
+            File(path: "CamPlusPreprocessor.mlmodelc/coremldata.bin", size: 330, sha256: "64fb697bb216eddb9f691250e45fee44b2ef87b52b047ede0063fe7275571f00"),
+            File(path: "CamPlusPreprocessor.mlmodelc/model.mil", size: 9364, sha256: "c551054a2a8f6ad2dba60ca9fd3512364b1c4114ea4d612bbd90d162487ecdb1"),
+            File(path: "CamPlusPreprocessor.mlmodelc/weights/weight.bin", size: 1_778_432, sha256: "09f13054339581673c8b5745954471945a61fea54441b6e55f934f041611143a"),
+        ])
+
+    /// The speaker model of each kind.
+    static func speakerModel(_ kind: SpeakerModelKind) -> Model {
+        switch kind {
+        case .wespeaker: return speaker
+        case .campplus: return speakerCampplus
+        }
+    }
+
     /// The downloaded models, in install order (smallest first).
-    static let downloaded: [Model] = [vad, speaker, smartTurn, eou]
+    static let downloaded: [Model] = [vad, speaker, speakerCampplus, smartTurn, eou]
 
     /// Phonon 31m's bundle at the commit PhononVoice pins (its bundle.json's total).
     static let phononBytes = 162_877_586
@@ -219,30 +245,20 @@ enum VoiceModels {
     /// Loads each downloaded model once so Core ML prepares it for this phone
     /// as part of the install, not on the first conversation.
     static func compile(_ model: Model) throws {
-        let configuration = MLModelConfiguration()
         // Matches how voice mode loads it (see VoiceEngine.start).
-        configuration.computeUnits = computeUnits(model.name)
-        let compiled: [String]
+        let compiled: [(name: String, units: MLComputeUnits)]
         switch model.name {
-        case .vad: compiled = [vadFile]
-        case .smartTurn: compiled = [SmartTurn.modelFile]
-        case .eou: compiled = ["streaming_encoder.mlmodelc", "decoder.mlmodelc", "joint_decision.mlmodelc"]
-        case .speaker: compiled = [SpeakerEmbedder.modelFile]
+        case .vad: compiled = [(vadFile, .cpuAndNeuralEngine)]
+        case .smartTurn: compiled = [(SmartTurn.modelFile, .cpuAndNeuralEngine)]
+        case .eou: compiled = ["streaming_encoder.mlmodelc", "decoder.mlmodelc", "joint_decision.mlmodelc"].map { ($0, .cpuAndGPU) }
+        case .speaker: compiled = SpeakerEmbedder.files(.wespeaker)
+        case .speakerCampplus: compiled = SpeakerEmbedder.files(.campplus)
         default: compiled = []
         }
-        for name in compiled {
-            _ = try MLModel(contentsOf: model.directory.appendingPathComponent(name), configuration: configuration)
-        }
-    }
-
-    /// Where each model runs. The EOU streaming encoder fails the Neural
-    /// Engine compiler on device (ANECCompile FAILED) and the fallback can
-    /// stall; the speaker model computes its own filterbank, which the Neural
-    /// Engine cannot take whole, so both run on the GPU.
-    static func computeUnits(_ name: VoiceModelName) -> MLComputeUnits {
-        switch name {
-        case .eou, .speaker: return .cpuAndGPU
-        default: return .cpuAndNeuralEngine
+        for file in compiled {
+            let configuration = MLModelConfiguration()
+            configuration.computeUnits = file.units
+            _ = try MLModel(contentsOf: model.directory.appendingPathComponent(file.name), configuration: configuration)
         }
     }
 

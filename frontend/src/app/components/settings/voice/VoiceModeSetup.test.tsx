@@ -37,7 +37,7 @@ import { VoiceModeSetup } from "./VoiceModeSetup";
 const INSTALLED: VoiceStatus = { available: true, missing: [], downloadBytes: 0, speakerLearned: false };
 const MISSING: VoiceStatus = {
     available: false,
-    missing: ["vad", "eou", "smart-turn", "speaker"],
+    missing: ["vad", "eou", "smart-turn", "speaker", "speaker-campplus"],
     downloadBytes: 42e6,
     speakerLearned: false,
 };
@@ -144,6 +144,19 @@ describe("VoiceModeSetup", () => {
         fireEvent.click(screen.getByRole("button", { name: "Forget my voice" }));
         expect(await screen.findByText(/learns your voice from your first few turns/)).toBeInTheDocument();
         expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("keeps the model that checks voices, marked as pressed", async () => {
+        engine.status.mockResolvedValue(INSTALLED);
+        render(<VoiceModeSetup />);
+        const group = await screen.findByRole("group", { name: "Check voices with" });
+        expect(group.querySelectorAll("button")).toHaveLength(4);
+        expect(screen.getByRole("button", { name: "WeSpeaker" })).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(screen.getByRole("button", { name: "Both" }));
+        expect(screen.getByRole("button", { name: "Both" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByRole("button", { name: "WeSpeaker" })).toHaveAttribute("aria-pressed", "false");
+        expect(window.localStorage.getItem("mike.voice.speakerModel.v1")).toBe("both");
+        window.localStorage.clear();
     });
 
     it("leaves out the voice row in an app build that cannot forget it", async () => {

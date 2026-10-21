@@ -16,9 +16,9 @@ listener, `voiceEvent`, with a `type` field.
 
 | Method | Arguments | Resolves |
 |---|---|---|
-| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number, speakerLearned: boolean }`. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"speaker"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size; `speakerLearned` means the person's voice has been learned and other voices are ignored. |
+| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number, speakerLearned: boolean }`. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"speaker"`, `"speaker-campplus"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size; `speakerLearned` means the person's voice has been learned and other voices are ignored. |
 | `voiceInstall` | — | `{ available }` once the missing models are downloaded and compiled. Progress arrives as `voiceEvent` `{ type: "install", fraction }`. |
-| `voiceRemove` | — | The `voiceStatus` payload, after deleting the VAD, EOU, Smart Turn and speaker models and the learned voice, and cancelling an install in progress. Phonon keeps its own `remove`. Rejects with `busy` while voice mode runs. |
+| `voiceRemove` | — | The `voiceStatus` payload, after deleting the VAD, EOU, Smart Turn and both speaker models and the learned voice, and cancelling an install in progress. Phonon keeps its own `remove`. Rejects with `busy` while voice mode runs. |
 | `voiceForgetSpeaker` | — | The `voiceStatus` payload, after forgetting the learned voice; it is learned again from the next turns. Works while voice mode runs. |
 | `voiceMicrophoneModes` | — | Once the system's microphone modes (Voice Isolation, Wide Spectrum) are shown. iOS lists them only while the app holds the microphone, so the web app offers this during voice mode. |
 | `voiceStart` | `{ config: VoiceConfig, voice?: string }` | When the engine is listening. Asks for the microphone if needed. Loads and warms every model. |
@@ -39,7 +39,9 @@ interface VoiceConfig {
   bargeInWords: number;        // 2    words not in the clause being played
   falseStartMs: number;        // 1500 speech without words: resume playback
   maxTurnMs: number;           // 60000 a single turn is cut here (at most 120000; larger falls back to the default)
-  speakerThreshold: number;    // 0.35 below this against the learned voice, speech is another voice (0 turns the check off)
+  speakerModel: "wespeaker" | "campplus" | "both" | "off"; // "wespeaker" decides whether speech is the person's ("both" averages the margins; "off" checks and learns nothing)
+  speakerThreshold: number;    // 0.35 below this WeSpeaker score against the learned voice, speech is another voice
+  campplusThreshold: number;   // 0.55 the same for CAM++
 }
 ```
 

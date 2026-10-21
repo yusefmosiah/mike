@@ -8,6 +8,7 @@ import { ClauseCutter, type Clause } from "@/app/lib/voice/clauses";
 import { currentDictationVocabulary, loadUserVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 import { SpeakableStream } from "@/app/lib/voice/speakable";
+import { speakerModelConfig } from "@/app/lib/voice/speakerCheck";
 import { spokenAnswer } from "@/app/lib/voice/spokenAnswer";
 import { spokenPrefix } from "@/app/lib/voice/spokenPrefix";
 import { correctWithVocabulary } from "@/app/lib/voice/vocabulary";
@@ -446,7 +447,7 @@ export function useVoiceChat({
             const chosen = loadVoicePreferences().speech.voice;
             try {
                 await voiceStart({
-                    config: { ...latest.current.config },
+                    config: { ...speakerModelConfig(), ...latest.current.config },
                     ...(isPhononVoice(chosen) ? { voice: chosen } : {}),
                 });
             } catch (startError) {

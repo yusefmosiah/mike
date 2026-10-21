@@ -79,7 +79,7 @@ enum VoiceMode {
         try await Installer.shared.run(progress: progress)
     }
 
-    /// Deletes the downloaded voice models (VAD, speaker, EOU, Smart Turn)
+    /// Deletes the downloaded voice models (VAD, the speaker models, EOU, Smart Turn)
     /// and the learned voice, cancelling an install. Refused (`busy`) while
     /// voice mode runs.
     static func remove() async {
@@ -196,7 +196,7 @@ final class ListeningPipeline: @unchecked Sendable {
     private let vad: VadManager
     private var vadState: VadStreamState
     private let smartTurn: SmartTurn.Model?
-    private let speaker: SpeakerEmbedder?
+    private let speaker: SpeakerModels?
     private var ring: SampleRing
     private var vadPending: [Float] = []
     private var vadStart = 0
@@ -208,7 +208,7 @@ final class ListeningPipeline: @unchecked Sendable {
     private var peakSpeech: Float = 0
     private var lastReportMs = 0
 
-    init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, speaker: SpeakerEmbedder?, config: VoiceConfig) {
+    init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, speaker: SpeakerModels?, config: VoiceConfig) {
         self.vad = vad
         self.eou = eou
         self.smartTurn = smartTurn
@@ -269,17 +269,18 @@ final class ListeningPipeline: @unchecked Sendable {
 
     /// The voice embedding of `fromMs..<toMs`, widened to at least the last
     /// 1.5 s, or nil if it cannot run.
-    func speakerEmbedding(fromMs: Int, toMs: Int) -> (embedding: [Float], audioMs: Int)? {
+    func speakerEmbedding(fromMs: Int, toMs: Int) -> SpeakerHeard? {
         let to = min(total, toMs * 16)
         let from = max(0, min(fromMs * 16, to - Self.speakerCheckSamples))
         let samples = ring.slice(from: from, to: to)
         return speakerEmbedding(of: samples)
     }
 
-    /// The voice embedding of `samples`, or nil if it cannot run.
-    func speakerEmbedding(of samples: [Float]) -> (embedding: [Float], audioMs: Int)? {
-        guard let speaker, let embedding = try? speaker.embedding(of: samples) else { return nil }
-        return (embedding, samples.count / 16)
+    /// Each speaker model's embedding of `samples`, or nil if none can run.
+    func speakerEmbedding(of samples: [Float]) -> SpeakerHeard? {
+        guard let speaker else { return nil }
+        let embeddings = speaker.embeddings(of: samples)
+        return embeddings.isEmpty ? nil : SpeakerHeard(embeddings: embeddings, audioMs: samples.count / 16)
     }
 
     /// The committed utterance for the final pass.
@@ -287,6 +288,12 @@ final class ListeningPipeline: @unchecked Sendable {
         let range = UtteranceBounds.samples(startMs: commit.startMs, endMs: commit.endMs, available: total)
         return ring.slice(from: range.lowerBound, to: range.upperBound)
     }
+}
+
+/// Speech as the speaker models heard it.
+struct SpeakerHeard: Sendable {
+    let embeddings: SpeakerEmbeddings
+    let audioMs: Int
 }
 
 /// Counts microphone samples dropped by the bounded stream.
@@ -373,10 +380,13 @@ actor VoiceEngine {
     private var config = VoiceConfig.defaults
     /// The person's voice (loaded at start, saved as it is learned).
     private var speaker = SpeakerProfile()
-    private var speakerModelLoaded = false
+    private var speakerKinds: [SpeakerModelKind] = []
 
     /// Whether speech is checked against the person's voice.
-    private var checksSpeaker: Bool { speakerModelLoaded && speaker.learned && config.speakerThreshold > 0 }
+    private var checksSpeaker: Bool {
+        guard let decider = config.speakerModel, speaker.learned else { return false }
+        return decider.kinds.contains { speakerKinds.contains($0) && speaker.centroid($0) != nil }
+    }
 
     /// Forgets the person's voice: it is learned again from the next turns.
     func forgetSpeaker() {
@@ -427,7 +437,7 @@ actor VoiceEngine {
         var heldPhonon = false
         let pipeline: ListeningPipeline
         let tts: Phonon
-        var hasSpeakerModel = false
+        var speakerKinds: [SpeakerModelKind] = []
         do {
             let units = MLComputeUnits.cpuAndNeuralEngine
             let vadConfiguration = MLModelConfiguration()
@@ -451,10 +461,21 @@ actor VoiceEngine {
             VoiceMode.log.info("voice start: smart turn at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             // Without it every voice is taken as the person's, as before.
-            let speakerModel = try? SpeakerEmbedder(
-                directory: VoiceModels.speaker.directory, computeUnits: VoiceModels.computeUnits(.speaker))
-            _ = try? speakerModel?.embedding(of: [Float](repeating: 0, count: 1600))
-            if speakerModel == nil { VoiceMode.log.error("voice start: speaker model failed to load") }
+            // Both speaker models load whichever decides, so both keep
+            // learning and both scores are logged; one that fails is left out.
+            var embedders: [SpeakerEmbedder] = []
+            if config.speakerModel != nil {
+                for kind in SpeakerModelKind.allCases {
+                    do {
+                        let embedder = try SpeakerEmbedder(kind: kind, directory: VoiceModels.speakerModel(kind).directory)
+                        _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600))
+                        embedders.append(embedder)
+                    } catch {
+                        VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) failed to load")
+                    }
+                }
+            }
+            let speakerModels = embedders.isEmpty ? nil : SpeakerModels(embedders)
             VoiceMode.log.info("voice start: speaker at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
@@ -469,8 +490,8 @@ actor VoiceEngine {
             _ = try? await tts.synthesize("Ready.")
             VoiceMode.log.info("voice start: phonon warm at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
-            pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: speakerModel, config: config)
-            hasSpeakerModel = speakerModel != nil
+            pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: speakerModels, config: config)
+            speakerKinds = speakerModels?.kinds ?? []
         } catch {
             if heldFluid { await FluidSpeechMini.Runtime.shared.endLive() }
             if heldPhonon { await PhononVoice.Runtime.shared.endVoice() }
@@ -512,9 +533,10 @@ actor VoiceEngine {
         policy.echoCancelled = audio.echoCancelled
         self.config = config
         speaker = SpeakerStore.load()
-        speakerModelLoaded = hasSpeakerModel
+        self.speakerKinds = speakerKinds
         policy.checksSpeaker = checksSpeaker
-        VoiceMode.log.info("voice start: speaker check \(self.checksSpeaker ? "on" : (self.speaker.learned ? "off" : "learning"), privacy: .public)")
+        let speakerState = config.speakerModel == nil ? "off" : (checksSpeaker ? "on" : (speaker.learned ? "unavailable" : "learning"))
+        VoiceMode.log.info("voice start: speaker check \(speakerState, privacy: .public), decided by \(config.speakerModel?.rawValue ?? "nothing", privacy: .public), models \(speakerKinds.map(\.rawValue).joined(separator: "+"), privacy: .public)")
         queue = ClauseQueue()
         pendingActions = []
         metrics = nil
@@ -634,14 +656,22 @@ actor VoiceEngine {
     }
 
     private func speakerChecked(
-        requestId: Int, heard: (embedding: [Float], audioMs: Int)?, milliseconds: Double, generation: Int
+        requestId: Int, heard: SpeakerHeard?, milliseconds: Double, generation: Int
     ) -> [LoopAction] {
         guard generation == self.generation else { return [] }
-        let verdict = heard.map { speaker.check($0.embedding, audioMs: $0.audioMs, threshold: config.speakerThreshold) } ?? .unknown
-        let match: Bool
-        if case .mismatch = verdict { match = false } else { match = true }
-        VoiceMode.log.info("voice: barge-in speaker check \(match ? "same" : "other", privacy: .public) voice, similarity \(verdict.similarity ?? -1, format: .fixed(precision: 2), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(milliseconds), privacy: .public) ms")
+        let verdict = heard.map { speaker.check($0.embeddings, audioMs: $0.audioMs, rule: config.speakerRule) } ?? .unknown
+        let match = verdict.outcome != .mismatch
+        VoiceMode.log.info("voice: barge-in speaker check \(match ? "same" : "other", privacy: .public) voice, \(Self.describe(verdict), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(milliseconds), privacy: .public) ms")
         return apply([.speakerChecked(requestId: requestId, match: match)], generation: generation)
+    }
+
+    /// Each model's score and the decision's margin, for the log (numbers only).
+    private static func describe(_ verdict: SpeakerProfile.Verdict) -> String {
+        var parts = SpeakerModelKind.allCases.compactMap { kind in
+            verdict.similarities[kind].map { "\(kind.rawValue) \(String(format: "%.2f", $0))" }
+        }
+        if let margin = verdict.margin { parts.append("margin \(String(format: "%+.2f", margin))") }
+        return parts.isEmpty ? "no scores" : parts.joined(separator: ", ")
     }
 
     private func fail(generation: Int) async {
@@ -695,15 +725,15 @@ actor VoiceEngine {
     }
 
     private func finalPass(
-        _ commit: TurnPolicy.Commit, audio samples: [Float], heard: (embedding: [Float], audioMs: Int)?,
+        _ commit: TurnPolicy.Commit, audio samples: [Float], heard: SpeakerHeard?,
         checkMs: Double, generation: Int
     ) async {
         guard generation == self.generation, running else { return }
-        let verdict = heard.map { speaker.check($0.embedding, audioMs: $0.audioMs, threshold: config.speakerThreshold) } ?? .unknown
-        if let similarity = verdict.similarity {
-            VoiceMode.log.info("voice: turn speaker check similarity \(similarity, format: .fixed(precision: 2), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(checkMs), privacy: .public) ms")
+        let verdict = heard.map { speaker.check($0.embeddings, audioMs: $0.audioMs, rule: config.speakerRule) } ?? .unknown
+        if !verdict.similarities.isEmpty {
+            VoiceMode.log.info("voice: turn speaker check \(verdict.outcome == .mismatch ? "other" : "same", privacy: .public) voice, \(Self.describe(verdict), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(checkMs), privacy: .public) ms")
         }
-        if case .mismatch = verdict, checksSpeaker {
+        if verdict.outcome == .mismatch, checksSpeaker {
             VoiceMode.log.info("voice: turn ignored, another voice")
             send(.ignored(.otherVoice))
             carryOut(policy.handle(.turnDiscarded))
@@ -733,10 +763,10 @@ actor VoiceEngine {
     }
 
     /// Learns the person's voice from a turn sent as theirs.
-    private func learnSpeaker(_ heard: (embedding: [Float], audioMs: Int)) {
-        guard config.speakerThreshold > 0 else { return }
+    private func learnSpeaker(_ heard: SpeakerHeard) {
+        guard config.speakerModel != nil else { return }
         let wasLearned = speaker.learned
-        guard speaker.learn(heard.embedding, audioMs: heard.audioMs, threshold: config.speakerThreshold) else { return }
+        guard speaker.learn(heard.embeddings, audioMs: heard.audioMs, rule: config.speakerRule) else { return }
         SpeakerStore.save(speaker)
         if speaker.learned, !wasLearned {
             VoiceMode.log.info("voice: speaker profile learned")

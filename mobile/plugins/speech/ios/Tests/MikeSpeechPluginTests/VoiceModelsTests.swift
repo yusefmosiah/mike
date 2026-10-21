@@ -60,8 +60,9 @@ final class VoiceModelsTests: XCTestCase {
             .eou: "FluidInference/parakeet-realtime-eou-120m-coreml",
             .smartTurn: "aufklarer/Smart-Turn-v3.2-CoreML",
             .speaker: "FluidInference/speaker-diarization-coreml",
+            .speakerCampplus: "FluidInference/campplus-coreml",
         ]
-        XCTAssertEqual(VoiceModels.downloaded.count, 4)
+        XCTAssertEqual(VoiceModels.downloaded.count, 5)
         for model in VoiceModels.downloaded {
             XCTAssertEqual(model.repository, expected[model.name])
             XCTAssertNotNil(model.revision.range(of: "^[0-9a-f]{40}$", options: .regularExpression))
@@ -76,8 +77,14 @@ final class VoiceModelsTests: XCTestCase {
         XCTAssertTrue(VoiceModels.vad.files.allSatisfy { $0.path.hasPrefix(VoiceModels.vadFile + "/") })
         XCTAssertTrue(VoiceModels.smartTurn.files.contains { $0.path == "smart_turn.mlmodelc/weights/weight.bin" })
         XCTAssertEqual(VoiceModels.eou.totalBytes, 224_238_270)
-        XCTAssertTrue(VoiceModels.speaker.files.allSatisfy { $0.path.hasPrefix(SpeakerEmbedder.modelFile + "/") })
+        for kind in SpeakerModelKind.allCases {
+            let model = VoiceModels.speakerModel(kind)
+            let compiled = SpeakerEmbedder.files(kind).map(\.name)
+            XCTAssertTrue(model.files.allSatisfy { file in compiled.contains { file.path.hasPrefix($0 + "/") } }, kind.rawValue)
+            for name in compiled { XCTAssertTrue(model.files.contains { $0.path == "\(name)/weights/weight.bin" }, name) }
+        }
         XCTAssertEqual(VoiceModels.speaker.totalBytes, 7_954_144)
+        XCTAssertEqual(VoiceModels.speakerCampplus.totalBytes, 16_615_589)
     }
 
     func testFilesAreKeptOnlyWhenSizeAndHashMatch() throws {

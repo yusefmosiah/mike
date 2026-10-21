@@ -15,6 +15,8 @@ final class VoiceContractTests: XCTestCase {
         XCTAssertEqual(config.falseStartMs, 1500)
         XCTAssertEqual(config.maxTurnMs, 60_000)
         XCTAssertEqual(config.speakerThreshold, 0.35, accuracy: 1e-6)
+        XCTAssertEqual(config.campplusThreshold, 0.55, accuracy: 1e-6)
+        XCTAssertEqual(config.speakerModel, .wespeaker)
         XCTAssertEqual(VoiceConfig(nil), .defaults)
         XCTAssertEqual(VoiceConfig([:]), .defaults)
     }
@@ -23,12 +25,17 @@ final class VoiceContractTests: XCTestCase {
         let config = VoiceConfig([
             "vadThreshold": 0.6, "pauseMs": 300, "smartTurnThreshold": 0.7, "maxSilenceMs": 2500,
             "bargeInSpeechMs": 400, "bargeInWords": 3, "falseStartMs": 1200, "maxTurnMs": 30_000,
-            "speakerThreshold": 0.45,
+            "speakerThreshold": 0.45, "campplusThreshold": 0.6, "speakerModel": "both",
         ])
         XCTAssertEqual(config.speakerThreshold, 0.45, accuracy: 1e-6)
-        XCTAssertEqual(VoiceConfig(["speakerThreshold": 0]).speakerThreshold, 0, "0 turns the check off")
+        XCTAssertEqual(config.campplusThreshold, 0.6, accuracy: 1e-6)
+        XCTAssertEqual(config.speakerModel, .both)
+        XCTAssertEqual(config.speakerRule, SpeakerRule(decider: .both, thresholds: [.wespeaker: 0.45, .campplus: 0.6]))
+        XCTAssertEqual(VoiceConfig(["speakerModel": "campplus"]).speakerModel, .campplus)
+        XCTAssertNil(VoiceConfig(["speakerModel": "off"]).speakerModel, "off checks nothing")
+        XCTAssertEqual(VoiceConfig(["speakerModel": "ecapa"]).speakerModel, .wespeaker, "an unknown model keeps the default")
+        XCTAssertEqual(VoiceConfig(["speakerThreshold": 0]).speakerThreshold, 0.35)
         XCTAssertEqual(VoiceConfig(["speakerThreshold": 1]).speakerThreshold, 0.35)
-        XCTAssertEqual(VoiceConfig(["speakerThreshold": -0.1]).speakerThreshold, 0.35)
         XCTAssertEqual(config.vadThreshold, 0.6, accuracy: 1e-6)
         XCTAssertEqual(config.pauseMs, 300)
         XCTAssertEqual(config.smartTurnThreshold, 0.7, accuracy: 1e-6)
@@ -93,7 +100,7 @@ final class VoiceContractTests: XCTestCase {
     }
 
     func testModelNamesAreTheContractsStrings() {
-        XCTAssertEqual(VoiceModelName.allCases.map(\.rawValue), ["vad", "eou", "smart-turn", "speaker", "phonon", "fluid-mini"])
+        XCTAssertEqual(VoiceModelName.allCases.map(\.rawValue), ["vad", "eou", "smart-turn", "speaker", "speaker-campplus", "phonon", "fluid-mini"])
     }
 
     func testStatusPayloadHasTheContractsFields() {

@@ -1,106 +1,204 @@
 import Foundation
 
+/// The speaker models voice mode can check a voice with. Each turns speech
+/// into an embedding; two stretches of one voice score high on cosine
+/// similarity. Their scores are not on one scale, so each has its own threshold.
+enum SpeakerModelKind: String, CaseIterable, Codable, Sendable {
+    /// WeSpeaker ResNet34-LM (VoxCeleb, English and more): 256 numbers.
+    case wespeaker
+    /// CAM++ (FunASR, trained on Mandarin): 192 numbers.
+    case campplus
+
+    var dimensions: Int {
+        switch self {
+        case .wespeaker: return 256
+        case .campplus: return 192
+        }
+    }
+
+    /// Two learning turns at least this alike are the same voice: above the
+    /// highest different-voice score seen at 1.5 s and more of speech
+    /// (WeSpeaker 0.47, CAM++ 0.62 on synthetic voices).
+    var candidateSimilarity: Float {
+        switch self {
+        case .wespeaker: return 0.5
+        case .campplus: return 0.68
+        }
+    }
+}
+
+/// Which model decides whether speech is the person's.
+enum SpeakerDecider: String, Equatable, Sendable {
+    case wespeaker
+    case campplus
+    /// Both, each score measured from its own threshold and the two averaged.
+    case both
+
+    var kinds: [SpeakerModelKind] {
+        switch self {
+        case .wespeaker: return [.wespeaker]
+        case .campplus: return [.campplus]
+        case .both: return [.wespeaker, .campplus]
+        }
+    }
+}
+
+/// How speech is judged: the decider and each model's threshold.
+struct SpeakerRule: Equatable, Sendable {
+    var decider: SpeakerDecider = .wespeaker
+    var thresholds: [SpeakerModelKind: Float] = [.wespeaker: 0.35, .campplus: 0.55]
+
+    func threshold(_ kind: SpeakerModelKind) -> Float { thresholds[kind] ?? 0.5 }
+}
+
+/// One stretch of speech as each model heard it (unit length), by model.
+typealias SpeakerEmbeddings = [SpeakerModelKind: [Float]]
+
 /// The voice voice mode listens to (docs/voice-chat.md, "Other voices"). It is
-/// learned from the person's first turns: a 256-number WeSpeaker embedding of
-/// each turn, kept on the phone. Once learned, a turn or a barge-in in a
-/// voice too unlike it (a TV, someone else in the room, the answer's own echo
-/// on a Mac speaker) is not taken as the person's.
+/// learned from the person's first turns, as each speaker model's embedding,
+/// kept on the phone. Once learned, a turn or a barge-in in a voice too
+/// unlike it (a TV, someone else in the room, the answer's own echo on a Mac
+/// speaker) is not taken as the person's.
 ///
 /// Pure: no audio and no model, so its rules are tested on their own.
 struct SpeakerProfile: Codable, Equatable {
-    static let dimensions = 256
     /// Turns that must agree with one another before the voice is learned.
     static let enrolTurns = 3
-    /// Turns kept while learning; a voice heard only once in them (a TV, a
-    /// visitor) cannot outvote the person's.
+    /// Turns kept while learning; a voice heard only once or twice in them (a
+    /// TV, a visitor) cannot outvote the person's.
     static let maxCandidates = 6
-    /// Two learning turns at least this alike are the same voice. Above the
-    /// highest different-voice score seen at 1.5 s and more of speech.
-    static let candidateSimilarity: Float = 0.5
     /// Shorter turns neither teach nor are learned from (their embeddings
     /// scatter: same-voice scores fall to 0.25 at half a second).
     static let minimumLearnMs = 1500
     /// Shorter speech is not judged: it passes.
     static let minimumCheckMs = 1000
     /// A learned voice keeps adapting (a cold, another microphone), but only
-    /// from turns well above the threshold.
+    /// from turns this far above the threshold.
     static let adaptMargin: Float = 0.15
     static let adaptRate: Float = 0.1
 
-    enum Verdict: Equatable {
-        /// Not learned yet, or too little speech to judge: let it through.
-        case unknown
-        case match(similarity: Float)
-        case mismatch(similarity: Float)
-
-        var similarity: Float? {
-            switch self {
-            case .unknown: return nil
-            case let .match(similarity), let .mismatch(similarity): return similarity
-            }
+    struct Verdict: Equatable {
+        enum Outcome: Equatable {
+            /// Not learned yet, too little speech, or no score from the
+            /// deciding models: let it through.
+            case unknown
+            case match
+            case mismatch
         }
+
+        var outcome: Outcome
+        /// Each model's score against the learned voice (for the log).
+        var similarities: [SpeakerModelKind: Float] = [:]
+        /// How far the decision is above (or below) the threshold.
+        var margin: Float?
+
+        static let unknown = Verdict(outcome: .unknown)
     }
 
-    private(set) var version = 1
-    /// The learned voice (unit length), once `enrolTurns` agree.
-    private(set) var centroid: [Float]?
-    /// Turns heard while learning (unit length), oldest first.
-    private(set) var candidates: [[Float]] = []
+    private(set) var version = 2
+    /// The learned voice as each model has it (unit length).
+    private(set) var centroids: [String: [Float]] = [:]
+    /// Turns heard while learning, oldest first.
+    private(set) var candidates: [[String: [Float]]] = []
 
-    var learned: Bool { centroid != nil }
+    var learned: Bool { !centroids.isEmpty }
 
-    /// Whether `embedding` of `audioMs` of speech sounds like the person.
-    /// `threshold` 0 turns the check off.
-    func check(_ embedding: [Float], audioMs: Int, threshold: Float) -> Verdict {
-        guard threshold > 0, let centroid, audioMs >= Self.minimumCheckMs,
-              let similarity = Self.cosine(centroid, embedding) else { return .unknown }
-        return similarity >= threshold ? .match(similarity: similarity) : .mismatch(similarity: similarity)
+    func centroid(_ kind: SpeakerModelKind) -> [Float]? { centroids[kind.rawValue] }
+
+    /// Whether speech of `audioMs` sounds like the person.
+    func check(_ heard: SpeakerEmbeddings, audioMs: Int, rule: SpeakerRule) -> Verdict {
+        guard learned else { return .unknown }
+        var similarities: [SpeakerModelKind: Float] = [:]
+        for kind in SpeakerModelKind.allCases {
+            if let centroid = centroid(kind), let embedding = heard[kind], let similarity = Self.cosine(centroid, embedding) {
+                similarities[kind] = similarity
+            }
+        }
+        guard audioMs >= Self.minimumCheckMs else { return Verdict(outcome: .unknown, similarities: similarities) }
+        let margins = rule.decider.kinds.compactMap { kind in similarities[kind].map { $0 - rule.threshold(kind) } }
+        guard !margins.isEmpty else { return Verdict(outcome: .unknown, similarities: similarities) }
+        let margin = margins.reduce(0, +) / Float(margins.count)
+        return Verdict(outcome: margin >= 0 ? .match : .mismatch, similarities: similarities, margin: margin)
     }
 
     /// Learns from a turn that was sent as the person's. Returns whether the
     /// profile changed (and should be saved).
-    mutating func learn(_ embedding: [Float], audioMs: Int, threshold: Float) -> Bool {
-        guard audioMs >= Self.minimumLearnMs, let unit = Self.normalised(embedding) else { return false }
-        if let centroid {
-            guard let similarity = Self.cosine(centroid, unit), similarity >= threshold + Self.adaptMargin else { return false }
-            let blended = zip(centroid, unit).map { (1 - Self.adaptRate) * $0 + Self.adaptRate * $1 }
-            guard let next = Self.normalised(blended) else { return false }
-            self.centroid = next
+    mutating func learn(_ heard: SpeakerEmbeddings, audioMs: Int, rule: SpeakerRule) -> Bool {
+        guard audioMs >= Self.minimumLearnMs else { return false }
+        var units: [String: [Float]] = [:]
+        for (kind, embedding) in heard {
+            if let unit = Self.normalised(embedding, kind: kind) { units[kind.rawValue] = unit }
+        }
+        guard !units.isEmpty else { return false }
+        if learned {
+            let verdict = check(heard, audioMs: audioMs, rule: rule)
+            guard verdict.outcome == .match, let margin = verdict.margin, margin >= Self.adaptMargin else { return false }
+            for (key, unit) in units {
+                guard let centroid = centroids[key] else {
+                    // A model added after the voice was learned starts from here.
+                    centroids[key] = unit
+                    continue
+                }
+                let blended = zip(centroid, unit).map { (1 - Self.adaptRate) * $0 + Self.adaptRate * $1 }
+                if let kind = SpeakerModelKind(rawValue: key), let next = Self.normalised(blended, kind: kind) {
+                    centroids[key] = next
+                }
+            }
             return true
         }
-        candidates.append(unit)
+        candidates.append(units)
         if candidates.count > Self.maxCandidates { candidates.removeFirst(candidates.count - Self.maxCandidates) }
         // The largest group of mutually alike turns, around any one of them.
-        var best: [[Float]] = []
+        let order = rule.decider.kinds + SpeakerModelKind.allCases.filter { !rule.decider.kinds.contains($0) }
+        var best: [[String: [Float]]] = []
         for anchor in candidates {
-            let group = candidates.filter { (Self.cosine(anchor, $0) ?? 0) >= Self.candidateSimilarity }
+            let group = candidates.filter { Self.alike(anchor, $0, order: order) }
             if group.count > best.count { best = group }
         }
-        if best.count >= Self.enrolTurns, let mean = Self.normalised(Self.mean(best)) {
-            centroid = mean
-            candidates = []
+        guard best.count >= Self.enrolTurns else { return true }
+        for kind in SpeakerModelKind.allCases {
+            let members = best.compactMap { $0[kind.rawValue] }
+            if !members.isEmpty, let mean = Self.normalised(Self.mean(members, kind.dimensions), kind: kind) {
+                centroids[kind.rawValue] = mean
+            }
         }
+        candidates = []
         return true
+    }
+
+    /// Two learning turns are one voice by the first model in `order` both have.
+    private static func alike(_ a: [String: [Float]], _ b: [String: [Float]], order: [SpeakerModelKind]) -> Bool {
+        for kind in order {
+            if let x = a[kind.rawValue], let y = b[kind.rawValue] {
+                return (cosine(x, y) ?? 0) >= kind.candidateSimilarity
+            }
+        }
+        return false
     }
 
     // MARK: - Vectors
 
+    static func normalised(_ vector: [Float], kind: SpeakerModelKind) -> [Float]? {
+        guard vector.count == kind.dimensions else { return nil }
+        return normalised(vector)
+    }
+
     static func normalised(_ vector: [Float]) -> [Float]? {
-        guard vector.count == dimensions, vector.allSatisfy(\.isFinite) else { return nil }
+        guard !vector.isEmpty, vector.allSatisfy(\.isFinite) else { return nil }
         let length = vector.reduce(0) { $0 + $1 * $1 }.squareRoot()
         guard length > 1e-6 else { return nil }
         return vector.map { $0 / length }
     }
 
-    /// Cosine similarity of two embeddings, nil if either is unusable.
+    /// Cosine similarity of two embeddings of one model, nil if unusable.
     static func cosine(_ a: [Float], _ b: [Float]) -> Float? {
-        guard let a = normalised(a), let b = normalised(b) else { return nil }
+        guard a.count == b.count, let a = normalised(a), let b = normalised(b) else { return nil }
         return zip(a, b).reduce(0) { $0 + $1.0 * $1.1 }
     }
 
-    private static func mean(_ vectors: [[Float]]) -> [Float] {
+    private static func mean(_ vectors: [[Float]], _ dimensions: Int) -> [Float] {
         var sum = [Float](repeating: 0, count: dimensions)
-        for vector in vectors {
+        for vector in vectors where vector.count == dimensions {
             for index in 0..<dimensions { sum[index] += vector[index] }
         }
         return sum.map { $0 / Float(vectors.count) }
