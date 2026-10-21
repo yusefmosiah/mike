@@ -18,6 +18,9 @@ struct TurnPolicy {
         case eou(atMs: Int)
         /// Smart Turn's answer to `runSmartTurn` (nil: it could not run).
         case smartTurn(requestId: Int, probability: Float?)
+        /// The answer to `checkSpeaker`: whether the speech is in the person's
+        /// voice (true too when the check could not run).
+        case speakerChecked(requestId: Int, match: Bool)
         /// The clock moved (sent with every microphone buffer).
         case tick(nowMs: Int)
         /// The final pass produced `text` and `turn` was sent: the answer is awaited.
@@ -52,6 +55,11 @@ struct TurnPolicy {
         /// Run Smart Turn once on the turn's audio `fromMs..<toMs` (the engine
         /// keeps the last 8 s) and answer with `.smartTurn(requestId:)`.
         case runSmartTurn(requestId: Int, fromMs: Int, toMs: Int)
+        /// Speech over the answer has the words for a barge-in: check that
+        /// `fromMs..<toMs` is in the person's voice (the engine widens a short
+        /// window to the last 1.5 s) and answer with `.speakerChecked`.
+        /// Playback is held meanwhile.
+        case checkSpeaker(requestId: Int, fromMs: Int, toMs: Int)
         /// The turn is over: run the final pass and send `turn`. The engine
         /// also clears the EOU stream's text, as the policy now has.
         case commit(Commit)
@@ -89,6 +97,12 @@ struct TurnPolicy {
     /// so its words and fragments of them never count, sound alone does not
     /// hold playback, and more words are needed to barge in.
     var echoCancelled = true
+    /// Set by the engine once the person's voice is learned: a barge-in is
+    /// first checked against it, so a TV or another person cannot cut the
+    /// answer off.
+    var checksSpeaker = false
+    /// After speech is found to be another voice, the next check waits this long.
+    static let speakerRecheckMs = 1000
     private(set) var state: VoiceState = .listening
     private var phase: Phase = .listening
     private var nowMs = 0
@@ -125,6 +139,11 @@ struct TurnPolicy {
     private var answerRun = ""
     private var paused = false
     private var falseStartSpent = false
+    private var pendingSpeakerCheck: (id: Int, onset: Int, speechMs: Int)?
+    private var nextSpeakerCheckMs = 0
+    /// Another voice was heard over this answer: sound alone no longer holds
+    /// playback (it would stutter through a whole TV programme).
+    private var otherVoiceHeard = false
     /// What the last barge-in heard, for the engine's log.
     private(set) var lastBargeIn: (speechMs: Int, foreignWords: Int, text: String)?
 
@@ -182,6 +201,21 @@ struct TurnPolicy {
             guard !inSpeech, let silence = silenceStartMs else { break }
             if let probability, probability >= config.smartTurnThreshold {
                 commit(.smartTurn, endMs: silence, &out)
+            }
+        case let .speakerChecked(requestId, match):
+            guard let pending = pendingSpeakerCheck, pending.id == requestId else { break }
+            pendingSpeakerCheck = nil
+            guard let turnId = answerTurnId else { break }
+            if match {
+                bargeIn(turnId: turnId, onset: pending.onset, speechMs: pending.speechMs, &out)
+            } else {
+                // Its words are spent; speech still going counts afresh from here.
+                otherVoiceHeard = true
+                runBaseline = words.count
+                runOnsetMs = inSpeech ? nowMs : nil
+                falseStartSpent = true
+                nextSpeakerCheckMs = nowMs + Self.speakerRecheckMs
+                releasePause(&out)
             }
         case let .tick(now):
             nowMs = max(nowMs, now)
@@ -351,20 +385,21 @@ struct TurnPolicy {
             let enoughSpeech = speechMs >= config.bargeInSpeechMs
             let needed = echoCancelled ? config.bargeInWords : max(config.bargeInWords, Self.uncancelledBargeInWords)
             if enoughSpeech, foreignWordCount >= needed {
-                lastBargeIn = (speechMs, foreignWordCount, words.dropFirst(runBaseline).joined(separator: " "))
-                paused = false
-                out.append(.bargeIn(turnId: turnId))
-                clauseKeys = []
-                previousClauseKeys = []
-                committedKeys = []
-                forgetAnswer()
-                phase = .listening
-                beginUtterance(at: onset, baseline: runBaseline, &out)
-                // A run that already ended goes straight to its pause check.
-                evaluate(&out)
+                guard checksSpeaker else {
+                    bargeIn(turnId: turnId, onset: onset, speechMs: speechMs, &out)
+                    return
+                }
+                guard pendingSpeakerCheck == nil, nowMs >= nextSpeakerCheckMs else { return }
+                nextRequestId += 1
+                pendingSpeakerCheck = (nextRequestId, onset, speechMs)
+                if !paused, case .speaking = phase {
+                    paused = true
+                    out.append(.pausePlayback)
+                }
+                out.append(.checkSpeaker(requestId: nextRequestId, fromMs: onset, toMs: nowMs))
                 return
             }
-            if enoughSpeech, inSpeech, !paused, !falseStartSpent, echoCancelled, case .speaking = phase {
+            if enoughSpeech, inSpeech, !paused, !falseStartSpent, echoCancelled, !otherVoiceHeard, case .speaking = phase {
                 paused = true
                 out.append(.pausePlayback)
             }
@@ -376,9 +411,27 @@ struct TurnPolicy {
         }
     }
 
+    private mutating func bargeIn(turnId: String, onset: Int, speechMs: Int, _ out: inout [Decision]) {
+        lastBargeIn = (speechMs, foreignWordCount, words.dropFirst(runBaseline).joined(separator: " "))
+        paused = false
+        out.append(.bargeIn(turnId: turnId))
+        clauseKeys = []
+        previousClauseKeys = []
+        committedKeys = []
+        forgetAnswer()
+        phase = .listening
+        beginUtterance(at: onset, baseline: runBaseline, &out)
+        // A run that already ended goes straight to its pause check.
+        evaluate(&out)
+    }
+
+    /// Forgets everything about the answer that was playing or awaited.
     private mutating func forgetAnswer() {
         answerKeys = []
         answerRun = ""
+        pendingSpeakerCheck = nil
+        nextSpeakerCheckMs = 0
+        otherVoiceHeard = false
     }
 
     private mutating func releasePause(_ out: inout [Decision]) {

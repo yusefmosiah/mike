@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AudioLines, Loader2, Mic, PhoneOff } from "lucide-react";
+import { AudioLines, Loader2, Mic, PhoneOff, SlidersHorizontal } from "lucide-react";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { cn } from "@/app/lib/utils";
 import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
 import type { UseVoiceChatResult, VoiceActivity } from "@/app/hooks/useVoiceChat";
+import { voiceMicrophoneModes, voiceMicrophoneModesSupported } from "@/app/lib/voice/voiceEngine";
 
 /** A download size as said before it starts: "about 450 MB", "about 1.2 GB". */
 export function formatDownloadSize(bytes: number): string {
@@ -107,10 +108,18 @@ export function VoiceModePanel({
 }: {
     voice: Pick<
         UseVoiceChatResult,
-        "phase" | "activity" | "partial" | "installProgress" | "downloadBytes" | "error" | "install" | "stop"
+        | "phase"
+        | "activity"
+        | "partial"
+        | "ignoredOtherVoice"
+        | "installProgress"
+        | "downloadBytes"
+        | "error"
+        | "install"
+        | "stop"
     >;
 }) {
-    const { phase, activity, partial, installProgress, downloadBytes, error } = voice;
+    const { phase, activity, partial, ignoredOtherVoice, installProgress, downloadBytes, error } = voice;
 
     if (phase === "setup" || phase === "installing") {
         const fraction = installProgress ?? 0;
@@ -195,10 +204,28 @@ export function VoiceModePanel({
                     {ACTIVITY_LABELS[activity]}
                 </p>
                 <p className="text-sm text-gray-600 [overflow-wrap:anywhere]">
-                    {partial || (activity === "listening" ? "Speak when you’re ready." : "Speak to interrupt.")}
+                    {partial ||
+                        (ignoredOtherVoice
+                            ? "Another voice, not sent."
+                            : activity === "listening"
+                              ? "Speak when you’re ready."
+                              : "Speak to interrupt.")}
                 </p>
             </div>
-            <EndButton onClick={voice.stop} />
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+                {voiceMicrophoneModesSupported() && (
+                    <PillButtonUI
+                        tone="white"
+                        size="sm"
+                        onClick={() => void voiceMicrophoneModes()}
+                        aria-label="Microphone mode"
+                        title="Microphone mode"
+                    >
+                        <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+                    </PillButtonUI>
+                )}
+                <EndButton onClick={voice.stop} />
+            </div>
         </Frame>
     );
 }

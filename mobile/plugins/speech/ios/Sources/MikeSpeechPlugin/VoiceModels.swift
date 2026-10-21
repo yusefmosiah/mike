@@ -13,6 +13,8 @@ import Foundation
 /// - Parakeet realtime EOU 120M, 320 ms (NVIDIA Open Model License),
 ///   FluidAudio's Core ML conversion.
 /// - Smart Turn v3.2 (BSD-2-Clause), aufklarer's Core ML port.
+/// - WeSpeaker ResNet34-LM (CC BY 4.0, pyannote's VoxCeleb model),
+///   FluidAudio's Core ML conversion: the voice voice mode listens to.
 ///
 /// Nothing is uploaded; only these public files are fetched, and no user
 /// content is sent.
@@ -93,8 +95,21 @@ enum VoiceModels {
             File(path: "smart_turn.mlmodelc/weights/weight.bin", size: 16_714_240, sha256: "b6295316741a0149e1fcab7cdf030e1b9bfb0eef778207accee91a2a9703a39c"),
         ])
 
+    static let speaker = Model(
+        name: .speaker,
+        repository: "FluidInference/speaker-diarization-coreml",
+        revision: "7eab74f3463c736418d0eb10296261ae581146c9",
+        folder: "",
+        files: [
+            File(path: "wespeaker_v2.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "d2b1fcde6121aea3ff0e14c1dc50d09dacb0314a2e89156353c31804230a422f"),
+            File(path: "wespeaker_v2.mlmodelc/coremldata.bin", size: 359, sha256: "6feb2472a71fa9d8a84020c85206138a4f6261c565c9884bf518d59dd5838da7"),
+            File(path: "wespeaker_v2.mlmodelc/metadata.json", size: 2738, sha256: "ddc4858b4051254098015cd0b97080149839d697faf7b036f933190e70b26758"),
+            File(path: "wespeaker_v2.mlmodelc/model.mil", size: 706_900, sha256: "2850f775d6ba659f01f616fed77ce6a45a25de3eb7e4bf3a4b07b658be4e13dd"),
+            File(path: "wespeaker_v2.mlmodelc/weights/weight.bin", size: 7_243_904, sha256: "34004f6798d35cad7071e2fdc67e63faaa782f53697e1cb49bcb452cf81ae151"),
+        ])
+
     /// The downloaded models, in install order (smallest first).
-    static let downloaded: [Model] = [vad, smartTurn, eou]
+    static let downloaded: [Model] = [vad, speaker, smartTurn, eou]
 
     /// Phonon 31m's bundle at the commit PhononVoice pins (its bundle.json's total).
     static let phononBytes = 162_877_586
@@ -206,16 +221,28 @@ enum VoiceModels {
     static func compile(_ model: Model) throws {
         let configuration = MLModelConfiguration()
         // Matches how voice mode loads it (see VoiceEngine.start).
-        configuration.computeUnits = model.name == .eou ? .cpuAndGPU : .cpuAndNeuralEngine
+        configuration.computeUnits = computeUnits(model.name)
         let compiled: [String]
         switch model.name {
         case .vad: compiled = [vadFile]
         case .smartTurn: compiled = [SmartTurn.modelFile]
         case .eou: compiled = ["streaming_encoder.mlmodelc", "decoder.mlmodelc", "joint_decision.mlmodelc"]
+        case .speaker: compiled = [SpeakerEmbedder.modelFile]
         default: compiled = []
         }
         for name in compiled {
             _ = try MLModel(contentsOf: model.directory.appendingPathComponent(name), configuration: configuration)
+        }
+    }
+
+    /// Where each model runs. The EOU streaming encoder fails the Neural
+    /// Engine compiler on device (ANECCompile FAILED) and the fallback can
+    /// stall; the speaker model computes its own filterbank, which the Neural
+    /// Engine cannot take whole, so both run on the GPU.
+    static func computeUnits(_ name: VoiceModelName) -> MLComputeUnits {
+        switch name {
+        case .eou, .speaker: return .cpuAndGPU
+        default: return .cpuAndNeuralEngine
         }
     }
 

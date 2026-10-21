@@ -179,6 +179,19 @@ describe("useVoiceChat", () => {
         expect(calls("voiceStart")).toEqual([{ config: { pauseMs: 300 } }]);
     });
 
+    it("clears the live words of a turn in another voice and says so until the person speaks", async () => {
+        const view = await started();
+        emit({ type: "partial", text: "and now the weather" });
+        emit({ type: "ignored", reason: "other-voice" });
+        expect(view.result.current.voice.partial).toBe("");
+        expect(view.result.current.voice.ignoredOtherVoice).toBe(true);
+        expect(view.sent).toEqual([]);
+        emit({ type: "partial", text: "" });
+        expect(view.result.current.voice.ignoredOtherVoice).toBe(true);
+        emit({ type: "partial", text: "what does" });
+        expect(view.result.current.voice.ignoredOtherVoice).toBe(false);
+    });
+
     it("sends a turn as a chat message, speaks the answer clause by clause as it streams, and ends it", async () => {
         const view = await started();
         emit({ type: "state", state: "user-speaking" });

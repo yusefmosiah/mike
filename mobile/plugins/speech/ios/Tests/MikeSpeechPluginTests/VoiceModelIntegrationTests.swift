@@ -11,7 +11,7 @@ import FluidAudio
 /// Silero VAD, the EOU stream with its re-arm, Smart Turn, and the whole
 /// listening pipeline through the turn policy to a commit and Fluid Speech
 /// Mini's final pass. Needs the downloaded models in a directory laid out as
-/// voice mode installs them (`vad/`, `eou/`, `smart-turn/`), named by
+/// voice mode installs them (`vad/`, `eou/`, `smart-turn/`, `speaker/`), named by
 /// MIKE_VOICE_MODELS; skipped without it:
 ///   TEST_RUNNER_MIKE_VOICE_MODELS=/path/to/models xcodebuild test -scheme MikeSpeech \
 ///     -destination 'platform=iOS Simulator,name=iPhone 17'
@@ -160,6 +160,27 @@ final class VoiceModelIntegrationTests: XCTestCase {
         XCTAssertTrue((0...1).contains(cut))
     }
 
+    /// The speaker model gives unit-length embeddings, and the clip's two
+    /// halves (one voice) score above the threshold.
+    func testTheSpeakerModelFindsOneVoiceInTheClip() throws {
+        guard let root = modelsRoot else { throw XCTSkip("MIKE_VOICE_MODELS not set") }
+        let directory = root.appendingPathComponent("speaker")
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent(SpeakerEmbedder.modelFile).path) else {
+            throw XCTSkip("speaker model not downloaded")
+        }
+        let embedder = try SpeakerEmbedder(directory: directory, computeUnits: .cpuOnly)
+        let samples = try clip()
+        let half = samples.count / 2
+        let first = try XCTUnwrap(embedder.embedding(of: Array(samples[..<half])))
+        let second = try XCTUnwrap(embedder.embedding(of: Array(samples[half...])))
+        XCTAssertEqual(first.count, SpeakerProfile.dimensions)
+        XCTAssertEqual(first.reduce(0) { $0 + $1 * $1 }.squareRoot(), 1, accuracy: 1e-3)
+        let similarity = try XCTUnwrap(SpeakerProfile.cosine(first, second))
+        print("VOICE-SPEAKER halves similarity \(similarity)")
+        XCTAssertGreaterThan(similarity, VoiceConfig.defaults.speakerThreshold)
+        XCTAssertNil(try embedder.embedding(of: []))
+    }
+
     /// The clip, then silence, through the listening pipeline and the turn
     /// policy as the engine runs them: one or more commits whose final-pass
     /// text covers the clip.
@@ -174,7 +195,7 @@ final class VoiceModelIntegrationTests: XCTestCase {
         try eou.warmUp()
         let smartTurn = try SmartTurn.Model(directory: root.appendingPathComponent("smart-turn"), computeUnits: .cpuOnly)
         let config = VoiceConfig.defaults
-        let pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, config: config)
+        let pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: nil, config: config)
         var policy = TurnPolicy(config: config)
 
         let samples = try clip()

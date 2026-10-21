@@ -16,9 +16,11 @@ listener, `voiceEvent`, with a `type` field.
 
 | Method | Arguments | Resolves |
 |---|---|---|
-| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number }`. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size. |
+| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number, speakerLearned: boolean }`. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"speaker"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size; `speakerLearned` means the person's voice has been learned and other voices are ignored. |
 | `voiceInstall` | — | `{ available }` once the missing models are downloaded and compiled. Progress arrives as `voiceEvent` `{ type: "install", fraction }`. |
-| `voiceRemove` | — | The `voiceStatus` payload, after deleting the VAD, EOU and Smart Turn models and cancelling an install in progress. Phonon keeps its own `remove`. Rejects with `busy` while voice mode runs. |
+| `voiceRemove` | — | The `voiceStatus` payload, after deleting the VAD, EOU, Smart Turn and speaker models and the learned voice, and cancelling an install in progress. Phonon keeps its own `remove`. Rejects with `busy` while voice mode runs. |
+| `voiceForgetSpeaker` | — | The `voiceStatus` payload, after forgetting the learned voice; it is learned again from the next turns. Works while voice mode runs. |
+| `voiceMicrophoneModes` | — | Once the system's microphone modes (Voice Isolation, Wide Spectrum) are shown. iOS lists them only while the app holds the microphone, so the web app offers this during voice mode. |
 | `voiceStart` | `{ config: VoiceConfig, voice?: string }` | When the engine is listening. Asks for the microphone if needed. Loads and warms every model. |
 | `voiceStop` | — | When audio is released. Ends any answer being spoken. |
 | `voiceSpeak` | `{ turnId, clauseId, text, final? }` | At once (queued). `text` is already speakable (the web app normalises it). Ignored if `turnId` is not the current answer's turn. `clauseId` is a non-negative integer, increasing within a turn. `final` marks the answer's last clause and is informational: the answer ends only on `voiceEndAnswer`. |
@@ -37,6 +39,7 @@ interface VoiceConfig {
   bargeInWords: number;        // 2    words not in the clause being played
   falseStartMs: number;        // 1500 speech without words: resume playback
   maxTurnMs: number;           // 60000 a single turn is cut here (at most 120000; larger falls back to the default)
+  speakerThreshold: number;    // 0.35 below this against the learned voice, speech is another voice (0 turns the check off)
 }
 ```
 
@@ -54,6 +57,7 @@ type VoiceEvent =
   | { type: "interrupted"; turnId: string; clauseId: number; fraction: number } // fraction of that clause's samples played, 0..1
   | { type: "answerFinished"; turnId: string }
   | { type: "ended"; reason: "stopped" | "interruption" | "route" | "error" } // going to the background is "interruption"
+  | { type: "ignored"; reason: "other-voice" }              // a finished turn was in another voice and not sent
   | { type: "metrics"; turnId: string; stages: Record<string, number> }; // milliseconds
 ```
 
@@ -66,11 +70,15 @@ type VoiceEvent =
   `bargeIn`, then `interrupted` for the clause that was playing. Either way the
   web app cancels that turn's chat answer and the engine keeps listening (the
   person's new words become the next `turn`).
+- Once the person's voice is learned, speech in another voice neither barges
+  in nor becomes a `turn`: its `partial`s may have been sent, then `ignored`
+  follows and the engine is `listening` again. A web build that does not know
+  `ignored` drops it.
 - `interrupted.fraction` is by samples. The web app maps it to words.
 - `metrics` stages: `endOfSpeechToCommit`, `finalPass`, `commitToFirstAudio`
   (measured from `turn` to the first sample of clause 0), `micDroppedMs`
-  (microphone audio dropped because listening fell behind), plus anything
-  else useful.
+  (microphone audio dropped because listening fell behind), `speakerCheck`
+  (the voice check of the turn), plus anything else useful.
 
 ## Web app ⇄ server
 

@@ -10,8 +10,11 @@ import { formatDownloadSize } from "@/app/components/assistant/VoiceModePanel";
 import {
   onVoiceEvent,
   VOICE_INSTALL_FAILURE_MESSAGE,
+  VOICE_FORGET_FAILURE_MESSAGE,
   VOICE_REMOVE_FAILURE_MESSAGE,
   voiceChatSupported,
+  voiceForgetSpeaker,
+  voiceForgetSpeakerSupported,
   voiceInstall,
   voiceRemove,
   voiceStatus,
@@ -19,7 +22,7 @@ import {
 } from "@/app/lib/voice/voiceEngine";
 
 /** Voice mode's own models; Phonon and Fluid Speech Mini have their own settings. */
-const VOICE_MODE_MODELS = ["vad", "eou", "smart-turn"];
+const VOICE_MODE_MODELS = ["vad", "eou", "smart-turn", "speaker"];
 
 /**
  * Voice mode's models on the phone: downloaded here or on first use, and
@@ -29,6 +32,8 @@ export function VoiceModeSetup() {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
+  const [forgetFailed, setForgetFailed] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,6 +76,17 @@ export function VoiceModeSetup() {
       setFailed(error instanceof Error ? error.message : VOICE_REMOVE_FAILURE_MESSAGE);
     }
     setRemoving(false);
+  };
+
+  const forget = async () => {
+    setForgetFailed(null);
+    setForgetting(true);
+    try {
+      setStatus(await voiceForgetSpeaker());
+    } catch (error) {
+      setForgetFailed(error instanceof Error ? error.message : VOICE_FORGET_FAILURE_MESSAGE);
+    }
+    setForgetting(false);
   };
 
   return (
@@ -123,6 +139,30 @@ export function VoiceModeSetup() {
             </p>
           )}
         </SettingsRow>
+        {voiceForgetSpeakerSupported() && (
+          <SettingsRow layout="stacked">
+            <div className="min-w-0 space-y-1">
+              <SettingsLabel>Your voice</SettingsLabel>
+              <SettingsDescription>
+                {status.speakerLearned
+                  ? "Voice mode knows your voice and ignores other voices, like a TV or someone else in the room. Forget it if voice mode learned the wrong voice or stops hearing you."
+                  : "Voice mode learns your voice from your first few turns, then ignores other voices, like a TV or someone else in the room. It stays on this phone."}
+              </SettingsDescription>
+            </div>
+            {status.speakerLearned && (
+              <div className="flex flex-wrap gap-1.5">
+                <PillButtonUI tone="white" size="sm" loading={forgetting} onClick={() => void forget()}>
+                  Forget my voice
+                </PillButtonUI>
+              </div>
+            )}
+            {forgetFailed && (
+              <p className="text-sm text-red-600" role="alert">
+                {forgetFailed}
+              </p>
+            )}
+          </SettingsRow>
+        )}
       </SettingsCard>
     </section>
   );

@@ -531,4 +531,77 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertFalse(out.contains(.clearTranscript))
         XCTAssertEqual(out.count, 1)
     }
+
+    // MARK: - Speaker checks
+
+    static func speakerChecks(_ decisions: [TurnPolicy.Decision]) -> [(id: Int, from: Int, to: Int)] {
+        decisions.compactMap { if case let .checkSpeaker(id, from, to) = $0 { return (id, from, to) } else { return nil } }
+    }
+
+    private func checkedSpeaking() -> Trace {
+        var trace = Trace()
+        trace.policy.checksSpeaker = true
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "The lease ends in May."))
+        return trace
+    }
+
+    func testWithTheVoiceLearnedABargeInIsCheckedFirst() {
+        var trace = checkedSpeaking()
+        XCTAssertEqual(trace.speech(2), [.pausePlayback])
+        let out = trace.partial("wait stop that")
+        XCTAssertFalse(out.contains(.bargeIn(turnId: "t1")), "not before the voice is checked")
+        let checks = Self.speakerChecks(out)
+        XCTAssertEqual(checks.count, 1)
+        XCTAssertEqual(checks.first?.to, trace.now)
+        XCTAssertTrue(trace.speech(1).isEmpty, "one check at a time")
+        let answer = trace.feed(.speakerChecked(requestId: checks[0].id, match: true))
+        XCTAssertEqual(answer.first, .bargeIn(turnId: "t1"))
+        XCTAssertEqual(trace.policy.state, .userSpeaking)
+    }
+
+    func testAnotherVoiceDoesNotBargeInAndPlaybackCarriesOn() {
+        var trace = checkedSpeaking()
+        trace.speech(2)
+        let check = Self.speakerChecks(trace.partial("wait stop that"))[0]
+        let answer = trace.feed(.speakerChecked(requestId: check.id, match: false))
+        XCTAssertEqual(answer, [.resumePlayback])
+        XCTAssertEqual(trace.policy.state, .speaking)
+        let more = trace.speech(2) + trace.partial("wait stop that and then")
+        XCTAssertFalse(more.contains(.pausePlayback), "sound alone no longer holds the answer")
+        XCTAssertTrue(Self.speakerChecks(more).isEmpty, "not checked again within a second")
+        XCTAssertEqual(Self.speakerChecks(trace.speech(2)).count, 1, "new words are checked again after it")
+    }
+
+    func testAnotherVoiceWhileThinkingDoesNotCancelTheAnswer() {
+        var trace = Trace()
+        trace.policy.checksSpeaker = true
+        trace.committedTurn("t1")
+        trace.speech(2)
+        let out = trace.partial("breaking news tonight")
+        XCTAssertFalse(out.contains(.pausePlayback), "nothing is playing")
+        let check = Self.speakerChecks(out)[0]
+        XCTAssertTrue(trace.feed(.speakerChecked(requestId: check.id, match: false)).isEmpty)
+        XCTAssertEqual(trace.policy.state, .thinking)
+        XCTAssertEqual(trace.policy.answerTurnId, "t1")
+    }
+
+    func testACheckAnsweredAfterTheAnswerEndedIsIgnored() {
+        var trace = checkedSpeaking()
+        trace.speech(2)
+        let check = Self.speakerChecks(trace.partial("wait stop that"))[0]
+        trace.feed(.answerEnded(turnId: "t1"))
+        let late = trace.feed(.speakerChecked(requestId: check.id, match: true))
+        XCTAssertFalse(late.contains(.bargeIn(turnId: "t1")))
+    }
+
+    func testWithoutALearnedVoiceABargeInIsNotChecked() {
+        var trace = Trace()
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "The lease ends in May."))
+        trace.speech(2)
+        let out = trace.partial("wait stop that")
+        XCTAssertEqual(out.first, .bargeIn(turnId: "t1"))
+        XCTAssertTrue(Self.speakerChecks(out).isEmpty)
+    }
 }

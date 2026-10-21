@@ -60,21 +60,26 @@ stopping there cut every chunk off after about 13 seconds.
 
 Hands-free voice mode (`docs/voice-chat.md`, contract in
 `docs/voice-chat-contract.md`): `voiceStatus`, `voiceInstall`, `voiceStart`,
-`voiceStop`, `voiceSpeak`, `voiceEndAnswer` and `voiceCancelAnswer`, with every
+`voiceStop`, `voiceSpeak`, `voiceEndAnswer`, `voiceCancelAnswer`,
+`voiceRemove`, `voiceForgetSpeaker` and `voiceMicrophoneModes`, with every
 event on the `voiceEvent` listener. One `AVAudioEngine` with Apple's voice
 processing (`VoiceAudioEngine.swift`); Silero VAD, Parakeet EOU 120M (320 ms,
 re-armed on every `<EOU>`, `EouStream.swift`) and Smart Turn v3.2
 (`SmartTurn.swift`) feed the pure `TurnPolicy`; a committed turn is
 transcribed by the warm Fluid Speech Mini; answers are spoken clause by clause
 through Phonon into the engine's player node (`ClauseQueue.swift`,
-`VoiceEngine.swift`). `voiceInstall` downloads VAD, EOU and Smart Turn from
+`VoiceEngine.swift`). The WeSpeaker speaker model learns the person's voice
+and keeps other voices from barging in or being sent (`SpeakerEmbedder.swift`,
+`SpeakerProfile.swift`). `voiceInstall` downloads VAD, the speaker model, EOU
+and Smart Turn from
 their upstream Hugging Face repositories at pinned commits, each file checked
 against its SHA-256 (`VoiceModels.swift`), into Application Support, plus
 Phonon through its own install. The tests in `TurnPolicyTests`,
-`ClauseQueueTests`, `VoiceContractTests` and `VoiceModelsTests` need nothing;
+`ClauseQueueTests`, `VoiceContractTests`, `VoiceModelsTests` and
+`SpeakerProfileTests` need nothing;
 `VoiceModelIntegrationTests` runs the models on the fixture clip when
 `TEST_RUNNER_MIKE_VOICE_MODELS` names a directory holding them (`vad/`,
-`eou/`, `smart-turn/`, laid out as the install writes them).
+`eou/`, `smart-turn/`, `speaker/`, laid out as the install writes them).
 
 Rejections carry a `code`: `not-installed`, `unavailable`, `permission-denied`
 (speech recognition turned off, older iOS only), `unsupported-audio` (WebM,

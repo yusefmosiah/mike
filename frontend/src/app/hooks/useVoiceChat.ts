@@ -98,6 +98,8 @@ export interface UseVoiceChatResult {
     activity: VoiceActivity;
     /** The person's words while they speak; cleared when the turn is sent. */
     partial: string;
+    /** A turn was heard in another voice and not sent; cleared when the person speaks. */
+    ignoredOtherVoice: boolean;
     /** Download progress, 0 to 1, while installing. */
     installProgress: number | null;
     /** Size of the models still to download. */
@@ -200,6 +202,7 @@ export function useVoiceChat({
     const [phase, setPhaseState] = useState<VoicePhase>("off");
     const [engineState, setEngineState] = useState<VoiceEngineState>("listening");
     const [partial, setPartial] = useState("");
+    const [ignoredOtherVoice, setIgnoredOtherVoice] = useState(false);
     const [installProgress, setInstallProgress] = useState<number | null>(null);
     const [downloadBytes, setDownloadBytes] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -301,6 +304,7 @@ export function useVoiceChat({
         carryRef.current = "";
         awaitingChatRef.current = false;
         setPartial("");
+        setIgnoredOtherVoice(false);
         setInstallProgress(null);
         setEngineState("listening");
         setPhase("off");
@@ -363,9 +367,15 @@ export function useVoiceChat({
                     return;
                 case "partial":
                     setPartial(event.text);
+                    if (event.text) setIgnoredOtherVoice(false);
+                    return;
+                case "ignored":
+                    setPartial("");
+                    setIgnoredOtherVoice(true);
                     return;
                 case "turn": {
                     setPartial("");
+                    setIgnoredOtherVoice(false);
                     const vocabulary = currentDictationVocabulary();
                     if (turn && !turn.ended) {
                         // The person went on before the last answer ended.
@@ -612,6 +622,7 @@ export function useVoiceChat({
         phase,
         activity: activityOf(engineState),
         partial,
+        ignoredOtherVoice,
         installProgress,
         downloadBytes,
         error,

@@ -8,6 +8,8 @@ const engine = vi.hoisted(() => ({
     status: vi.fn(),
     install: vi.fn(),
     remove: vi.fn(),
+    forget: vi.fn(),
+    forgetSupported: vi.fn(() => true),
     handlers: new Set<(event: VoiceEvent) => void>(),
 }));
 vi.mock("@/app/lib/voice/voiceEngine", async (importOriginal) => ({
@@ -16,23 +18,37 @@ vi.mock("@/app/lib/voice/voiceEngine", async (importOriginal) => ({
     voiceStatus: engine.status,
     voiceInstall: engine.install,
     voiceRemove: engine.remove,
+    voiceForgetSpeaker: engine.forget,
+    voiceForgetSpeakerSupported: engine.forgetSupported,
     onVoiceEvent: (handler: (event: VoiceEvent) => void) => {
         engine.handlers.add(handler);
         return () => engine.handlers.delete(handler);
     },
 }));
 
-import { VoiceEngineError, VOICE_INSTALL_FAILURE_MESSAGE, VOICE_REMOVE_FAILURE_MESSAGE } from "@/app/lib/voice/voiceEngine";
+import {
+    VoiceEngineError,
+    VOICE_FORGET_FAILURE_MESSAGE,
+    VOICE_INSTALL_FAILURE_MESSAGE,
+    VOICE_REMOVE_FAILURE_MESSAGE,
+} from "@/app/lib/voice/voiceEngine";
 import { VoiceModeSetup } from "./VoiceModeSetup";
 
-const INSTALLED: VoiceStatus = { available: true, missing: [], downloadBytes: 0 };
-const MISSING: VoiceStatus = { available: false, missing: ["vad", "eou", "smart-turn"], downloadBytes: 42e6 };
+const INSTALLED: VoiceStatus = { available: true, missing: [], downloadBytes: 0, speakerLearned: false };
+const MISSING: VoiceStatus = {
+    available: false,
+    missing: ["vad", "eou", "smart-turn", "speaker"],
+    downloadBytes: 42e6,
+    speakerLearned: false,
+};
 
 beforeEach(() => {
     engine.supported.mockReturnValue(true);
     engine.status.mockReset();
     engine.install.mockReset();
     engine.remove.mockReset();
+    engine.forget.mockReset();
+    engine.forgetSupported.mockReturnValue(true);
     engine.handlers.clear();
 });
 
@@ -64,7 +80,7 @@ describe("VoiceModeSetup", () => {
     });
 
     it("offers removal when only another model is missing", async () => {
-        engine.status.mockResolvedValue({ available: false, missing: ["phonon"], downloadBytes: 160e6 });
+        engine.status.mockResolvedValue({ available: false, missing: ["phonon"], downloadBytes: 160e6, speakerLearned: false });
         render(<VoiceModeSetup />);
         expect(await screen.findByRole("button", { name: "Remove voice mode models" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Download speech models" })).toBeInTheDocument();
@@ -110,5 +126,31 @@ describe("VoiceModeSetup", () => {
         engine.install.mockRejectedValueOnce("odd");
         fireEvent.click(screen.getByRole("button", { name: "Download speech models" }));
         await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(VOICE_INSTALL_FAILURE_MESSAGE));
+    });
+
+    it("says voice mode learns your voice, and offers to forget it once learned", async () => {
+        engine.status.mockResolvedValue(INSTALLED);
+        const { unmount } = render(<VoiceModeSetup />);
+        expect(await screen.findByText(/learns your voice from your first few turns/)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Forget my voice" })).not.toBeInTheDocument();
+        unmount();
+
+        engine.status.mockResolvedValue({ ...INSTALLED, speakerLearned: true });
+        engine.forget.mockRejectedValueOnce("odd").mockResolvedValueOnce(INSTALLED);
+        render(<VoiceModeSetup />);
+        expect(await screen.findByText(/knows your voice and ignores other voices/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Forget my voice" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent(VOICE_FORGET_FAILURE_MESSAGE);
+        fireEvent.click(screen.getByRole("button", { name: "Forget my voice" }));
+        expect(await screen.findByText(/learns your voice from your first few turns/)).toBeInTheDocument();
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("leaves out the voice row in an app build that cannot forget it", async () => {
+        engine.forgetSupported.mockReturnValue(false);
+        engine.status.mockResolvedValue({ ...INSTALLED, speakerLearned: true });
+        render(<VoiceModeSetup />);
+        expect(await screen.findByText(/speech models are on this phone/)).toBeInTheDocument();
+        expect(screen.queryByText("Your voice")).not.toBeInTheDocument();
     });
 });

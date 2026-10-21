@@ -59,8 +59,9 @@ final class VoiceModelsTests: XCTestCase {
             VoiceModelName.vad: "FluidInference/silero-vad-coreml",
             .eou: "FluidInference/parakeet-realtime-eou-120m-coreml",
             .smartTurn: "aufklarer/Smart-Turn-v3.2-CoreML",
+            .speaker: "FluidInference/speaker-diarization-coreml",
         ]
-        XCTAssertEqual(VoiceModels.downloaded.count, 3)
+        XCTAssertEqual(VoiceModels.downloaded.count, 4)
         for model in VoiceModels.downloaded {
             XCTAssertEqual(model.repository, expected[model.name])
             XCTAssertNotNil(model.revision.range(of: "^[0-9a-f]{40}$", options: .regularExpression))
@@ -75,6 +76,8 @@ final class VoiceModelsTests: XCTestCase {
         XCTAssertTrue(VoiceModels.vad.files.allSatisfy { $0.path.hasPrefix(VoiceModels.vadFile + "/") })
         XCTAssertTrue(VoiceModels.smartTurn.files.contains { $0.path == "smart_turn.mlmodelc/weights/weight.bin" })
         XCTAssertEqual(VoiceModels.eou.totalBytes, 224_238_270)
+        XCTAssertTrue(VoiceModels.speaker.files.allSatisfy { $0.path.hasPrefix(SpeakerEmbedder.modelFile + "/") })
+        XCTAssertEqual(VoiceModels.speaker.totalBytes, 7_954_144)
     }
 
     func testFilesAreKeptOnlyWhenSizeAndHashMatch() throws {

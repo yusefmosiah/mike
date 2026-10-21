@@ -14,6 +14,7 @@ final class VoiceContractTests: XCTestCase {
         XCTAssertEqual(config.bargeInWords, 2)
         XCTAssertEqual(config.falseStartMs, 1500)
         XCTAssertEqual(config.maxTurnMs, 60_000)
+        XCTAssertEqual(config.speakerThreshold, 0.35, accuracy: 1e-6)
         XCTAssertEqual(VoiceConfig(nil), .defaults)
         XCTAssertEqual(VoiceConfig([:]), .defaults)
     }
@@ -22,7 +23,12 @@ final class VoiceContractTests: XCTestCase {
         let config = VoiceConfig([
             "vadThreshold": 0.6, "pauseMs": 300, "smartTurnThreshold": 0.7, "maxSilenceMs": 2500,
             "bargeInSpeechMs": 400, "bargeInWords": 3, "falseStartMs": 1200, "maxTurnMs": 30_000,
+            "speakerThreshold": 0.45,
         ])
+        XCTAssertEqual(config.speakerThreshold, 0.45, accuracy: 1e-6)
+        XCTAssertEqual(VoiceConfig(["speakerThreshold": 0]).speakerThreshold, 0, "0 turns the check off")
+        XCTAssertEqual(VoiceConfig(["speakerThreshold": 1]).speakerThreshold, 0.35)
+        XCTAssertEqual(VoiceConfig(["speakerThreshold": -0.1]).speakerThreshold, 0.35)
         XCTAssertEqual(config.vadThreshold, 0.6, accuracy: 1e-6)
         XCTAssertEqual(config.pauseMs, 300)
         XCTAssertEqual(config.smartTurnThreshold, 0.7, accuracy: 1e-6)
@@ -57,6 +63,7 @@ final class VoiceContractTests: XCTestCase {
         XCTAssertEqual(json(.turn(turnId: "t1", text: "The lease.", audioMs: 1200)),
                        ["type": "turn", "turnId": "t1", "text": "The lease.", "audioMs": 1200])
         XCTAssertEqual(json(.bargeIn(turnId: "t1")), ["type": "bargeIn", "turnId": "t1"])
+        XCTAssertEqual(json(.ignored(.otherVoice)), ["type": "ignored", "reason": "other-voice"])
         XCTAssertEqual(json(.clauseStarted(turnId: "t1", clauseId: 0)), ["type": "clauseStarted", "turnId": "t1", "clauseId": 0])
         XCTAssertEqual(json(.clausePlayed(turnId: "t1", clauseId: 2)), ["type": "clausePlayed", "turnId": "t1", "clauseId": 2])
         XCTAssertEqual(json(.interrupted(turnId: "t1", clauseId: 3, fraction: 0.4)),
@@ -86,12 +93,13 @@ final class VoiceContractTests: XCTestCase {
     }
 
     func testModelNamesAreTheContractsStrings() {
-        XCTAssertEqual(VoiceModelName.allCases.map(\.rawValue), ["vad", "eou", "smart-turn", "phonon", "fluid-mini"])
+        XCTAssertEqual(VoiceModelName.allCases.map(\.rawValue), ["vad", "eou", "smart-turn", "speaker", "phonon", "fluid-mini"])
     }
 
     func testStatusPayloadHasTheContractsFields() {
-        let status = VoiceMode.Status(available: false, missing: ["vad", "phonon"], downloadBytes: 42)
-        XCTAssertEqual(status.payload as NSDictionary, ["available": false, "missing": ["vad", "phonon"], "downloadBytes": 42])
+        let status = VoiceMode.Status(available: false, missing: ["vad", "phonon"], downloadBytes: 42, speakerLearned: true)
+        XCTAssertEqual(status.payload as NSDictionary,
+                       ["available": false, "missing": ["vad", "phonon"], "downloadBytes": 42, "speakerLearned": true])
     }
 
     func testStatusNamesWhatIsMissingInContractOrder() async {

@@ -30,8 +30,11 @@ enum VoiceMode {
         let missing: [String]
         let downloadBytes: Int
 
+        /// Whether the person's voice has been learned (see SpeakerProfile).
+        var speakerLearned = false
+
         var payload: [String: Any] {
-            ["available": available, "missing": missing, "downloadBytes": downloadBytes]
+            ["available": available, "missing": missing, "downloadBytes": downloadBytes, "speakerLearned": speakerLearned]
         }
     }
 
@@ -65,7 +68,9 @@ enum VoiceMode {
         }
         let order = VoiceModelName.allCases.map(\.rawValue)
         missing.sort { (order.firstIndex(of: $0) ?? 0) < (order.firstIndex(of: $1) ?? 0) }
-        return Status(available: canRunHere && missing.isEmpty, missing: missing, downloadBytes: bytes)
+        return Status(
+            available: canRunHere && missing.isEmpty, missing: missing, downloadBytes: bytes,
+            speakerLearned: SpeakerStore.load().learned)
     }
 
     /// Downloads and prepares every missing model. `progress` gets 0...1 over
@@ -74,11 +79,13 @@ enum VoiceMode {
         try await Installer.shared.run(progress: progress)
     }
 
-    /// Deletes the downloaded voice models (VAD, EOU, Smart Turn), cancelling
-    /// an install. Refused (`busy`) while voice mode runs.
+    /// Deletes the downloaded voice models (VAD, speaker, EOU, Smart Turn)
+    /// and the learned voice, cancelling an install. Refused (`busy`) while
+    /// voice mode runs.
     static func remove() async {
         await Installer.shared.cancel()
         VoiceModels.removeAll()
+        SpeakerStore.remove()
     }
 
     /// Install progress, delivered in order on the caller's thread: never
@@ -189,6 +196,7 @@ final class ListeningPipeline: @unchecked Sendable {
     private let vad: VadManager
     private var vadState: VadStreamState
     private let smartTurn: SmartTurn.Model?
+    private let speaker: SpeakerEmbedder?
     private var ring: SampleRing
     private var vadPending: [Float] = []
     private var vadStart = 0
@@ -200,10 +208,11 @@ final class ListeningPipeline: @unchecked Sendable {
     private var peakSpeech: Float = 0
     private var lastReportMs = 0
 
-    init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, config: VoiceConfig) {
+    init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, speaker: SpeakerEmbedder?, config: VoiceConfig) {
         self.vad = vad
         self.eou = eou
         self.smartTurn = smartTurn
+        self.speaker = speaker
         vadState = VadStreamState.initial()
         // The longest turn, plus room for the padding and an 8 s Smart Turn window.
         ring = SampleRing(capacity: (config.maxTurnMs + 10_000) * 16)
@@ -253,6 +262,24 @@ final class ListeningPipeline: @unchecked Sendable {
         let to = min(total, toMs * 16)
         let from = max(fromMs * 16 - UtteranceBounds.preRollSamples, to - SmartTurn.windowSamples)
         return try? smartTurn.probability(of: ring.slice(from: from, to: to))
+    }
+
+    /// Speech shorter than this is widened back to it for a speaker check.
+    static let speakerCheckSamples = 24_000
+
+    /// The voice embedding of `fromMs..<toMs`, widened to at least the last
+    /// 1.5 s, or nil if it cannot run.
+    func speakerEmbedding(fromMs: Int, toMs: Int) -> (embedding: [Float], audioMs: Int)? {
+        let to = min(total, toMs * 16)
+        let from = max(0, min(fromMs * 16, to - Self.speakerCheckSamples))
+        let samples = ring.slice(from: from, to: to)
+        return speakerEmbedding(of: samples)
+    }
+
+    /// The voice embedding of `samples`, or nil if it cannot run.
+    func speakerEmbedding(of samples: [Float]) -> (embedding: [Float], audioMs: Int)? {
+        guard let speaker, let embedding = try? speaker.embedding(of: samples) else { return nil }
+        return (embedding, samples.count / 16)
     }
 
     /// The committed utterance for the final pass.
@@ -309,6 +336,7 @@ actor VoiceEngine {
     private enum LoopAction {
         case clearText
         case runSmartTurn(requestId: Int, fromMs: Int, toMs: Int)
+        case checkSpeaker(requestId: Int, fromMs: Int, toMs: Int)
         case finalPass(TurnPolicy.Commit)
     }
 
@@ -342,6 +370,22 @@ actor VoiceEngine {
     /// The audio graph epoch this actor has caught up with (see `handle(.rebuilt)`).
     private var graphEpoch = 0
     private var micDrops: DropCounter?
+    private var config = VoiceConfig.defaults
+    /// The person's voice (loaded at start, saved as it is learned).
+    private var speaker = SpeakerProfile()
+    private var speakerModelLoaded = false
+
+    /// Whether speech is checked against the person's voice.
+    private var checksSpeaker: Bool { speakerModelLoaded && speaker.learned && config.speakerThreshold > 0 }
+
+    /// Forgets the person's voice: it is learned again from the next turns.
+    func forgetSpeaker() {
+        speaker = SpeakerProfile()
+        SpeakerStore.remove()
+        policy.checksSpeaker = false
+        VoiceMode.log.info("voice: speaker profile forgotten")
+    }
+
 
     /// Bumped at once by `voiceStop` (outside the plugin's call queue), so a
     /// start still loading its models gives up instead of opening the microphone.
@@ -383,6 +427,7 @@ actor VoiceEngine {
         var heldPhonon = false
         let pipeline: ListeningPipeline
         let tts: Phonon
+        var hasSpeakerModel = false
         do {
             let units = MLComputeUnits.cpuAndNeuralEngine
             let vadConfiguration = MLModelConfiguration()
@@ -405,6 +450,13 @@ actor VoiceEngine {
             _ = try? smartTurn?.probability(of: [])
             VoiceMode.log.info("voice start: smart turn at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
+            // Without it every voice is taken as the person's, as before.
+            let speakerModel = try? SpeakerEmbedder(
+                directory: VoiceModels.speaker.directory, computeUnits: VoiceModels.computeUnits(.speaker))
+            _ = try? speakerModel?.embedding(of: [Float](repeating: 0, count: 1600))
+            if speakerModel == nil { VoiceMode.log.error("voice start: speaker model failed to load") }
+            VoiceMode.log.info("voice start: speaker at \(Self.milliseconds(since: started), privacy: .public) ms")
+            try stillWanted()
             await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
             _ = try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)
             VoiceMode.log.info("voice start: fluid mini at \(Self.milliseconds(since: started), privacy: .public) ms")
@@ -417,7 +469,8 @@ actor VoiceEngine {
             _ = try? await tts.synthesize("Ready.")
             VoiceMode.log.info("voice start: phonon warm at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
-            pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, config: config)
+            pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: speakerModel, config: config)
+            hasSpeakerModel = speakerModel != nil
         } catch {
             if heldFluid { await FluidSpeechMini.Runtime.shared.endLive() }
             if heldPhonon { await PhononVoice.Runtime.shared.endVoice() }
@@ -457,6 +510,11 @@ actor VoiceEngine {
         input = continuation
         policy = TurnPolicy(config: config)
         policy.echoCancelled = audio.echoCancelled
+        self.config = config
+        speaker = SpeakerStore.load()
+        speakerModelLoaded = hasSpeakerModel
+        policy.checksSpeaker = checksSpeaker
+        VoiceMode.log.info("voice start: speaker check \(self.checksSpeaker ? "on" : (self.speaker.learned ? "off" : "learning"), privacy: .public)")
         queue = ClauseQueue()
         pendingActions = []
         metrics = nil
@@ -552,9 +610,18 @@ actor VoiceEngine {
                     actions += await smartTurnAnswered(
                         requestId: requestId, probability: probability,
                         milliseconds: Self.milliseconds(since: started), generation: generation)
+                case let .checkSpeaker(requestId, fromMs, toMs):
+                    let started = ContinuousClock.now
+                    let heard = pipeline.speakerEmbedding(fromMs: fromMs, toMs: toMs)
+                    actions += await speakerChecked(
+                        requestId: requestId, heard: heard,
+                        milliseconds: Self.milliseconds(since: started), generation: generation)
                 case let .finalPass(commit):
                     let audio = pipeline.utterance(commit)
-                    Task { await self.finalPass(commit, audio: audio, generation: generation) }
+                    let started = ContinuousClock.now
+                    let heard = pipeline.speakerEmbedding(of: audio)
+                    let checkMs = Self.milliseconds(since: started)
+                    Task { await self.finalPass(commit, audio: audio, heard: heard, checkMs: checkMs, generation: generation) }
                 }
             }
         }
@@ -564,6 +631,17 @@ actor VoiceEngine {
         guard generation == self.generation else { return [] }
         commitStages["smartTurn"] = milliseconds
         return apply([.smartTurn(requestId: requestId, probability: probability)], generation: generation)
+    }
+
+    private func speakerChecked(
+        requestId: Int, heard: (embedding: [Float], audioMs: Int)?, milliseconds: Double, generation: Int
+    ) -> [LoopAction] {
+        guard generation == self.generation else { return [] }
+        let verdict = heard.map { speaker.check($0.embedding, audioMs: $0.audioMs, threshold: config.speakerThreshold) } ?? .unknown
+        let match: Bool
+        if case .mismatch = verdict { match = false } else { match = true }
+        VoiceMode.log.info("voice: barge-in speaker check \(match ? "same" : "other", privacy: .public) voice, similarity \(verdict.similarity ?? -1, format: .fixed(precision: 2), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(milliseconds), privacy: .public) ms")
+        return apply([.speakerChecked(requestId: requestId, match: match)], generation: generation)
     }
 
     private func fail(generation: Int) async {
@@ -587,6 +665,8 @@ actor VoiceEngine {
                 send(.partial(text: text))
             case let .runSmartTurn(requestId, fromMs, toMs):
                 pendingActions.append(.runSmartTurn(requestId: requestId, fromMs: fromMs, toMs: toMs))
+            case let .checkSpeaker(requestId, fromMs, toMs):
+                pendingActions.append(.checkSpeaker(requestId: requestId, fromMs: fromMs, toMs: toMs))
             case let .commit(commit):
                 let smartTurn = commitStages["smartTurn"]
                 commitStages = ["endOfSpeechToCommit": Double(commit.decidedAtMs - commit.endMs)]
@@ -614,7 +694,21 @@ actor VoiceEngine {
         }
     }
 
-    private func finalPass(_ commit: TurnPolicy.Commit, audio samples: [Float], generation: Int) async {
+    private func finalPass(
+        _ commit: TurnPolicy.Commit, audio samples: [Float], heard: (embedding: [Float], audioMs: Int)?,
+        checkMs: Double, generation: Int
+    ) async {
+        guard generation == self.generation, running else { return }
+        let verdict = heard.map { speaker.check($0.embedding, audioMs: $0.audioMs, threshold: config.speakerThreshold) } ?? .unknown
+        if let similarity = verdict.similarity {
+            VoiceMode.log.info("voice: turn speaker check similarity \(similarity, format: .fixed(precision: 2), privacy: .public), \(heard?.audioMs ?? 0, privacy: .public) ms audio, \(Int(checkMs), privacy: .public) ms")
+        }
+        if case .mismatch = verdict, checksSpeaker {
+            VoiceMode.log.info("voice: turn ignored, another voice")
+            send(.ignored(.otherVoice))
+            carryOut(policy.handle(.turnDiscarded))
+            return
+        }
         let started = ContinuousClock.now
         var text = ""
         if let fluidDirectory {
@@ -629,11 +723,27 @@ actor VoiceEngine {
             carryOut(policy.handle(.turnDiscarded))
             return
         }
+        if let heard { learnSpeaker(heard) }
+        if heard != nil { stages["speakerCheck"] = checkMs }
         let turnId = UUID().uuidString.lowercased()
         if let previous = metrics?.turnId { flushMetrics(previous) }
         metrics = TurnMetrics(turnId: turnId, stages: stages, sentAt: .now)
         send(.turn(turnId: turnId, text: text, audioMs: commit.endMs - commit.startMs))
         carryOut(policy.handle(.turnCommitted(turnId: turnId, text: text)))
+    }
+
+    /// Learns the person's voice from a turn sent as theirs.
+    private func learnSpeaker(_ heard: (embedding: [Float], audioMs: Int)) {
+        guard config.speakerThreshold > 0 else { return }
+        let wasLearned = speaker.learned
+        guard speaker.learn(heard.embedding, audioMs: heard.audioMs, threshold: config.speakerThreshold) else { return }
+        SpeakerStore.save(speaker)
+        if speaker.learned, !wasLearned {
+            VoiceMode.log.info("voice: speaker profile learned")
+        } else if !speaker.learned {
+            VoiceMode.log.info("voice: speaker profile learning, \(self.speaker.candidates.count, privacy: .public) turns heard")
+        }
+        policy.checksSpeaker = checksSpeaker
     }
 
     // MARK: - Speaking

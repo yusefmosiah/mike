@@ -23,6 +23,11 @@ struct VoiceConfig: Equatable, Sendable {
     var falseStartMs: Int = 1500
     /// A single turn is cut here.
     var maxTurnMs: Int = 60_000
+    /// Once the person's voice is learned, speech scoring below this against
+    /// it is another voice (0 turns the check off). Same-voice scores at a
+    /// second of speech or more run from about 0.45 up; other voices stayed
+    /// under 0.41 in testing, so this errs toward letting the person through.
+    var speakerThreshold: Float = 0.35
 
     static let defaults = VoiceConfig()
     /// The longest turn accepted (the final pass and the audio kept for it scale with it).
@@ -56,6 +61,7 @@ struct VoiceConfig: Equatable, Sendable {
         if let value = number("bargeInWords"), (0...20).contains(value) { bargeInWords = Int(value.rounded()) }
         if let value = millis("falseStartMs", 0...30_000) { falseStartMs = value }
         if let value = millis("maxTurnMs", 1_000...Double(Self.maxTurnLimitMs)) { maxTurnMs = value }
+        if let value = number("speakerThreshold"), value >= 0, value < 1 { speakerThreshold = Float(value) }
     }
 }
 
@@ -76,6 +82,11 @@ enum VoiceEndReason: String, Equatable, Sendable {
     case error
 }
 
+/// Why a finished turn was not sent.
+enum VoiceIgnoreReason: String, Equatable, Sendable {
+    case otherVoice = "other-voice"
+}
+
 /// Every event the engine sends on the `voiceEvent` listener.
 enum VoiceEvent: Equatable, Sendable {
     case install(fraction: Double)
@@ -88,6 +99,8 @@ enum VoiceEvent: Equatable, Sendable {
     case interrupted(turnId: String, clauseId: Int, fraction: Double)
     case answerFinished(turnId: String)
     case ended(VoiceEndReason)
+    /// A finished turn was not sent: it was in another voice.
+    case ignored(VoiceIgnoreReason)
     case metrics(turnId: String, stages: [String: Double])
 
     static let listenerName = "voiceEvent"
@@ -116,6 +129,8 @@ enum VoiceEvent: Equatable, Sendable {
             return ["type": "answerFinished", "turnId": turnId]
         case let .ended(reason):
             return ["type": "ended", "reason": reason.rawValue]
+        case let .ignored(reason):
+            return ["type": "ignored", "reason": reason.rawValue]
         case let .metrics(turnId, stages):
             return ["type": "metrics", "turnId": turnId, "stages": stages.mapValues { ($0 * 10).rounded() / 10 }]
         }
@@ -127,6 +142,7 @@ enum VoiceModelName: String, CaseIterable, Sendable {
     case vad
     case eou
     case smartTurn = "smart-turn"
+    case speaker
     case phonon
     case fluidMini = "fluid-mini"
 }

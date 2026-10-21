@@ -28,6 +28,11 @@ export interface VoiceConfig {
     falseStartMs: number;
     /** A single turn is cut here, 60000 ms (at most 120000; a larger value falls back to the default). */
     maxTurnMs: number;
+    /**
+     * Once the person's voice is learned, speech scoring below this against it
+     * is another voice and neither interrupts nor is sent, 0.35 (0 turns it off).
+     */
+    speakerThreshold: number;
 }
 
 export type VoiceEngineState = "listening" | "user-speaking" | "confirming-end" | "thinking" | "speaking";
@@ -47,16 +52,20 @@ export type VoiceEvent =
     | { type: "interrupted"; turnId: string; clauseId: number; fraction: number }
     | { type: "answerFinished"; turnId: string }
     | { type: "ended"; reason: VoiceEndReason }
+    /** A finished turn was not sent: it was in another voice ("other-voice"). */
+    | { type: "ignored"; reason: string }
     /** Stage timings in ms, by name (for example `micDroppedMs`); unknown names are kept. */
     | { type: "metrics"; turnId: string; stages: Record<string, number> };
 
 export interface VoiceStatus {
     /** Every model voice mode needs is installed and this device can run it. */
     available: boolean;
-    /** Models still to download ("vad", "eou", "smart-turn", "phonon", "fluid-mini"). */
+    /** Models still to download ("vad", "eou", "smart-turn", "speaker", "phonon", "fluid-mini"). */
     missing: string[];
     /** Their total size. */
     downloadBytes: number;
+    /** Voice mode has learned the person's voice and ignores other voices. */
+    speakerLearned: boolean;
 }
 
 interface CapacitorBridge {
@@ -75,6 +84,7 @@ export const VOICE_MICROPHONE_MESSAGE =
     "The microphone is off for this app. Turn it on in the phone's settings to talk.";
 export const VOICE_REMOVE_FAILURE_MESSAGE = "Could not remove the voice mode models. Please try again.";
 export const VOICE_BUSY_MESSAGE = "Turn off voice mode before removing its models.";
+export const VOICE_FORGET_FAILURE_MESSAGE = "Could not forget your voice. Please try again.";
 const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     "permission-denied": VOICE_MICROPHONE_MESSAGE,
     unavailable: VOICE_UNAVAILABLE_MESSAGE,
@@ -111,10 +121,24 @@ function bridge(): CapacitorBridge | null {
     return cap;
 }
 
+function hasMethod(name: string): boolean {
+    const header = bridge()?.PluginHeaders?.find((entry) => entry.name === PLUGIN);
+    return !!header?.methods?.some((method) => method.name === name);
+}
+
 /** True in an app build whose plugin has the voice engine. */
 export function voiceChatSupported(): boolean {
-    const header = bridge()?.PluginHeaders?.find((entry) => entry.name === PLUGIN);
-    return !!header?.methods?.some((method) => method.name === "voiceStatus");
+    return hasMethod("voiceStatus");
+}
+
+/** True when the app can open the system's microphone modes (Voice Isolation). */
+export function voiceMicrophoneModesSupported(): boolean {
+    return voiceChatSupported() && hasMethod("voiceMicrophoneModes");
+}
+
+/** True when the app can forget the learned voice. */
+export function voiceForgetSpeakerSupported(): boolean {
+    return voiceChatSupported() && hasMethod("voiceForgetSpeaker");
 }
 
 function call(method: string, options?: Record<string, unknown>): Promise<unknown> {
@@ -134,6 +158,7 @@ function parseStatus(value: unknown): VoiceStatus {
         available: result.available === true,
         missing: Array.isArray(result.missing) ? result.missing.filter((name): name is string => typeof name === "string") : [],
         downloadBytes: finite(result.downloadBytes) && result.downloadBytes > 0 ? result.downloadBytes : 0,
+        speakerLearned: result.speakerLearned === true,
     };
 }
 
@@ -142,13 +167,14 @@ export async function voiceStatus(): Promise<VoiceStatus> {
     try {
         return parseStatus(await call("voiceStatus"));
     } catch {
-        return { available: false, missing: [], downloadBytes: 0 };
+        return { available: false, missing: [], downloadBytes: 0, speakerLearned: false };
     }
 }
 
 /**
- * Deletes voice mode's own models (VAD, end of utterance, Smart Turn) and
- * cancels an install in progress; Phonon has its own removal. Resolves the
+ * Deletes voice mode's own models (VAD, end of utterance, Smart Turn, the
+ * speaker model) and the learned voice, and cancels an install in progress;
+ * Phonon has its own removal. Resolves the
  * status afterwards. Rejects while voice mode runs (`busy`).
  */
 export async function voiceRemove(): Promise<VoiceStatus> {
@@ -162,6 +188,27 @@ export async function voiceRemove(): Promise<VoiceStatus> {
         );
     }
     return parseStatus(result);
+}
+
+/**
+ * Forgets the person's learned voice; voice mode learns it again from their
+ * next turns. Works while voice mode runs. Resolves the status afterwards.
+ */
+export async function voiceForgetSpeaker(): Promise<VoiceStatus> {
+    try {
+        return parseStatus(await call("voiceForgetSpeaker"));
+    } catch (error) {
+        throw new VoiceEngineError(VOICE_FORGET_FAILURE_MESSAGE, errorCode(error) ?? undefined);
+    }
+}
+
+/**
+ * Opens the system's microphone modes, where Voice Isolation filters out
+ * other sounds. The phone lists them only while voice mode has the microphone.
+ * Never rejects.
+ */
+export async function voiceMicrophoneModes(): Promise<void> {
+    await call("voiceMicrophoneModes").catch(() => undefined);
 }
 
 /**
@@ -248,6 +295,8 @@ export function parseVoiceEvent(data: unknown): VoiceEvent | null {
             const reason = END_REASONS.find((known) => known === event.reason);
             return { type: "ended", reason: reason ?? "error" };
         }
+        case "ignored":
+            return { type: "ignored", reason: text(event.reason) ? event.reason : "other-voice" };
         case "metrics": {
             const stages = Object.fromEntries(Object.entries(record(event.stages)).filter(([, value]) => finite(value)));
             return text(turnId) ? { type: "metrics", turnId, stages: stages as Record<string, number> } : null;

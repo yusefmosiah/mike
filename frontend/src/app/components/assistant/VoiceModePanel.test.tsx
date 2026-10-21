@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDownloadSize, VoiceModePanel } from "./VoiceModePanel";
 import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
@@ -9,6 +9,7 @@ function voice(overrides: Partial<UseVoiceChatResult> = {}) {
         phase: "on",
         activity: "listening",
         partial: "",
+        ignoredOtherVoice: false,
         installProgress: null,
         downloadBytes: 0,
         error: null,
@@ -27,6 +28,28 @@ describe("formatDownloadSize", () => {
 });
 
 describe("VoiceModePanel", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("says a turn in another voice was not sent, until the person speaks", () => {
+        const { rerender } = render(<VoiceModePanel voice={voice({ ignoredOtherVoice: true })} />);
+        expect(screen.getByText("Another voice, not sent.")).toBeInTheDocument();
+        rerender(<VoiceModePanel voice={voice({ ignoredOtherVoice: true, partial: "as I was saying" })} />);
+        expect(screen.getByText("as I was saying")).toBeInTheDocument();
+        expect(screen.queryByText("Another voice, not sent.")).not.toBeInTheDocument();
+    });
+
+    it("opens the phone's microphone modes where the app has them", () => {
+        const nativePromise = vi.fn(async () => undefined);
+        vi.stubGlobal("Capacitor", {
+            PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "voiceStatus" }, { name: "voiceMicrophoneModes" }] }],
+            nativePromise,
+        });
+        render(<VoiceModePanel voice={voice()} />);
+        fireEvent.click(screen.getByRole("button", { name: "Microphone mode" }));
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "voiceMicrophoneModes", undefined);
+        expect(screen.getByRole("button", { name: "End" })).toBeInTheDocument();
+    });
+
     it("shows the state in words and in shape, with the live words and one End control", () => {
         const handlers = voice({ partial: "what does clause four say" });
         const { rerender } = render(<VoiceModePanel voice={handlers} />);

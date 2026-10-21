@@ -237,9 +237,52 @@ end-of-utterance signal.
   default behaviour).
 - **Echo fallback**, if voice processing leaves too much at loudspeaker
   volume: FluidAudio's LocalVQE (4.8M parameters, 16 ms, beta, needs the
-  played audio as its reference; not stacked on voice processing). A last
-  resort is a voice match: FluidAudio's CAM++ speaker embedding, enrolled
-  from the person's first turns, as a third barge-in condition.
+  played audio as its reference; not stacked on voice processing). The voice
+  match below already keeps the answer's own echo from barging in once the
+  person's voice is learned.
+
+### Other voices
+
+A TV, a radio or someone else in the room speaks real words, so the word
+rule above cannot tell them from the person. Voice mode learns the person's
+voice and checks speech against it (`SpeakerProfile.swift`,
+`SpeakerEmbedder.swift`).
+
+- **The model:** WeSpeaker ResNet34-LM, pyannote's VoxCeleb model (CC BY
+  4.0), FluidAudio's Core ML conversion (about 8 MB, downloaded with the
+  other voice models, on the GPU). It turns speech into 256 numbers; two
+  stretches of one voice score high on cosine similarity. About 65 ms per
+  check on an M-series Mac. CAM++ (FluidAudio's other speaker model) was
+  passed over: it is trained on Mandarin speech under a more restrictive
+  licence.
+- **Learning:** the first turns sent of 1.5 s or more are kept (up to six).
+  Once three of them score 0.5 or more with one another, their mean is the
+  person's voice; a TV heard in one or two early turns cannot outvote the
+  person. Later turns that score well above the threshold (0.15 over it)
+  nudge it (a cold, another microphone). It is kept on the phone in
+  `Application Support/MikeVoice/speaker.json` (excluded from backup), and
+  "Forget my voice" in Settings, or removing the voice models, deletes it.
+- **Turns:** once learned, a finished turn of a second or more scoring under
+  `speakerThreshold` (0.35) is not sent: the engine sends `ignored` and
+  listens again (the panel says "Another voice, not sent."). Shorter turns
+  pass, since a short embedding scatters.
+- **Barge-in:** once the word rule is met, playback is held and the speech
+  since the run began (widened back to 1.5 s) is checked. The person's voice
+  barges in; another voice resumes playback, its words are spent, and from
+  then on sound alone no longer holds this answer. New words are checked
+  again after a second.
+- **Thresholds:** from probing synthetic voices with the model: one voice
+  scored 0.46–0.69 at 1 s of speech and 0.60–0.85 at 2 s, different voices at
+  most 0.40 and 0.47. 0.35 errs toward letting the person through; the
+  similarity of every check is logged (numbers only) for tuning on the phone.
+- **Voice Isolation:** the panel's microphone-mode button opens the system's
+  microphone modes, where Voice Isolation filters out sounds other than the
+  nearest voice before any of this sees them. Apps cannot switch it on
+  themselves.
+- **Later, if needed:** a personal VAD (the end of turn conditioned on the
+  person's voice, so a TV cannot hold a turn open), and Pipecat's Audience
+  addressee model (whether the person is speaking to the assistant or to
+  someone in the room).
 
 ### Speaking
 
@@ -288,6 +331,7 @@ clauses, and the engine speaks one clause per call.
 | Parakeet EOU 120M | about 300 MB (speech-swift's figure; to be measured) | continuously, every 320 ms |
 | Phonon 31m | about 95 MB | while speaking |
 | Smart Turn v3.2 | about 17 MB | once per candidate pause |
+| WeSpeaker ResNet34-LM | about 8 MB | once per turn and per barge-in candidate |
 | Silero VAD | under 2 MB | continuously |
 
 About 700 MB in all, which fits a 6 GB iPhone alongside the web view; we

@@ -1,3 +1,4 @@
+import AVFoundation
 import Capacitor
 import Foundation
 #if canImport(FluidAudio)
@@ -35,7 +36,9 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "voiceSpeak", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceEndAnswer", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceCancelAnswer", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "voiceRemove", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "voiceRemove", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceForgetSpeaker", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voiceMicrophoneModes", returnType: CAPPluginReturnPromise)
     ]
 
     /// About half an hour of the web view's AAC recording.
@@ -367,6 +370,35 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         Task {
             await VoiceMode.remove()
             call.resolve(await VoiceMode.status().payload)
+        }
+    }
+
+    /// Forgets the person's learned voice (voice mode learns it again from
+    /// the next turns) and resolves the new `voiceStatus` payload. Works while
+    /// voice mode runs.
+    @objc func voiceForgetSpeaker(_ call: CAPPluginCall) {
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) {
+            voiceCalls.yield {
+                await VoiceEngine.shared.forgetSpeaker()
+                call.resolve(await VoiceMode.status().payload)
+            }
+            return
+        }
+        #endif
+        Task {
+            SpeakerStore.remove()
+            call.resolve(await VoiceMode.status().payload)
+        }
+    }
+
+    /// Opens the system's microphone modes (Voice Isolation, Wide Spectrum).
+    /// iOS lists them only while the app is using the microphone, so the web
+    /// app offers this during voice mode. Resolves once it is shown.
+    @objc func voiceMicrophoneModes(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+            call.resolve()
         }
     }
 
