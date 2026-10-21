@@ -3,7 +3,7 @@
 import { errorCode, knownErrorCodeMessage } from "@/app/lib/userFacingError";
 
 /**
- * The iPhone app's native voice engine, for hands-free voice chat
+ * The app's native voice engine (the iPhone app; Android has none yet), for hands-free voice chat
  * (docs/voice-chat.md; the interface is docs/voice-chat-contract.md). The
  * engine listens, decides when a turn ends and when the person speaks over the
  * answer, and plays the clauses this page sends it. It lives in the
@@ -67,12 +67,12 @@ interface CapacitorBridge {
 
 const PLUGIN = "MikeSpeech";
 
-export const VOICE_UNAVAILABLE_MESSAGE = "Voice mode is not available on this iPhone.";
+export const VOICE_UNAVAILABLE_MESSAGE = "Voice mode is not available on this phone.";
 export const VOICE_START_FAILURE_MESSAGE = "Could not start voice mode. Please try again.";
 export const VOICE_INSTALL_FAILURE_MESSAGE =
     "Could not download the speech models. Check the connection and try again.";
 export const VOICE_MICROPHONE_MESSAGE =
-    "The microphone is off for this app. Turn it on in the iPhone's Settings to talk.";
+    "The microphone is off for this app. Turn it on in the phone's settings to talk.";
 export const VOICE_REMOVE_FAILURE_MESSAGE = "Could not remove the voice mode models. Please try again.";
 export const VOICE_BUSY_MESSAGE = "Turn off voice mode before removing its models.";
 const ERROR_MESSAGES: Readonly<Record<string, string>> = {

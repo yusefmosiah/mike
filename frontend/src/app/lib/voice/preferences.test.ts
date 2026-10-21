@@ -70,6 +70,19 @@ describe("load and save", () => {
     });
 });
 
+describe("in the Android app", () => {
+    it("reads aloud on the phone but dictates with the server until Fluid Speech Mini is downloaded and chosen", () => {
+        vi.stubGlobal("Capacitor", {
+            PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }, { name: "speak" }] }],
+            nativePromise: vi.fn(),
+            getPlatform: () => "android",
+        });
+        expect(defaultVoicePreferences()).toEqual({ transcription: { engine: "operator" }, speech: { engine: "device" } });
+        saveVoicePreferences({ transcription: { engine: "device", model: "fluid-speech-mini" }, speech: { engine: "device" } });
+        expect(loadVoicePreferences().transcription).toEqual({ engine: "device", model: "fluid-speech-mini" });
+    });
+});
+
 describe("in the iPhone app", () => {
     it("dictates on the phone by default, and keeps a saved choice", () => {
         expect(defaultVoicePreferences()).toEqual(DEFAULT_VOICE_PREFERENCES);

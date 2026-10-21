@@ -203,7 +203,7 @@ describe("useDictation with live dictation", () => {
     });
 
     it("shows a stop failure and leaves the composer unchanged", async () => {
-        phone.stopLiveDictation.mockRejectedValueOnce(new LiveDictationError("Could not transcribe the recording on this iPhone. Please try again."));
+        phone.stopLiveDictation.mockRejectedValueOnce(new LiveDictationError("Could not transcribe the recording on this phone. Please try again."));
         const { result } = await startLive();
         await act(async () => {
             result.current.stop();

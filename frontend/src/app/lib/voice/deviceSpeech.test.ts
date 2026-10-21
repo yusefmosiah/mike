@@ -5,6 +5,11 @@ import {
     DEVICE_TRANSCRIBE_FAILURE_MESSAGE,
     DeviceSpeechError,
     deviceSpeechStatus,
+    devicePlatform,
+    FLUID_INSTALL_FAILURE_MESSAGE,
+    fluidSpeechMiniStatus,
+    installFluidSpeechMini,
+    removeFluidSpeechMini,
     deviceSpeechSupported,
     deviceVoices,
     deviceVoiceSupported,
@@ -36,7 +41,7 @@ import {
 
 const nativePromise = vi.fn();
 
-function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ name: "MikeSpeech" }]) {
+function inApp(headers: { name: string; methods?: { name: string }[] }[] = [{ name: "MikeSpeech", methods: [{ name: "transcribe" }] }]) {
     vi.stubGlobal("Capacitor", { PluginHeaders: headers, nativePromise });
 }
 
@@ -59,6 +64,12 @@ describe("deviceSpeechSupported", () => {
         expect(deviceSpeechSupported()).toBe(false);
         inApp();
         expect(deviceSpeechSupported()).toBe(true);
+    });
+
+    it("is false in the Android app, whose plugin has no methods yet", () => {
+        inApp([{ name: "MikeSpeech", methods: [] }, { name: "MikeFiles", methods: [] }]);
+        expect(deviceSpeechSupported()).toBe(false);
+        expect(deviceVoiceSupported()).toBe(false);
     });
 
     it("is false without a window (server rendering)", () => {
@@ -145,7 +156,7 @@ describe("transcribeOnDevice", () => {
     it("turns the phone's failure codes into messages for the user", async () => {
         inApp();
         nativePromise.mockRejectedValueOnce({ code: "not-installed", message: "internal" });
-        await expect(transcribeOnDevice(new Blob(["a"]))).rejects.toThrow(/Download Apple's speech model/);
+        await expect(transcribeOnDevice(new Blob(["a"]))).rejects.toThrow(/Download the speech model/);
         nativePromise.mockRejectedValueOnce({ code: "something-new" });
         await expect(transcribeOnDevice(new Blob(["a"]))).rejects.toThrow(DEVICE_TRANSCRIBE_FAILURE_MESSAGE);
         nativePromise.mockRejectedValueOnce(new Error("raw native text"));
@@ -219,7 +230,7 @@ describe("speakOnDevice", () => {
         await expect(speakOnDevice("Hi.")).rejects.toThrow(DEVICE_SPEAK_FAILURE_MESSAGE);
         inApp();
         nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "too-long" }));
-        await expect(speakOnDevice("Hi.")).rejects.toThrow("This is too long to read aloud on this iPhone at once.");
+        await expect(speakOnDevice("Hi.")).rejects.toThrow("This is too long to read aloud on this phone at once.");
         nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "busy" }));
         await expect(speakOnDevice("Hi.")).rejects.toThrow("Read-aloud is off while voice mode is on.");
         nativePromise.mockRejectedValueOnce(Object.assign(new Error("x"), { code: "failed" }));
@@ -501,6 +512,140 @@ describe("installPhonon and removePhonon", () => {
     });
 });
 
+describe("devicePlatform", () => {
+    it("is the shell's platform in the app and web outside it", () => {
+        expect(devicePlatform()).toBe("web");
+        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [] }], nativePromise, getPlatform: () => "android" });
+        expect(devicePlatform()).toBe("android");
+        // A shell without getPlatform (or one that throws) is the iPhone's.
+        inApp();
+        expect(devicePlatform()).toBe("ios");
+        vi.stubGlobal("Capacitor", {
+            PluginHeaders: [{ name: "MikeSpeech" }],
+            nativePromise,
+            getPlatform: () => {
+                throw new Error("gone");
+            },
+        });
+        expect(devicePlatform()).toBe("ios");
+    });
+});
+
+describe("Fluid Speech Mini downloaded on request (Android)", () => {
+    it("reads the status with its progress, size and removability", async () => {
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "unavailable" });
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "downloadable", engine: "fluid-mini", downloadBytes: 300_166_787.4 });
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "downloadable", downloadBytes: 300_166_787 });
+        expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "status", { engine: "fluid-mini" });
+        nativePromise.mockResolvedValueOnce({ state: "downloading", engine: "fluid-mini", progress: 1.4, downloadBytes: -1 });
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "downloading", progress: 1 });
+        nativePromise.mockResolvedValueOnce({ state: "available", engine: "fluid-mini", live: true, removable: true });
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "available", removable: true });
+        // An older build answers about Apple's recognizer; a failure is unavailable.
+        nativePromise.mockResolvedValueOnce({ state: "available" });
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "unavailable" });
+        nativePromise.mockResolvedValueOnce(null);
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "unavailable" });
+        nativePromise.mockRejectedValueOnce(new Error("raw"));
+        expect(await fluidSpeechMiniStatus()).toEqual({ state: "unavailable" });
+    });
+
+    it("downloads with progress, then the model is available (and live)", async () => {
+        inApp();
+        vi.useFakeTimers();
+        try {
+            let finish: (value: unknown) => void = () => {};
+            let progress: number | undefined = 0.4;
+            let installed = false;
+            nativePromise.mockImplementation((_plugin: string, method: string) => {
+                if (method === "install") return new Promise((resolve) => (finish = resolve));
+                return Promise.resolve(
+                    installed
+                        ? { state: "available", engine: "fluid-mini", live: true, removable: true }
+                        : { state: "downloading", engine: "fluid-mini", ...(progress === undefined ? {} : { progress }) },
+                );
+            });
+            // Asked before the download: not available, and not kept.
+            expect(await fluidSpeechMiniAvailable()).toBe(false);
+            const heard = vi.fn();
+            const done = installFluidSpeechMini(heard);
+            await vi.advanceTimersByTimeAsync(500);
+            expect(heard).toHaveBeenLastCalledWith(0.4);
+            progress = undefined;
+            await vi.advanceTimersByTimeAsync(500);
+            expect(heard).toHaveBeenCalledTimes(1);
+            installed = true;
+            finish({});
+            expect(await done).toEqual({ state: "available", removable: true });
+            expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "fluid-mini" });
+            expect(await fluidSpeechMiniAvailable()).toBe(true);
+            expect(await liveDictationAvailable()).toBe(true);
+            const calls = nativePromise.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(nativePromise.mock.calls.length).toBe(calls);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("stops listening when the download ends while a status call is pending", async () => {
+        inApp();
+        vi.useFakeTimers();
+        try {
+            let answerStatus: (value: unknown) => void = () => {};
+            let finish: (value: unknown) => void = () => {};
+            nativePromise.mockImplementation((_plugin: string, method: string) =>
+                method === "install" ? new Promise((resolve) => (finish = resolve)) : new Promise((resolve) => (answerStatus = resolve)),
+            );
+            const heard = vi.fn();
+            const done = installFluidSpeechMini(heard);
+            await vi.advanceTimersByTimeAsync(500);
+            nativePromise.mockImplementation(async () => ({ state: "available", engine: "fluid-mini" }));
+            finish({});
+            await done;
+            answerStatus({ state: "downloading", engine: "fluid-mini", progress: 0.5 });
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(heard).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("fails with a message when the download fails, the model is still missing, or there is no app", async () => {
+        await expect(installFluidSpeechMini()).rejects.toThrow(FLUID_INSTALL_FAILURE_MESSAGE);
+        inApp();
+        nativePromise.mockRejectedValueOnce(Object.assign(new Error("raw"), { code: "install-failed" }));
+        await expect(installFluidSpeechMini()).rejects.toBeInstanceOf(DeviceSpeechError);
+        nativePromise.mockReset();
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "install" ? {} : { state: "downloadable", engine: "fluid-mini" },
+        );
+        await expect(installFluidSpeechMini()).rejects.toThrow(FLUID_INSTALL_FAILURE_MESSAGE);
+    });
+
+    it("removes the model and returns the new status", async () => {
+        expect(await removeFluidSpeechMini()).toEqual({ state: "unavailable" });
+        inApp();
+        nativePromise.mockImplementation(async (_plugin: string, method: string) =>
+            method === "remove" ? {} : { state: "downloadable", engine: "fluid-mini", downloadBytes: 10 },
+        );
+        expect(await removeFluidSpeechMini()).toEqual({ state: "downloadable", downloadBytes: 10 });
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "remove", { engine: "fluid-mini" });
+        nativePromise.mockImplementation(async (_plugin: string, method: string) => {
+            if (method === "remove") throw new Error("not implemented");
+            return { state: "unavailable" };
+        });
+        expect(await removeFluidSpeechMini()).toEqual({ state: "unavailable" });
+    });
+
+    it("reports Phonon's download size when the app gives it", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({ state: "not-installed", engine: "phonon", downloadBytes: 66_838_000 });
+        expect(await phononStatus()).toEqual({ state: "not-installed", downloadBytes: 66_838_000 });
+    });
+});
+
 describe("liveDictationAvailable", () => {
     it("is false in a browser", async () => {
         expect(await liveDictationAvailable()).toBe(false);
@@ -588,7 +733,7 @@ describe("live dictation", () => {
         nativePromise.mockRejectedValueOnce({ code: "permission-denied" });
         await expect(startLiveDictation(() => undefined)).rejects.toMatchObject({
             code: "permission-denied",
-            message: "Speech recognition is turned off for this app in the iPhone's Settings.",
+            message: "Speech recognition is turned off for this app in the phone's settings.",
         });
         expect(remove).toHaveBeenCalledTimes(1);
 

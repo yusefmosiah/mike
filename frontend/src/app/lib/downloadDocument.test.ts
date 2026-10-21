@@ -33,7 +33,7 @@ it("cleans up even if clicking fails", async () => {
 });
 it("hands the file to the iPhone app's share sheet instead of a link", async () => {
     const nativePromise = vi.fn().mockResolvedValue({ completed: true });
-    (window as { Capacitor?: unknown }).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles" }] };
+    (window as { Capacitor?: unknown }).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles", methods: [{ name: "share" }] }] };
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
     try {
         await downloadBlob(new Blob(["docx"]), "brief.docx");

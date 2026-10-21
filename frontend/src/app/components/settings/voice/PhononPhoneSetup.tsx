@@ -3,20 +3,21 @@
 import { useState } from "react";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { SettingsDescription } from "@/app/components/settings/SettingsText";
+import { formatDownloadSize } from "@/app/components/assistant/VoiceModePanel";
 import {
   installPhonon,
   removePhonon,
   type PhononStatus,
 } from "@/app/lib/voice/deviceSpeech";
 
-/** What the download is, said before it starts. */
+/** What the download is, said before it starts (the iPhone's Core ML build, which the phone then compiles). */
 const PHONON_DOWNLOAD_SIZE = "about 160 MB";
 const PHONON_DISK_SIZE = "about twice that once the phone has prepared it";
 
 /**
  * Phonon on the phone: its model is not in the app. The person downloads it
  * here (nothing is fetched before), can watch the progress, and can remove it
- * again to free the space. Until it is on the phone, Apple's voices read.
+ * again to free the space. Until it is on the phone, the phone's own voices read.
  */
 export function PhononPhoneSetup({
   status,
@@ -66,8 +67,8 @@ export function PhononPhoneSetup({
       <div className="space-y-2">
         <SettingsDescription>
           {chosen
-            ? "The text never leaves this iPhone."
-            : "Phonon is on this iPhone. Choose it above to read English with it."}
+            ? "The text never leaves this phone."
+            : "Phonon is on this phone. Choose it above to read English with it."}
           {status.compiling ? " The next reading prepares it for this phone first (about ten seconds)." : ""}
         </SettingsDescription>
         <PillButtonUI tone="white" size="sm" loading={removing} onClick={() => void remove()}>
@@ -85,8 +86,9 @@ export function PhononPhoneSetup({
   return (
     <div className="space-y-2">
       <SettingsDescription>
-        Phonon is not on this iPhone yet. Download it once ({PHONON_DOWNLOAD_SIZE}; {PHONON_DISK_SIZE}) to read English
-        with it. Until then Apple&apos;s voices read. Only the model is downloaded; no text is sent.
+        Phonon is not on this phone yet. Download it once (
+        {status.downloadBytes ? formatDownloadSize(status.downloadBytes) : `${PHONON_DOWNLOAD_SIZE}; ${PHONON_DISK_SIZE}`}) to read
+        English with it. Until then the phone&apos;s own voices read. Only the model is downloaded; no text is sent.
       </SettingsDescription>
       {downloading ? (
         <div className="space-y-1">

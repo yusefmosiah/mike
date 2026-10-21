@@ -10,9 +10,10 @@ import { browserModelsSupported } from "@/app/lib/voice/browserModels";
 import {
   deviceSpeechStatus,
   deviceVoiceSupported,
-  fluidSpeechMiniAvailable,
+  fluidSpeechMiniStatus,
   phononStatus,
   type DeviceSpeechState,
+  type FluidSpeechMiniStatus,
   type PhononStatus,
 } from "@/app/lib/voice/deviceSpeech";
 import type { VoiceAvailability } from "@/app/lib/voice/preferences";
@@ -27,9 +28,12 @@ export interface VoiceAvailabilityState {
   /** Apple's recognition on the phone, in the iPhone app. */
   deviceStatus: DeviceSpeechState;
   refreshDevice: () => void;
-  /** Fluid Speech Mini, bundled in the iPhone app (iOS 18 and later). */
+  /** Fluid Speech Mini can transcribe now (bundled on the iPhone, downloaded on Android). */
   fluidSpeechMini: boolean;
-  /** Phonon on the phone: downloaded or not, in the iPhone app (iOS 18 and later). */
+  /** Where Fluid Speech Mini stands: on Android it is `downloadable` until downloaded. */
+  fluidStatus: FluidSpeechMiniStatus;
+  refreshFluid: () => void;
+  /** Phonon on the phone: downloaded or not, in the app (iOS 18 and later, Android). */
   phonon: PhononStatus;
   refreshPhonon: () => void;
   loading: boolean;
@@ -37,10 +41,11 @@ export interface VoiceAvailabilityState {
 }
 
 const PHONON_UNAVAILABLE: PhononStatus = { state: "unavailable" };
+const FLUID_UNAVAILABLE: FluidSpeechMiniStatus = { state: "unavailable" };
 
 /**
- * What this deployment offers and what this browser (or, in the iPhone app,
- * this phone) can do, for Settings → Voice.
+ * What this deployment offers and what this browser (or, in the app, this
+ * phone) can do, for Settings → Voice.
  */
 export function useVoiceAvailability(): VoiceAvailabilityState {
   const [options, setOptions] = useState<VoiceOptions | null>(null);
@@ -50,7 +55,8 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
   const [recognitionCheck, setRecognitionCheck] = useState(0);
   const [deviceStatus, setDeviceStatus] = useState<DeviceSpeechState>("unavailable");
   const [deviceCheck, setDeviceCheck] = useState(0);
-  const [fluidSpeechMini, setFluidSpeechMini] = useState(false);
+  const [fluidStatus, setFluidStatus] = useState<FluidSpeechMiniStatus>(FLUID_UNAVAILABLE);
+  const [fluidCheck, setFluidCheck] = useState(0);
   const [phonon, setPhonon] = useState<PhononStatus>(PHONON_UNAVAILABLE);
   const [phononCheck, setPhononCheck] = useState(0);
 
@@ -93,13 +99,13 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
 
   useEffect(() => {
     let active = true;
-    void fluidSpeechMiniAvailable().then((ok) => {
-      if (active) setFluidSpeechMini(ok);
+    void fluidSpeechMiniStatus().then((status) => {
+      if (active) setFluidStatus(status);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [fluidCheck]);
 
   useEffect(() => {
     let active = true;
@@ -114,14 +120,15 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
   return {
     options,
     availability: {
-      deviceRecognition: deviceStatus !== "unavailable" || fluidSpeechMini,
+      // Also while Fluid Speech Mini is only downloadable, so Settings can offer the download.
+      deviceRecognition: deviceStatus !== "unavailable" || fluidStatus.state !== "unavailable",
       deviceSpeech: deviceVoiceSupported(),
       operatorTranscription: !!options?.operator.transcription,
       operatorSpeech: !!options?.operator.speech,
       openRouter: !!options?.openrouter.available && !!options.openrouter.catalog,
       browserRecognition: recognitionStatus !== "unavailable",
-      // In the iPhone app the web view's own voices stay silent; Apple's
-      // voices come through the plugin instead ("This iPhone").
+      // In the app the web view's own voices stay silent; the phone's
+      // voices come through the plugin instead ("This phone").
       browserSpeech: browserSpeechSupported() && !deviceVoiceSupported(),
       webgpu: browserModelsSupported(),
     },
@@ -129,7 +136,9 @@ export function useVoiceAvailability(): VoiceAvailabilityState {
     refreshRecognition: () => setRecognitionCheck((n) => n + 1),
     deviceStatus,
     refreshDevice: () => setDeviceCheck((n) => n + 1),
-    fluidSpeechMini,
+    fluidSpeechMini: fluidStatus.state === "available",
+    fluidStatus,
+    refreshFluid: () => setFluidCheck((n) => n + 1),
     phonon,
     refreshPhonon: () => setPhononCheck((n) => n + 1),
     loading,

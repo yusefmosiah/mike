@@ -2,15 +2,20 @@
     "name": "@mike/speech",
     "version": "0.1.0",
     "private": true,
-    "description": "Mike's iOS plugin: dictation with Apple's on-device speech recognition.",
+    "description": "Mike's on-device speech plugin for iOS and Android: dictation and read-aloud on the phone.",
     "license": "AGPL-3.0-only",
     "files": [
         "ios/Sources",
-        "Package.swift"
+        "Package.swift",
+        "android/src",
+        "android/build.gradle"
     ],
     "capacitor": {
         "ios": {
             "src": "ios"
+        },
+        "android": {
+            "src": "android"
         }
     }
 }

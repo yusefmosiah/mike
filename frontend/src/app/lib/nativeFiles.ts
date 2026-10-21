@@ -4,18 +4,22 @@
 // AirDrop, Mail. A browser has no bridge and downloads as usual.
 
 interface CapacitorBridge {
-    PluginHeaders?: { name: string }[];
+    PluginHeaders?: { name: string; methods?: { name: string }[] }[];
     nativePromise?: (plugin: string, method: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
 
 const PLUGIN = "MikeFiles";
 
-/** The shell's bridge when it has the file plugin (app builds before it have none). */
+/**
+ * The shell's bridge when its file plugin can share (app builds before it
+ * have no plugin; the Android app registers it without "share" for now).
+ */
 function bridge(): NonNullable<CapacitorBridge["nativePromise"]> | null {
     // globalThis, not window: the server render has no window, and no bridge.
     const cap = (globalThis as { Capacitor?: CapacitorBridge }).Capacitor;
     if (typeof cap?.nativePromise !== "function") return null;
-    if (!cap.PluginHeaders?.some((header) => header.name === PLUGIN)) return null;
+    const header = cap.PluginHeaders?.find((entry) => entry.name === PLUGIN);
+    if (!header?.methods?.some((method) => method.name === "share")) return null;
     return cap.nativePromise.bind(cap);
 }
 

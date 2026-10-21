@@ -368,6 +368,11 @@ media-services resets by ending the turn cleanly and rebuilding the engine.
 
 ## Android (next)
 
+Dictation and read-aloud already run on Android (`android-speech.md`): Fluid
+Speech Mini's ONNX build on ONNX Runtime's CPU provider (real-time factor
+about 0.3 on a Snapdragon 6 Gen 1) and Phonon's C library on the CPU (3–4×
+real time). Voice mode builds on them:
+
 - Audio: `MODE_IN_COMMUNICATION`, capture with `VOICE_COMMUNICATION` (Oboe
   where possible), speech played with `USAGE_VOICE_COMMUNICATION` so the
   platform canceller has the reference; route to the speaker explicitly

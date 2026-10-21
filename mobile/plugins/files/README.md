@@ -17,3 +17,11 @@ a message for the user and one of these codes: `invalid-file`, `too-large`
 
 The file is written to a temporary folder with complete file protection and
 removed when the sheet closes. Names and contents are never logged.
+
+## Android
+
+`android/` registers `MikeFiles` with no methods, so the app builds with the
+plugin and the web app, which looks for `share`, falls back to a blob link.
+Android's web view ignores that link (Capacitor sets no download listener),
+so downloads do not work on Android until `share` is implemented there; the
+web side then uses it with no change.

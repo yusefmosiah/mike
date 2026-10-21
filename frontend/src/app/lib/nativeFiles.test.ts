@@ -15,9 +15,17 @@ describe("saving a file in the iPhone app", () => {
         expect(nativeFileSaveSupported()).toBe(false);
     });
 
+    it("falls back to the link in the Android app, whose plugin cannot share yet", async () => {
+        const nativePromise = vi.fn();
+        (window as Win).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles", methods: [] }] };
+        expect(nativeFileSaveSupported()).toBe(false);
+        expect(await saveFileNatively(new Blob(["x"]), "a.txt")).toBe(false);
+        expect(nativePromise).not.toHaveBeenCalled();
+    });
+
     it("sends the bytes, name and type to the share sheet", async () => {
         const nativePromise = vi.fn().mockResolvedValue({ completed: true });
-        (window as Win).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles" }] };
+        (window as Win).Capacitor = { nativePromise, PluginHeaders: [{ name: "MikeFiles", methods: [{ name: "share" }] }] };
         expect(nativeFileSaveSupported()).toBe(true);
         const ok = await saveFileNatively(new Blob(["hello"], { type: "text/plain" }), "notes.txt");
         expect(ok).toBe(true);
@@ -33,7 +41,7 @@ describe("saving a file in the iPhone app", () => {
     it("passes a failure on to the caller", async () => {
         (window as Win).Capacitor = {
             nativePromise: vi.fn().mockRejectedValue(new Error("The file could not be saved.")),
-            PluginHeaders: [{ name: "MikeFiles" }],
+            PluginHeaders: [{ name: "MikeFiles", methods: [{ name: "share" }] }],
         };
         await expect(saveFileNatively(new Blob(["x"]), "a")).rejects.toThrow("could not be saved");
     });

@@ -15,6 +15,9 @@ vi.mock("./browserModels", () => local);
 const phone = vi.hoisted(() => ({
     transcribeOnDevice: vi.fn(async (..._args: unknown[]) => "phone words"),
     fluidSpeechMiniAvailable: vi.fn(async () => false),
+    fluidSpeechMiniStatus: vi.fn(async () => ({ state: "unavailable" })),
+    DEVICE_MODEL_MISSING_MESSAGE: "Download the speech model in Settings → Voice to dictate on this phone.",
+    DeviceSpeechError: class DeviceSpeechError extends Error {},
     prepareFluidSpeechMini: vi.fn(),
     liveDictationAvailable: vi.fn(async () => false),
     startLiveDictation: vi.fn(async (..._args: unknown[]) => undefined),
@@ -137,6 +140,25 @@ describe("transcribeRecording", () => {
             await transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini" });
             expect(phone.transcribeOnDevice).toHaveBeenCalledTimes(1);
             expect(phone.transcribeOnDevice).toHaveBeenCalledWith(blob, undefined);
+        });
+
+        it("asks for the download when the phone has no recognizer until Fluid Speech Mini is downloaded (Android)", async () => {
+            phone.fluidSpeechMiniAvailable.mockResolvedValue(false);
+            phone.transcribeOnDevice.mockRejectedValue(new Error("unavailable"));
+            phone.fluidSpeechMiniStatus.mockResolvedValueOnce({ state: "downloadable" });
+            await expect(transcribeRecording(blob, { engine: "device", model: "fluid-speech-mini" })).rejects.toThrow(
+                "Download the speech model in Settings → Voice to dictate on this phone.",
+            );
+            phone.fluidSpeechMiniStatus.mockResolvedValueOnce({ state: "downloading" });
+            await expect(transcribeRecording(blob, { engine: "device" })).rejects.toThrow("Download the speech model");
+            // Fluid Speech Mini cannot run here at all: the recognizer's own error stands.
+            await expect(transcribeRecording(blob, { engine: "device" })).rejects.toThrow("unavailable");
+            // Apple's recognizer chosen: no question about Fluid Speech Mini.
+            phone.fluidSpeechMiniStatus.mockClear();
+            await expect(transcribeRecording(blob, { engine: "device", model: "apple" })).rejects.toThrow("unavailable");
+            expect(phone.fluidSpeechMiniStatus).not.toHaveBeenCalled();
+            phone.transcribeOnDevice.mockReset();
+            phone.transcribeOnDevice.mockImplementation(async () => "phone words");
         });
 
         it("falls back to Apple's recognizer when Fluid Speech Mini fails, and shows the first error if both do", async () => {

@@ -104,7 +104,7 @@ describe("VoiceSettings", () => {
 describe("VoiceSettings in the iPhone app", () => {
     const nativePromise = vi.fn();
     beforeEach(() => {
-        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }], nativePromise });
+        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }] }], nativePromise });
     });
     afterEach(() => {
         vi.unstubAllGlobals();
@@ -119,7 +119,7 @@ describe("VoiceSettings in the iPhone app", () => {
         const dictation = await screen.findByRole("group", { name: "Dictation engine" });
         await waitFor(() =>
             expect(Array.from(dictation.querySelectorAll("button")).map((b) => [b.textContent, b.getAttribute("aria-pressed")])[0])
-                .toEqual(["This iPhone", "true"]),
+                .toEqual(["This phone", "true"]),
         );
         expect(screen.getByText(/after downloading Apple's speech model/)).toBeInTheDocument();
         nativePromise.mockImplementation(async () => ({ state: "available" }));
@@ -144,7 +144,7 @@ describe("VoiceSettings in the iPhone app", () => {
                   : {},
         );
         beforeEach(() => {
-            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "speak" }] }], nativePromise });
+            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }, { name: "speak" }] }], nativePromise });
         });
         afterEach(() => vi.unstubAllGlobals());
 
@@ -233,7 +233,7 @@ describe("VoiceSettings read-aloud with Phonon", () => {
         });
         beforeEach(() => {
             phonon = { state: "not-installed" };
-            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "speak" }] }], nativePromise });
+            vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }, { name: "speak" }] }], nativePromise });
         });
         afterEach(() => {
             vi.unstubAllGlobals();
@@ -247,11 +247,11 @@ describe("VoiceSettings read-aloud with Phonon", () => {
                 ["Phonon", "false"],
                 ["Apple", "true"],
             ]);
-            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("The iPhone's default voice");
+            expect(screen.getByRole("button", { name: "Read-aloud voice" })).toHaveTextContent("The phone's default voice");
 
             fireEvent.click(within(voices).getByRole("button", { name: "Phonon" }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "phonon" }));
-            expect(await screen.findByText(/Phonon is not on this iPhone yet/)).toHaveTextContent("about 160 MB");
+            expect(await screen.findByText(/Phonon is not on this phone yet/)).toHaveTextContent("about 160 MB");
             expect(screen.getByRole("button", { name: "Play a sample of Harper" })).toBeDisabled();
             expect(screen.getByText(/Download Phonon above to hear samples/)).toBeInTheDocument();
             expect(nativePromise).not.toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" });
@@ -260,7 +260,7 @@ describe("VoiceSettings read-aloud with Phonon", () => {
             fireEvent.click(screen.getByRole("button", { name: "Download Phonon" }));
             await waitFor(() => expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "phonon" }));
             expect(await screen.findByRole("button", { name: "Remove Phonon" })).toBeInTheDocument();
-            expect(screen.getByText(/The text never leaves this iPhone/)).toBeInTheDocument();
+            expect(screen.getByText(/The text never leaves this phone/)).toBeInTheDocument();
             expect(screen.getByRole("radio", { name: /Harper/ })).toBeChecked();
             expect(screen.getByRole("button", { name: "Play a sample of Harper" })).toBeEnabled();
 
@@ -285,7 +285,7 @@ describe("VoiceSettings read-aloud with Phonon", () => {
 
             fireEvent.click(within(voices).getByRole("button", { name: "Apple" }));
             await waitFor(() => expect(loadVoicePreferences().speech).toEqual({ engine: "device", model: "apple" }));
-            expect(screen.getByText(/Phonon is on this iPhone. Choose it above/)).toBeInTheDocument();
+            expect(screen.getByText(/Phonon is on this phone. Choose it above/)).toBeInTheDocument();
             await userEvent.click(screen.getByRole("button", { name: "Read-aloud voice" }));
             await userEvent.click(await screen.findByRole("menuitem", { name: /Zoe/ }));
             await waitFor(() =>
@@ -354,5 +354,73 @@ describe("VoiceSettings vocabulary", () => {
         fireEvent.click(screen.getByRole("button", { name: "Add" }));
         expect(await screen.findByRole("alert")).toHaveTextContent("at most 4 words");
         expect(state.terms).toEqual(["Ximena Achterberg"]);
+    });
+});
+
+describe("VoiceSettings in the Android app", () => {
+    let fluid: Record<string, unknown>;
+    const nativePromise = vi.fn(async (_plugin: string, method: string, args?: Record<string, unknown>) => {
+        if (method === "status" && args?.engine === "fluid-mini") return fluid;
+        if (method === "status" && args?.engine === "phonon") return { state: "not-installed", engine: "phonon", downloadBytes: 66_838_000 };
+        if (method === "status") return { state: "unavailable" };
+        if (method === "voices") return { voices: [{ id: "en-us-x-iol-local", name: "en-us-x-iol-local", language: "en-US", quality: "enhanced" }] };
+        if (method === "install") {
+            fluid = { state: "available", engine: "fluid-mini", locale: "en", live: true, removable: true };
+            return fluid;
+        }
+        if (method === "remove") {
+            fluid = { state: "downloadable", engine: "fluid-mini", downloadBytes: 300_166_787 };
+            return fluid;
+        }
+        return {};
+    });
+    beforeEach(() => {
+        state.options = options();
+        fluid = { state: "downloadable", engine: "fluid-mini", locale: "en", downloadBytes: 300_166_787 };
+        vi.stubGlobal("Capacitor", {
+            PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }, { name: "speak" }] }],
+            nativePromise,
+            getPlatform: () => "android",
+        });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        nativePromise.mockClear();
+        window.localStorage.clear();
+    });
+
+    it("offers Fluid Speech Mini's download on the phone, then its removal", async () => {
+        render(<VoiceSettings />);
+        const dictation = await screen.findByRole("group", { name: "Dictation engine" });
+        // The server dictates until the model is on the phone.
+        expect(within(dictation).getByRole("button", { name: "This server" })).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(within(dictation).getByRole("button", { name: "This phone" }));
+        expect(await screen.findByText(/Fluid Speech Mini is not on this phone yet/)).toHaveTextContent("about 300 MB");
+        // No Apple recognizer on Android: no choice of recognizer, no Apple download.
+        expect(screen.queryByRole("group", { name: "Dictation recognizer" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Download speech model" })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Download Fluid Speech Mini" }));
+        expect(await screen.findByRole("button", { name: "Remove Fluid Speech Mini" })).toBeInTheDocument();
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "install", { engine: "fluid-mini" });
+        expect(screen.getByText(/runs on this phone and works offline/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Remove Fluid Speech Mini" }));
+        expect(await screen.findByRole("button", { name: "Download Fluid Speech Mini" })).toBeInTheDocument();
+        expect(nativePromise).toHaveBeenCalledWith("MikeSpeech", "remove", { engine: "fluid-mini" });
+    });
+
+    it("says dictation on the phone is English only for another language", async () => {
+        window.localStorage.setItem("mike.voice.v1", JSON.stringify({ transcription: { engine: "device", language: "fr-FR" }, speech: { engine: "device" } }));
+        render(<VoiceSettings />);
+        expect(await screen.findByText(/Dictation on this phone is in English only/)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Download Fluid Speech Mini" })).not.toBeInTheDocument();
+    });
+
+    it("reads aloud with the phone's own voices until Phonon is downloaded", async () => {
+        render(<VoiceSettings />);
+        const voices = await screen.findByRole("group", { name: "Read-aloud voices" });
+        expect(within(voices).getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+        expect(screen.getByText(/other languages use the phone's own voices/)).toBeInTheDocument();
+        expect(screen.getByText(/Phonon is not on this phone yet/)).toHaveTextContent("about 67 MB");
+        expect(screen.getByText(/only voices that need no connection are offered/)).toBeInTheDocument();
     });
 });

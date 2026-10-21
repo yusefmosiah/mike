@@ -372,7 +372,7 @@ describe("useDictation", () => {
         const nativePromise = vi.fn();
         beforeEach(() => {
             vi.stubGlobal("Capacitor", {
-                PluginHeaders: [{ name: "MikeSpeech", methods: [] }],
+                PluginHeaders: [{ name: "MikeSpeech", methods: [{ name: "transcribe" }] }],
                 nativePromise,
             });
             MockMediaRecorder.isTypeSupported.mockImplementation(
@@ -423,7 +423,7 @@ describe("useDictation", () => {
             });
 
             await waitFor(() =>
-                expect(result.current.error).toMatch(/Download Apple's speech model/),
+                expect(result.current.error).toMatch(/Download the speech model/),
             );
         });
     });

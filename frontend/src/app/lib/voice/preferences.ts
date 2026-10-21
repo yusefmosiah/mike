@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import { deviceSpeechSupported, deviceVoiceSupported } from "./deviceSpeech";
+import { devicePlatform, deviceSpeechSupported, deviceVoiceSupported } from "./deviceSpeech";
 
 /**
  * Voice preferences (goals/mission-10-voice.md): which engine transcribes
@@ -11,10 +11,10 @@ import { deviceSpeechSupported, deviceVoiceSupported } from "./deviceSpeech";
  * browser's built-in voices and an on-device model exist on one machine and
  * not the next.
  *
- *  - "device": speech on the phone, in Mike's iPhone app: on-device
- *    recognition for dictation (the `model` is "fluid-speech-mini", the
- *    default where the app has it, or "apple") and Apple's voices for
- *    read-aloud (the default there).
+ *  - "device": speech on the phone, in the iPhone and Android apps:
+ *    on-device recognition for dictation (the `model` is "fluid-speech-mini",
+ *    the default where the app has it, or "apple" on the iPhone) and Phonon
+ *    or the phone's own voices for read-aloud (the default there).
  *  - "operator": the deployment's own speech server (the default elsewhere).
  *  - "openrouter": OpenRouter, the comparison lane; never in strict private
  *    mode (the server refuses it there too).
@@ -50,12 +50,17 @@ export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
 /**
  * The defaults on this device: in the iPhone app dictation and read-aloud
  * stay on the phone (read-aloud only in app builds whose plugin can speak);
- * elsewhere both go to the deployment's speech server.
+ * in the Android app read-aloud does, and dictation stays on the deployment's
+ * speech server until the person downloads Fluid Speech Mini (Settings →
+ * Voice, "This phone"); elsewhere both go to the deployment's speech server.
  */
 export function defaultVoicePreferences(): VoicePreferences {
     if (!deviceSpeechSupported()) return DEFAULT_VOICE_PREFERENCES;
     return {
-        transcription: { engine: "device", model: "fluid-speech-mini" },
+        transcription:
+            devicePlatform() === "android"
+                ? DEFAULT_VOICE_PREFERENCES.transcription
+                : { engine: "device", model: "fluid-speech-mini" },
         speech: { engine: deviceVoiceSupported() ? "device" : DEFAULT_VOICE_PREFERENCES.speech.engine },
     };
 }
@@ -105,7 +110,7 @@ export function loadVoicePreferences(): VoicePreferences {
     } catch {
         // Storage blocked (private window, policy): the defaults apply.
     }
-    // The defaults depend on whether this page runs in the iPhone app.
+    // The defaults depend on whether this page runs in the app.
     const device = deviceSpeechSupported();
     if (raw === cachedRaw && device === cachedDevice) return cachedValue;
     cachedRaw = raw;
@@ -151,7 +156,7 @@ export function useVoicePreferences(): [VoicePreferences, (next: VoicePreference
 /** What this deployment and this browser can actually do. */
 export interface VoiceAvailability {
     deviceRecognition: boolean;
-    /** Apple's voices, through the iPhone app's plugin. */
+    /** The phone's voices (and Phonon), through the app's plugin. */
     deviceSpeech: boolean;
     operatorTranscription: boolean;
     operatorSpeech: boolean;

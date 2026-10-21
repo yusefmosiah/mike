@@ -167,9 +167,9 @@ export function VoiceTestBench({
   catalog,
 }: {
   availability: VoiceAvailability;
-  /** The iPhone app has Fluid Speech Mini. */
+  /** The app has Fluid Speech Mini on this phone. */
   fluidSpeechMini?: boolean;
-  /** Apple's recognizer works on this iPhone. */
+  /** Apple's recognizer works on this phone. */
   appleDictation?: boolean;
   catalog: { speech: VoiceCatalogModel[]; transcription: VoiceCatalogModel[] } | null;
 }) {
@@ -208,9 +208,9 @@ export function VoiceTestBench({
     ...speechModels.map((id) => ({ key: `or:${id}`, label: `OpenRouter: ${nameOf(catalog?.speech, id)}`, engine: "openrouter" as const, model: id })),
   ];
   const sttCandidates: Candidate[] = [
-    ...(fluidSpeechMini ? [{ key: "device-fluid", label: "Fluid Speech Mini on this iPhone", engine: "device" as const, model: "fluid-speech-mini" }] : []),
+    ...(fluidSpeechMini ? [{ key: "device-fluid", label: "Fluid Speech Mini on this phone", engine: "device" as const, model: "fluid-speech-mini" }] : []),
     ...(availability.deviceRecognition && appleDictation
-      ? [{ key: "device", label: "Apple speech on this iPhone", engine: "device" as const }]
+      ? [{ key: "device", label: "Apple speech on this phone", engine: "device" as const }]
       : []),
     ...(availability.operatorTranscription ? [{ key: "operator", label: "This server", engine: "operator" as const }] : []),
     ...(availability.webgpu && hasBrowserModelConsent("transcription")
@@ -274,7 +274,7 @@ export function VoiceTestBench({
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // The iPhone's own engine reads AAC, not the web view's WebM.
+      // The iPhone's own engine reads AAC, not the web view's WebM (Android's reads both).
       const mimeType = availability.deviceRecognition && MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : undefined;
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks: Blob[] = [];

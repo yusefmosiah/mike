@@ -18,5 +18,14 @@ www/server.js
 # Xcode per-user state for the local Swift package
 .swiftpm/
 
+# Gradle output of the plugins' Android modules (built from android/)
+/plugins/*/android/build/
+/plugins/*/android/.gradle/
+
 # Fluid Speech Mini weights, fetched by `npm run speech-model` (never committed).
 /plugins/speech/ios/Sources/MikeSpeechPlugin/FluidSpeechMini/
+
+# Phonon's Android library, built by `npm run phonon:android` (never committed),
+# and the xn-ptts checkout it is built from.
+/plugins/speech/android/src/main/jniLibs/
+/.cache/

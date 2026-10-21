@@ -9,10 +9,13 @@
 
 import { synthesizeSpeech, transcribeAudio } from "@/app/lib/mikeApi";
 import {
+    DEVICE_MODEL_MISSING_MESSAGE,
+    DeviceSpeechError,
     FLUID_MINI_ENGINE,
     PHONON_ENGINE,
     cancelLiveDictation,
     fluidSpeechMiniAvailable,
+    fluidSpeechMiniStatus,
     liveDictationAvailable,
     prepareFluidSpeechMini,
     startLiveDictation,
@@ -34,6 +37,8 @@ import { correctWithVocabulary, type DictationVocabulary } from "./vocabulary";
  * (`model`) is not Apple's and the language is English (the model is English
  * only); otherwise Apple's recognizer. If Fluid Speech Mini fails, Apple's
  * takes the recording; when that fails too, the first error is the one shown.
+ * On Android, where there is no Apple recognizer and Fluid Speech Mini is
+ * downloaded on request, a dictation before the download says so.
  */
 async function transcribeOnPhone(
     blob: Blob,
@@ -48,7 +53,15 @@ async function transcribeOnPhone(
             ? transcribeOnDevice(blob, preferences.language, undefined, terms)
             : transcribeOnDevice(blob, preferences.language);
     if (!wantsFluidSpeechMini(preferences) || !(await fluidSpeechMiniAvailable())) {
-        return withApple();
+        try {
+            return await withApple();
+        } catch (error) {
+            if (wantsFluidSpeechMini(preferences)) {
+                const { state } = await fluidSpeechMiniStatus();
+                if (state === "downloadable" || state === "downloading") throw new DeviceSpeechError(DEVICE_MODEL_MISSING_MESSAGE);
+            }
+            throw error;
+        }
     }
     try {
         return await transcribeOnDevice(blob, preferences.language, FLUID_MINI_ENGINE);

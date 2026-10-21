@@ -46,7 +46,7 @@ const MICROPHONE_START_FAILURE_MESSAGE =
 const TRANSCRIBE_FAILURE_MESSAGE =
     "Could not transcribe the recording. Please try again.";
 
-/** The message for a failure of the iPhone's live dictation. */
+/** The message for a failure of the phone's live dictation. */
 function liveFailure(liveError: unknown): string {
     if (liveError instanceof LiveDictationError && liveError.code === "permission-denied") {
         return MICROPHONE_ACCESS_DENIED_MESSAGE;
@@ -67,7 +67,7 @@ export interface UseDictationResult {
     /** User-facing failure text, or null. */
     error: string | null;
     /**
-     * The text heard so far while a live dictation runs (the iPhone app with
+     * The text heard so far while a live dictation runs (the app with
      * Fluid Speech Mini), until its final text arrives; null otherwise.
      * `confirmed` will not change; `volatile` is the tail that may.
      */
@@ -257,7 +257,7 @@ export function useDictation({
             void loadUserVocabulary().catch(() => undefined);
             // Load the on-device model while they speak, not after.
             void prepareTranscription().catch(() => undefined);
-            // On the iPhone with Fluid Speech Mini the phone records and
+            // In the app with Fluid Speech Mini the phone records and
             // transcribes as the person speaks; everything else records a
             // clip here and transcribes it at the end.
             const preferences = loadVoicePreferences().transcription;

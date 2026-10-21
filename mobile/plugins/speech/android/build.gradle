@@ -1,0 +1,63 @@
+// Android module of MikeSpeechPlugin (see ../README.md, Android): dictation with
+// Fluid Speech Mini on ONNX Runtime and read-aloud with Phonon (libptts_ffi.so,
+// built by `npm run phonon:android`) or the phone's own voices.
+// Built as part of the app (mobile/android) through project(':capacitor-android').
+ext {
+    androidxAppCompatVersion = project.hasProperty('androidxAppCompatVersion') ? rootProject.ext.androidxAppCompatVersion : '1.7.1'
+    junitVersion = project.hasProperty('junitVersion') ? rootProject.ext.junitVersion : '4.13.2'
+    androidxJunitVersion = project.hasProperty('androidxJunitVersion') ? rootProject.ext.androidxJunitVersion : '1.3.0'
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace = "com.firm.mike.speech"
+    compileSdk = project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
+    defaultConfig {
+        minSdkVersion project.hasProperty('minSdkVersion') ? rootProject.ext.minSdkVersion : 29
+        targetSdkVersion project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Phonon's library is built for arm64 only (xn-ptts has no 32-bit
+        // build). ONNX Runtime ships four ABIs (about 140 MB); this keeps the
+        // plugin's own test APK to arm64, and scripts/configure-android.mjs
+        // does the same for the app.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+    lint {
+        abortOnError = false
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+    sourceSets {
+        // The dictation fixture the iOS tests use, for the on-device benchmark.
+        androidTest.assets.srcDirs += ['../ios/Tests/MikeSpeechPluginTests/Fixtures']
+    }
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    // Fluid Speech Mini (MIT). 1.31 is the release the model's 2- and 4-bit
+    // MatMulNBits weights were tested with.
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.0'
+    // Calls Phonon's C library (Apache-2.0 OR LGPL-2.1), as xn-ptts's Kotlin wrapper does.
+    implementation 'net.java.dev.jna:jna:5.17.0@aar'
+
+    testImplementation "junit:junit:$junitVersion"
+    // android.jar's org.json is a stub on the JVM.
+    testImplementation 'org.json:json:20250517'
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+}

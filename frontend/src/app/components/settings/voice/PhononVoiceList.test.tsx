@@ -161,10 +161,10 @@ describe("PhononVoiceList", () => {
   });
 
   it("shows the message of a known failure in the row", async () => {
-    synthesize.mockRejectedValueOnce(new DeviceSpeechError("Could not read this aloud on this iPhone. Please try again."));
+    synthesize.mockRejectedValueOnce(new DeviceSpeechError("Could not read this aloud on this phone. Please try again."));
     renderList();
     await userEvent.click(screen.getByRole("button", { name: "Play a sample of Hugh" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not read this aloud on this iPhone.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not read this aloud on this phone.");
     synthesize.mockRejectedValueOnce(new BrowserModelError("The model restarted."));
     await userEvent.click(screen.getByRole("button", { name: "Play a sample of Hugh" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The model restarted.");

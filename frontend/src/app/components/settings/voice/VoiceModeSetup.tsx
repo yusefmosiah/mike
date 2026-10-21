@@ -82,8 +82,8 @@ export function VoiceModeSetup() {
             <SettingsLabel>Speech models</SettingsLabel>
             <SettingsDescription>
               {missing
-                ? `Voice mode needs speech models on this iPhone (${formatDownloadSize(status.downloadBytes)}, downloaded once). They download here or the first time you start voice mode. What you say stays on the phone.`
-                : "Voice mode's speech models are on this iPhone. What you say stays on the phone."}
+                ? `Voice mode needs speech models on this phone (${formatDownloadSize(status.downloadBytes)}, downloaded once). They download here or the first time you start voice mode. What you say stays on the phone.`
+                : "Voice mode's speech models are on this phone. What you say stays on the phone."}
             </SettingsDescription>
           </div>
           {progress !== null ? (

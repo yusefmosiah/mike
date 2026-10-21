@@ -1,6 +1,6 @@
 # @mike/speech
 
-The iPhone app's on-device speech: a Capacitor plugin (`MikeSpeech`) that
+The iPhone and Android apps' on-device speech (Android: see "Android" below): a Capacitor plugin (`MikeSpeech`) that
 transcribes a recording with Apple's speech recognition on the phone, and
 renders text to audio with Apple's voices. The web app's "This iPhone"
 engines (`frontend/src/app/lib/voice/deviceSpeech.ts`) use it: dictation
@@ -86,3 +86,57 @@ The clip (or the rendered speech) is written to a temporary file for the
 length of the call and deleted afterwards; nothing is logged. Only the plugin
 class may carry an `@objc(...)` name: the Capacitor CLI registers every such
 name it finds as a plugin.
+
+## Android
+
+`android/` implements the same contract for dictation and read-aloud
+(`MikeSpeechPlugin.java`; design and measurements in
+[docs/android-speech.md](../../../docs/android-speech.md)). Hands-free voice
+mode is not implemented there: the plugin does not list `voiceStatus`, so the
+web app hides voice mode on Android.
+
+- Fluid Speech Mini (`engine: "fluid-mini"`): the model's ONNX build
+  (FluidVoice-Labs/fluid-speech-mini-onnx, about 300 MB, 2- and 4-bit
+  `MatMulNBits` weights) on ONNX Runtime 1.31's CPU provider, four threads;
+  `FluidModel.java` ports the model's reference `transcribe.py` (log-mel,
+  chunked front end, encoder, greedy TDT). It is not in the app: `status`
+  reports `downloadable` (with `downloadBytes`), `downloading` (with
+  `progress`) or `available` (with `live: true` and `removable: true`);
+  `install` downloads it from Hugging Face at a pinned commit, checks every
+  file's size and SHA-256 (`ModelPack.java`, `ModelInstaller.java`, resumable)
+  into the app's no-backup files; `remove` deletes it. `prepare` loads and
+  warms it. `transcribe` decodes the clip with MediaExtractor and MediaCodec
+  (AAC/MP4, Opus/WebM, WAV, MP3) to 16 kHz mono. `startLive`, `stopLive` and
+  `cancelLive` record with AudioRecord (`VOICE_RECOGNITION`, 16 kHz, asking
+  for the microphone if needed) and transcribe in sliding windows with the
+  iPhone's live configuration (`SlidingWindow.java`: 3 s chunks, 3 s left and
+  1.5 s right context, the volatile tail refreshed about once a second),
+  sending the same `liveTranscript` events; the app leaving the foreground
+  ends a live dictation and keeps its text (`ended: true`). The model is
+  dropped after five idle minutes, in the background and on memory pressure.
+  Inference sits behind `FluidBackend.java` so an accelerated backend can be
+  added later. ONNX Runtime's own telemetry provider (it starts Microsoft's
+  telemetry client at app launch) is removed in the plugin's manifest and
+  telemetry is turned off on the environment.
+- Phonon (`engine: "phonon"`): xn-ptts 0.4.0's C library (`libptts_ffi.so`,
+  arm64, called through JNA, `Phonon.java`) on the CPU. The library is built
+  from the pinned xn-ptts source by `npm run phonon:android` (Rust, cargo-ndk
+  and the NDK) into `android/src/main/jniLibs/` (gitignored); without it
+  `status` reports `unavailable`. The model is the upstream
+  gradium/phonon-31m-en q8 weights plus the eight English voices the web app
+  offers, pinned and checked like Fluid Speech Mini (about 67 MB): `status`
+  reports `not-installed` (with `downloadBytes`), `installing` (with
+  `progress`), `available`; there is no `compiling` step on Android. `speak`
+  returns a 24 kHz 16-bit mono WAV, like the iPhone's.
+- Without `engine`, `speak` and `voices` use the phone's own text-to-speech
+  engine (`SystemVoice.java`, `synthesizeToFile`), offering only voices that
+  need no network. Dictation without `engine` (the iPhone's Apple
+  recognizer) has no Android counterpart: `status` reports `unavailable` and
+  `transcribe` rejects `unavailable`.
+
+Tests: `./gradlew :mike-speech:testDebugUnitTest` in `mobile/android` runs
+the JVM tests (resampling, log-mel against the reference script's numbers,
+token decoding, the sliding window, the download and its checks against a
+local server). `SpeechOnDeviceTest` (androidTest) runs both models on a phone
+with the fixture clip and reports latency and memory; its header has the
+commands.

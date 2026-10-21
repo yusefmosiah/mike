@@ -50,6 +50,9 @@ describe("voiceChatSupported", () => {
         expect(voiceChatSupported()).toBe(false);
         vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech" }] });
         expect(voiceChatSupported()).toBe(false);
+        // The Android app registers the plugin without methods for now.
+        vi.stubGlobal("Capacitor", { PluginHeaders: [{ name: "MikeSpeech", methods: [] }], nativePromise });
+        expect(voiceChatSupported()).toBe(false);
         inApp(["speak", "transcribe"]);
         expect(voiceChatSupported()).toBe(false);
         vi.stubGlobal("Capacitor", { nativePromise });

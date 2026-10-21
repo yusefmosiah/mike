@@ -11,10 +11,17 @@
         "test": "node --test scripts/*.test.mjs",
         "ios:configure": "node scripts/configure-ios.mjs",
         "ios:add": "npm run www && cap add ios && npm run ios:configure",
+        "android:configure": "node scripts/configure-android.mjs",
+        "phonon:android": "node scripts/build-phonon-android.mjs",
+        "android:add": "npm run www && cap add android && npm run android:configure",
+        "android:sync": "npm run www && cap sync android && npm run android:configure",
+        "android:debug": "npm run android:sync && cd android && ./gradlew assembleDebug",
+        "android:run": "npm run android:sync && cap run android --no-sync",
         "build:ios": "cap build ios",
         "build:android": "cap build android"
     },
     "dependencies": {
+        "@capacitor/android": "^8.5.3",
         "@capacitor/app": "^8.1.2",
         "@capacitor/camera": "^8.2.5",
         "@capacitor/core": "^8.5.2",

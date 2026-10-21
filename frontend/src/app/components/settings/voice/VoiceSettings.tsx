@@ -13,6 +13,7 @@ import {
 } from "@/app/lib/voice/browserSpeech";
 import {
   PHONON_ENGINE,
+  devicePlatform,
   deviceVoices,
   installDeviceSpeech,
   speakOnDevice,
@@ -41,6 +42,7 @@ import {
   type VoiceEngine,
 } from "@/app/lib/voice/preferences";
 import { BrowserModelSetup } from "./BrowserModelSetup";
+import { FluidSpeechMiniSetup } from "./FluidSpeechMiniSetup";
 import { PhononPhoneSetup } from "./PhononPhoneSetup";
 import { PhononVoiceList } from "./PhononVoiceList";
 import { useVoiceAvailability } from "./useVoiceAvailability";
@@ -53,7 +55,7 @@ import { VocabularySection } from "./VocabularySection";
 function unavailableReason(engine: VoiceEngine): string {
   switch (engine) {
     case "device":
-      return "Apple's speech on the phone needs the iPhone app (an up-to-date build to read aloud).";
+      return "Speech on the phone needs the app (an up-to-date build).";
     case "operator":
       return "This deployment has no speech server configured.";
     case "openrouter":
@@ -101,7 +103,7 @@ function PhononCredit() {
 const FLUID_SPEECH_MINI_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
 
 const ENGINE_LABELS: Record<VoiceEngine, string> = {
-  device: "This iPhone",
+  device: "This phone",
   operator: "This server",
   openrouter: "OpenRouter",
   browser: "This browser",
@@ -133,7 +135,7 @@ function EnginePills({
 /** Settings → Voice: engines, models, voices and a side-by-side test bench. */
 export function VoiceSettings() {
   const [preferences, setPreferences] = useVoicePreferences();
-  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, fluidSpeechMini, phonon, refreshPhonon, loading, error } =
+  const { options, availability, recognitionStatus, refreshRecognition, deviceStatus, refreshDevice, fluidSpeechMini, fluidStatus, refreshFluid, phonon, refreshPhonon, loading, error } =
     useVoiceAvailability();
   const [systemVoices, setSystemVoices] = useState<VoiceChoice[]>([]);
   const [kokoroVoices, setKokoroVoices] = useState<string[]>([]);
@@ -147,11 +149,19 @@ export function VoiceSettings() {
     fluidSpeechMini && stt.model !== "apple" ? "fluid-speech-mini" : "apple";
   // What dictation will actually use: the model is English only.
   const usesFluid = fluidSpeechMini && deviceModel === "fluid-speech-mini" && isEnglishLanguage(stt.language);
+  // The app downloads Fluid Speech Mini on request (Android): Settings offers the download and the removal.
+  const fluidSetup =
+    (fluidStatus.state === "downloadable" || fluidStatus.state === "downloading" || !!fluidStatus.removable) &&
+    stt.model !== "apple" &&
+    isEnglishLanguage(stt.language);
 
   // The phone reads with Phonon when it is chosen, or, with no choice, once it is downloaded.
   const phoneSpeechModel: DeviceSpeechModel =
     phonon.state === "unavailable" || tts.model === "apple" ? "apple" : tts.model === "phonon" || phonon.state === "available" ? "phonon" : "apple";
   const browserModel = browserSpeechModel(tts.model);
+  // The iPhone's own voices are Apple's; Android's come from its text-to-speech engine.
+  const android = devicePlatform() === "android";
+  const otherVoices = android ? "the phone's own voices" : "Apple's voices";
 
   useEffect(() => {
     if (tts.engine !== "browser") return;
@@ -256,20 +266,30 @@ export function VoiceSettings() {
                   </div>
                 </SettingsRow>
               )}
-              {usesFluid ? (
+              {fluidSetup ? (
+                <SettingsRow>
+                  <FluidSpeechMiniSetup status={fluidStatus} onChange={refreshFluid} />
+                </SettingsRow>
+              ) : usesFluid ? (
                 <SettingsRow>
                   <SettingsDescription>
-                    Fluid Speech Mini runs on this iPhone and works offline; the recording never leaves it.
+                    Fluid Speech Mini runs on this phone and works offline; the recording never leaves it.
+                  </SettingsDescription>
+                </SettingsRow>
+              ) : deviceStatus === "unavailable" ? (
+                <SettingsRow>
+                  <SettingsDescription>
+                    Dictation on this phone is in English only, with Fluid Speech Mini. Choose another engine for other languages.
                   </SettingsDescription>
                 </SettingsRow>
               ) : (
                 <SettingsRow>
                   <SettingsDescription>
                     {deviceStatus === "available"
-                      ? "Apple's speech recognition runs on this iPhone; the recording never leaves it."
+                      ? "Apple's speech recognition runs on this phone; the recording never leaves it."
                       : deviceStatus === "downloading"
                         ? "Apple's speech model for this language is downloading."
-                        : "This iPhone can transcribe on the device after downloading Apple's speech model for this language."}
+                        : "This phone can transcribe on the device after downloading Apple's speech model for this language."}
                   </SettingsDescription>
                   {deviceStatus === "downloadable" && (
                     <PillButtonUI
@@ -290,7 +310,7 @@ export function VoiceSettings() {
               )}
             </>
           )}
-          {fluidSpeechMini && (
+          {(fluidSpeechMini || fluidSetup) && (
             <SettingsRow>
               <SettingsDescription>
                 <a
@@ -421,7 +441,7 @@ export function VoiceSettings() {
                 <SettingsRow layout="stacked">
                   <div className="min-w-0 space-y-1">
                     <SettingsLabel>Voices</SettingsLabel>
-                    <SettingsDescription>Phonon reads English only; other languages use Apple&apos;s voices.</SettingsDescription>
+                    <SettingsDescription>Phonon reads English only; other languages use {otherVoices}.</SettingsDescription>
                   </div>
                   <div role="group" aria-label="Read-aloud voices" className="flex flex-wrap gap-1.5">
                     {DEVICE_SPEECH_CHOICES.map(({ model, label }) => (
@@ -433,7 +453,7 @@ export function VoiceSettings() {
                           setPreferences({ ...preferences, speech: { engine: "device", model } })
                         }
                       >
-                        {label}
+                        {model === "apple" && android ? "System" : label}
                       </TabPillButtonUI>
                     ))}
                   </div>
@@ -460,7 +480,7 @@ export function VoiceSettings() {
                   <VoiceChoiceDropdown
                     label="Read-aloud voice"
                     value={tts.voice}
-                    placeholder="The iPhone's default voice"
+                    placeholder="The phone's default voice"
                     choices={phoneVoices}
                     onChange={(voice) =>
                       setPreferences({
@@ -472,7 +492,9 @@ export function VoiceSettings() {
                 )}
                 {phoneSpeechModel !== "phonon" && (
                   <SettingsDescription>
-                    Apple&apos;s voices read on this iPhone; the text never leaves it. Better voices (enhanced, premium) can be downloaded in the iPhone&apos;s Accessibility settings, under spoken content.
+                    {android
+                      ? "The phone's own voices read on this phone; only voices that need no connection are offered, so the text never leaves it. More voices can be downloaded in the phone's text-to-speech settings."
+                      : "Apple's voices read on this phone; the text never leaves it. Better voices (enhanced, premium) can be downloaded in the iPhone's Accessibility settings, under spoken content."}
                   </SettingsDescription>
                 )}
               </SettingsRow>

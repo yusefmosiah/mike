@@ -97,7 +97,7 @@ describe("VoiceModeSetup", () => {
         });
         expect(bar).toHaveAttribute("aria-valuenow", "50");
         await act(async () => finish(true));
-        expect(await screen.findByText(/speech models are on this iPhone/)).toBeInTheDocument();
+        expect(await screen.findByText(/speech models are on this phone/)).toBeInTheDocument();
         expect(engine.handlers.size).toBe(0);
     });
 

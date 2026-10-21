@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Live dictation records with AudioRecord; the model downloads need the network. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- ONNX Runtime asks for this only for its telemetry, removed below. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <!-- Android 11 and later: the phone's text-to-speech engine must be visible to bind to it. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+    <application>
+        <!--
+            ONNX Runtime's Android package (1.31) starts Microsoft's telemetry
+            client from this provider when the app launches, before any model
+            is used. The app talks only to the firm's server (and to the
+            pinned model downloads the person asks for), so it is removed;
+            FluidModel also turns telemetry off on the environment.
+        -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
+    </application>
+</manifest>

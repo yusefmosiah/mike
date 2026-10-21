@@ -3,18 +3,21 @@
 import { errorCode, knownErrorCodeMessage } from "@/app/lib/userFacingError";
 
 /**
- * Dictation with Apple's speech recognition on the phone, in Mike's iPhone
- * app (mobile/plugins/speech). The app's native shell gives this page the
- * `MikeSpeech` plugin through the Capacitor bridge; a browser has no bridge,
- * so the engine is offered only inside the app. The clip recorded for
- * dictation is handed to the phone and transcribed there: nothing goes to
- * Mike's backend or to Apple.
+ * Speech on the phone, in the iPhone and Android apps (mobile/plugins/speech):
+ * dictation with Fluid Speech Mini (bundled on the iPhone, downloaded on
+ * request on Android) or, on the iPhone, Apple's speech recognition, and
+ * read-aloud with Phonon or the phone's own voices. The app's native shell
+ * gives this page the `MikeSpeech` plugin through the Capacitor bridge; a
+ * browser has no bridge, so the engine is offered only inside the app. The
+ * clip recorded for dictation is handed to the phone and transcribed there:
+ * nothing goes to Mike's backend or to Apple or Google.
  */
 
 export type DeviceSpeechState = "available" | "downloadable" | "downloading" | "unavailable";
 
 interface CapacitorBridge {
     PluginHeaders?: { name: string; methods?: { name: string }[] }[];
+    getPlatform?: () => string;
     addListener?: (plugin: string, event: string, callback: (data: unknown) => void) => { remove: () => unknown };
     nativePromise?: (plugin: string, method: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
@@ -23,13 +26,14 @@ const PLUGIN = "MikeSpeech";
 const STATES: readonly DeviceSpeechState[] = ["available", "downloadable", "downloading", "unavailable"];
 
 export const DEVICE_TRANSCRIBE_FAILURE_MESSAGE =
-    "Could not transcribe the recording on this iPhone. Please try again.";
+    "Could not transcribe the recording on this phone. Please try again.";
+export const DEVICE_MODEL_MISSING_MESSAGE = "Download the speech model in Settings → Voice to dictate on this phone.";
 const DEVICE_ERROR_MESSAGES: Readonly<Record<string, string>> = {
-    "not-installed": "Download Apple's speech model in Settings → Voice to dictate on this iPhone.",
-    unavailable: "This iPhone cannot transcribe this language on the device.",
-    "permission-denied": "Speech recognition is turned off for this app in the iPhone's Settings.",
-    "unsupported-audio": "This recording format cannot be transcribed on this iPhone.",
-    "too-long": "The recording is too long to transcribe on this iPhone.",
+    "not-installed": DEVICE_MODEL_MISSING_MESSAGE,
+    unavailable: "This phone cannot transcribe this language on the device.",
+    "permission-denied": "Speech recognition is turned off for this app in the phone's settings.",
+    "unsupported-audio": "This recording format cannot be transcribed on this phone.",
+    "too-long": "The recording is too long to transcribe on this phone.",
 };
 
 /** A failure with a message written for the user. */
@@ -43,9 +47,22 @@ function nativePromise(): NonNullable<CapacitorBridge["nativePromise"]> | null {
     return cap.nativePromise.bind(cap);
 }
 
-/** True inside Mike's iPhone app, whose shell has the speech plugin. */
+/** The plugin's methods, as the shell lists them (none outside the app). */
+function pluginHas(method: string): boolean {
+    if (!nativePromise()) return false;
+    const cap = (window as unknown as { Capacitor: CapacitorBridge }).Capacitor;
+    const header = cap.PluginHeaders?.find((entry) => entry.name === PLUGIN);
+    return !!header?.methods?.some((entry) => entry.name === method);
+}
+
+/**
+ * True inside the app when its speech plugin can transcribe (the iPhone app,
+ * and Android builds whose plugin has its methods; earlier Android builds
+ * registered it without any, and there the page keeps the deployment's
+ * speech server).
+ */
 export function deviceSpeechSupported(): boolean {
-    return nativePromise() !== null;
+    return pluginHas("transcribe");
 }
 
 /**
@@ -53,10 +70,21 @@ export function deviceSpeechSupported(): boolean {
  * builds before 2026-10-11 can only transcribe).
  */
 export function deviceVoiceSupported(): boolean {
-    if (!nativePromise()) return false;
+    return pluginHas("speak");
+}
+
+/**
+ * The app's platform as its shell reports it ("ios", "android"), or "web"
+ * outside the app.
+ */
+export function devicePlatform(): string {
+    if (!nativePromise()) return "web";
     const cap = (window as unknown as { Capacitor: CapacitorBridge }).Capacitor;
-    const header = cap.PluginHeaders?.find((entry) => entry.name === PLUGIN);
-    return !!header?.methods?.some((method) => method.name === "speak");
+    try {
+        return typeof cap.getPlatform === "function" ? cap.getPlatform() : "ios";
+    } catch {
+        return "ios";
+    }
 }
 
 function stateOf(result: unknown): DeviceSpeechState {
@@ -134,23 +162,36 @@ export interface PhononStatus {
     state: PhononState;
     /** While installing: the fraction downloaded, 0 to 1. */
     progress?: number;
+    /** Before the download: its size in bytes, when the app says (Android). */
+    downloadBytes?: number;
     /** True when the first reading will first compile the models (about 10 seconds). */
     compiling?: boolean;
 }
 
 const UNAVAILABLE: PhononStatus = { state: "unavailable" };
 
+const progressOf = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? { progress: Math.min(1, Math.max(0, value)) } : {};
+const downloadBytesOf = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? { downloadBytes: Math.round(value) } : {};
+
 function phononStatusOf(result: unknown): PhononStatus {
     // An older app build ignores `engine` and answers about Apple's recognizer.
     if (!result || typeof result !== "object" || (result as { engine?: unknown }).engine !== PHONON_ENGINE) {
         return UNAVAILABLE;
     }
-    const { state, progress, compiling } = result as { state?: unknown; progress?: unknown; compiling?: unknown };
+    const { state, progress, compiling, downloadBytes } = result as {
+        state?: unknown;
+        progress?: unknown;
+        compiling?: unknown;
+        downloadBytes?: unknown;
+    };
     const known = PHONON_STATES.find((candidate) => candidate === state);
     if (!known) return UNAVAILABLE;
     return {
         state: known,
-        ...(typeof progress === "number" && Number.isFinite(progress) ? { progress: Math.min(1, Math.max(0, progress)) } : {}),
+        ...progressOf(progress),
+        ...downloadBytesOf(downloadBytes),
         ...(compiling === true ? { compiling: true } : {}),
     };
 }
@@ -223,7 +264,7 @@ export async function installPhonon(onProgress?: (fraction: number) => void): Pr
 
 export const PHONON_BUSY_MESSAGE = "Turn off voice mode before removing Phonon.";
 
-/** Deletes Phonon's model from the phone; reading aloud then uses Apple's voices. */
+/** Deletes Phonon's model from the phone; reading aloud then uses the phone's own voices. */
 export async function removePhonon(): Promise<PhononStatus> {
     const call = nativePromise();
     if (!call) return UNAVAILABLE;
@@ -274,9 +315,96 @@ export function prepareFluidSpeechMini(): void {
     call(PLUGIN, "prepare", { engine: FLUID_MINI_ENGINE }).catch(() => undefined);
 }
 
-/** Forgets the cached answer of `fluidSpeechMiniAvailable` (tests). */
+/** Forgets the cached answer of `fluidSpeechMiniAvailable` (after a download or a removal, and tests). */
 export function resetFluidSpeechMiniAvailability(): void {
     fluidAvailable = null;
+    liveAvailable = null;
+}
+
+/**
+ * Fluid Speech Mini on the phone: bundled and `available` on the iPhone; on
+ * Android `downloadable` until the person downloads it (about 300 MB),
+ * `downloading` meanwhile, then `available` (and `removable`).
+ */
+export interface FluidSpeechMiniStatus {
+    state: DeviceSpeechState;
+    /** While downloading: the fraction downloaded, 0 to 1. */
+    progress?: number;
+    /** Before the download: its size in bytes. */
+    downloadBytes?: number;
+    /** The model was downloaded and can be deleted again (Android). */
+    removable?: boolean;
+}
+
+const FLUID_UNAVAILABLE: FluidSpeechMiniStatus = { state: "unavailable" };
+
+/** Where Fluid Speech Mini stands on this phone. */
+export async function fluidSpeechMiniStatus(): Promise<FluidSpeechMiniStatus> {
+    const call = nativePromise();
+    if (!call) return FLUID_UNAVAILABLE;
+    let result: unknown;
+    try {
+        result = await call(PLUGIN, "status", { engine: FLUID_MINI_ENGINE });
+    } catch {
+        return FLUID_UNAVAILABLE;
+    }
+    // An older app build ignores `engine` and answers about Apple's recognizer.
+    if (!result || typeof result !== "object" || (result as { engine?: unknown }).engine !== FLUID_MINI_ENGINE) {
+        return FLUID_UNAVAILABLE;
+    }
+    const { progress, downloadBytes, removable } = result as { progress?: unknown; downloadBytes?: unknown; removable?: unknown };
+    return {
+        state: stateOf(result),
+        ...progressOf(progress),
+        ...downloadBytesOf(downloadBytes),
+        ...(removable === true ? { removable: true } : {}),
+    };
+}
+
+export const FLUID_INSTALL_FAILURE_MESSAGE = "Could not download the speech model. Check the connection and try again.";
+
+/**
+ * Downloads Fluid Speech Mini onto the phone (Android; call from the person's
+ * click). `onProgress` hears the fraction downloaded until the download ends.
+ * Resolves with the new status.
+ */
+export async function installFluidSpeechMini(onProgress?: (fraction: number) => void): Promise<FluidSpeechMiniStatus> {
+    const call = nativePromise();
+    if (!call) throw new DeviceSpeechError(FLUID_INSTALL_FAILURE_MESSAGE);
+    let polling = true;
+    const poll = async () => {
+        while (polling) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            if (!polling) return;
+            const { state, progress } = await fluidSpeechMiniStatus();
+            if (polling && state === "downloading" && progress !== undefined) onProgress?.(progress);
+        }
+    };
+    void poll();
+    try {
+        await call(PLUGIN, "install", { engine: FLUID_MINI_ENGINE });
+    } catch {
+        throw new DeviceSpeechError(FLUID_INSTALL_FAILURE_MESSAGE);
+    } finally {
+        polling = false;
+    }
+    resetFluidSpeechMiniAvailability();
+    const status = await fluidSpeechMiniStatus();
+    if (status.state !== "available") throw new DeviceSpeechError(FLUID_INSTALL_FAILURE_MESSAGE);
+    return status;
+}
+
+/** Deletes the downloaded Fluid Speech Mini from the phone (Android). */
+export async function removeFluidSpeechMini(): Promise<FluidSpeechMiniStatus> {
+    const call = nativePromise();
+    if (!call) return FLUID_UNAVAILABLE;
+    try {
+        await call(PLUGIN, "remove", { engine: FLUID_MINI_ENGINE });
+    } catch {
+        // The status below says what is left.
+    }
+    resetFluidSpeechMiniAvailability();
+    return fluidSpeechMiniStatus();
 }
 
 /**
@@ -315,7 +443,7 @@ export interface DeviceVoice {
     id: string;
     name: string;
     language: string;
-    /** "default", "enhanced" or "premium" (downloaded in the iPhone's Settings). */
+    /** "default", "enhanced" or "premium" (better voices are downloaded in the phone's settings). */
     quality: string;
 }
 
@@ -340,14 +468,14 @@ export async function deviceVoices(): Promise<DeviceVoice[]> {
     }
 }
 
-export const DEVICE_SPEAK_FAILURE_MESSAGE = "Could not read this aloud on this iPhone. Please try again.";
+export const DEVICE_SPEAK_FAILURE_MESSAGE = "Could not read this aloud on this phone. Please try again.";
 const DEVICE_SPEAK_ERROR_MESSAGES: Readonly<Record<string, string>> = {
-    "too-long": "This is too long to read aloud on this iPhone at once.",
+    "too-long": "This is too long to read aloud on this phone at once.",
     busy: "Read-aloud is off while voice mode is on.",
 };
 
 /**
- * `text` spoken as a WAV file by one of Apple's voices on the phone, or, with
+ * `text` spoken as a WAV file by one of the phone's own voices, or, with
  * `engine` `PHONON_ENGINE`, by Phonon (English, once downloaded; `voice` is
  * then a Phonon voice name).
  */
