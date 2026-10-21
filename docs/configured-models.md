@@ -117,10 +117,19 @@ listed under their own heading with their real limits and reasoning controls:
       "contextWindow": 1048576,
       "maxOutputTokens": 384000,
       "reasoning": {
-        "efforts": ["high", "max"],
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
         "default": "high",
         "canDisable": true,
         "offValue": "none"
+      },
+      "cost": {
+        "input": 0.12,
+        "cacheRead": 0.0024,
+        "output": 0.48
       }
     },
     {
@@ -136,8 +145,18 @@ listed under their own heading with their real limits and reasoning controls:
       "contextWindow": 1048576,
       "maxOutputTokens": 131072,
       "reasoning": {
-        "efforts": ["high"],
-        "param": "none"
+        "efforts": [
+          "low",
+          "high"
+        ],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      },
+      "cost": {
+        "input": 0.07,
+        "cacheRead": 0.024,
+        "output": 0.37
       }
     },
     {
@@ -149,28 +168,40 @@ listed under their own heading with their real limits and reasoning controls:
       "baseUrl": "https://api.river.ai/v1",
       "apiModel": "zai-org/GLM-5.3-Flash",
       "apiKeyEnv": "RIVER_API_KEY",
+      "supportsVision": true,
       "contextWindow": 1048576,
       "maxOutputTokens": 131072,
       "reasoning": {
-        "efforts": ["low", "high", "max"],
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
         "default": "high",
         "canDisable": false
+      },
+      "cost": {
+        "input": 0.12,
+        "cacheRead": 0.024,
+        "output": 0.4
       }
     }
   ]
 }
 ```
 
-River documents no reasoning control for Nemotron, so it is declared with
-`"param": "none"`: it reasons, and Mike sends it no effort field.
+Every River model above takes text and images, streams, reasons and calls
+tools. Each accepts `reasoning_effort`, including `none` to turn reasoning
+off; the efforts listed are the ones checked against River on 2026-10-21. The
+prices come from River's published list
+(https://console.river.ai/api/public/pricing), in US dollars per million
+tokens. Check them there before relying on the spend shown.
 
-An earlier version of this example declared `river/deepseek-v4.1-flash`
-(River's original `deepseek-ai/DeepSeek-V4.1-Flash`). Mike reads that id as
-`river/deepseek-v4.1-flash-1017`, so chats and preferences saved with it move
-to the 1017 release once it is declared.
-
-Add `"cost": { "input": …, "output": …, "cacheRead": … }` with River's
-current per-million-token prices to see each turn's spend.
+Do not declare River's original `deepseek-ai/DeepSeek-V4.1-Flash` (the id
+`river/deepseek-v4.1-flash`): it is retired here. Mike reads that id as
+`river/deepseek-v4.1-flash-1017`, so chats and preferences saved with it
+move to the 1017 release. A deployment that still declares the old id gets a
+startup warning, and the old entry is left out of the pickers.
 
 ## Context window and output limit
 

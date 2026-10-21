@@ -1,5 +1,5 @@
-import { afterEach, describe, it, expect } from "vitest";
-import { resetModelRegistryCache } from "../llm/registry";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { getConfiguredModel, resetModelRegistryCache } from "../llm/registry";
 import {
     CLAUDE_MAIN_MODELS,
     GEMINI_MAIN_MODELS,
@@ -175,6 +175,31 @@ describe("resolveModel", () => {
             expect(
                 resolveModel("river/deepseek-v4.1-flash-1017", DEFAULT_MAIN_MODEL),
             ).toBe("river/deepseek-v4.1-flash-1017");
+        });
+
+        it("leaves out a declaration of the retired id, with a warning", () => {
+            const river = {
+                provider: "openai-compatible",
+                location: "cloud",
+                baseUrl: "https://api.river.ai/v1",
+            };
+            process.env.MIKE_MODEL_CONFIG_JSON = JSON.stringify({
+                models: [
+                    { ...river, id: "river/deepseek-v4.1-flash", apiModel: "deepseek-ai/DeepSeek-V4.1-Flash" },
+                    { ...river, id: "river/glm-5.3-flash", apiModel: "zai-org/GLM-5.3-Flash" },
+                ],
+            });
+            resetModelRegistryCache();
+            const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+            try {
+                expect(getConfiguredModel("river/deepseek-v4.1-flash")).toBeNull();
+                expect(getConfiguredModel("river/glm-5.3-flash")).not.toBeNull();
+                expect(warn).toHaveBeenCalledWith(
+                    expect.stringContaining("river/deepseek-v4.1-flash-1017"),
+                );
+            } finally {
+                warn.mockRestore();
+            }
         });
     });
 

@@ -1,3 +1,4 @@
+import { LEGACY_MODEL_IDS } from "./legacyModelIds";
 import { getConfiguredModel } from "./registry";
 import { REASONING_LEVELS, type Provider, type ReasoningLevel } from "./types";
 
@@ -396,16 +397,7 @@ export function providerForModel(model: string): Provider {
     throw new Error(`Unknown model id: ${model}`);
 }
 
-// Renamed/retired static ids → their current equivalents. Stored preferences
-// and localStorage selections outlive catalog renames; mapping here keeps an
-// old saved value working instead of silently kicking it to the fallback.
-export const LEGACY_MODEL_IDS: Record<string, string> = {
-    "gemini-3.1-flash-lite-preview": "gemini-3.5-flash-lite",
-    "gpt-5.4-lite": "gpt-5.4-mini",
-    // The River selection replaced DeepSeek V4.1 Flash with its 1017 release
-    // (docs/configured-models.md).
-    "river/deepseek-v4.1-flash": "river/deepseek-v4.1-flash-1017",
-};
+export { LEGACY_MODEL_IDS };
 
 export function resolveModel(
     id: string | null | undefined,

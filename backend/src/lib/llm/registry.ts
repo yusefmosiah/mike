@@ -8,6 +8,7 @@ import {
   type UserApiKeys,
 } from "./types";
 import { PHALA_GATEWAY_REPO } from "./attestation/aci";
+import { LEGACY_MODEL_IDS } from "./legacyModelIds";
 
 // Deployment-declared models. The static catalog in models.ts covers the
 // hosted providers Mike ships with; this registry is how an operator adds a
@@ -52,7 +53,20 @@ export function loadModelRegistry(): ModelRegistryConfig {
     models: Array.isArray(record.models)
       ? record.models.flatMap((value) => {
           const model = parseConfiguredModel(value);
-          return model ? [model] : [];
+          if (!model) return [];
+          // A retired id would be offered in the pickers, then read as its
+          // replacement, which this deployment may not declare: the turn
+          // would silently run on the fallback model instead.
+          const current = Object.hasOwn(LEGACY_MODEL_IDS, model.id)
+            ? LEGACY_MODEL_IDS[model.id]
+            : undefined;
+          if (current) {
+            console.warn(
+              `[models] ${model.id} in MIKE_MODEL_CONFIG_JSON is retired and left out; declare ${current} instead (see docs/configured-models.md).`,
+            );
+            return [];
+          }
+          return [model];
         })
       : [],
     committees: Array.isArray(record.committees)
