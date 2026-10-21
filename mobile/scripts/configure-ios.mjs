@@ -27,6 +27,8 @@
 //     Phonon (plugins/speech) declares iOS 18, and Swift Package Manager
 //     refuses a dependency with a higher floor than the package using it.
 //     Fluid Speech Mini and Phonon need iOS 18 themselves.
+//   - SceneDelegate: on a Mac, no white title bar: the window controls sit
+//     over the page's own colour (MIKE_MAC_TITLEBAR).
 //   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
 //     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
@@ -315,6 +317,47 @@ patch("SceneDelegate.swift", "MIKE_KEYBOARD_EVENTS", (source) =>
     }
 `,
   ),
+);
+
+// MIKE_MAC_TITLEBAR: on a Mac (the iPhone app running there), no white title
+// bar above the page. The window controls sit over the app's own content
+// (the unified windowing-control style, iOS 26), the page starts just below
+// them, and the strip they sit on takes the page's background colour, so it
+// follows the light and dark themes. iPhone and iPad are unchanged.
+patch("SceneDelegate.swift", "MIKE_MAC_TITLEBAR", (source) =>
+  source
+    .replace(
+      "    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {",
+      `    // MIKE_MAC_TITLEBAR: the window controls over the content on a Mac.
+    @available(iOS 26.0, *)
+    func preferredWindowingControlStyle(for windowScene: UIWindowScene) -> UIWindowScene.WindowingControlStyle {
+        ProcessInfo.processInfo.isiOSAppOnMac ? .unified : .automatic
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {`,
+    )
+    .replace(
+      "            webView.topAnchor.constraint(equalTo: view.topAnchor),\n",
+      "            macTitlebarTop(webView),\n",
+    )
+    .replace(
+      "    override var childForStatusBarStyle: UIViewController? { bridgeController }",
+      `    // MIKE_MAC_TITLEBAR: on a Mac the page starts below the window controls,
+    // on a strip the page's own background colour.
+    private var backgroundObservation: NSKeyValueObservation?
+
+    private func macTitlebarTop(_ webView: UIView) -> NSLayoutConstraint {
+        guard ProcessInfo.processInfo.isiOSAppOnMac, #available(iOS 26.0, *) else {
+            return webView.topAnchor.constraint(equalTo: view.topAnchor)
+        }
+        backgroundObservation = bridgeController.webView?.observe(\\.underPageBackgroundColor, options: [.initial, .new]) { [weak self] page, _ in
+            self?.view.backgroundColor = page.underPageBackgroundColor
+        }
+        return webView.topAnchor.constraint(equalTo: view.layoutGuide(for: .safeArea(cornerAdaptation: .vertical)).topAnchor)
+    }
+
+    override var childForStatusBarStyle: UIViewController? { bridgeController }`,
+    ),
 );
 
 // MIKE_UI_TESTS: the UI-test target. Written into project.pbxproj directly
