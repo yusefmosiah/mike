@@ -12,10 +12,10 @@
 #  - /var/lib/mike-vault: the master key, the sealing key and the encrypted
 #    store, readable by this service alone (a dynamic user). Back it up with
 #    the master key, or not at all: one without the other is useless.
-{ config, lib, pkgs, ... }:
+{ lib, pkgs, workstationVms, ... }:
 
 let
-  vms = lib.attrNames config.microvm.vms;
+  vms = workstationVms;
   port = 8200;
   # The service's own files only; Node runs the TypeScript directly.
   src = builtins.path {
