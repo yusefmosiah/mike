@@ -105,7 +105,7 @@ final class SpeakerProfileTests: XCTestCase {
         let wespeaker = try XCTUnwrap(verdict(.wespeaker).similarities[.wespeaker])
         let campplus = try XCTUnwrap(verdict(.wespeaker).similarities[.campplus])
         let both = try XCTUnwrap(verdict(.both).margin)
-        XCTAssertEqual(both, ((wespeaker - 0.35) + (campplus - 0.55)) / 2, accuracy: 1e-5, "the mean of the two margins")
+        XCTAssertEqual(both, ((wespeaker - 0.35) + (campplus - 0.39)) / 2, accuracy: 1e-5, "without the joined space, the mean of the two margins")
         let only: SpeakerEmbeddings = [.wespeaker: mixed[.wespeaker]!]
         XCTAssertEqual(profile.check(only, audioMs: 2000, rule: SpeakerRule(decider: .both)).outcome, .match, "a missing model is left out")
         XCTAssertEqual(profile.check(only, audioMs: 2000, rule: SpeakerRule(decider: .campplus)).outcome, .unknown)

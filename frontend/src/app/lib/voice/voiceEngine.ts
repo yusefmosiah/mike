@@ -38,7 +38,7 @@ export interface VoiceConfig {
      * this is another voice and neither interrupts nor is sent, 0.35.
      */
     speakerThreshold: number;
-    /** The same for CAM++, whose scores run higher for every voice, 0.55. */
+    /** The same for CAM++, 0.39. */
     campplusThreshold: number;
 }
 

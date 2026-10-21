@@ -30,12 +30,12 @@ struct VoiceConfig: Equatable, Sendable {
     /// at a second of speech or more run from about 0.45 up; other voices
     /// stayed under 0.41 in testing, so this errs toward the person.
     var speakerThreshold: Float = 0.35
-    /// The same for CAM++, whose scores run higher for every voice: same
-    /// 0.45 and up at a second, others up to 0.46 (0.62 at 2 s). Provisional.
-    var campplusThreshold: Float = 0.55
+    /// The same for CAM++ (fitted like WeSpeaker's; see SpeakerRule).
+    var campplusThreshold: Float = 0.39
 
     var speakerRule: SpeakerRule {
-        SpeakerRule(decider: speakerModel ?? .wespeaker, thresholds: [.wespeaker: speakerThreshold, .campplus: campplusThreshold])
+        SpeakerRule(decider: speakerModel ?? .wespeaker, thresholds: [.wespeaker: speakerThreshold, .campplus: campplusThreshold],
+                    fusion: speakerModel == .both ? SpeakerFusion.bundled : nil)
     }
 
     static let defaults = VoiceConfig()

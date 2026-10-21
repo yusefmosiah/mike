@@ -17,8 +17,9 @@ enum SpeakerModelKind: String, CaseIterable, Codable, Sendable {
     }
 
     /// Two learning turns at least this alike are the same voice: above the
-    /// highest different-voice score seen at 1.5 s and more of speech
-    /// (WeSpeaker 0.47, CAM++ 0.62 on synthetic voices).
+    /// highest different-voice score between 1.5–3 s LibriSpeech enrolment
+    /// turns (WeSpeaker 0.48; CAM++ 0.73, a few pairs in ten thousand above
+    /// 0.68). `.both` groups by WeSpeaker.
     var candidateSimilarity: Float {
         switch self {
         case .wespeaker: return 0.5
@@ -44,11 +45,25 @@ enum SpeakerDecider: String, Equatable, Sendable {
 }
 
 /// How speech is judged: the decider and each model's threshold.
+///
+/// Thresholds were fitted on held-out LibriSpeech speakers to miss the person
+/// in about 2 % of clean 1–2 s turns (WeSpeaker 0.32, rounded up to 0.35;
+/// CAM++ 0.39; the joined space 0.27). CAM++ alone, trained on Mandarin, lets
+/// in far more other voices than WeSpeaker on English speech; it is meant to
+/// be used through `.both`.
 struct SpeakerRule: Equatable, Sendable {
     var decider: SpeakerDecider = .wespeaker
-    var thresholds: [SpeakerModelKind: Float] = [.wespeaker: 0.35, .campplus: 0.55]
+    var thresholds: [SpeakerModelKind: Float] = [.wespeaker: 0.35, .campplus: 0.39]
+    /// `.both` compares voices in the joined space when this is set
+    /// (SpeakerFusion.swift), and averages the two margins when it is not.
+    var fusion: SpeakerFusion?
+    var fusedThreshold: Float = 0.27
 
     func threshold(_ kind: SpeakerModelKind) -> Float { thresholds[kind] ?? 0.5 }
+
+    static func == (a: SpeakerRule, b: SpeakerRule) -> Bool {
+        a.decider == b.decider && a.thresholds == b.thresholds && a.fusion === b.fusion && a.fusedThreshold == b.fusedThreshold
+    }
 }
 
 /// One stretch of speech as each model heard it (unit length), by model.
@@ -115,10 +130,25 @@ struct SpeakerProfile: Codable, Equatable {
             }
         }
         guard audioMs >= Self.minimumCheckMs else { return Verdict(outcome: .unknown, similarities: similarities) }
-        let margins = rule.decider.kinds.compactMap { kind in similarities[kind].map { $0 - rule.threshold(kind) } }
-        guard !margins.isEmpty else { return Verdict(outcome: .unknown, similarities: similarities) }
-        let margin = margins.reduce(0, +) / Float(margins.count)
+        let margin: Float
+        if rule.decider == .both, let fused = fusedSimilarity(heard, fusion: rule.fusion) {
+            margin = fused - rule.fusedThreshold
+        } else {
+            let margins = rule.decider.kinds.compactMap { kind in similarities[kind].map { $0 - rule.threshold(kind) } }
+            guard !margins.isEmpty else { return Verdict(outcome: .unknown, similarities: similarities) }
+            margin = margins.reduce(0, +) / Float(margins.count)
+        }
         return Verdict(outcome: margin >= 0 ? .match : .mismatch, similarities: similarities, margin: margin)
+    }
+
+    /// The learned voice against `heard` in the joined space, or nil without
+    /// the head or either model's embedding on either side.
+    func fusedSimilarity(_ heard: SpeakerEmbeddings, fusion: SpeakerFusion?) -> Float? {
+        guard let fusion else { return nil }
+        var learnedVoice: SpeakerEmbeddings = [:]
+        for kind in SpeakerModelKind.allCases { learnedVoice[kind] = centroid(kind) }
+        guard let a = fusion.project(learnedVoice), let b = fusion.project(heard) else { return nil }
+        return Self.cosine(a, b)
     }
 
     /// Learns from a turn that was sent as the person's. Returns whether the

@@ -39,9 +39,9 @@ interface VoiceConfig {
   bargeInWords: number;        // 2    words not in the clause being played
   falseStartMs: number;        // 1500 speech without words: resume playback
   maxTurnMs: number;           // 60000 a single turn is cut here (at most 120000; larger falls back to the default)
-  speakerModel: "wespeaker" | "campplus" | "both" | "off"; // "wespeaker" decides whether speech is the person's ("both" averages the margins; "off" checks and learns nothing)
+  speakerModel: "wespeaker" | "campplus" | "both" | "off"; // "wespeaker" decides whether speech is the person's ("both" decides in the two models' joined space; "off" checks and learns nothing)
   speakerThreshold: number;    // 0.35 below this WeSpeaker score against the learned voice, speech is another voice
-  campplusThreshold: number;   // 0.55 the same for CAM++
+  campplusThreshold: number;   // 0.39 the same for CAM++
 }
 ```
 

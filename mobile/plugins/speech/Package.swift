@@ -42,7 +42,7 @@ let package = Package(
                 .product(name: "ptts", package: "xn-ptts")
             ],
             path: "ios/Sources/MikeSpeechPlugin",
-            resources: hasModel ? [.copy("FluidSpeechMini")] : []),
+            resources: [.copy("SpeakerFusion")] + (hasModel ? [.copy("FluidSpeechMini")] : [])),
         .testTarget(
             name: "MikeSpeechPluginTests",
             dependencies: ["MikeSpeechPlugin"],

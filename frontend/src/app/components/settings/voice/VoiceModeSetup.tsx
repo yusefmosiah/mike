@@ -184,8 +184,8 @@ export function VoiceModeSetup() {
                 ))}
               </div>
               <SettingsDescription>
-                Both models always run and their scores are logged; this picks which one decides. It takes effect the next
-                time voice mode starts.
+                Both models always run and their scores are logged; this picks which decides. Both told voices apart best in
+                testing. It takes effect the next time voice mode starts.
               </SettingsDescription>
             </div>
             {status.speakerLearned && (

@@ -259,19 +259,21 @@ voice and checks speech against it (`SpeakerProfile.swift`,
 
   Two stretches of one voice score high on cosine similarity. Each takes
   about 100 ms on an M-series Mac. Settings ("Check voices with") picks which
-  decides: WeSpeaker (the default), CAM++, both (each score measured from its
-  own threshold, the two margins averaged), or off. The scores of every turn
-  and barge-in are logged, so the choice can be made from real voices.
+  decides: WeSpeaker (the default), CAM++, both, or off. Both joins the two
+  embeddings in a small trained space (`SpeakerFusion.swift`, below) and
+  decides there; without it (CAM++ failed to load) the two margins are
+  averaged. The scores of every turn and barge-in are logged, so the choice
+  can be made from real voices.
 - **Learning:** the first turns sent of 1.5 s or more are kept (up to six),
   as both models hear them. Once three of them are alike by the deciding
-  model (WeSpeaker 0.5 or more, CAM++ 0.68), each model's mean of them is the
+  model (WeSpeaker 0.5 or more, CAM++ 0.68; both groups by WeSpeaker), each model's mean of them is the
   person's voice; a TV heard in one or two early turns cannot outvote the
   person. Later turns that score well above the threshold (0.15 over it)
   nudge it (a cold, another microphone). It is kept on the phone in
   `Application Support/MikeVoice/speaker.json` (excluded from backup), and
   "Forget my voice" in Settings, or removing the voice models, deletes it.
 - **Turns:** once learned, a finished turn of a second or more scoring under
-  the threshold (WeSpeaker 0.35, CAM++ 0.55) is not sent: the engine sends `ignored` and
+  the threshold (WeSpeaker 0.35, CAM++ 0.39, both 0.27) is not sent: the engine sends `ignored` and
   listens again (the panel says "Another voice, not sent."). Shorter turns
   pass, since a short embedding scatters.
 - **Barge-in:** once the word rule is met, playback is held and the speech
@@ -279,22 +281,41 @@ voice and checks speech against it (`SpeakerProfile.swift`,
   barges in; another voice resumes playback, its words are spent, and from
   then on sound alone no longer holds this answer. New words are checked
   again after a second.
-- **Thresholds:** from probing eight synthetic macOS voices (the lowest
-  same-voice score against the highest different-voice one):
+- **Benchmark:** LibriSpeech's 73 test speakers, each enrolled from three
+  1.5–3 s turns of one chapter and tested on 0.5–4 s crops from other
+  chapters, clean and under: a TV voice through a real room and a
+  loudspeaker's band at +10, +5 and 0 dB; another talker, babble, music and
+  noise at +5 dB (MUSAN); the speech itself across a room ("far"); and
+  macOS voices for the answer's own echo. Thresholds and fusion weights were
+  fitted on the 73 dev speakers, never the test ones, and the head below on
+  train-clean-100 with the dev halves of the noise and rooms. Misses of the
+  person when other voices get in 1 % of the time (lower is better; mean of
+  the nine conditions, and the worst one, a TV at the person's level):
 
-  | Speech | WeSpeaker | CAM++ |
-  |---|---|---|
-  | 0.5 s | 0.24 / 0.35 | 0.27 / 0.36 |
-  | 1 s | 0.46 / 0.40 | 0.45 / 0.46 |
-  | 2 s | 0.60 / 0.47 | 0.70 / 0.62 |
-  | 4 s | 0.71 / 0.49 | 0.81 / 0.75 |
+  | Decides | 1 s turns | 2 s turns | TV at 0 dB, 1 s / 2 s |
+  |---|---|---|---|
+  | WeSpeaker | 13.0 % | 4.8 % | 27 % / 12 % |
+  | CAM++ | 49 % | 28 % | 62 % / 44 % |
+  | Both, margins averaged | 14.2 % | 6.2 % | 29 % / 15 % |
+  | Both, joined space | 9.8 % | 3.5 % | 21 % / 10 % |
 
-  CAM++ scores every English voice higher and separates them less on these;
-  real voices through the phone's microphone decide. Both thresholds err
-  toward letting the person through; the similarities of every check are
-  logged (numbers only) for tuning. With enough checks labelled (the person
-  or not), a small calibration fitted on the two scores could replace the
-  plain average.
+  CAM++ alone is weak on English: the original PyTorch model scores the
+  same, so the conversion is not at fault (its filterbank does need each
+  bin's mean removed, `SpeakerEmbedder.removeMean`). At the thresholds
+  above, 2–3 % of other same-gender voices and under 1 % of the macOS
+  voices get through on clean 1–2 s speech. These are read audiobooks with
+  simulated rooms and TVs; real voices through the phone's microphone
+  decide, which is why every check's scores are logged (numbers only).
+- **The joined space:** WeSpeaker's and CAM++'s embeddings each have the
+  training speakers' mean voice taken out and are joined (448 numbers); LDA
+  with within-speaker whitening maps them to 150, fitted on LibriSpeech
+  train-clean-100 (251 speakers, none in dev or test; 40 crops each, most
+  under the noises above). It is a 270 KB matrix shipped in the plugin
+  (`SpeakerFusion/speaker-fusion.bin`), applied to the learned voice and to
+  each check. Logistic-regression fusion of the two scores, adaptive score
+  normalisation, and adding two more models (CAM++ English, ECAPA) came out
+  about the same with more to ship; heads trained with a margin loss did
+  worse.
 - **Voice Isolation:** the panel's microphone-mode button opens the system's
   microphone modes, where Voice Isolation filters out sounds other than the
   nearest voice before any of this sees them. Apps cannot switch it on
