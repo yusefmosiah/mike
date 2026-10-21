@@ -14,14 +14,20 @@ import { errorCode, knownErrorCodeMessage } from "@/app/lib/userFacingError";
 export interface VoiceConfig {
     /** Speech probability, 0.5. */
     vadThreshold: number;
-    /** Silence that opens the end-of-turn check, 250 ms. */
+    /** Silence that opens the end-of-turn check, 500 ms. */
     pauseMs: number;
-    /** At or above: the turn is complete, 0.5. */
+    /** At or above: the turn is complete, 0.6 (below, asked again as the silence goes on). */
     smartTurnThreshold: number;
-    /** The turn ends whatever the models say, 2000 ms. */
+    /** The turn ends whatever the models say, 3000 ms. */
     maxSilenceMs: number;
+    /** Speech resumed this soon after a turn continues it (`turn.continues`), 3000 ms; 0 is off. */
+    continueMs: number;
     /** Speech needed for a barge-in, 300 ms. */
     bargeInSpeechMs: number;
+    /** Speech needed to hold playback before any words, 700 ms. */
+    holdSpeechMs: number;
+    /** Speech probability needed to start while the answer is awaited or playing, 0.7. */
+    bargeInVadThreshold: number;
     /** Words not in the clause being played needed for a barge-in, 2. */
     bargeInWords: number;
     /** Speech without words after which playback resumes, 1500 ms. */
@@ -30,7 +36,7 @@ export interface VoiceConfig {
     maxTurnMs: number;
     /**
      * The speaker model that decides whether speech is the person's, "wespeaker";
-     * "both" averages the two, "off" checks and learns nothing.
+     * "both" decides in the two models' joined space, "off" checks and learns nothing.
      */
     speakerModel: "wespeaker" | "campplus" | "both" | "off";
     /**
@@ -52,7 +58,11 @@ export type VoiceEvent =
     | { type: "install"; fraction: number }
     | { type: "state"; state: VoiceEngineState }
     | { type: "partial"; text: string }
-    | { type: "turn"; turnId: string; text: string; audioMs: number }
+    /**
+     * `continues`: the turn before, which the person went on from; `text` is
+     * then the whole prompt, that turn's words and the new ones.
+     */
+    | { type: "turn"; turnId: string; text: string; audioMs: number; continues?: string }
     | { type: "bargeIn"; turnId: string }
     | { type: "clauseStarted"; turnId: string; clauseId: number }
     | { type: "clausePlayed"; turnId: string; clauseId: number }
@@ -281,7 +291,13 @@ export function parseVoiceEvent(data: unknown): VoiceEvent | null {
             return text(event.text) ? { type: "partial", text: event.text } : null;
         case "turn":
             return text(turnId) && text(event.text)
-                ? { type: "turn", turnId, text: event.text, audioMs: finite(event.audioMs) ? event.audioMs : 0 }
+                ? {
+                      type: "turn",
+                      turnId,
+                      text: event.text,
+                      audioMs: finite(event.audioMs) ? event.audioMs : 0,
+                      ...(text(event.continues) && event.continues ? { continues: event.continues } : {}),
+                  }
                 : null;
         case "bargeIn":
         case "answerFinished":

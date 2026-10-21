@@ -9,14 +9,26 @@ import Foundation
 struct VoiceConfig: Equatable, Sendable {
     /// Speech probability at or above which a VAD frame is speech.
     var vadThreshold: Float = 0.5
-    /// Silence that opens the end-of-turn check.
-    var pauseMs: Int = 250
-    /// At or above: Smart Turn says the turn is complete.
-    var smartTurnThreshold: Float = 0.5
+    /// Silence that opens the end-of-turn check (two VAD frames: one ended
+    /// turns on a breath).
+    var pauseMs: Int = 500
+    /// At or above: Smart Turn says the turn is complete. Below it, Smart
+    /// Turn is asked again every `smartTurnRecheckMs` of further silence.
+    var smartTurnThreshold: Float = 0.6
     /// The turn ends after this much silence whatever the models say.
-    var maxSilenceMs: Int = 2000
+    var maxSilenceMs: Int = 3000
+    /// Speech resumed within this long after a turn was sent continues it:
+    /// the two are transcribed together and sent as one turn that replaces
+    /// the earlier one (`continues`). 0 turns it off.
+    var continueMs: Int = 3000
     /// VAD speech needed for a barge-in.
     var bargeInSpeechMs: Int = 300
+    /// VAD speech needed to hold playback before any words: longer than a
+    /// cough or a gust.
+    var holdSpeechMs: Int = 700
+    /// While the answer is awaited or playing, speech starts only at this
+    /// VAD probability (wind and traffic score lower than a voice).
+    var bargeInVadThreshold: Float = 0.7
     /// Words not in the clause being played needed for a barge-in.
     var bargeInWords: Int = 2
     /// Speech without qualifying words for this long: resume playback.
@@ -66,7 +78,10 @@ struct VoiceConfig: Equatable, Sendable {
         if let value = millis("pauseMs", 0...10_000) { pauseMs = value }
         if let value = probability("smartTurnThreshold") { smartTurnThreshold = value }
         if let value = millis("maxSilenceMs", 100...30_000) { maxSilenceMs = value }
+        if let value = millis("continueMs", 0...30_000) { continueMs = value }
         if let value = millis("bargeInSpeechMs", 0...10_000) { bargeInSpeechMs = value }
+        if let value = millis("holdSpeechMs", 0...10_000) { holdSpeechMs = value }
+        if let value = probability("bargeInVadThreshold") { bargeInVadThreshold = value }
         if let value = number("bargeInWords"), (0...20).contains(value) { bargeInWords = Int(value.rounded()) }
         if let value = millis("falseStartMs", 0...30_000) { falseStartMs = value }
         if let value = millis("maxTurnMs", 1_000...Double(Self.maxTurnLimitMs)) { maxTurnMs = value }
@@ -109,7 +124,8 @@ enum VoiceEvent: Equatable, Sendable {
     case install(fraction: Double)
     case state(VoiceState)
     case partial(text: String)
-    case turn(turnId: String, text: String, audioMs: Int)
+    /// `continues`: the earlier turn this one replaces (its words are in `text`).
+    case turn(turnId: String, text: String, audioMs: Int, continues: String? = nil)
     case bargeIn(turnId: String)
     case clauseStarted(turnId: String, clauseId: Int)
     case clausePlayed(turnId: String, clauseId: Int)
@@ -132,8 +148,10 @@ enum VoiceEvent: Equatable, Sendable {
             return ["type": "state", "state": state.rawValue]
         case let .partial(text):
             return ["type": "partial", "text": text]
-        case let .turn(turnId, text, audioMs):
-            return ["type": "turn", "turnId": turnId, "text": text, "audioMs": audioMs]
+        case let .turn(turnId, text, audioMs, continues):
+            var payload: [String: Any] = ["type": "turn", "turnId": turnId, "text": text, "audioMs": audioMs]
+            if let continues { payload["continues"] = continues }
+            return payload
         case let .bargeIn(turnId):
             return ["type": "bargeIn", "turnId": turnId]
         case let .clauseStarted(turnId, clauseId):

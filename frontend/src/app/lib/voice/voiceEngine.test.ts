@@ -200,6 +200,12 @@ describe("events", () => {
             [{ type: "turn", turnId: "t", text: "hi", audioMs: 900 }, { type: "turn", turnId: "t", text: "hi", audioMs: 900 }],
             [{ type: "turn", turnId: "t", text: "hi" }, { type: "turn", turnId: "t", text: "hi", audioMs: 0 }],
             [{ type: "turn", text: "hi" }, null],
+            [
+                { type: "turn", turnId: "t2", text: "hi there", audioMs: 900, continues: "t1" },
+                { type: "turn", turnId: "t2", text: "hi there", audioMs: 900, continues: "t1" },
+            ],
+            [{ type: "turn", turnId: "t", text: "hi", audioMs: 900, continues: 7 }, { type: "turn", turnId: "t", text: "hi", audioMs: 900 }],
+            [{ type: "turn", turnId: "t", text: "hi", audioMs: 900, continues: "" }, { type: "turn", turnId: "t", text: "hi", audioMs: 900 }],
             [{ type: "bargeIn", turnId: "t" }, { type: "bargeIn", turnId: "t" }],
             [{ type: "answerFinished", turnId: "t" }, { type: "answerFinished", turnId: "t" }],
             [{ type: "bargeIn" }, null],

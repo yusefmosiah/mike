@@ -46,6 +46,9 @@ struct TurnPolicy {
         /// When the decision was made, for `endOfSpeechToCommit`.
         let decidedAtMs: Int
         let reason: CommitReason
+        /// The sent turn this one continues: `startMs` is that turn's start,
+        /// so the final pass hears both, and `turn` replaces it.
+        var continues: String? = nil
     }
 
     enum Decision: Equatable {
@@ -103,6 +106,11 @@ struct TurnPolicy {
     var checksSpeaker = false
     /// After speech is found to be another voice, the next check waits this long.
     static let speakerRecheckMs = 1000
+    /// After Smart Turn says "not done", it is asked again after this much more silence.
+    static let smartTurnRecheckMs = 750
+    /// Recognised sounds that are not words to barge in with (a cough or wind
+    /// comes out of the EOU stream as these, or as single letters).
+    static let fillers: Set<String> = ["uh", "um", "umm", "uhm", "uhh", "mm", "mmm", "hmm", "hm", "mhm", "ah", "ahh", "oh", "er", "eh", "huh", "ha"]
     private(set) var state: VoiceState = .listening
     private var phase: Phase = .listening
     private var nowMs = 0
@@ -122,7 +130,14 @@ struct TurnPolicy {
     private var utteranceBaseline = 0
     private var lastPartialSent = ""
     private var endCheckOpen = false
+    /// Smart Turn said "not done": not asked again before this.
+    private var nextEndCheckMs = 0
     private var eouPending = false
+    /// The turn the person is continuing, if they took the floor back right
+    /// after it was sent; its bounds while it is being finalised and answered.
+    private var continuing: (turnId: String, startMs: Int)?
+    private var committedBounds: (startMs: Int, endMs: Int)?
+    private var answeredTurn: (turnId: String, startMs: Int, endMs: Int)?
     private var nextRequestId = 0
     private var pendingRequest: Int?
 
@@ -153,6 +168,11 @@ struct TurnPolicy {
 
     private var silenceThreshold: Float { max(0.01, config.vadThreshold - 0.15) }
 
+    /// Speech starts here: higher while the answer is awaited or playing.
+    private var onsetThreshold: Float {
+        answerTurnId == nil ? config.vadThreshold : max(config.vadThreshold, config.bargeInVadThreshold)
+    }
+
     /// The turn whose answer is pending or playing, if any.
     var answerTurnId: String? {
         switch phase {
@@ -166,7 +186,7 @@ struct TurnPolicy {
         switch input {
         case let .vad(probability, startMs, endMs):
             nowMs = max(nowMs, endMs)
-            if probability >= config.vadThreshold {
+            if probability >= (inSpeech ? config.vadThreshold : onsetThreshold) {
                 silenceStartMs = nil
                 lastSpeechEndMs = endMs
                 if !inSpeech {
@@ -201,6 +221,10 @@ struct TurnPolicy {
             guard !inSpeech, let silence = silenceStartMs else { break }
             if let probability, probability >= config.smartTurnThreshold {
                 commit(.smartTurn, endMs: silence, &out)
+            } else {
+                // Not done (or no answer): ask again if the silence goes on.
+                endCheckOpen = false
+                nextEndCheckMs = nowMs + Self.smartTurnRecheckMs
             }
         case let .speakerChecked(requestId, match):
             guard let pending = pendingSpeakerCheck, pending.id == requestId else { break }
@@ -223,6 +247,8 @@ struct TurnPolicy {
         case let .turnCommitted(turnId, text):
             guard phase == .finalizing else { break }
             phase = .thinking(turnId: turnId)
+            answeredTurn = committedBounds.map { (turnId, $0.startMs, $0.endMs) }
+            committedBounds = nil
             clauseKeys = []
             previousClauseKeys = []
             committedKeys = Set(VoiceWords.normalised(text))
@@ -232,6 +258,7 @@ struct TurnPolicy {
             evaluate(&out)
         case .turnDiscarded:
             guard phase == .finalizing else { break }
+            committedBounds = nil
             returnToListening(&out)
         case let .clausePlaying(turnId, text):
             guard answerTurnId == turnId else { break }
@@ -250,6 +277,7 @@ struct TurnPolicy {
             previousClauseKeys = []
             committedKeys = []
             forgetAnswer()
+            answeredTurn = nil
             // A held answer must not leave the player paused for the next one.
             releasePause(&out)
             // Without echo cancellation, sound still going is the answer's own tail.
@@ -271,6 +299,7 @@ struct TurnPolicy {
         case .userTurn:
             // Speech resumed: whatever check was open is moot.
             endCheckOpen = false
+            nextEndCheckMs = 0
             eouPending = false
             pendingRequest = nil
             setState(.userSpeaking, &out)
@@ -285,6 +314,7 @@ struct TurnPolicy {
         utteranceBaseline = min(baseline, words.count)
         lastPartialSent = ""
         endCheckOpen = false
+        nextEndCheckMs = 0
         eouPending = false
         pendingRequest = nil
         setState(.userSpeaking, &out)
@@ -302,7 +332,7 @@ struct TurnPolicy {
     }
 
     private mutating func openEndCheck(_ out: inout [Decision]) {
-        guard phase == .userTurn, !endCheckOpen, !inSpeech, let start = utteranceStartMs else { return }
+        guard phase == .userTurn, !endCheckOpen, !inSpeech, nowMs >= nextEndCheckMs, let start = utteranceStartMs else { return }
         endCheckOpen = true
         eouPending = false
         nextRequestId += 1
@@ -313,7 +343,10 @@ struct TurnPolicy {
 
     private mutating func commit(_ reason: CommitReason, endMs: Int, _ out: inout [Decision]) {
         guard let start = utteranceStartMs else { return }
-        out.append(.commit(Commit(startMs: start, endMs: max(start, endMs), decidedAtMs: nowMs, reason: reason)))
+        out.append(.commit(Commit(startMs: start, endMs: max(start, endMs), decidedAtMs: nowMs, reason: reason,
+                                  continues: continuing?.turnId)))
+        committedBounds = (start, max(start, endMs))
+        continuing = nil
         phase = .finalizing
         utteranceStartMs = nil
         endCheckOpen = false
@@ -367,7 +400,7 @@ struct TurnPolicy {
     private var foreignWordCount: Int {
         words.dropFirst(runBaseline).reduce(0) { count, word in
             let key = VoiceWords.normalised(word).joined()
-            guard !key.isEmpty, !clauseKeys.contains(key), !previousClauseKeys.contains(key),
+            guard key.count > 1, !Self.fillers.contains(key), !clauseKeys.contains(key), !previousClauseKeys.contains(key),
                   !committedKeys.contains(key) else { return count }
             if !echoCancelled, answerKeys.contains(key) || answerRun.contains(key) { return count }
             return count + 1
@@ -383,7 +416,10 @@ struct TurnPolicy {
         if runLive {
             let speechMs = (inSpeech ? lastSpeechEndMs : (silenceStartMs ?? lastSpeechEndMs)) - onset
             let enoughSpeech = speechMs >= config.bargeInSpeechMs
-            let needed = echoCancelled ? config.bargeInWords : max(config.bargeInWords, Self.uncancelledBargeInWords)
+            // Once a hold has come to nothing, sound going on (wind, traffic)
+            // has had longer to throw up stray words: one more is needed.
+            let needed = (echoCancelled ? config.bargeInWords : max(config.bargeInWords, Self.uncancelledBargeInWords))
+                + (falseStartSpent ? 1 : 0)
             if enoughSpeech, foreignWordCount >= needed {
                 guard checksSpeaker else {
                     bargeIn(turnId: turnId, onset: onset, speechMs: speechMs, &out)
@@ -399,7 +435,7 @@ struct TurnPolicy {
                 out.append(.checkSpeaker(requestId: nextRequestId, fromMs: onset, toMs: nowMs))
                 return
             }
-            if enoughSpeech, inSpeech, !paused, !falseStartSpent, echoCancelled, !otherVoiceHeard, case .speaking = phase {
+            if speechMs >= config.holdSpeechMs, inSpeech, !paused, !falseStartSpent, echoCancelled, !otherVoiceHeard, case .speaking = phase {
                 paused = true
                 out.append(.pausePlayback)
             }
@@ -420,7 +456,14 @@ struct TurnPolicy {
         committedKeys = []
         forgetAnswer()
         phase = .listening
-        beginUtterance(at: onset, baseline: runBaseline, &out)
+        // Taking the floor back right after the turn was sent: the turn was
+        // cut too soon. Hear it again from its start and send it whole.
+        if let answered = answeredTurn, answered.turnId == turnId, config.continueMs > 0,
+           onset - answered.endMs <= config.continueMs {
+            continuing = (turnId, answered.startMs)
+        }
+        answeredTurn = nil
+        beginUtterance(at: continuing?.startMs ?? onset, baseline: runBaseline, &out)
         // A run that already ended goes straight to its pause check.
         evaluate(&out)
     }

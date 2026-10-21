@@ -32,10 +32,13 @@ listener, `voiceEvent`, with a `type` field.
 ```ts
 interface VoiceConfig {
   vadThreshold: number;        // 0.5  speech probability
-  pauseMs: number;             // 250  silence that opens the end-of-turn check
-  smartTurnThreshold: number;  // 0.5  at or above: the turn is complete
-  maxSilenceMs: number;        // 2000 the turn ends whatever the models say
+  pauseMs: number;             // 500  silence that opens the end-of-turn check
+  smartTurnThreshold: number;  // 0.6  at or above: the turn is complete (below: asked again every 750 ms of silence)
+  maxSilenceMs: number;        // 3000 the turn ends whatever the models say
+  continueMs: number;          // 3000 speech resumed this soon after a turn continues it (`turn.continues`); 0 is off
   bargeInSpeechMs: number;     // 300  VAD speech needed for a barge-in
+  holdSpeechMs: number;        // 700  VAD speech needed to hold playback before words arrive
+  bargeInVadThreshold: number; // 0.7  speech probability needed to start while the answer is awaited or playing
   bargeInWords: number;        // 2    words not in the clause being played
   falseStartMs: number;        // 1500 speech without words: resume playback
   maxTurnMs: number;           // 60000 a single turn is cut here (at most 120000; larger falls back to the default)
@@ -52,7 +55,7 @@ type VoiceEvent =
   | { type: "install"; fraction: number }
   | { type: "state"; state: "listening" | "user-speaking" | "confirming-end" | "thinking" | "speaking" }
   | { type: "partial"; text: string }                       // live words, replaced by `turn`
-  | { type: "turn"; turnId: string; text: string; audioMs: number }
+  | { type: "turn"; turnId: string; text: string; audioMs: number; continues?: string } // `continues`: see below
   | { type: "bargeIn"; turnId: string }                     // the person spoke over turn `turnId`'s answer (or while it was thinking)
   | { type: "clauseStarted"; turnId: string; clauseId: number }
   | { type: "clausePlayed"; turnId: string; clauseId: number }
@@ -68,6 +71,17 @@ type VoiceEvent =
   Mini's final pass (vocabulary is applied by the web app).
 - After `turn` the engine is `thinking` until the first `voiceSpeak` for that
   turn starts playing (`speaking`).
+- `continues` names the turn sent just before, when the person went on
+  speaking within a few seconds of it being committed (the end of the turn
+  was a mistake). The engine transcribes the two stretches together, so
+  `text` is the whole prompt, that turn's words and the new ones; it has
+  already sent `bargeIn` for that turn's answer. The web app replaces that
+  turn's prompt rather than adding another: words not yet sent are swapped,
+  and a sent prompt gets a new version (a branch) answered in its place. The
+  old prompt and its cut-off answer stay as the older branch. When it cannot
+  replace it (the prompt has no stored id yet, or the surface has no
+  branching), it sends `text` as a new message. A `continues` that names no
+  turn it knows is ignored.
 - A barge-in while `thinking` sends `bargeIn` only; while `speaking` it sends
   `bargeIn`, then `interrupted` for the clause that was playing. Either way the
   web app cancels that turn's chat answer and the engine keeps listening (the

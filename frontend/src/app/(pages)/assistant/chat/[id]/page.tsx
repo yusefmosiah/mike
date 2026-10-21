@@ -52,7 +52,7 @@ export default function AssistantChatPage() {
     // Branch navigation: leaf moves happen server-side and the ancestry they
     // select comes back as this page's transcript, so the reload and the
     // queued re-answer (edit prompt / regenerate) live here, not in the view.
-    const { reloadActivePath, editPrompt, regenerate, branchIntoNewThread } =
+    const { reloadActivePath, editPrompt, replaceVoicePrompt, regenerate, branchIntoNewThread } =
         useChatBranchActions({
             chatId: id,
             messages,
@@ -233,6 +233,7 @@ export default function AssistantChatPage() {
             chatLoading={chatLoading}
             onBranchChange={reloadActivePath}
             onEditPrompt={editPrompt}
+            onReplaceVoicePrompt={replaceVoicePrompt}
             onRegenerate={regenerate}
             onBranchIntoNewThread={openBranchedThread}
             generatingBy={generating}

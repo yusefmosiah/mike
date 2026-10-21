@@ -701,7 +701,7 @@ actor VoiceEngine {
                 let smartTurn = commitStages["smartTurn"]
                 commitStages = ["endOfSpeechToCommit": Double(commit.decidedAtMs - commit.endMs)]
                 if commit.reason == .smartTurn, let smartTurn { commitStages["smartTurn"] = smartTurn }
-                VoiceMode.log.info("voice: commit (\(commit.reason.rawValue, privacy: .public)) \(commit.decidedAtMs - commit.endMs, privacy: .public) ms after speech")
+                VoiceMode.log.info("voice: commit (\(commit.reason.rawValue, privacy: .public)) \(commit.decidedAtMs - commit.endMs, privacy: .public) ms after speech\(commit.continues == nil ? "" : ", continuing the last turn", privacy: .public)")
                 pendingActions += [.clearText, .finalPass(commit)]
             case let .bargeIn(turnId):
                 send(.bargeIn(turnId: turnId))
@@ -758,7 +758,7 @@ actor VoiceEngine {
         let turnId = UUID().uuidString.lowercased()
         if let previous = metrics?.turnId { flushMetrics(previous) }
         metrics = TurnMetrics(turnId: turnId, stages: stages, sentAt: .now)
-        send(.turn(turnId: turnId, text: text, audioMs: commit.endMs - commit.startMs))
+        send(.turn(turnId: turnId, text: text, audioMs: commit.endMs - commit.startMs, continues: commit.continues))
         carryOut(policy.handle(.turnCommitted(turnId: turnId, text: text)))
     }
 

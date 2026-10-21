@@ -74,8 +74,11 @@ afterEach(() => {
  * prompt and an empty answer and starts loading; `stream` grows the answer;
  * `finish` ends loading.
  */
-function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?: string | null } = {}) {
+function renderVoiceChat(
+    options: { sendOk?: boolean; silent?: boolean; chatId?: string | null; replace?: boolean | "reject" } = {},
+) {
     const sent: string[] = [];
+    const replaced: [string, string][] = [];
     const cancelResponse = vi.fn();
     const hook = renderHook(
         ({ chatId }: { chatId: string | null }) => {
@@ -101,6 +104,20 @@ function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?:
                     setLoading(true);
                     return true;
                 },
+                // As the branch actions do: the new version takes the old
+                // prompt's place, the rest of that branch goes, and it is answered.
+                replacePrompt: options.replace
+                    ? async (messageId, text) => {
+                          if (options.replace === "reject") throw new Error("busy");
+                          replaced.push([messageId, text]);
+                          setMessages((prev) => [
+                              ...prev.slice(0, prev.findIndex((message) => message.id === messageId)),
+                              { id: "u-new", role: "user", content: text, voice: true },
+                              { role: "assistant", content: "", events: [] },
+                          ]);
+                          setLoading(true);
+                      }
+                    : undefined,
                 cancelResponse: () => {
                     cancelResponse();
                     setLoading(false);
@@ -122,7 +139,18 @@ function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?:
     return {
         ...hook,
         sent,
+        replaced,
         cancelResponse,
+        // As the chat stream's first frame does: the sent prompt gets its stored id.
+        namePrompt: (id: string) =>
+            act(() =>
+                hook.result.current.setMessages((prev) => {
+                    const next = [...prev];
+                    const at = next.findLastIndex((message) => message.role === "user");
+                    next[at] = { ...next[at], id };
+                    return next;
+                }),
+            ),
         // As the chat stream does: the piece being written is marked streaming.
         stream: (text: string, id = "a1") =>
             updateAnswer((answer) => ({ ...answer, id, events: [{ type: "content", text, isStreaming: true }] })),
@@ -791,6 +819,85 @@ describe("useVoiceChat", () => {
             "Dismissal under Federal Rule of Civil Procedure twelve b six,",
             "requires plausible facts, as the Court held.",
         ]);
+    });
+
+    describe("a turn the person went on from (`continues`)", () => {
+        it("replaces the words of a turn not yet sent, and sends them once", async () => {
+            const view = await started({ replace: true });
+            act(() => view.result.current.setLoading(true));
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            emit({ type: "bargeIn", turnId: "t1" });
+            emit({ type: "turn", turnId: "t2", text: "what notice does the tenant owe", audioMs: 1900, continues: "t1" });
+            view.finish();
+            await waitFor(() => expect(view.sent).toEqual(["what notice does the tenant owe"]));
+            expect(view.replaced).toEqual([]);
+        });
+
+        it("keeps the words carried into the turn it continues", async () => {
+            const view = await started({ replace: true });
+            act(() => view.result.current.setLoading(true));
+            emit({ type: "turn", turnId: "t1", text: "the lease", audioMs: 900 });
+            emit({ type: "bargeIn", turnId: "t1" });
+            emit({ type: "turn", turnId: "t2", text: "what notice", audioMs: 900 });
+            emit({ type: "turn", turnId: "t3", text: "what notice does the tenant owe", audioMs: 1900, continues: "t2" });
+            view.finish();
+            await waitFor(() => expect(view.sent).toEqual(["the lease what notice does the tenant owe"]));
+        });
+
+        it("replaces a sent prompt with the whole of what was said, without waiting for the abandoned answer's record", async () => {
+            recordMock.mockImplementationOnce(() => new Promise<void>(() => undefined));
+            const view = await started({ replace: true });
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            view.namePrompt("u1");
+            view.stream(ANSWER.slice(0, 120));
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+            emit({ type: "bargeIn", turnId: "t1" });
+            expect(view.cancelResponse).toHaveBeenCalledTimes(1);
+            emit({ type: "turn", turnId: "t2", text: "what notice does ximena acterberg owe", audioMs: 1900, continues: "t1" });
+            await waitFor(() => expect(view.replaced).toEqual([["u1", "what notice does Ximena Achterberg owe"]]));
+            expect(view.sent).toEqual(["what notice"]);
+            // The new version's answer is spoken as that turn's.
+            view.stream(ANSWER.slice(0, 120), "a2");
+            await waitFor(() => expect(calls("voiceSpeak")).toContainEqual(expect.objectContaining({ turnId: "t2" })));
+        });
+
+        it("sends a continuation of a turn it does not know as a new turn", async () => {
+            const view = await started({ replace: true });
+            emit({ type: "turn", turnId: "t1", text: "first question", audioMs: 900 });
+            view.namePrompt("u1");
+            view.stream(ANSWER.slice(0, 50));
+            emit({ type: "turn", turnId: "t2", text: "second question", audioMs: 900, continues: "t0" });
+            await waitFor(() => expect(view.sent).toEqual(["first question", "second question"]));
+            expect(view.replaced).toEqual([]);
+        });
+
+        it("sends the whole of what was said as a new turn without a way to replace the prompt", async () => {
+            const view = await started();
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            view.namePrompt("u1");
+            emit({ type: "bargeIn", turnId: "t1" });
+            emit({ type: "turn", turnId: "t2", text: "what notice does the tenant owe", audioMs: 1900, continues: "t1" });
+            await waitFor(() => expect(view.sent).toEqual(["what notice", "what notice does the tenant owe"]));
+        });
+
+        it("sends it as a new turn before the chat has named the prompt", async () => {
+            const view = await started({ replace: true });
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            emit({ type: "bargeIn", turnId: "t1" });
+            emit({ type: "turn", turnId: "t2", text: "what notice does the tenant owe", audioMs: 1900, continues: "t1" });
+            await waitFor(() => expect(view.sent).toEqual(["what notice", "what notice does the tenant owe"]));
+            expect(view.replaced).toEqual([]);
+        });
+
+        it("sends it as a new turn when the prompt could not be replaced", async () => {
+            const view = await started({ replace: "reject" });
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            view.namePrompt("u1");
+            emit({ type: "bargeIn", turnId: "t1" });
+            emit({ type: "turn", turnId: "t2", text: "what notice does the tenant owe", audioMs: 1900, continues: "t1" });
+            await waitFor(() => expect(view.sent).toEqual(["what notice", "what notice does the tenant owe"]));
+            expect(view.result.current.voice.error).toBeNull();
+        });
     });
 
     it("marks voice mode on for the page while it runs, so read-aloud stays silent", async () => {

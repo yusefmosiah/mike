@@ -66,7 +66,7 @@ private struct Trace {
     mutating func committedTurn(_ turnId: String) {
         speech(4)
         partial("what does clause four say")
-        let out = silence(1)
+        let out = silence(2)
         guard let request = Self.smartTurnRequests(out).first else { return }
         feed(.smartTurn(requestId: request.id, probability: 0.9))
         feed(.turnCommitted(turnId: turnId))
@@ -82,53 +82,69 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertEqual(Trace.states(onset), [.userSpeaking])
         trace.speech(3)
         XCTAssertEqual(trace.partial("hello there"), [.partial("hello there")])
+        XCTAssertTrue(Trace.smartTurnRequests(trace.silence(1)).isEmpty, "a breath is not a pause")
         let pause = trace.silence(1)
         XCTAssertEqual(Trace.states(pause), [.confirmingEnd])
         let requests = Trace.smartTurnRequests(pause)
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.from, 0)
-        XCTAssertEqual(requests.first?.to, 1280)
-        let decided = trace.feed(.smartTurn(requestId: requests[0].id, probability: 0.5))
-        XCTAssertEqual(Trace.commits(decided), [TurnPolicy.Commit(startMs: 0, endMs: 1024, decidedAtMs: 1280, reason: .smartTurn)])
+        XCTAssertEqual(requests.first?.to, 1536)
+        let decided = trace.feed(.smartTurn(requestId: requests[0].id, probability: 0.6))
+        XCTAssertEqual(Trace.commits(decided), [TurnPolicy.Commit(startMs: 0, endMs: 1024, decidedAtMs: 1536, reason: .smartTurn)])
     }
 
-    func testBelowTheThresholdKeepsListeningUntilMaxSilence() {
+    func testBelowTheThresholdAsksAgainAsTheSilenceGoesOnThenEndsAtMaxSilence() {
         var trace = Trace()
         trace.speech(4)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)  // to 1536
         let request = Trace.smartTurnRequests(pause)[0]
-        XCTAssertTrue(trace.feed(.smartTurn(requestId: request.id, probability: 0.49)).isEmpty)
-        // 2000 ms of silence counted from where speech stopped (1024 ms).
-        let waiting = trace.silence(7)  // up to 3072: 2048 ms of silence
-        XCTAssertEqual(Trace.commits(waiting), [TurnPolicy.Commit(startMs: 0, endMs: 1024, decidedAtMs: 3072, reason: .maxSilence)])
-        XCTAssertTrue(Trace.smartTurnRequests(waiting).isEmpty, "one Smart Turn run per pause")
+        XCTAssertTrue(trace.feed(.smartTurn(requestId: request.id, probability: 0.59)).isEmpty)
+        XCTAssertTrue(Trace.smartTurnRequests(trace.silence(2)).isEmpty, "not again before smartTurnRecheckMs")
+        let again = Trace.smartTurnRequests(trace.silence(1))  // 2304: 768 ms after the answer
+        XCTAssertEqual(again.count, 1)
+        XCTAssertEqual(again.first?.from, 0)
+        XCTAssertEqual(again.first?.to, 2304)
+        XCTAssertTrue(trace.feed(.smartTurn(requestId: again[0].id, probability: 0.3)).isEmpty)
+        // 3000 ms of silence counted from where speech stopped (1024 ms).
+        let waiting = trace.silence(7)  // up to 4096: 3072 ms of silence
+        XCTAssertEqual(Trace.commits(waiting), [TurnPolicy.Commit(startMs: 0, endMs: 1024, decidedAtMs: 4096, reason: .maxSilence)])
+    }
+
+    func testALaterSmartTurnAnswerCanEndTheTurnBeforeMaxSilence() {
+        var trace = Trace()
+        trace.speech(4)
+        let first = Trace.smartTurnRequests(trace.silence(2))[0]
+        trace.feed(.smartTurn(requestId: first.id, probability: 0.2))
+        let second = Trace.smartTurnRequests(trace.silence(3))[0]
+        let commit = Trace.commits(trace.feed(.smartTurn(requestId: second.id, probability: 0.8)))
+        XCTAssertEqual(commit, [TurnPolicy.Commit(startMs: 0, endMs: 1024, decidedAtMs: 2304, reason: .smartTurn)])
     }
 
     func testWithoutSmartTurnTheTurnStillEndsAtMaxSilence() {
         var trace = Trace()
         trace.speech(2)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: nil))
-        let out = trace.tick(until: 512 + 2000)
+        let out = trace.tick(until: 512 + 3000)
         XCTAssertEqual(Trace.commits(out).first?.reason, .maxSilence)
-        XCTAssertEqual(Trace.commits(out).first?.decidedAtMs, 2512)
+        XCTAssertEqual(Trace.commits(out).first?.decidedAtMs, 3512)
     }
 
     func testSpeechResumingAfterAPauseCancelsTheCheckAndIgnoresItsLateAnswer() {
         var trace = Trace()
         trace.speech(3)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         let first = Trace.smartTurnRequests(pause)[0]
         let resumed = trace.speech(2)
         XCTAssertEqual(Trace.states(resumed), [.userSpeaking])
         XCTAssertTrue(trace.feed(.smartTurn(requestId: first.id, probability: 0.99)).isEmpty, "a stale answer must not end the turn")
-        let second = Trace.smartTurnRequests(trace.silence(1))
+        let second = Trace.smartTurnRequests(trace.silence(2))
         XCTAssertEqual(second.count, 1)
         XCTAssertGreaterThan(second[0].id, first.id)
         XCTAssertEqual(second[0].from, 0, "the check covers the whole turn so far")
         let commit = Trace.commits(trace.feed(.smartTurn(requestId: second[0].id, probability: 0.8)))
         XCTAssertEqual(commit.first?.startMs, 0)
-        XCTAssertEqual(commit.first?.endMs, 1536)
+        XCTAssertEqual(commit.first?.endMs, 1792)
     }
 
     func testEouDuringSpeechOpensTheCheckAtTheFirstSilentFrameEvenBeforePauseMs() {
@@ -183,7 +199,7 @@ final class TurnPolicyTests: XCTestCase {
         trace.speech(2)
         XCTAssertTrue(trace.frames(0.4, 3).isEmpty, "0.4 is above 0.5 - 0.15: still speech")
         XCTAssertTrue(trace.policy.inSpeech)
-        let low = trace.frames(0.3, 1)
+        let low = trace.frames(0.3, 2)
         XCTAssertFalse(trace.policy.inSpeech)
         XCTAssertEqual(Trace.smartTurnRequests(low).count, 1)
     }
@@ -202,7 +218,7 @@ final class TurnPolicyTests: XCTestCase {
         trace.speech(1)
         let shown = trace.partial("is the lease signed")
         XCTAssertEqual(shown, [.partial("is the lease signed")])
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         // After the commit the engine clears the EOU text; nothing is shown while thinking.
         trace.feed(.turnCommitted(turnId: "t1"))
@@ -212,13 +228,13 @@ final class TurnPolicyTests: XCTestCase {
     func testCommitThenFinalPassResultDrivesThinkingOrBackToListening() {
         var trace = Trace()
         trace.speech(2)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         XCTAssertEqual(trace.policy.state, .confirmingEnd)
         XCTAssertEqual(Trace.states(trace.feed(.turnDiscarded)), [.listening])
 
         trace.speech(2)
-        let again = trace.silence(1)
+        let again = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(again)[0].id, probability: 0.9))
         XCTAssertEqual(Trace.states(trace.feed(.turnCommitted(turnId: "t2"))), [.thinking])
         XCTAssertEqual(trace.policy.answerTurnId, "t2")
@@ -227,7 +243,7 @@ final class TurnPolicyTests: XCTestCase {
     func testTheCommittedTurnsLateWordsAreNotABargeIn() {
         var trace = Trace()
         trace.speech(4)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         trace.feed(.turnCommitted(turnId: "t1"))
         // The EOU stream's last words of that turn arrive after the commit:
@@ -241,7 +257,7 @@ final class TurnPolicyTests: XCTestCase {
         var trace = Trace()
         trace.speech(4)
         trace.partial("i'm gonna try interrupting")
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         // A breath long enough to count as speech, and the EOU stream's last
         // words of the committed turn arriving inside it.
@@ -256,7 +272,7 @@ final class TurnPolicyTests: XCTestCase {
     func testTheCommittedTurnsLateWordsInABreathWhileThinkingAreNotABargeIn() {
         var trace = Trace()
         trace.speech(4)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         trace.feed(.turnCommitted(turnId: "t1", text: "Um, what happened?"))
         trace.speech(1)
@@ -269,7 +285,7 @@ final class TurnPolicyTests: XCTestCase {
     func testNewWordsStillBargeInAfterTheCommittedTurnsLateWords() {
         var trace = Trace()
         trace.speech(4)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         trace.feed(.turnCommitted(turnId: "t1", text: "Um, what happened?"))
         trace.speech(1)
@@ -282,7 +298,7 @@ final class TurnPolicyTests: XCTestCase {
     func testNoTimersRunWhileTheFinalPassIsRunning() {
         var trace = Trace()
         trace.speech(2)
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
         let waiting = trace.silence(20)
         XCTAssertTrue(Trace.commits(waiting).isEmpty)
@@ -371,6 +387,7 @@ final class TurnPolicyTests: XCTestCase {
         trace.feed(.clausePlaying(turnId: "t1", text: "The lease ends on the thirtieth of May."))
         trace.speech(1)
         trace.partial("the lease ends on")
+        XCTAssertTrue(trace.speech(1).isEmpty, "half a second is a cough, not yet a hold")
         let held = trace.speech(1)
         XCTAssertEqual(held, [.pausePlayback], "speech without foreign words holds playback")
         XCTAssertTrue(trace.speech(1).isEmpty)
@@ -417,12 +434,49 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertFalse(out.contains(.pausePlayback))
     }
 
+    func testFillersAndSingleLettersAreNotWordsToBargeInWith() {
+        var trace = Trace()
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "The rent is due monthly."))
+        // A cough or a gust of wind, heard by the EOU stream as these.
+        let out = trace.speech(2) + trace.partial("uh mm a hmm oh i")
+        XCTAssertFalse(out.contains(.bargeIn(turnId: "t1")))
+        XCTAssertEqual(trace.partial("uh mm a hmm oh i no wait").first, .bargeIn(turnId: "t1"), "two-letter words still count")
+    }
+
+    func testWhileTheAnswerPlaysSpeechMustBeClearerToStart() {
+        var trace = Trace()
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "The rent is due monthly."))
+        // Wind and traffic: speech-like to Silero, but under the barge-in bar.
+        let wind = trace.frames(0.6, 6) + trace.partial("the wind went by")
+        XCTAssertFalse(wind.contains(.pausePlayback))
+        XCTAssertFalse(wind.contains(.bargeIn(turnId: "t1")))
+        XCTAssertFalse(trace.policy.inSpeech)
+        // The same probability opens a turn when nothing is being answered.
+        var listening = Trace()
+        XCTAssertEqual(Trace.states(listening.frames(0.6, 1)), [.userSpeaking])
+    }
+
+    func testAfterAHoldCameToNothingOneMoreWordIsNeeded() {
+        var trace = Trace()
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "The deposit is returned within ten days."))
+        let onset = trace.now
+        trace.speech(3)
+        XCTAssertEqual(trace.tick(until: onset + 1500), [.resumePlayback])
+        // The sound goes on (wind): two stray words are no longer enough.
+        trace.speech(2)
+        XCTAssertFalse(trace.partial("going by").contains(.bargeIn(turnId: "t1")))
+        XCTAssertEqual(trace.partial("going by stop").first, .bargeIn(turnId: "t1"))
+    }
+
     func testFalseStartPausesThenResumesAfterFalseStartMs() {
         var trace = Trace()
         trace.committedTurn("t1")
         trace.feed(.clausePlaying(turnId: "t1", text: "The deposit is returned within ten days."))
         let onset = trace.now
-        trace.speech(1)
+        trace.speech(2)
         XCTAssertEqual(trace.speech(1), [.pausePlayback])
         trace.silence(1)
         let resumed = trace.tick(until: onset + 1500)
@@ -450,22 +504,24 @@ final class TurnPolicyTests: XCTestCase {
         // The EOU stream's words lag the audio by about half a second.
         let out = trace.partial("stop please")
         XCTAssertEqual(out.first, .bargeIn(turnId: "t1"))
-        XCTAssertTrue(out.contains(.state(.userSpeaking)) || out.contains(.state(.confirmingEnd)))
-        // The run already ended, so its pause check follows straight away.
-        XCTAssertEqual(Trace.smartTurnRequests(out).count, 1)
+        XCTAssertTrue(out.contains(.state(.userSpeaking)))
+        // The run already ended, so its pause check follows at the next silent frame.
+        XCTAssertEqual(Trace.smartTurnRequests(trace.silence(1)).count, 1)
     }
 
     func testAfterBargeInTheNewWordsBecomeTheNextTurn() {
         var trace = Trace()
         trace.committedTurn("t1")
         trace.feed(.clausePlaying(turnId: "t1", text: "The lease ends in May."))
+        trace.tick(until: trace.now + 3500)  // past continueMs: a new turn, not the last one continued
         let onset = trace.now
         trace.speech(2)
         trace.partial("no I meant the other lease")
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         let request = Trace.smartTurnRequests(pause)[0]
         let commit = Trace.commits(trace.feed(.smartTurn(requestId: request.id, probability: 0.9)))
         XCTAssertEqual(commit.first?.startMs, onset, "the turn starts where the barge-in speech did")
+        XCTAssertNil(commit.first?.continues)
         XCTAssertEqual(trace.policy.state, .confirmingEnd)
         // A clause of the old answer arriving now changes nothing.
         XCTAssertTrue(trace.feed(.clausePlaying(turnId: "t1", text: "x")).isEmpty)
@@ -481,19 +537,75 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertEqual(trace.speech(1).first, .bargeIn(turnId: "t1"))
     }
 
+    // MARK: - Continuing a turn cut too soon
+
+    func testSpeakingAgainRightAfterATurnWasSentContinuesIt() {
+        var trace = Trace()
+        trace.committedTurn("t1")  // speech 0..<1024, sent
+        trace.tick(until: trace.now + 1000)
+        trace.speech(2)
+        let out = trace.partial("about the deposit")
+        XCTAssertEqual(out.first, .bargeIn(turnId: "t1"))
+        XCTAssertTrue(out.contains(.partial("about the deposit")), "the panel shows the new words")
+        let request = Trace.smartTurnRequests(trace.silence(2))[0]
+        XCTAssertEqual(request.from, 0, "Smart Turn hears the whole turn")
+        let commit = Trace.commits(trace.feed(.smartTurn(requestId: request.id, probability: 0.9)))
+        XCTAssertEqual(commit.first?.startMs, 0, "the final pass hears both stretches")
+        XCTAssertEqual(commit.first?.continues, "t1")
+        // The continued turn can itself be continued.
+        trace.feed(.turnCommitted(turnId: "t2"))
+        trace.speech(2)
+        trace.partial("and the keys")
+        let next = Trace.commits(trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(trace.silence(2))[0].id, probability: 0.9)))
+        XCTAssertEqual(next.first?.startMs, 0)
+        XCTAssertEqual(next.first?.continues, "t2")
+    }
+
+    func testContinuingIsOffAtZeroAndAfterContinueMs() {
+        var config = VoiceConfig.defaults
+        config.continueMs = 0
+        var off = Trace(config)
+        off.committedTurn("t1")
+        off.speech(2)
+        off.partial("about the deposit")
+        let commit = Trace.commits(off.feed(.smartTurn(requestId: Trace.smartTurnRequests(off.silence(2))[0].id, probability: 0.9)))
+        XCTAssertNil(commit.first?.continues)
+        XCTAssertGreaterThan(commit.first?.startMs ?? 0, 0)
+
+        var late = Trace()
+        late.committedTurn("t1")  // speech ended at 1024
+        late.tick(until: 1024 + 3100)
+        late.speech(2)
+        late.partial("about the deposit")
+        let lateCommit = Trace.commits(late.feed(.smartTurn(requestId: Trace.smartTurnRequests(late.silence(2))[0].id, probability: 0.9)))
+        XCTAssertNil(lateCommit.first?.continues)
+    }
+
+    func testATurnFoundEmptyIsNotContinued() {
+        var trace = Trace()
+        trace.speech(4)
+        trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(trace.silence(2))[0].id, probability: 0.9))
+        trace.feed(.turnDiscarded)
+        trace.speech(2)
+        trace.partial("hello")
+        let commit = Trace.commits(trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(trace.silence(2))[0].id, probability: 0.9)))
+        XCTAssertNil(commit.first?.continues)
+        XCTAssertEqual(commit.first?.startMs, 1536)
+    }
+
     // MARK: - Held playback and the transcript's size
 
     func testAnAnswerEndingWhilePlaybackIsHeldResumesThePlayer() {
         var trace = Trace()
         trace.committedTurn("t1")
         trace.feed(.clausePlaying(turnId: "t1", text: "The deposit is returned within ten days."))
-        trace.speech(1)
+        trace.speech(2)
         XCTAssertEqual(trace.speech(1), [.pausePlayback])
         let ended = trace.feed(.answerEnded(turnId: "t1"))
         XCTAssertEqual(ended.first, .resumePlayback, "the next answer must not start on a paused player")
         XCTAssertTrue(ended.contains(.state(.userSpeaking)))
         // The next answer plays normally: no stale resume or pause.
-        let pause = trace.silence(1)
+        let pause = trace.silence(2)
         let request = Trace.smartTurnRequests(pause)[0]
         trace.feed(.smartTurn(requestId: request.id, probability: 0.9))
         let next = trace.feed(.turnCommitted(turnId: "t2"))
@@ -548,7 +660,7 @@ final class TurnPolicyTests: XCTestCase {
 
     func testWithTheVoiceLearnedABargeInIsCheckedFirst() {
         var trace = checkedSpeaking()
-        XCTAssertEqual(trace.speech(2), [.pausePlayback])
+        XCTAssertEqual(trace.speech(3), [.pausePlayback])
         let out = trace.partial("wait stop that")
         XCTAssertFalse(out.contains(.bargeIn(turnId: "t1")), "not before the voice is checked")
         let checks = Self.speakerChecks(out)
@@ -567,7 +679,8 @@ final class TurnPolicyTests: XCTestCase {
         let answer = trace.feed(.speakerChecked(requestId: check.id, match: false))
         XCTAssertEqual(answer, [.resumePlayback])
         XCTAssertEqual(trace.policy.state, .speaking)
-        let more = trace.speech(2) + trace.partial("wait stop that and then")
+        // After another voice, three new words are needed.
+        let more = trace.speech(2) + trace.partial("wait stop that and then go")
         XCTAssertFalse(more.contains(.pausePlayback), "sound alone no longer holds the answer")
         XCTAssertTrue(Self.speakerChecks(more).isEmpty, "not checked again within a second")
         XCTAssertEqual(Self.speakerChecks(trace.speech(2)).count, 1, "new words are checked again after it")

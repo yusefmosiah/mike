@@ -97,6 +97,32 @@ describe("useChatBranchActions", () => {
         expect(view.handleChat).not.toHaveBeenCalled();
     });
 
+    it("replaces a prompt spoken in voice mode with a new version answered as a voice turn", async () => {
+        const stored: Message = { id: "prompt-2", role: "user", content: "original question, and more" };
+        api.createBranch.mockResolvedValue({ id: "prompt-2", leaf: "prompt-2", messages: [stored] });
+        api.getChat.mockResolvedValue({ messages: [stored] });
+        const view = setup([oldPrompt, oldAnswer]);
+
+        await act(() => view.result.current.replaceVoicePrompt("prompt-1", "original question, and more"));
+
+        expect(api.createBranch).toHaveBeenCalledWith("chat-1", {
+            from_message_id: "prompt-1",
+            content: "original question, and more",
+            files: undefined,
+            workflow: undefined,
+        });
+        expect(view.handleChat).toHaveBeenCalledWith(
+            { ...stored, voice: true },
+            { linkOnlyToMessageId: "prompt-2", history: [] },
+        );
+    });
+
+    it("rejects replacing a prompt that is not in the transcript", async () => {
+        const view = setup([oldPrompt, oldAnswer]);
+        await expect(act(() => view.result.current.replaceVoicePrompt("gone", "words"))).rejects.toThrow();
+        expect(api.createBranch).not.toHaveBeenCalled();
+    });
+
     it("regenerates the answer just received without moving the leaf first", async () => {
         const earlier: Message[] = [
             { id: "p0", role: "user", content: "earlier" },

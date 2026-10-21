@@ -98,7 +98,7 @@ import {
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
-import { useVoiceChat, type UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
+import { useVoiceChat, type UseVoiceChatOptions, type UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { VoiceModePanel } from "./VoiceModePanel";
 
 export interface ChatInputHandle {
@@ -129,7 +129,7 @@ export interface ChatInputHandle {
  * the thread's once the first turn is sent, and voice mode carries on.
  */
 export type ChatInputVoice =
-    | { chatId: string; messages: Message[] }
+    | { chatId: string; messages: Message[]; replacePrompt?: UseVoiceChatOptions["replacePrompt"] }
     | { session: UseVoiceChatResult };
 
 /** A prompt as edited in the composer: its new text and files. */
@@ -921,6 +921,7 @@ function ChatInputForChatImpl(
         messages: ownVoice?.messages ?? NO_MESSAGES,
         isResponseLoading: isLoading,
         send: sendVoice,
+        replacePrompt: ownVoice?.replacePrompt,
         cancelResponse: onCancel,
     });
     const voiceChat = sharedVoice ?? composerVoice;

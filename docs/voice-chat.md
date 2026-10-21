@@ -177,12 +177,13 @@ All four streams run all the time on the 16 kHz mono tap:
    model itself: fresh caches, replaying audio from the token. We do not rely
    on `reset()` timing.
 3. **Smart Turn v3.2** (BSD-2, Core ML port about 17 MB, about 3.5 ms on
-   Apple silicon) runs once per candidate (a VAD pause or `<EOU>`) on the
-   turn's last 8 s.
-   - At 0.5 or more, the turn ends.
-   - Below 0.5, keep listening.
-   - A hard limit ends the turn after about 2 s of silence whatever the
-     models say.
+   Apple silicon) runs on the turn's last 8 s once a pause reaches half a
+   second (two VAD blocks: one ended turns on a breath), or at `<EOU>`.
+   - At 0.6 or more, the turn ends (0.5 cut people off mid-thought).
+   - Below it, keep listening, and ask again every 750 ms of further
+     silence, so a pause that turns out to be the end still ends early.
+   - A hard limit ends the turn after 3 s of silence whatever the models
+     say.
 4. **Fluid Speech Mini final pass:** on commit, transcribe the VAD-bounded
    utterance (already warm). It is about 25 ms per 15 s window on a Mac, to
    be measured on the iPhone. Then apply the dictation vocabulary.
@@ -216,7 +217,16 @@ end-of-utterance signal.
   confirmed speech, not just sound. Both conditions must hold:
   - **(a)** VAD speech for at least about 300 ms;
   - **(b)** at least two words in the EOU partials that do not match the
-    clause being played (compare against its text).
+    clause being played (compare against its text). Fillers ("uh", "mm",
+    "hmm", "oh"…) and single letters do not count: a cough or a gust of
+    wind comes out of the EOU stream as those.
+
+  Outdoors, noise is the other hazard. While the answer is awaited or
+  playing, speech must reach a VAD probability of 0.7 to start
+  (`bargeInVadThreshold`; 0.5 otherwise), playback is held only after
+  700 ms of it (`holdSpeechMs`, three blocks), not after a cough, and once a
+  hold comes to nothing (or another voice was heard) one more word is
+  needed, since wind going on has longer to throw up stray words.
 
   That avoids Volocal's failure, where any two-word partial interrupts,
   including the assistant's own leaked echo or a TV. Reference figures from
@@ -232,6 +242,12 @@ end-of-utterance signal.
   - the web app cancels the chat turn and records what was heard.
   The person's speech is already being transcribed, so their next turn
   continues without a gap.
+- **A turn ended too soon:** when the person goes on within a few seconds of
+  a committed turn, the engine transcribes both stretches as one and sends
+  the new `turn` with `continues` naming the earlier one. The continuation
+  replaces the earlier prompt instead of following its cancelled answer: the
+  web app saves the whole prompt as a new version of the earlier one (a
+  branch) and answers that, or swaps the words if they were not sent yet.
 - **False start** (VAD speech but no words within about 1.5 s): pause
   playback rather than stopping it, and resume if nothing follows (LiveKit's
   default behaviour).
@@ -584,7 +600,9 @@ from the design:
   a pause is known at the end of that block, not one block later. As a
   result:
   - `pauseMs` below 256 has the effect of 256;
-  - `bargeInSpeechMs: 300` needs two speech blocks, so 512 ms.
+  - `bargeInSpeechMs: 300` needs two speech blocks, so 512 ms;
+  - `pauseMs: 500` needs two silent blocks, and `holdSpeechMs: 700` three
+    speech blocks (768 ms).
 - **Barge-in compares against two clauses.** The partial's words are
   normalised (case, accents and apostrophes folded; letters and digits only).
   A word is foreign only if it is in neither the clause playing nor the one

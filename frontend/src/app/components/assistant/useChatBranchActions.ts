@@ -75,6 +75,8 @@ export function useChatBranchActions({
             content: string;
             /** The edited prompt's files; the original's when omitted. */
             files?: Message["files"];
+            /** Said in voice mode: the new version is answered as a voice turn. */
+            voice?: boolean;
         }) => {
             if (!chatId || !args.message.id || busyRef.current) return;
             const files = args.files ?? args.message.files;
@@ -93,7 +95,7 @@ export function useChatBranchActions({
                     .then((detail) => detail.messages)
                     .catch(() => created.messages);
                 const index = path.findIndex((m) => m.id === created.id);
-                const prompt: Message & { id: string } =
+                const stored: Message & { id: string } =
                     index >= 0
                         ? { ...path[index], id: created.id }
                         : {
@@ -103,6 +105,7 @@ export function useChatBranchActions({
                               files,
                               workflow: args.message.workflow,
                           };
+                const prompt = args.voice ? { ...stored, voice: true } : stored;
                 const history =
                     index >= 0 ? path.slice(0, index) : path.slice(0, -1);
                 void reanswer(prompt, history);
@@ -111,6 +114,23 @@ export function useChatBranchActions({
             }
         },
         [chatId, reanswer],
+    );
+
+    /**
+     * Voice mode: replaces a stored prompt with the whole of what the person
+     * said, when they went on after it was sent. Rejects when it cannot (no
+     * chat, another branch action running, the prompt not in the
+     * transcript), so voice mode sends the words as a new message instead.
+     */
+    const replaceVoicePrompt = useCallback(
+        async (messageId: string, content: string) => {
+            const message = messages.find((m) => m.id === messageId);
+            if (!chatId || !message || busyRef.current) {
+                throw new Error("The prompt cannot be replaced");
+            }
+            await editPrompt({ message, content, voice: true });
+        },
+        [chatId, messages, editPrompt],
     );
 
     /** Answers the prompt again; the new answer becomes a sibling of the old. */
@@ -184,6 +204,7 @@ export function useChatBranchActions({
     return {
         reloadActivePath,
         editPrompt,
+        replaceVoicePrompt,
         regenerate,
         branchIntoNewThread,
         navigateSibling,

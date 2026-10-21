@@ -468,7 +468,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         localTurnActive: isResponseLoading,
         onFinished: (detail) => setMessages(detail.messages),
     });
-    const { editPrompt, regenerate, branchIntoNewThread, navigateSibling } =
+    const { editPrompt, replaceVoicePrompt, regenerate, branchIntoNewThread, navigateSibling } =
         useChatBranchActions({
             chatId: activeChatId,
             messages,
@@ -2478,6 +2478,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                         projectCmNumber: project?.cm_number,
                     }}
                     onEditBranch={handleEditPrompt}
+                    onReplaceVoicePrompt={replaceVoicePrompt}
                     onNavigateSibling={handleNavigateSibling}
                     onRegenerate={handleRegenerate}
                     onBranchIntoNewThread={handleBranchIntoNewThread}

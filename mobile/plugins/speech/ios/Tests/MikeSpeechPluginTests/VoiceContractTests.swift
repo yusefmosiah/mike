@@ -7,10 +7,13 @@ final class VoiceContractTests: XCTestCase {
     func testConfigDefaultsMatchTheContract() {
         let config = VoiceConfig()
         XCTAssertEqual(config.vadThreshold, 0.5)
-        XCTAssertEqual(config.pauseMs, 250)
-        XCTAssertEqual(config.smartTurnThreshold, 0.5)
-        XCTAssertEqual(config.maxSilenceMs, 2000)
+        XCTAssertEqual(config.pauseMs, 500)
+        XCTAssertEqual(config.smartTurnThreshold, 0.6, accuracy: 1e-6)
+        XCTAssertEqual(config.maxSilenceMs, 3000)
+        XCTAssertEqual(config.continueMs, 3000)
         XCTAssertEqual(config.bargeInSpeechMs, 300)
+        XCTAssertEqual(config.holdSpeechMs, 700)
+        XCTAssertEqual(config.bargeInVadThreshold, 0.7, accuracy: 1e-6)
         XCTAssertEqual(config.bargeInWords, 2)
         XCTAssertEqual(config.falseStartMs, 1500)
         XCTAssertEqual(config.maxTurnMs, 60_000)
@@ -25,8 +28,12 @@ final class VoiceContractTests: XCTestCase {
         let config = VoiceConfig([
             "vadThreshold": 0.6, "pauseMs": 300, "smartTurnThreshold": 0.7, "maxSilenceMs": 2500,
             "bargeInSpeechMs": 400, "bargeInWords": 3, "falseStartMs": 1200, "maxTurnMs": 30_000,
+            "continueMs": 0, "holdSpeechMs": 900, "bargeInVadThreshold": 0.8,
             "speakerThreshold": 0.45, "campplusThreshold": 0.6, "speakerModel": "both",
         ])
+        XCTAssertEqual(config.continueMs, 0, "0 turns continuing off")
+        XCTAssertEqual(config.holdSpeechMs, 900)
+        XCTAssertEqual(config.bargeInVadThreshold, 0.8, accuracy: 1e-6)
         XCTAssertEqual(config.speakerThreshold, 0.45, accuracy: 1e-6)
         XCTAssertEqual(config.campplusThreshold, 0.6, accuracy: 1e-6)
         XCTAssertEqual(config.speakerModel, .both)
@@ -52,9 +59,9 @@ final class VoiceContractTests: XCTestCase {
             "bargeInWords": 2.6, "maxTurnMs": Double.nan, "unknown": 1,
         ])
         XCTAssertEqual(bad.vadThreshold, 0.5)
-        XCTAssertEqual(bad.pauseMs, 250)
-        XCTAssertEqual(bad.smartTurnThreshold, 0.5, "a boolean is not a number")
-        XCTAssertEqual(bad.maxSilenceMs, 2000)
+        XCTAssertEqual(bad.pauseMs, 500)
+        XCTAssertEqual(bad.smartTurnThreshold, 0.6, accuracy: 1e-6, "a boolean is not a number")
+        XCTAssertEqual(bad.maxSilenceMs, 3000)
         XCTAssertEqual(bad.bargeInWords, 3, "rounded")
         XCTAssertEqual(bad.maxTurnMs, 60_000)
     }
@@ -71,6 +78,8 @@ final class VoiceContractTests: XCTestCase {
         XCTAssertEqual(json(.partial(text: "the lease")), ["type": "partial", "text": "the lease"])
         XCTAssertEqual(json(.turn(turnId: "t1", text: "The lease.", audioMs: 1200)),
                        ["type": "turn", "turnId": "t1", "text": "The lease.", "audioMs": 1200])
+        XCTAssertEqual(json(.turn(turnId: "t2", text: "The lease, and the keys.", audioMs: 4000, continues: "t1")),
+                       ["type": "turn", "turnId": "t2", "text": "The lease, and the keys.", "audioMs": 4000, "continues": "t1"])
         XCTAssertEqual(json(.bargeIn(turnId: "t1")), ["type": "bargeIn", "turnId": "t1"])
         XCTAssertEqual(json(.ignored(.otherVoice)), ["type": "ignored", "reason": "other-voice"])
         XCTAssertEqual(json(.clauseStarted(turnId: "t1", clauseId: 0)), ["type": "clauseStarted", "turnId": "t1", "clauseId": 0])

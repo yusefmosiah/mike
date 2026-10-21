@@ -177,6 +177,12 @@ interface Props {
         files?: Message["files"];
     }) => void | Promise<void>;
     /**
+     * Voice mode: replaces a sent prompt with the whole of what the person
+     * said, when they went on after it was sent (useVoiceChat's
+     * `replacePrompt`). Without it, those words are sent as a new message.
+     */
+    onReplaceVoicePrompt?: (messageId: string, content: string) => Promise<void>;
+    /**
      * Branches into a new thread from an answer: the host creates the new
      * chat and opens it. Without it, no control renders.
      */
@@ -218,6 +224,7 @@ export function ChatView({
     onBranchChange,
     onRegenerate,
     onEditPrompt,
+    onReplaceVoicePrompt,
     onBranchIntoNewThread,
     generatingBy = null,
 }: Props) {
@@ -919,6 +926,7 @@ export function ChatView({
         messages,
         isResponseLoading,
         send: (text) => chatInputRef.current?.sendVoice(text) ?? false,
+        replacePrompt: onReplaceVoicePrompt,
         cancelResponse: cancel,
     });
 

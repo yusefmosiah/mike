@@ -29,7 +29,7 @@ import {
     type EditedPrompt,
 } from "./ChatInput";
 import { ChatInputPrompt } from "./ChatInputPrompt";
-import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
+import type { UseVoiceChatOptions, UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import {
     generatingNotice,
     threadHasOtherAuthors,
@@ -108,6 +108,11 @@ export interface ChatThreadProps {
      * it, the composer runs voice mode itself once the thread has an id.
      */
     voiceSession?: UseVoiceChatResult;
+    /**
+     * For the composer's own voice mode: replaces a sent prompt with the
+     * whole of what the person said, when they went on after it was sent.
+     */
+    onReplaceVoicePrompt?: UseVoiceChatOptions["replacePrompt"];
     /** Extra composer settings, such as the project the chat belongs to. */
     chatInputProps?: Pick<
         ChatInputProps,
@@ -287,6 +292,7 @@ export function ChatThread({
     onDocumentClick,
     chatInputKey,
     voiceSession,
+    onReplaceVoicePrompt,
     chatInputProps,
     onEditBranch,
     onNavigateSibling,
@@ -927,7 +933,7 @@ export function ChatThread({
                                         voiceSession
                                             ? { session: voiceSession }
                                             : chatId
-                                              ? { chatId, messages }
+                                              ? { chatId, messages, replacePrompt: onReplaceVoicePrompt }
                                               : undefined
                                     }
                                 />

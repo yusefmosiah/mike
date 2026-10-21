@@ -39,7 +39,8 @@ import {
  * hook sends each turn as an ordinary chat message (with `voice: true`), makes
  * the streaming answer speakable, cuts it into clauses for the engine to
  * speak, stops the answer when the person speaks over it, and records what
- * they heard of it.
+ * they heard of it. When the person goes on from a turn already sent (the
+ * engine's `continues`), the whole of what they said replaces that prompt.
  */
 
 /**
@@ -86,6 +87,15 @@ export interface UseVoiceChatOptions {
      * caller says why).
      */
     send: (text: string) => boolean;
+    /**
+     * Replaces the stored prompt `messageId` with `text`: a new version of it,
+     * answered as a voice message (the old one and its cut-off answer stay
+     * behind as the older branch). For a turn the person went on from after
+     * it was sent. Resolves once the version is saved; rejects when it could
+     * not be. Without it, or before the chat has named the prompt, the whole
+     * of what they said is sent as a new message.
+     */
+    replacePrompt?: (messageId: string, text: string) => Promise<void>;
     /** Stops the answer streaming into the thread. */
     cancelResponse: () => void;
     /** Thresholds for the engine; anything left out keeps the engine's default. */
@@ -118,9 +128,13 @@ export interface UseVoiceChatResult {
 interface VoiceTurn {
     turnId: string;
     text: string;
+    /** The words of a turn spoken over before it was sent, which open `text`. */
+    carried: string;
     /** The thread's length when the words were sent; the answer comes after. */
     baseIndex: number;
     sent: boolean;
+    /** A sent turn the person went on from: these words replace its prompt. */
+    replaces: VoiceTurn | null;
     answerId?: string;
     sawLoading: boolean;
     /** The answer text already made speakable. */
@@ -145,17 +159,20 @@ interface VoiceTurn {
     markRecorded: () => void;
     /** Before sending: the last answer's record to wait for. */
     waitFor: Promise<void> | null;
-    waiting: boolean;
+    /** That wait, once begun. */
+    waiting: Promise<void> | null;
 }
 
-function newTurn(turnId: string, text: string): VoiceTurn {
+function newTurn(turnId: string, text: string, carried = ""): VoiceTurn {
     let markRecorded: () => void = () => undefined;
     const recorded = new Promise<void>((resolve) => (markRecorded = resolve));
     return {
         turnId,
         text,
+        carried,
         baseIndex: 0,
         sent: false,
+        replaces: null,
         sawLoading: false,
         fed: 0,
         settled: 0,
@@ -171,7 +188,7 @@ function newTurn(turnId: string, text: string): VoiceTurn {
         recorded,
         markRecorded,
         waitFor: null,
-        waiting: false,
+        waiting: null,
     };
 }
 
@@ -181,10 +198,20 @@ function answerOf(turn: VoiceTurn, messages: readonly Message[]): Message | null
         const known = messages.find((message) => message.role === "assistant" && message.id === turn.answerId);
         if (known) return known;
     }
+    // A replacing turn's thread still shows the replaced answer until the new version is loaded.
+    const replaced = turn.replaces?.answerId;
     for (let i = turn.baseIndex; i < messages.length; i++) {
-        if (messages[i].role === "assistant") return messages[i];
+        if (messages[i].role === "assistant" && !(replaced && messages[i].id === replaced)) return messages[i];
     }
     return null;
+}
+
+/** Where a sent turn's stored prompt is, once the chat has named it: the message before its answer. */
+function promptOf(turn: VoiceTurn, messages: readonly Message[]): { id: string; index: number } | null {
+    const answer = answerOf(turn, messages);
+    const index = answer ? messages.indexOf(answer) - 1 : turn.baseIndex;
+    const prompt = messages[index];
+    return prompt?.role === "user" && prompt.id ? { id: prompt.id, index } : null;
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
@@ -196,6 +223,7 @@ export function useVoiceChat({
     messages,
     isResponseLoading,
     send,
+    replacePrompt,
     cancelResponse,
     config,
 }: UseVoiceChatOptions): UseVoiceChatResult {
@@ -228,16 +256,20 @@ export function useVoiceChat({
     // The turn before, whose `interrupted` may still arrive.
     const previousRef = useRef<VoiceTurn | null>(null);
     const pendingRef = useRef<VoiceTurn | null>(null);
-    // Words of a turn spoken over before they were sent: they open the next turn.
+    // Words of a turn spoken over before they were sent: they open the next
+    // turn, which also replaces whatever prompt they were to replace.
     const carryRef = useRef("");
+    const carryReplacesRef = useRef<VoiceTurn | null>(null);
+    // A prompt being replaced: nothing else is sent until it is saved.
+    const replacingRef = useRef<Promise<void> | null>(null);
     const sendTimerRef = useRef<number | null>(null);
     // A turn was sent with no chat yet (the new-chat screen): the chat it
     // creates is this conversation's, not a different thread.
     const awaitingChatRef = useRef(false);
 
-    const latest = useRef({ chatId, messages, isResponseLoading, send, cancelResponse, config });
+    const latest = useRef({ chatId, messages, isResponseLoading, send, replacePrompt, cancelResponse, config });
     useEffect(() => {
-        latest.current = { chatId, messages, isResponseLoading, send, cancelResponse, config };
+        latest.current = { chatId, messages, isResponseLoading, send, replacePrompt, cancelResponse, config };
     });
 
     const clearSendTimer = () => {
@@ -287,6 +319,7 @@ export function useVoiceChat({
             // Never sent: the words are not lost, they open the next turn.
             pendingRef.current = null;
             carryRef.current = joinWords(carryRef.current, turn.text);
+            carryReplacesRef.current = turn.replaces;
         }
         const streaming = turn.sent && !turn.ended;
         turn.ended = true;
@@ -303,6 +336,8 @@ export function useVoiceChat({
         previousRef.current = null;
         pendingRef.current = null;
         carryRef.current = "";
+        carryReplacesRef.current = null;
+        replacingRef.current = null;
         awaitingChatRef.current = false;
         setPartial("");
         setIgnoredOtherVoice(false);
@@ -384,17 +419,33 @@ export function useVoiceChat({
                         void voiceCancelAnswer(turn.turnId);
                         settleHeard(turn);
                     }
-                    const words = joinWords(carryRef.current, correctWithVocabulary(event.text.trim(), vocabulary).trim());
+                    // The person went on from the last turn: the engine heard
+                    // the two as one, so `text` already holds that turn's words.
+                    const continued = event.continues && turn?.turnId === event.continues ? turn : null;
+                    const carried = continued ? continued.carried : carryRef.current;
+                    const carriedReplaces = carryReplacesRef.current;
+                    const words = joinWords(carried, correctWithVocabulary(event.text.trim(), vocabulary).trim());
                     carryRef.current = "";
+                    carryReplacesRef.current = null;
                     previousRef.current = turn;
                     if (!words) {
                         turnRef.current = null;
                         void voiceCancelAnswer(event.turnId);
                         return;
                     }
-                    const next = newTurn(event.turnId, words);
-                    // The model should see the interruption before the new words.
-                    if (turn?.sent && turn.cancelled) next.waitFor = turn.recorded;
+                    const next = newTurn(event.turnId, words, carried);
+                    if (continued?.sent) {
+                        // Its answer was abandoned: these words replace its prompt.
+                        next.replaces = continued;
+                    } else if (continued) {
+                        // Never sent: these words take its place, and its wait.
+                        next.replaces = continued.replaces;
+                        next.waitFor = continued.waitFor ?? continued.waiting;
+                    } else {
+                        next.replaces = carriedReplaces;
+                        // The model should see the interruption before the new words.
+                        if (turn?.sent && turn.cancelled) next.waitFor = turn.recorded;
+                    }
                     turnRef.current = next;
                     pendingRef.current = next;
                     setQueued((count) => count + 1);
@@ -518,22 +569,76 @@ export function useVoiceChat({
         await begin(session);
     }, [begin, setPhase]);
 
+    /** A sent turn whose answer has not begun soon after: the send failed. */
+    const expectAnswer = useCallback(
+        (turn: VoiceTurn) => {
+            clearSendTimer();
+            const session = sessionRef.current;
+            sendTimerRef.current = window.setTimeout(() => {
+                sendTimerRef.current = null;
+                if (sessionRef.current !== session || turnRef.current !== turn) return;
+                if (turn.sawLoading || answerOf(turn, latest.current.messages)) return;
+                void voiceCancelAnswer(turn.turnId);
+                fail(VOICE_SEND_FAILURE_MESSAGE);
+            }, SEND_TIMEOUT_MS);
+        },
+        [fail],
+    );
+
+    /** Saves the turn's words as a new version of the prompt it replaces, which answers them. */
+    const replace = useCallback(
+        (turn: VoiceTurn, prompt: { id: string; index: number }, replacePrompt: NonNullable<UseVoiceChatOptions["replacePrompt"]>) => {
+            const session = sessionRef.current;
+            // The new version takes the old one's place in the thread.
+            turn.baseIndex = prompt.index;
+            const replacing = replacePrompt(prompt.id, turn.text).then(
+                () => {
+                    if (sessionRef.current !== session) return;
+                    turn.sent = true;
+                    // Spoken over while it was saved: the answer it began stops.
+                    if (turn.ended) latest.current.cancelResponse();
+                    else expectAnswer(turn);
+                },
+                () => {
+                    // Not saved: the words go as a new message instead.
+                    turn.replaces = null;
+                    if (sessionRef.current === session && !turn.ended) pendingRef.current = turn;
+                },
+            );
+            replacingRef.current = replacing;
+            void replacing.finally(() => {
+                if (replacingRef.current !== replacing) return;
+                replacingRef.current = null;
+                setQueued((count) => count + 1);
+            });
+        },
+        [expectAnswer],
+    );
+
     // Sends a turn waiting to go, once no answer is streaming (one the person
     // spoke over is still stopping).
     useEffect(() => {
         const pending = pendingRef.current;
-        if (!pending || phaseRef.current !== "on" || isResponseLoading || pending.waiting) return;
+        if (!pending || phaseRef.current !== "on" || isResponseLoading || pending.waiting || replacingRef.current) return;
         if (pending.waitFor) {
-            const recorded = pending.waitFor;
+            const waiting = Promise.race([pending.waitFor, delay(RECORD_WAIT_MS)]);
             pending.waitFor = null;
-            pending.waiting = true;
-            void Promise.race([recorded, delay(RECORD_WAIT_MS)]).then(() => {
-                pending.waiting = false;
+            pending.waiting = waiting;
+            void waiting.then(() => {
+                pending.waiting = null;
                 setQueued((count) => count + 1);
             });
             return;
         }
         pendingRef.current = null;
+        const replaceWith = latest.current.replacePrompt;
+        const prompt =
+            pending.replaces && replaceWith && latest.current.chatId ? promptOf(pending.replaces, messages) : null;
+        if (prompt && replaceWith) {
+            replace(pending, prompt, replaceWith);
+            return;
+        }
+        pending.replaces = null;
         pending.baseIndex = messages.length;
         if (!latest.current.send(pending.text)) {
             void voiceCancelAnswer(pending.turnId);
@@ -543,16 +648,8 @@ export function useVoiceChat({
         }
         pending.sent = true;
         if (!latest.current.chatId) awaitingChatRef.current = true;
-        clearSendTimer();
-        const session = sessionRef.current;
-        sendTimerRef.current = window.setTimeout(() => {
-            sendTimerRef.current = null;
-            if (sessionRef.current !== session || turnRef.current !== pending) return;
-            if (pending.sawLoading || answerOf(pending, latest.current.messages)) return;
-            void voiceCancelAnswer(pending.turnId);
-            fail(VOICE_SEND_FAILURE_MESSAGE);
-        }, SEND_TIMEOUT_MS);
-    }, [queued, isResponseLoading, messages, fail]);
+        expectAnswer(pending);
+    }, [queued, isResponseLoading, messages, fail, expectAnswer, replace]);
 
     // Speaks the answer as it streams.
     useEffect(() => {
