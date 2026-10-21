@@ -13,6 +13,7 @@
 # From the iMac (~/.ssh/config):
 #   Host choir-agents
 #     User agent
+#     IdentityFile ~/.ssh/id_ed25519_ovh
 #     ProxyCommand ssh node-a choir-agents-vsock
 #     # The hop to node-a is host-key checked; this one is a local vsock
 #     # socket, and the guest's host key is new on every boot.
@@ -20,10 +21,11 @@
 #     UserKnownHostsFile /dev/null
 #     LogLevel ERROR
 #
-# One-time setup, inside the VM: `claude auth login` (prints a URL; sign in,
-# paste the code back), a deploy key for go-choir, the go-choir clone in
-# ~/go-choir, and the first `tmux attach -t remote-control` to accept its
-# trust prompts.
+# One-time setup, inside the VM (choir-agents.md): `claude auth login`
+# (prints a URL; sign in, paste the code back), `gh auth login` with a
+# fine-grained token for go-choir (the org disables deploy keys), the
+# go-choir clone in ~/go-choir, and the first answers to Remote Control's
+# trust prompts in `tmux attach -t remote-control`.
 { lib, pkgs, ... }:
 
 let
