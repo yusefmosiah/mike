@@ -491,7 +491,10 @@ from the design:
   normalised (case, accents and apostrophes folded; letters and digits only).
   A word is foreign only if it is in neither the clause playing nor the one
   before it, because the EOU stream lags by about half a second and echo of
-  the previous clause is still arriving when the next one starts. Words count
+  the previous clause is still arriving when the next one starts. Nor is a
+  word of the person's own turn being answered: the same lag delivers that
+  turn's last words after the commit, and a breath while they arrive used to
+  read as a barge-in and cancel the answer before it began. Words count
   from the start of the speech run, and up to `falseStartMs` after it, because
   the words of a short "stop" arrive after the VAD has seen it end.
 - **False starts:**

@@ -20,8 +20,8 @@ struct TurnPolicy {
         case smartTurn(requestId: Int, probability: Float?)
         /// The clock moved (sent with every microphone buffer).
         case tick(nowMs: Int)
-        /// The final pass produced text and `turn` was sent: the answer is awaited.
-        case turnCommitted(turnId: String)
+        /// The final pass produced `text` and `turn` was sent: the answer is awaited.
+        case turnCommitted(turnId: String, text: String = "")
         /// The final pass found nothing to send (a cough, a door): back to listening.
         case turnDiscarded
         /// A clause of `turnId`'s answer started playing.
@@ -108,8 +108,13 @@ struct TurnPolicy {
     private var runBaseline = 0
     private var clauseKeys: Set<String> = []
     private var previousClauseKeys: Set<String> = []
+    /// The words of the turn being answered: the EOU stream's last ones
+    /// arrive after the commit and must not count as a barge-in.
+    private var committedKeys: Set<String> = []
     private var paused = false
     private var falseStartSpent = false
+    /// What the last barge-in heard, for the engine's log.
+    private(set) var lastBargeIn: (speechMs: Int, foreignWords: Int, text: String)?
 
     init(config: VoiceConfig = .defaults) {
         self.config = config
@@ -169,11 +174,12 @@ struct TurnPolicy {
         case let .tick(now):
             nowMs = max(nowMs, now)
             evaluate(&out)
-        case let .turnCommitted(turnId):
+        case let .turnCommitted(turnId, text):
             guard phase == .finalizing else { break }
             phase = .thinking(turnId: turnId)
             clauseKeys = []
             previousClauseKeys = []
+            committedKeys = Set(VoiceWords.normalised(text))
             releasePause(&out)
             setState(.thinking, &out)
             evaluate(&out)
@@ -192,6 +198,7 @@ struct TurnPolicy {
             guard answerTurnId == turnId else { break }
             clauseKeys = []
             previousClauseKeys = []
+            committedKeys = []
             // A held answer must not leave the player paused for the next one.
             releasePause(&out)
             returnToListening(&out)
@@ -302,11 +309,13 @@ struct TurnPolicy {
 
     /// Words of the current speech run that the assistant is not saying: they
     /// are not in the clause playing, nor in the one before it (its echo can
-    /// still be arriving through the EOU stream's half-second of lag).
+    /// still be arriving through the EOU stream's half-second of lag), nor in
+    /// the person's own turn being answered (its last words lag the commit).
     private var foreignWordCount: Int {
         words.dropFirst(runBaseline).reduce(0) { count, word in
             let key = VoiceWords.normalised(word).joined()
-            guard !key.isEmpty, !clauseKeys.contains(key), !previousClauseKeys.contains(key) else { return count }
+            guard !key.isEmpty, !clauseKeys.contains(key), !previousClauseKeys.contains(key),
+                  !committedKeys.contains(key) else { return count }
             return count + 1
         }
     }
@@ -321,10 +330,12 @@ struct TurnPolicy {
             let speechMs = (inSpeech ? lastSpeechEndMs : (silenceStartMs ?? lastSpeechEndMs)) - onset
             let enoughSpeech = speechMs >= config.bargeInSpeechMs
             if enoughSpeech, foreignWordCount >= config.bargeInWords {
+                lastBargeIn = (speechMs, foreignWordCount, words.dropFirst(runBaseline).joined(separator: " "))
                 paused = false
                 out.append(.bargeIn(turnId: turnId))
                 clauseKeys = []
                 previousClauseKeys = []
+                committedKeys = []
                 phase = .listening
                 beginUtterance(at: onset, baseline: runBaseline, &out)
                 // A run that already ended goes straight to its pause check.

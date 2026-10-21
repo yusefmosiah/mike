@@ -162,11 +162,12 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Live dictation is not available on this iPhone.", "unavailable")
             return
         }
+        let send: @Sendable (LiveDictationSession.Event) -> Void = { [weak self] event in
+            self?.notifyListeners(Self.liveEventName, data: Self.livePayload(event))
+        }
         Task {
             do {
-                try await LiveDictation.shared.start(modelDirectory: directory) { [weak self] event in
-                    self?.notifyListeners(Self.liveEventName, data: Self.livePayload(event))
-                }
+                try await LiveDictation.shared.start(modelDirectory: directory, emit: send)
                 call.resolve()
             } catch {
                 Self.reject(call, error)

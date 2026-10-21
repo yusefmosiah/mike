@@ -193,6 +193,12 @@ final class ListeningPipeline: @unchecked Sendable {
     private var vadPending: [Float] = []
     private var vadStart = 0
     private(set) var total = 0
+    // Diagnostics, logged every 2 s: microphone level and the highest speech
+    // probability (numbers only, never audio or words).
+    private var levelSum: Float = 0
+    private var levelCount = 0
+    private var peakSpeech: Float = 0
+    private var lastReportMs = 0
 
     init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, config: VoiceConfig) {
         self.vad = vad
@@ -208,6 +214,8 @@ final class ListeningPipeline: @unchecked Sendable {
     func process(_ samples: [Float]) async throws -> [TurnPolicy.Input] {
         ring.append(samples)
         total += samples.count
+        for sample in samples { levelSum += sample * sample }
+        levelCount += samples.count
         var inputs: [TurnPolicy.Input] = []
         vadPending.append(contentsOf: samples)
         while vadPending.count >= VadManager.chunkSize {
@@ -218,6 +226,7 @@ final class ListeningPipeline: @unchecked Sendable {
             let startMs = vadStart / 16
             vadStart += VadManager.chunkSize
             inputs.append(.vad(probability: result.probability, startMs: startMs, endMs: vadStart / 16))
+            peakSpeech = max(peakSpeech, result.probability)
         }
         for output in try eou.feed(samples) {
             switch output {
@@ -226,6 +235,15 @@ final class ListeningPipeline: @unchecked Sendable {
             }
         }
         inputs.append(.tick(nowMs: total / 16))
+        if total / 16 - lastReportMs >= 2000 {
+            let rms = levelCount > 0 ? (levelSum / Float(levelCount)).squareRoot() : 0
+            let decibels = 20 * log10(max(rms, 1e-7))
+            VoiceMode.log.info("voice listen: \(self.total / 16, privacy: .public) ms heard, level \(decibels, format: .fixed(precision: 1), privacy: .public) dBFS, peak speech \(self.peakSpeech, format: .fixed(precision: 2), privacy: .public)")
+            lastReportMs = total / 16
+            levelSum = 0
+            levelCount = 0
+            peakSpeech = 0
+        }
         return inputs
     }
 
@@ -367,22 +385,31 @@ actor VoiceEngine {
                 contentsOf: VoiceModels.vad.directory.appendingPathComponent(VoiceModels.vadFile), configuration: vadConfiguration)
             let vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: vadModel)
             _ = try await vad.processStreamingChunk([Float](repeating: 0, count: VadManager.chunkSize), state: .initial())
+            VoiceMode.log.info("voice start: vad at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
-            let eou = try await EouStream.load(directory: VoiceModels.eou.directory, computeUnits: units)
+            // The streaming encoder fails the Neural Engine compiler on device
+            // (ANECCompile FAILED) and the fallback can stall; run it on the GPU.
+            let eou = try await EouStream.load(directory: VoiceModels.eou.directory, computeUnits: .cpuAndGPU)
+            VoiceMode.log.info("voice start: eou loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             try eou.warmUp()
+            VoiceMode.log.info("voice start: eou warm at \(Self.milliseconds(since: started), privacy: .public) ms")
             // Without Smart Turn the turn still ends, at maxSilenceMs.
             let smartTurn = try? SmartTurn.Model(directory: VoiceModels.smartTurn.directory, computeUnits: units)
             _ = try? smartTurn?.probability(of: [])
+            VoiceMode.log.info("voice start: smart turn at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
             _ = try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)
+            VoiceMode.log.info("voice start: fluid mini at \(Self.milliseconds(since: started), privacy: .public) ms")
             heldFluid = true
             try stillWanted()
             tts = try await PhononVoice.Runtime.shared.beginVoice(voice: voice)
+            VoiceMode.log.info("voice start: phonon loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
             heldPhonon = true
             // Phonon conditions on its voice on the first utterance; do it now.
             _ = try? await tts.synthesize("Ready.")
+            VoiceMode.log.info("voice start: phonon warm at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, config: config)
         } catch {
@@ -561,10 +588,12 @@ actor VoiceEngine {
                 pendingActions += [.clearText, .finalPass(commit)]
             case let .bargeIn(turnId):
                 send(.bargeIn(turnId: turnId))
-                if let interruption = stopSpeaking() {
+                let interruption = stopSpeaking()
+                if let interruption {
                     send(.interrupted(turnId: turnId, clauseId: interruption.clauseId, fraction: interruption.fraction))
                 }
-                VoiceMode.log.info("voice: barge-in")
+                let heard = policy.lastBargeIn
+                VoiceMode.log.info("voice: barge-in while \(interruption == nil ? "thinking" : "speaking", privacy: .public), \(heard?.speechMs ?? -1, privacy: .public) ms speech, \(heard?.foreignWords ?? -1, privacy: .public) new words: \(heard?.text ?? "", privacy: .private)")
                 flushMetrics(turnId)
             case .clearTranscript:
                 pendingActions.append(.clearText)
@@ -597,7 +626,7 @@ actor VoiceEngine {
         if let previous = metrics?.turnId { flushMetrics(previous) }
         metrics = TurnMetrics(turnId: turnId, stages: stages, sentAt: .now)
         send(.turn(turnId: turnId, text: text, audioMs: commit.endMs - commit.startMs))
-        carryOut(policy.handle(.turnCommitted(turnId: turnId)))
+        carryOut(policy.handle(.turnCommitted(turnId: turnId, text: text)))
     }
 
     // MARK: - Speaking

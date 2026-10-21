@@ -205,7 +205,8 @@ enum VoiceModels {
     /// as part of the install, not on the first conversation.
     static func compile(_ model: Model) throws {
         let configuration = MLModelConfiguration()
-        configuration.computeUnits = .cpuAndNeuralEngine
+        // Matches how voice mode loads it (see VoiceEngine.start).
+        configuration.computeUnits = model.name == .eou ? .cpuAndGPU : .cpuAndNeuralEngine
         let compiled: [String]
         switch model.name {
         case .vad: compiled = [vadFile]

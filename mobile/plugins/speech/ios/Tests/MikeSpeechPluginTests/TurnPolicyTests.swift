@@ -237,6 +237,48 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertTrue(trace.speech(2).isEmpty, "speech alone, without words, does not barge in")
     }
 
+    func testTheCommittedTurnsLateWordsInABreathDuringTheFinalPassAreNotABargeIn() {
+        var trace = Trace()
+        trace.speech(4)
+        trace.partial("i'm gonna try interrupting")
+        let pause = trace.silence(1)
+        trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
+        // A breath long enough to count as speech, and the EOU stream's last
+        // words of the committed turn arriving inside it.
+        trace.speech(2)
+        trace.partial("you next")
+        trace.silence(1)
+        let committed = trace.feed(.turnCommitted(turnId: "t1", text: "I'm gonna try interrupting you next."))
+        XCTAssertFalse(committed.contains(.bargeIn(turnId: "t1")))
+        XCTAssertEqual(trace.policy.answerTurnId, "t1")
+    }
+
+    func testTheCommittedTurnsLateWordsInABreathWhileThinkingAreNotABargeIn() {
+        var trace = Trace()
+        trace.speech(4)
+        let pause = trace.silence(1)
+        trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
+        trace.feed(.turnCommitted(turnId: "t1", text: "Um, what happened?"))
+        trace.speech(1)
+        trace.partial("what happened")
+        let out = trace.speech(1) + trace.silence(2)
+        XCTAssertFalse(out.contains(.bargeIn(turnId: "t1")))
+        XCTAssertEqual(trace.policy.answerTurnId, "t1")
+    }
+
+    func testNewWordsStillBargeInAfterTheCommittedTurnsLateWords() {
+        var trace = Trace()
+        trace.speech(4)
+        let pause = trace.silence(1)
+        trace.feed(.smartTurn(requestId: Trace.smartTurnRequests(pause)[0].id, probability: 0.9))
+        trace.feed(.turnCommitted(turnId: "t1", text: "Um, what happened?"))
+        trace.speech(1)
+        trace.partial("what happened")
+        XCTAssertFalse(trace.speech(1).contains(.bargeIn(turnId: "t1")))
+        let out = trace.partial("what happened wait stop")
+        XCTAssertEqual(out.first, .bargeIn(turnId: "t1"))
+    }
+
     func testNoTimersRunWhileTheFinalPassIsRunning() {
         var trace = Trace()
         trace.speech(2)

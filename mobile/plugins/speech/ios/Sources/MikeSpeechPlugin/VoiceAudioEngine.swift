@@ -29,6 +29,10 @@ final class VoiceAudioEngine: @unchecked Sendable {
     private let lock = NSLock()
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
+    /// The microphone format the current tap was built for.
+    private var inputFormat: AVAudioFormat?
+    /// When recent rebuilds happened, to stop a rebuild loop.
+    private var recentRebuilds: [ContinuousClock.Instant] = []
     private var observers: [NSObjectProtocol] = []
     private var saved: (category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions)?
     private var deliver: (@Sendable ([Float]) -> Void)?
@@ -52,6 +56,14 @@ final class VoiceAudioEngine: @unchecked Sendable {
     /// How long a failed rebuild waits for an interruption notice to arrive
     /// and give the real reason (an interruption also changes the configuration).
     static let rebuildGrace: DispatchTimeInterval = .milliseconds(250)
+    /// More rebuilds than this within the window means the graph cannot run.
+    static let rebuildLimit = 5
+    static let rebuildWindow: Duration = .seconds(2)
+
+    static func sameFormat(_ a: AVAudioFormat, _ b: AVAudioFormat) -> Bool {
+        a.sampleRate == b.sampleRate && a.channelCount == b.channelCount
+            && a.commonFormat == b.commonFormat && a.isInterleaved == b.isInterleaved
+    }
 
     /// Asks for the microphone if needed.
     func prepare() async throws {
@@ -214,6 +226,7 @@ final class VoiceAudioEngine: @unchecked Sendable {
         guard let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false),
               let converter = AVAudioConverter(from: mono, to: Self.microphoneFormat)
         else { throw OnDeviceSpeech.Failure.failed }
+        VoiceMode.log.info("voice mic: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, format \(format.commonFormat.rawValue, privacy: .public), interleaved \(format.isInterleaved, privacy: .public)")
         let deliver = self.deliver
         let resampler = Resampler(converter: converter, mono: mono)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
@@ -240,6 +253,7 @@ final class VoiceAudioEngine: @unchecked Sendable {
         }
         self.engine = engine
         self.player = player
+        inputFormat = format
         let session = AVAudioSession.sharedInstance()
         latencySamples = Int(((session.outputLatency + session.ioBufferDuration) * Self.playerRate).rounded())
         observeEngine(engine)
@@ -252,19 +266,51 @@ final class VoiceAudioEngine: @unchecked Sendable {
         engine.stop()
         self.engine = nil
         player = nil
+        inputFormat = nil
     }
 
-    /// The hardware changed under the engine (a headset, a route override):
-    /// formats are stale, so the whole graph is built again.
+    /// The engine stopped on a configuration change: restart it, or build the
+    /// graph again when the microphone format changed (a headset, a route).
     private func rebuild() {
         lock.lock()
         // The engine stops itself on a real change; one that kept running
         // (a notice from our own start) needs nothing.
-        guard !ended, engine?.isRunning != true else { lock.unlock(); return }
-        teardownGraph()
+        guard !ended, let engine, !engine.isRunning else { lock.unlock(); return }
+        let now = ContinuousClock.now
+        recentRebuilds = recentRebuilds.filter { now - $0 < Self.rebuildWindow } + [now]
+        guard recentRebuilds.count <= Self.rebuildLimit else {
+            lock.unlock()
+            VoiceMode.log.error("voice: audio graph keeps stopping, giving up")
+            end(.error)
+            return
+        }
         epoch += 1
         do {
-            try buildGraph()
+            // Enabling voice processing on a new engine posts a configuration
+            // change of its own, which stops it: rebuilding on that notice
+            // would loop. When the microphone format is unchanged, restart
+            // this engine (its voice processing and tap stay); build a new
+            // graph only for a real format change (a headset, a new route).
+            if let built = inputFormat, let player, Self.sameFormat(engine.inputNode.outputFormat(forBus: 0), built) {
+                player.stop()
+                engine.prepare()
+                do {
+                    try engine.start()
+                    VoiceMode.log.info("voice: audio engine restarted")
+                    if paused {
+                        pausedPlayed = 0
+                        pausedRendered = 0
+                    } else {
+                        player.play()
+                    }
+                } catch {
+                    teardownGraph()
+                    try buildGraph()
+                }
+            } else {
+                teardownGraph()
+                try buildGraph()
+            }
             let notify = self.notify
             let epoch = self.epoch
             lock.unlock()
@@ -342,12 +388,27 @@ final class Resampler: @unchecked Sendable {
     private let converter: AVAudioConverter
     private let mono: AVAudioFormat
 
+    // Diagnostics: buffers seen and buffers that could not be converted,
+    // logged every few seconds (counts only, never audio).
+    private var buffers = 0
+    private var failures = 0
+
     init(converter: AVAudioConverter, mono: AVAudioFormat) {
         self.converter = converter
         self.mono = mono
     }
 
     func convert(channel0Of buffer: AVAudioPCMBuffer) -> [Float]? {
+        buffers += 1
+        let samples = resample(buffer)
+        if samples?.isEmpty ?? true { failures += 1 }
+        if buffers % 200 == 1 {
+            VoiceMode.log.info("voice tap: \(self.buffers, privacy: .public) buffers, \(self.failures, privacy: .public) unconverted")
+        }
+        return samples
+    }
+
+    private func resample(_ buffer: AVAudioPCMBuffer) -> [Float]? {
         guard let source = buffer.floatChannelData, buffer.frameLength > 0,
               let input = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buffer.frameLength) else { return nil }
         input.frameLength = buffer.frameLength
