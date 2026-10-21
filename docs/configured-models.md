@@ -306,6 +306,45 @@ relied on through `aci_verified`).
 The older `{ "endpoint", "expectedMeasurement" }` form compares one reported
 measurement string. It is not cryptographic verification.
 
+Phala also serves DeepSeek V4.1 Flash 1017, attested the same way. Phala's
+model list names no reasoning parameter for it, but the gateway accepts
+`reasoning_effort`, including `none`; checked on 2026-10-21, with the
+receipt verified. Prices are Phala's, in US dollars per million tokens:
+
+```json
+{
+  "id": "phala/deepseek-v4.1-flash-1017",
+  "label": "DeepSeek V4.1 Flash 1017",
+  "group": "Phala (encrypted)",
+  "provider": "openai-compatible",
+  "location": "cloud",
+  "baseUrl": "https://inference.phala.com/v1",
+  "apiModel": "deepseek/deepseek-v4.1-flash-1017",
+  "apiKeyEnv": "PHALA_API_KEY",
+  "attestation": {
+    "scheme": "aci"
+  },
+  "supportsVision": true,
+  "contextWindow": 1048576,
+  "maxOutputTokens": 393216,
+  "reasoning": {
+    "efforts": [
+      "low",
+      "high",
+      "max"
+    ],
+    "default": "high",
+    "canDisable": true,
+    "offValue": "none"
+  },
+  "cost": {
+    "input": 0.75,
+    "output": 1.6,
+    "cacheRead": 0.15
+  }
+}
+```
+
 ## Tool-call tolerance
 
 Self-hosted builds of Qwen, DeepSeek and GLM often describe tool calls in
@@ -385,8 +424,9 @@ For self-hosted vision models, also cap the server: vLLM and SGLang otherwise
 accept whatever the checkpoint allows (Qwen3.8 allows about 16.8 MP). See
 `docs/reports/file-intake-2026-10-10.md`, section 2.2.
 
-Phala's `phala/qwen3.8-27b-uncensored` and `phala/gemma-4-26b-a4b-uncensored`
-take images; declare them with `"supportsVision": true`.
+Phala's `phala/qwen3.8-27b-uncensored`, `phala/gemma-4-26b-a4b-uncensored`
+and `phala/deepseek-v4.1-flash-1017` take images; declare them with
+`"supportsVision": true`.
 
 
 ### Synchronizing New Models from Models.dev
