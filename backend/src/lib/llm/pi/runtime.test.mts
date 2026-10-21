@@ -190,6 +190,88 @@ describe("Pi runtime: turns, branches and memory", () => {
     expect(requests.at(-1)!.toolResults.join("")).toContain("Delaware");
   });
 
+  it("an answer interrupted while read aloud is replayed as what was heard, and the stored transcript keeps it whole", async () => {
+    const full = "The notice period is ninety days. It must be given in writing, by courier, to the registered office.";
+    const heard = "The notice period is ninety days.\n\n[The person interrupted here; they did not hear the rest.]";
+    const assistantTexts: string[][] = [];
+    const watch = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => {
+      assistantTexts.push(
+        ctx.messages
+          .filter((m) => m.role === "assistant")
+          .map((m) => (Array.isArray(m.content) ? m.content.map((part: { text?: string }) => part.text ?? "").join("") : "")),
+      );
+      return fauxAssistantMessage([fauxText("ok")]);
+    };
+    scripted = [
+      () => fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage([fauxText(full)]),
+    ];
+    await turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" });
+
+    scripted = [watch];
+    await turn([{ role: "user", content: "Please read NDA" }, { role: "assistant", content: full }, { role: "user", content: "In writing?" }], {
+      user: "u2",
+      parent: "a1",
+      assistant: "a2",
+    }, { turn: { userMessageId: "u2", parentMessageId: "a1", assistantMessageId: "a2", parentHeard: heard } });
+    // The model saw what the person heard in the answer's place, and the
+    // turn's tool result is still in the transcript.
+    expect(assistantTexts[0]).toContain(heard);
+    expect(assistantTexts[0].join("\n")).not.toContain("registered office");
+    expect(requests.at(-1)!.toolResults.join("")).toContain("Delaware");
+
+    // The next turn continues from there: still only what was heard.
+    scripted = [watch];
+    await turn([{ role: "user", content: "Thanks" }], { user: "u3", parent: "a2", assistant: "a3" });
+    expect(assistantTexts[1]).toContain(heard);
+    expect(assistantTexts[1].join("\n")).not.toContain("registered office");
+
+    // The parent's own conversation is unchanged: a turn that does not mark it
+    // interrupted sees the whole answer.
+    scripted = [watch];
+    await turn([{ role: "user", content: "again" }], { user: "u2b", parent: "a1", assistant: "a2b" });
+    expect(assistantTexts[2].join("\n")).toContain("registered office");
+    const map = await lineage();
+    expect(map.messages.a2.conversation).not.toBe(map.messages.a1.conversation);
+  });
+
+  it("an interrupted answer with text before a mid-answer tool call is replayed once, as heard, keeping the tool call", async () => {
+    const before = "Let me check the NDA.";
+    const after = "The notice period is ninety days, by courier to the registered office.";
+    const heard = "Let me check the NDA. The notice period is ninety days.\n\n[The person interrupted here; they did not hear the rest.]";
+    let seen: readonly { role: string; content?: unknown }[] = [];
+    scripted = [
+      () => fauxAssistantMessage([fauxText(before), fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage([fauxText(after)]),
+    ];
+    await turn([{ role: "user", content: "Please read NDA" }], { user: "u1", parent: null, assistant: "a1" });
+    scripted = [
+      (ctx) => {
+        seen = ctx.messages.filter((m) => m.role !== "system");
+        return fauxAssistantMessage([fauxText("ok")]);
+      },
+    ];
+    await turn([{ role: "user", content: "Please read NDA" }, { role: "assistant", content: `${before}${after}` }, { role: "user", content: "By courier?" }], {
+      user: "u2",
+      parent: "a1",
+      assistant: "a2",
+    }, { turn: { userMessageId: "u2", parentMessageId: "a1", assistantMessageId: "a2", parentHeard: heard } });
+    const text = (content: unknown) =>
+      Array.isArray(content) ? content.map((part: { text?: string }) => part.text ?? "").join("") : String(content ?? "");
+    const transcript = seen.map((m) => text(m.content)).join("\n");
+    // Said once, as heard: the pre-tool text is not kept beside it.
+    expect(transcript.split("Let me check the NDA.")).toHaveLength(2);
+    expect(transcript).not.toContain("registered office");
+    // The tool call and its result are still there, before the heard text.
+    const roles = seen.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "toolResult", "assistant", "user"]);
+    expect(
+      (seen[1].content as { type: string }[]).map((part) => part.type),
+    ).toEqual(["toolCall"]);
+    expect(text(seen[2].content)).toContain("Delaware");
+    expect(text(seen[3].content)).toBe(heard);
+  });
+
   it("regenerating forks at the parent answer, and identical prompt text stays two branches", async () => {
     const q1 = "first question";
     const q2 = "same words";

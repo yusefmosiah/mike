@@ -1873,6 +1873,41 @@ describe("POST /chat — streaming endpoint", () => {
         );
     });
 
+    it("returns 400 when voice is not a boolean (never starts a stream)", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, voice: 1 });
+
+        expect(res.status).toBe(400);
+        expect(res.body.detail).toBe("voice must be a boolean");
+        expect(runLLMStream).not.toHaveBeenCalled();
+    });
+
+    it("forwards a voice turn to the stream", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, voice: true });
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream).toHaveBeenCalledWith(
+            expect.objectContaining({ voice: true }),
+        );
+    });
+
+    it("leaves voice off when the request omits it", async () => {
+        const res = await request(app)
+            .post("/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+
+        expect(res.status).toBe(200);
+        expect(runLLMStream).toHaveBeenCalledWith(
+            expect.objectContaining({ voice: false }),
+        );
+    });
+
     it("leaves auto_mode off when the request omits it", async () => {
         const res = await request(app)
             .post("/chat")

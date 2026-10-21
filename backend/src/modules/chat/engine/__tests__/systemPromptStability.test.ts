@@ -50,6 +50,7 @@ vi.mock("../subagents/subagentHost", () => ({
 
 import { kernels } from "../../../../lib/codemode";
 import { buildMessages, buildUserPersonalisationPrompt, generateSpotlightNonce } from "../contextBuilders";
+import { VOICE_PROMPT_SECTION } from "../prompts";
 import { runLLMStream } from "../streaming";
 import type { WorkflowStore } from "../types";
 
@@ -75,6 +76,7 @@ type TurnShape = {
   pythonNames: string[];
   connectorTool?: string;
   autoMode?: boolean;
+  voice?: boolean;
   skills: string[];
   sharedAudience: boolean;
   memory: string;
@@ -134,6 +136,7 @@ async function runTurn(shape: TurnShape): Promise<StreamChatCall> {
     memorySharedAudience: shape.sharedAudience,
     includeSubagents: true,
     autoMode: shape.autoMode ?? false,
+    voice: shape.voice ?? false,
     nonce,
   } as never);
   return streamChatWithTools.mock.calls.at(-1)![0];
@@ -220,5 +223,14 @@ describe("the chat system prompt", () => {
     // The time is stamped on the user's message.
     const latest = (call.messages as { role: string; content: string }[]).at(-1)!;
     expect(latest.content).toMatch(/^\[Sent: .*2026/);
+  });
+
+  it("asks a voice turn for spoken answers as turn context, leaving the system prompt unchanged", async () => {
+    const typed = await runTurn(TURN_ONE);
+    const spoken = await runTurn({ ...TURN_ONE, voice: true });
+    expect(spoken.systemPrompt).toBe(typed.systemPrompt);
+    expect(spoken.systemPrompt).not.toContain("VOICE CONVERSATION:");
+    expect(section(spoken, "voice")).toBe(VOICE_PROMPT_SECTION);
+    expect(section(typed, "voice")).toBeUndefined();
   });
 });

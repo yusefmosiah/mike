@@ -31,6 +31,7 @@ import { updateChatTitle } from "./chat.titles";
 import { guestCodeApprovalFor } from "./chat.codeApprovals";
 import { prepareChatStream, type PreparedChatStream } from "./chat.prepare";
 import { linkedPrompt, walkActivePath, type TreeRow } from "./chat.tree";
+import { answerProse } from "./chat.spoken";
 import {
     appendAssistantEventsToMessage,
     AssistantStreamError,
@@ -64,6 +65,8 @@ export type ChatTurnResumeContext = {
     model: string | null;
     reasoning: string | null;
     autoMode: boolean;
+    /** A hands-free voice turn. Optional: contexts stored before voice lack it. */
+    voice?: boolean;
     timeZone: string | null;
     turnUserMessageId: string;
 };
@@ -121,6 +124,8 @@ export async function driveChatTurn(
         nonce,
         approvalEvents,
         autoMode: turnAutoMode,
+        voice: turnVoice,
+        parentHeard,
         workstationUserId,
     } = prepared;
     let chatTitle = prepared.chatTitle;
@@ -288,6 +293,7 @@ export async function driveChatTurn(
                           userMessageId: turnUserMessageId,
                           parentMessageId: turnParentMessageId,
                           assistantMessageId,
+                          ...(parentHeard !== undefined ? { parentHeard } : {}),
                       }
                     : undefined,
                 ...(askInputsResponse
@@ -297,6 +303,7 @@ export async function driveChatTurn(
                 includeSubagents: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
+                voice: turnVoice,
                 workstationUserId,
                 guestCode,
                 memoryProjectId: canReadProjectMemory
@@ -663,13 +670,7 @@ export function transcriptFromRows(rows: TreeRow[]): ChatMessage[] {
                     : {}),
             };
         }
-        const text = Array.isArray(row.content)
-            ? (row.content as Array<{ type?: unknown; text?: unknown }>)
-                  .filter((event) => event?.type === "content" && typeof event.text === "string")
-                  .map((event) => event.text as string)
-                  .join("")
-            : "";
-        return { role: "assistant", content: text };
+        return { role: "assistant", content: answerProse(row.content) };
     });
 }
 
@@ -738,6 +739,7 @@ async function resumeChatTurn(
         projectId: context.projectId,
         askInputsResponse: null,
         autoMode: context.autoMode,
+        voice: context.voice === true,
         requestedModel: context.model ?? undefined,
         requestedReasoning: (context.reasoning ?? undefined) as Parameters<typeof prepareChatStream>[1]["requestedReasoning"],
         requestedTimeZone: context.timeZone ?? undefined,

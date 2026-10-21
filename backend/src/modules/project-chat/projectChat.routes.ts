@@ -86,6 +86,13 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .json({ detail: "auto_mode must be a boolean" });
     }
     const autoMode = rawAutoMode === true;
+    // A hands-free voice turn: the answer is read aloud, so the model is asked
+    // for short spoken answers. Off unless the caller asks; boolean only.
+    const rawVoice = body.voice;
+    if (rawVoice !== undefined && typeof rawVoice !== "boolean") {
+        return void res.status(400).json({ detail: "voice must be a boolean" });
+    }
+    const voice = rawVoice === true;
     // Regenerate names the existing prompt the new answer hangs from; see
     // linkOnlyToMessageId in prepareProjectChatStream. Without it a send is a send.
     const rawLinkOnlyToMessageId = body.link_only_to_message_id;
@@ -118,6 +125,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         chat_id,
         model,
         auto_mode: autoMode,
+        voice,
     });
 
     const prep = await prepareProjectChatStream(db, {
@@ -132,6 +140,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         attached_documents,
         askInputsResponse,
         autoMode,
+        voice,
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
@@ -172,6 +181,7 @@ projectChatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                       model: model ?? null,
                       reasoning: parsedReasoning.value ?? null,
                       autoMode,
+                      voice,
                       timeZone:
                           typeof req.body?.time_zone === "string"
                               ? req.body.time_zone

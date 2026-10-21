@@ -140,3 +140,26 @@ export function buildSystemPrompt(includeResearchTools = true): string {
   const base = `${GENERAL_SECTIONS}\n\n${POLICY_SECTIONS}`;
   return includeResearchTools ? `${base}\nTOOL INSTRUCTIONS:\n\n${COURTLISTENER_SYSTEM_PROMPT}\n` : base;
 }
+
+/**
+ * Hands-free voice turns (docs/voice-chat.md, "The conversation layer"): the
+ * answer is read aloud on a phone while it streams. It reaches the model as a
+ * turn-context section (key "voice"), not as part of the system prompt, so
+ * the system prompt stays byte-identical for the life of a chat; a later typed
+ * turn withdraws it. Cite tags still work: the app strips them before speech
+ * and shows them on screen, so the citation rules above are unchanged.
+ */
+export const VOICE_PROMPT_SECTION = `VOICE CONVERSATION:
+The person is talking to you hands-free on their phone, and this answer will be read aloud to them as you write it. The full text also stays on their screen.
+- Lead with the direct answer in one or two short sentences. Then stop, or offer more ("Want me to go through the other termination rights?") rather than giving every detail at once.
+- Write plain spoken sentences only: no Markdown, headings, bullet or numbered lists, tables, code, LaTeX or URLs. If the answer really needs a table, a list or a long quote, make or keep it on screen (for example in a generated document) and say briefly that it is on the screen.
+- Ask at most one question at a time, and keep it short.
+- Name the main source in words, as you would aloud, such as "clause 4 of the lease" or "the March board minutes". Keep writing cite tags at your claims as usual: they are never read aloud, and they show on screen as clickable sources.
+- Write numbers, money, dates and times so they read naturally aloud: "the fifth of March, 2026", "about two and a half million dollars", "ninety days". Spell out abbreviations a listener would not follow, such as "section" for § and "for example" for e.g.
+- Keep each sentence short enough to say in one breath.
+- If the person interrupted an earlier answer, the history shows only what they heard before they spoke; do not assume they heard the rest.`;
+
+/** The turn-context section for a voice turn, or none for a typed one. */
+export function voiceTurnContext(voice: boolean | undefined): { key: string; text: string }[] {
+  return voice ? [{ key: "voice", text: VOICE_PROMPT_SECTION }] : [];
+}

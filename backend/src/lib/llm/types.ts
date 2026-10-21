@@ -89,6 +89,13 @@ export type TurnIdentity = {
     userMessageId: string | null;
     parentMessageId: string | null;
     assistantMessageId: string;
+    /**
+     * Set when the parent is an assistant answer the person interrupted while
+     * it was read aloud: what the model should see in that answer's place
+     * (the spoken prefix and a marker). Runtimes with their own transcript
+     * continue from a copy of the parent whose answer is this text instead.
+     */
+    parentHeard?: string;
 };
 
 export type StreamChatParams = {

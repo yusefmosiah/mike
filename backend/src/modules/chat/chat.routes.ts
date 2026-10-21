@@ -71,6 +71,8 @@ import {
     getChatMessages,
     threadPresence,
     postChatNote,
+    parseSpokenText,
+    recordSpokenAnswer,
     codeApprovalsForViewer,
     decideCodeApproval,
     revokeThreadCodeApproval,
@@ -385,6 +387,30 @@ chatRouter.post("/:chatId/turn/:turnId/stop", requireAuth, asyncRoute(async (req
     }
     run.stop();
     res.json({ stopped: true, finished: false });
+}));
+
+// PUT /chat/:chatId/messages/:messageId/spoken
+// Hands-free voice chat: the person interrupted this answer while it was read
+// aloud, and `spokenText` is what they heard. The full answer stays stored and
+// shown; the next turn's model history replays the spoken part instead. The
+// standing is stopping's: the thread's creator or a project editor, and the
+// person the answer was generated for. 204 on success.
+chatRouter.put("/:chatId/messages/:messageId/spoken", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const { chatId, messageId } = req.params;
+    const parsed = parseSpokenText(req.body);
+    if (!parsed.ok) return void res.status(400).json({ detail: parsed.detail });
+    const db = createDb();
+    const result = await recordSpokenAnswer(db, {
+        chatId,
+        messageId,
+        userId,
+        userEmail,
+        spokenText: parsed.value,
+    });
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.status(204).end();
 }));
 
 // GET /chat/:chatId/people
@@ -715,6 +741,13 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .json({ detail: "auto_mode must be a boolean" });
     }
     const autoMode = rawAutoMode === true;
+    // A hands-free voice turn: the answer is read aloud, so the model is asked
+    // for short spoken answers. Off unless the caller asks; boolean only.
+    const rawVoice = body.voice;
+    if (rawVoice !== undefined && typeof rawVoice !== "boolean") {
+        return void res.status(400).json({ detail: "voice must be a boolean" });
+    }
+    const voice = rawVoice === true;
     // Regenerate names the existing prompt the new answer hangs from; see
     // linkOnlyToMessageId in prepareChatStream. Without it a send is a send.
     const rawLinkOnlyToMessageId = body.link_only_to_message_id;
@@ -743,6 +776,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         model,
         messageCount: messages?.length,
         auto_mode: autoMode,
+        voice,
     });
 
     const userEmail = res.locals.userEmail as string | undefined;
@@ -759,6 +793,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         projectId: parsedProjectId.value.projectId,
         askInputsResponse,
         autoMode,
+        voice,
         requestedModel: model,
         requestedReasoning: parsedReasoning.value,
         requestedTimeZone: req.body?.time_zone,
@@ -798,6 +833,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
                       model: model ?? null,
                       reasoning: parsedReasoning.value ?? null,
                       autoMode,
+                      voice,
                       timeZone:
                           typeof req.body?.time_zone === "string"
                               ? req.body.time_zone

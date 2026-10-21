@@ -410,6 +410,22 @@ describe("POST /projects/:projectId/chat", () => {
         });
     });
 
+    it("forwards a voice turn to the stream, and leaves voice off by default", async () => {
+        const voiced = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send({ ...VALID_BODY, voice: true });
+        expect(voiced.status).toBe(200);
+        expect(runLLMStream.mock.calls[0][0]).toMatchObject({ voice: true });
+
+        const typed = await request(app)
+            .post("/projects/p1/chat")
+            .set("Authorization", "Bearer test")
+            .send(VALID_BODY);
+        expect(typed.status).toBe(200);
+        expect(runLLMStream.mock.calls[1][0]).toMatchObject({ voice: false });
+    });
+
     it("leaves auto_mode off when the request omits it", async () => {
         const res = await request(app)
             .post("/projects/p1/chat")
@@ -454,6 +470,7 @@ describe("POST /projects/:projectId/chat", () => {
     [{ ...VALID_BODY, chat_id: " " }, "chat_id must be a non-empty string"],
     [{ ...VALID_BODY, model: 42 }, "model must be a non-empty string"],
     [{ ...VALID_BODY, auto_mode: "true" }, "auto_mode must be a boolean"],
+    [{ ...VALID_BODY, voice: "yes" }, "voice must be a boolean"],
         [
             {
                 ...VALID_BODY,

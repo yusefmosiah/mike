@@ -27,6 +27,7 @@ import {
     loadUserMessageAuthors,
     appendAskInputsResponseToAssistantMessage,
     linkedPrompt,
+    replayInterruptedAnswers,
     resolveLeaf,
     transcriptFromRows,
     walkActivePath,
@@ -102,6 +103,12 @@ export type PreparedProjectChatStream = {
     // that reaches this function already holds content.edit (the gate above
     // answers 403 otherwise), so it is the same standing writing needs.
     autoMode: boolean;
+    // A hands-free voice turn (the answer is read aloud), forwarded to
+    // runLLMStream, which adds the voice section as turn context.
+    voice: boolean;
+    // Set when the turn's parent is an answer the person interrupted while it
+    // was read aloud: what the model sees in its place (chat.spoken.ts).
+    parentHeard?: string;
     // Whether the document-WRITING tools are offered this turn. This is a
     // question about the caller's standing on the PROJECT, never about their
     // standing in the thread — see the long note in prepareProjectChatStream.
@@ -155,6 +162,8 @@ type PrepareProjectChatStreamArgs = {
          * above is what decides whether the caller may use it.
          */
         autoMode?: boolean;
+        /** A hands-free voice turn: ask the model for short spoken answers. */
+        voice?: boolean;
         requestedModel: string | null | undefined;
         requestedReasoning:
             | ReturnType<typeof resolveEffectiveReasoningLevel>
@@ -545,8 +554,15 @@ async function prepareAdmittedProjectChatStream(
         };
 
         const timeZone = resolveRequestTimeZone(args.requestedTimeZone);
-        const enrichedMessages = await enrichWithPriorEvents(
+        // An answer the person interrupted while it was read aloud reaches the
+        // model as what they heard, not as its full stored text.
+        const replay = await replayInterruptedAnswers(db, {
+            chatId,
+            parentMessageId: turnParentMessageId,
             messages,
+        });
+        const enrichedMessages = await enrichWithPriorEvents(
+            replay.messages,
             chatId,
             db,
             docIndex,
@@ -634,6 +650,10 @@ async function prepareAdmittedProjectChatStream(
                 completedTurnPersisted,
                 approvalEvents,
                 autoMode: args.autoMode === true,
+                voice: args.voice === true,
+                ...(replay.parentHeard !== undefined
+                    ? { parentHeard: replay.parentHeard }
+                    : {}),
                 allowDocumentMutation,
                 memorySharedAudience,
                 memoryTurn,
@@ -742,6 +762,7 @@ async function resumeProjectChatTurn(
         attached_documents: context.attachedDocuments ?? undefined,
         askInputsResponse: null,
         autoMode: context.autoMode,
+        voice: context.voice === true,
         requestedModel: context.model ?? undefined,
         requestedReasoning: (context.reasoning ?? undefined) as Parameters<
             typeof prepareProjectChatStream

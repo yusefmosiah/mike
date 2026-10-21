@@ -10,6 +10,13 @@ export { verifyQuoteAgainstSource } from "./engine/verifyCitations";
 export { threadPresence, type ThreadPresence } from "./chat.presence";
 export { postChatNote } from "./chat.notes";
 export {
+  heardAnswerText,
+  INTERRUPTED_MARKER,
+  parseSpokenText,
+  recordSpokenAnswer,
+  replayInterruptedAnswers,
+} from "./chat.spoken";
+export {
     codeApprovalsForViewer,
     decideCodeApproval,
     guestCodeApprovalFor,

@@ -62,6 +62,8 @@ export type ProjectChatTurnResumeContext = {
     model: string | null;
     reasoning: string | null;
     autoMode: boolean;
+    /** A hands-free voice turn. Optional: contexts stored before voice lack it. */
+    voice?: boolean;
     timeZone: string | null;
     displayedDoc: ChatDocumentReference | null;
     attachedDocuments: ChatDocumentReference[] | null;
@@ -189,6 +191,8 @@ export async function driveProjectChatTurn(
         nonce,
         approvalEvents,
         autoMode: turnAutoMode,
+        voice: turnVoice,
+        parentHeard,
         workstationUserId,
     } = prepared;
     // Mutable: the title-generation flow below reassigns it once a title
@@ -309,6 +313,7 @@ export async function driveProjectChatTurn(
                           userMessageId: turnUserMessageId,
                           parentMessageId: turnParentMessageId,
                           assistantMessageId,
+                          ...(parentHeard !== undefined ? { parentHeard } : {}),
                       }
                     : undefined,
                 ...(askInputsResponse
@@ -318,6 +323,7 @@ export async function driveProjectChatTurn(
                 includeSubagents: true,
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
+                voice: turnVoice,
                 workstationUserId,
                 guestCode: await guestCodeApprovalFor(db, {
                     chatId,

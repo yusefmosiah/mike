@@ -55,6 +55,7 @@ import { endAtLastUser, mergeConsecutiveUserTurns } from "../../../lib/llm/userT
 import { runToolCalls } from "./tools/toolDispatcher";
 import { parseAskInputs } from "./tools/askInputs";
 import { moveToolActivityToInput, skillsPromptSection } from "./contextBuilders";
+import { voiceTurnContext } from "./prompts";
 import { syncWorkspaceOncePerTurn } from "../../workspace/workspace.service";
 import {
   getCachedCaseOpinionTexts,
@@ -457,6 +458,12 @@ export async function runLLMStream(params: {
    * callers that omit it keep their exact behavior.
    */
   autoMode?: boolean;
+  /**
+   * A hands-free voice turn: the answer is read aloud as it streams. Adds the
+   * voice section (prompts.ts) as turn context, never to the system prompt,
+   * which stays fixed for the chat. Defaults to false.
+   */
+  voice?: boolean;
   workflowStore?: WorkflowStore;
   tabularStore?: TabularCellStore;
   /** Tools executed by the connected client (Word add-in) instead of here. */
@@ -658,6 +665,9 @@ export async function runLLMStream(params: {
     ...(isGuest && workstation
       ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
       : []),
+    // A voice turn: short spoken answers (prompts.ts). A typed turn after one
+    // withdraws it, because the section is no longer desired.
+    ...voiceTurnContext(params.voice),
   ];
   const turns: LlmMessage[] = mergeConsecutiveUserTurns(rawMsgs
     .filter((m) => m.role !== "system")

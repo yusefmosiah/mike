@@ -2283,6 +2283,10 @@ create table if not exists public.chat_messages (
   files jsonb,
   workflow jsonb,
   citations jsonb,
+  -- Voice chat: what the person heard of an answer they interrupted while it
+  -- was read aloud, and when. Null for an answer that was not interrupted.
+  spoken_text text,
+  interrupted_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -8180,5 +8184,6 @@ insert into public.schema_migrations (filename) values
   ('20261010_12_skill_versions.sql'),
   ('20261012_01_web_reader_snapshots.sql'),
   ('20261013_01_autocompact_tokens.sql'),
-  ('20261020_01_dictation_vocabulary.sql')
+  ('20261020_01_dictation_vocabulary.sql'),
+  ('20261020_02_spoken_answers.sql')
 on conflict (filename) do nothing;

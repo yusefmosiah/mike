@@ -26,6 +26,7 @@ import { getAccessibleChat, validateAccessibleProjectId } from "./chat.access";
 import { createTurnAdmission, type TurnClaim } from "../../lib/turnClaims";
 import { linkedPrompt, resolveLeaf, setLeaf } from "./chat.tree";
 import { workstationHostOf } from "./chat.codeApprovals";
+import { replayInterruptedAnswers } from "./chat.spoken";
 
 // ---------------------------------------------------------------------------
 // Pre-stream preparation for POST /chat (streaming)
@@ -65,6 +66,12 @@ export type PreparedChatStream = {
     // content.edit standing as writing; the route is what gates a caller, the
     // stream is what enforces the guardrails.
     autoMode: boolean;
+    // A hands-free voice turn (the answer is read aloud), forwarded to
+    // runLLMStream, which adds the voice section as turn context.
+    voice: boolean;
+    // Set when the turn's parent is an answer the person interrupted while it
+    // was read aloud: what the model sees in its place (chat.spoken.ts).
+    parentHeard?: string;
     // Whether the document-writing tools are offered this turn. A standalone
     // chat writes into the caller's own library, so it keeps them; a project
     // chat writes into the PROJECT, and that is a question about the caller's
@@ -127,6 +134,8 @@ type PrepareChatStreamArgs = {
          * use it at all is the same content.edit standing writing needs.
          */
         autoMode?: boolean;
+        /** A hands-free voice turn: ask the model for short spoken answers. */
+        voice?: boolean;
         requestedModel: string | null | undefined;
         requestedReasoning:
             | ReturnType<typeof resolveEffectiveReasoningLevel>
@@ -525,8 +534,15 @@ async function prepareAdmittedChatStream(
         // and workflow titles replayed from earlier turns are fenced as well.
         const nonce = generateSpotlightNonce(branchRootChatId ?? chatId);
         const timeZone = resolveRequestTimeZone(args.requestedTimeZone);
-        const enrichedMessages = await enrichWithPriorEvents(
+        // An answer the person interrupted while it was read aloud reaches the
+        // model as what they heard, not as its full stored text.
+        const replay = await replayInterruptedAnswers(db, {
+            chatId,
+            parentMessageId: turnParentMessageId,
             messages,
+        });
+        const enrichedMessages = await enrichWithPriorEvents(
+            replay.messages,
             chatId,
             db,
             docIndex,
@@ -582,6 +598,10 @@ async function prepareAdmittedChatStream(
                 completedTurnPersisted,
                 approvalEvents,
                 autoMode: args.autoMode === true,
+                voice: args.voice === true,
+                ...(replay.parentHeard !== undefined
+                    ? { parentHeard: replay.parentHeard }
+                    : {}),
                 allowDocumentMutation,
                 canReadProjectMemory,
                 canCurateProjectMemory,

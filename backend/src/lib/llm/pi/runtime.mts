@@ -1096,7 +1096,86 @@ async function conversationForTurn(
       background,
     );
   }
+  if (turn.parentHeard !== undefined) {
+    const heard = await conversationAfterHeard(harness, chatKey, turn.parentMessageId, turn.parentHeard, agentModel);
+    if (heard) return heard;
+  }
   return conversationAfter(harness, chatKey, turn.parentMessageId);
+}
+
+/**
+ * The conversation after an answer the person interrupted while it was read
+ * aloud, with that answer as the person heard it.
+ *
+ * What they heard (`heard`: the spoken prefix and a marker) is the whole
+ * answer's speakable text, not a prefix of any one entry: the app strips
+ * markdown and citations and expands abbreviations before speaking, so it
+ * cannot be lined up with the model's own text character by character. So
+ * the answer is rebuilt rather than trimmed: a fork at the turn's user input,
+ * then the answer's entries copied in order with every text part removed
+ * (tool calls, their results and reasoning stay, so what the turn read is
+ * still known), entries left empty dropped, and `heard` appended once as the
+ * answer's text. Text written before a mid-answer tool call is therefore
+ * neither kept nor repeated. The stored answer and the parent's own
+ * conversation are unchanged. Undefined when the answer was never mapped or
+ * its entries cannot be copied faithfully (compaction inside the answer), for
+ * the caller to continue from the whole answer.
+ */
+async function conversationAfterHeard(
+  harness: Harness,
+  chatKey: string,
+  messageId: string,
+  heard: string,
+  agentModel: { provider: string; modelId: string },
+): Promise<Conversation | undefined> {
+  const lineage = await harness.snapshot(ChatLineage, chatKey, background);
+  const place = lineage?.messages?.[messageId];
+  if (!place) return undefined;
+  const base = await harness.conversation(place.conversation as ConversationId, background);
+  if (!base) return undefined;
+  // The answer's entries, newest first, back to the person's input it answers.
+  const answer: EntryRecord[] = [];
+  let input: EntryRecord | undefined;
+  let cursor: Parameters<Conversation["entries"]>[2];
+  search: do {
+    const page = await base.entries({ maxEntryId: place.entry as EntryId, order: "descending" }, 50, cursor, background);
+    for (const entry of page.items) {
+      if (entry.kind === "pi.user" && !isHarnessNote(entry)) {
+        input = entry;
+        break search;
+      }
+      answer.push(entry);
+    }
+    cursor = page.next;
+  } while (cursor !== undefined);
+  if (!input || answer.some((entry) => entry.head !== undefined || entry.edits?.length)) return undefined;
+  const copies: EntryDraft[] = [];
+  for (const entry of answer.reverse()) {
+    if (isHarnessNote(entry)) continue;
+    const message = entry.model?.[0];
+    if (entry.kind === "pi.assistant" && message?.role === "assistant") {
+      const kept = message.content.filter((part) => part.type !== "text");
+      if (!kept.some((part) => part.type === "toolCall")) continue;
+      copies.push({ kind: entry.kind, model: [{ ...message, content: kept }], ...(entry.data !== undefined ? { data: entry.data } : {}) });
+      continue;
+    }
+    copies.push({ kind: entry.kind, ...(entry.model ? { model: entry.model } : {}), ...(entry.data !== undefined ? { data: entry.data } : {}) });
+  }
+  copies.push(...seedEntries([{ role: "assistant", content: heard }], agentModel, false));
+  const remember = async (tx: Tx, id: ConversationId) => {
+    (await tx.doc(ChatLineage, chatKey, null)).conversations.push(id);
+  };
+  return base.fork(
+    input.id,
+    {
+      ownership: { kind: "ownerless" },
+      init: async (tx, id) => {
+        for (const entry of copies) await tx.appendEntry(id, entry);
+        await remember(tx, id);
+      },
+    },
+    background,
+  );
 }
 
 /**
