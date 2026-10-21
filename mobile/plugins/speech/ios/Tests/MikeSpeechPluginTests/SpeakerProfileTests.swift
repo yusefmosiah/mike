@@ -1,3 +1,4 @@
+import CoreML
 import XCTest
 @testable import MikeSpeechPlugin
 
@@ -162,5 +163,15 @@ final class SpeakerProfileTests: XCTestCase {
         XCTAssertEqual(SpeakerStore.load(from: url), SpeakerProfile(), "a damaged file is forgotten")
         SpeakerStore.remove(at: url)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testCamPlusFeaturesHaveEachBinsMeanRemoved() throws {
+        let features = try MLMultiArray(shape: [1, 3, 2], dataType: .float32)
+        let values: [Float] = [1, 10, 2, 20, 6, 60]  // frames × bins
+        for (index, value) in values.enumerated() { features[index] = NSNumber(value: value) }
+        try SpeakerEmbedder.removeMean(features)
+        let out = (0..<6).map { features[$0].floatValue }
+        XCTAssertEqual(out, [-2, -20, -1, -10, 3, 30])
+        XCTAssertThrowsError(try SpeakerEmbedder.removeMean(try MLMultiArray(shape: [3, 2], dataType: .float32)))
     }
 }

@@ -75,8 +75,40 @@ final class SpeakerEmbedder {
         let features = try models[0].prediction(from: MLDictionaryFeatureProvider(dictionary: ["waveform": waveform]))
             .featureValue(for: "features")?.multiArrayValue
         guard let features else { return nil }
+        try Self.removeMean(features)
         return try models[1].prediction(from: MLDictionaryFeatureProvider(dictionary: ["feats": features]))
             .featureValue(for: "embedding")?.multiArrayValue
+    }
+
+    /// CAM++ was trained on filterbanks with each bin's mean over the clip
+    /// removed (3D-Speaker's `FBank(mean_nor=True)`); the converted
+    /// preprocessor leaves it in, which pulls the embedding far from the
+    /// reference model's (cosine 0.56–0.75 against 0.99 with it removed).
+    static func removeMean(_ features: MLMultiArray) throws {
+        let shape = features.shape.map(\.intValue)
+        guard shape.count == 3, shape[0] == 1, shape[1] > 0 else { throw OnDeviceSpeech.Failure.failed }
+        let frames = shape[1], bins = shape[2]
+        let strides = features.strides.map(\.intValue)
+        guard features.dataType == .float32 else {
+            // Not the converted model's output type: go element by element.
+            for bin in 0..<bins {
+                var sum = 0.0
+                for frame in 0..<frames { sum += features[[0, frame, bin] as [NSNumber]].doubleValue }
+                let mean = sum / Double(frames)
+                for frame in 0..<frames {
+                    let key = [0, frame, bin] as [NSNumber]
+                    features[key] = NSNumber(value: features[key].doubleValue - mean)
+                }
+            }
+            return
+        }
+        let pointer = features.dataPointer.bindMemory(to: Float.self, capacity: strides[0] * shape[0])
+        for bin in 0..<bins {
+            var sum: Float = 0
+            for frame in 0..<frames { sum += pointer[frame * strides[1] + bin * strides[2]] }
+            let mean = sum / Float(frames)
+            for frame in 0..<frames { pointer[frame * strides[1] + bin * strides[2]] -= mean }
+        }
     }
 
     /// Fills `count` samples with `speech`, repeated.
