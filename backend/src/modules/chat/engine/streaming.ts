@@ -665,7 +665,7 @@ export async function runLLMStream(params: {
     ...(isGuest && workstation
       ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
       : []),
-    // A voice turn: short spoken answers (prompts.ts). A typed turn after one
+    // A voice turn: spoken answers (prompts.ts). A typed turn after one
     // withdraws it, because the section is no longer desired.
     ...voiceTurnContext(params.voice),
   ];

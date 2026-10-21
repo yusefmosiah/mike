@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Message } from "@/app/components/shared/types";
-import { assistantHistoryContent } from "@/app/lib/assistantHistoryContent";
 import { recordSpokenAnswer } from "@/app/lib/mikeApi";
 import { isPhononVoice } from "@/app/lib/voice/browserModels.spec";
 import { ClauseCutter, type Clause } from "@/app/lib/voice/clauses";
 import { currentDictationVocabulary, loadUserVocabulary } from "@/app/lib/voice/dictationVocabulary";
 import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 import { SpeakableStream } from "@/app/lib/voice/speakable";
+import { spokenAnswer } from "@/app/lib/voice/spokenAnswer";
 import { spokenPrefix } from "@/app/lib/voice/spokenPrefix";
 import { correctWithVocabulary } from "@/app/lib/voice/vocabulary";
 import { setVoiceModeActive } from "@/app/lib/voice/voiceMode";
@@ -122,6 +122,8 @@ interface VoiceTurn {
     sawLoading: boolean;
     /** The answer text already made speakable. */
     fed: number;
+    /** The answer's text pieces already spoken in full (spokenAnswer.ts). */
+    settled: number;
     speakable: SpeakableStream;
     cutter: ClauseCutter;
     clauses: Clause[];
@@ -153,6 +155,7 @@ function newTurn(turnId: string, text: string): VoiceTurn {
         sent: false,
         sawLoading: false,
         fed: 0,
+        settled: 0,
         speakable: new SpeakableStream(),
         cutter: new ClauseCutter(),
         clauses: [],
@@ -561,12 +564,20 @@ export function useVoiceChat({
                 voiceSpeak(turn.turnId, clause.id, clause.text, clause.final);
             }
         };
-        const text = assistantHistoryContent(answer);
+        const { text, settled } = spokenAnswer(answer);
         if (text.length > turn.fed) {
             speak(turn.cutter.push(turn.speakable.push(text.slice(turn.fed))));
             turn.fed = text.length;
         }
-        if (turn.sawLoading && !isResponseLoading) {
+        const ending = turn.sawLoading && !isResponseLoading;
+        // The text paused for a tool call or thinking: say all of it now, so
+        // the person hears it while the work runs. (At the end, the last
+        // clause goes out below, marked final.)
+        if (settled > turn.settled) {
+            turn.settled = settled;
+            if (!ending) speak([...turn.cutter.push(turn.speakable.flush()), ...turn.cutter.flush()]);
+        }
+        if (ending) {
             turn.ended = true;
             speak([...turn.cutter.push(turn.speakable.finish()), ...turn.cutter.finish()]);
             voiceEndAnswer(turn.turnId);

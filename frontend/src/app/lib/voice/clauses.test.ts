@@ -147,3 +147,31 @@ describe("ClauseCutter", () => {
         expect([...rest, ...final].map((clause) => clause.final)).toEqual([true]);
     });
 });
+
+describe("a pause in the answer (a tool call or thinking follows)", () => {
+    it("speaks a short acknowledgement at once, and carries on after it", () => {
+        const stream = new SpeakableStream();
+        const cutter = new ClauseCutter();
+        const texts = (clauses: Clause[]) => clauses.map((clause) => clause.text);
+        expect(texts(cutter.push(stream.push("Let me check the lease.")))).toEqual([]);
+        const paused = [...cutter.push(stream.flush()), ...cutter.flush()];
+        expect(texts(paused)).toEqual(["Let me check the lease."]);
+        expect(paused.some((clause) => clause.final)).toBe(false);
+        const after = [
+            ...cutter.push(stream.push("\n\nClause four says the rent is due on the first of each month.")),
+            ...cutter.push(stream.finish()),
+            ...cutter.finish(),
+        ];
+        expect(texts(after)).toEqual(["Clause four says the rent is due on the first of each month."]);
+        expect(after.at(-1)?.final).toBe(true);
+        expect(stream.text).toBe("Let me check the lease. Clause four says the rent is due on the first of each month.");
+    });
+
+    it("speaks even a one-word acknowledgement, and an empty pause speaks nothing", () => {
+        const stream = new SpeakableStream();
+        const cutter = new ClauseCutter();
+        cutter.push(stream.push("Sure."));
+        expect([...cutter.push(stream.flush()), ...cutter.flush()].map((clause) => clause.text)).toEqual(["Sure."]);
+        expect([...cutter.push(stream.flush()), ...cutter.flush()]).toEqual([]);
+    });
+});

@@ -134,7 +134,7 @@ type PrepareChatStreamArgs = {
          * use it at all is the same content.edit standing writing needs.
          */
         autoMode?: boolean;
-        /** A hands-free voice turn: ask the model for short spoken answers. */
+        /** A hands-free voice turn: the answer is read aloud (prompts.ts). */
         voice?: boolean;
         requestedModel: string | null | undefined;
         requestedReasoning:

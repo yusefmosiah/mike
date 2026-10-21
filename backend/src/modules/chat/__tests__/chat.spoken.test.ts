@@ -27,8 +27,11 @@ const PATH_ROWS = [
 ];
 
 describe("the voice prompt section", () => {
-    it("asks for short spoken answers and keeps cite tags working", () => {
-        expect(VOICE_PROMPT_SECTION).toMatch(/one or two short sentences/);
+    it("asks for a spoken acknowledgement before work, not short answers, and keeps cite tags working", () => {
+        expect(VOICE_PROMPT_SECTION).toMatch(/before a tool call/);
+        expect(VOICE_PROMPT_SECTION).toMatch(/acknowledge the question/);
+        expect(VOICE_PROMPT_SECTION).toMatch(/When you can answer straight away, just answer/);
+        expect(VOICE_PROMPT_SECTION).not.toMatch(/short answers|one or two short sentences/);
         expect(VOICE_PROMPT_SECTION).toMatch(/no Markdown/);
         expect(VOICE_PROMPT_SECTION).toMatch(/tables, code/);
         expect(VOICE_PROMPT_SECTION).toMatch(/URLs/);

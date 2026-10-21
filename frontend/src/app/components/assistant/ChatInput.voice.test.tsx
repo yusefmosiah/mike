@@ -241,7 +241,7 @@ function NewChatPage({ onSubmit }: { onSubmit: (message: Message) => void }) {
                 onClick={() =>
                     setMessages((prev) => [
                         prev[0],
-                        { id: "a1", role: "assistant", content: "", events: [{ type: "content", text: "Ninety days." }] },
+                        { id: "a1", role: "assistant", content: "", events: [{ type: "content", text: "Ninety days.", isStreaming: true }] },
                     ])
                 }
             >

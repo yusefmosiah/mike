@@ -370,6 +370,14 @@ export class SpeakableStream {
         return this.drain(false);
     }
 
+    /**
+     * The answer has paused (a tool call or thinking follows): converts all
+     * text received so far, as at the end. More text may follow.
+     */
+    flush(): SpeakablePiece[] {
+        return this.drain(true);
+    }
+
     finish(): SpeakablePiece[] {
         return this.drain(true);
     }

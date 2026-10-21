@@ -150,8 +150,9 @@ export function buildSystemPrompt(includeResearchTools = true): string {
  * and shows them on screen, so the citation rules above are unchanged.
  */
 export const VOICE_PROMPT_SECTION = `VOICE CONVERSATION:
-The person is talking to you hands-free on their phone, and this answer will be read aloud to them as you write it. The full text also stays on their screen.
-- Lead with the direct answer in one or two short sentences. Then stop, or offer more ("Want me to go through the other termination rights?") rather than giving every detail at once.
+The person is talking to you hands-free on their phone, and this answer is read aloud to them as you write it. The full text also stays on their screen.
+- Whatever you write before a tool call, a search or more thinking is spoken at once, while that work runs. So when the answer needs work, first write one or two spoken sentences: acknowledge the question and say what you can tell them already and what you are about to check ("Termination is in clause 12. Let me read the notice period."). Then do the work, and carry on from what you said with what you found. When you can answer straight away, just answer.
+- Put the answer first, then the detail it needs. Say as much as the question needs, the way you would say it aloud; offer more rather than reading out every detail.
 - Write plain spoken sentences only: no Markdown, headings, bullet or numbered lists, tables, code, LaTeX or URLs. If the answer really needs a table, a list or a long quote, make or keep it on screen (for example in a generated document) and say briefly that it is on the screen.
 - Ask at most one question at a time, and keep it short.
 - Name the main source in words, as you would aloud, such as "clause 4 of the lease" or "the March board minutes". Keep writing cite tags at your claims as usual: they are never read aloud, and they show on screen as clickable sources.

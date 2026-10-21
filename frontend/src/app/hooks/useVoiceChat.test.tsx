@@ -123,8 +123,20 @@ function renderVoiceChat(options: { sendOk?: boolean; silent?: boolean; chatId?:
         ...hook,
         sent,
         cancelResponse,
+        // As the chat stream does: the piece being written is marked streaming.
         stream: (text: string, id = "a1") =>
-            updateAnswer((answer) => ({ ...answer, id, events: [{ type: "content", text }] })),
+            updateAnswer((answer) => ({ ...answer, id, events: [{ type: "content", text, isStreaming: true }] })),
+        // Text, then a tool call that is running, then (optionally) the text after it.
+        streamAroundTool: (before: string, after?: string, id = "a1") =>
+            updateAnswer((answer) => ({
+                ...answer,
+                id,
+                events: [
+                    { type: "content", text: before },
+                    { type: "tool_call_start" as const, name: "read_document", isStreaming: true },
+                    ...(after === undefined ? [] : [{ type: "content" as const, text: after, isStreaming: true }]),
+                ],
+            })),
         fail: () => updateAnswer((answer) => ({ ...answer, error: "Sorry, something went wrong." })),
         finish: () => act(() => hook.result.current.setLoading(false)),
     };
@@ -204,6 +216,23 @@ describe("useVoiceChat", () => {
         expect(calls("voiceSpeak")).toHaveLength(4);
         expect(recordMock).not.toHaveBeenCalled();
         expect(view.cancelResponse).not.toHaveBeenCalled();
+    });
+
+    it("speaks what the answer says before a tool call at once, then carries on after it", async () => {
+        const view = await started();
+        emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+        view.stream("Let me check the lease.");
+        expect(calls("voiceSpeak")).toEqual([]);
+        view.streamAroundTool("Let me check the lease.");
+        expect(calls("voiceSpeak")).toEqual([{ turnId: "t1", clauseId: 0, text: "Let me check the lease." }]);
+        expect(calls("voiceEndAnswer")).toEqual([]);
+        view.streamAroundTool("Let me check the lease.", "Clause 12 needs ninety days' written notice.");
+        view.finish();
+        expect(calls("voiceSpeak").map((call) => (call as { text: string }).text)).toEqual([
+            "Let me check the lease.",
+            "Clause 12 needs ninety days' written notice.",
+        ]);
+        expect(calls("voiceEndAnswer")).toEqual([{ turnId: "t1" }]);
     });
 
     it("on a barge-in mid-answer stops the chat turn and records what was heard", async () => {

@@ -328,15 +328,22 @@ media-services resets by ending the turn cleanly and rebuilding the engine.
     default).
   - Keep a pronunciation list; the dictation vocabulary is a start.
   - Tables, code and long quotes become "it's on the screen".
-- **Voice prompt.** Added to voice turns: one or two sentences for a direct
-  answer, one question at a time, summary first then offer detail, no
-  markdown, cite the main source aloud in words ("clause 4 of the lease"),
-  everything else on screen. OpenAI's voice prompting guide is the best
-  reference.
-- **Tool calls.** When a tool call starts, the app says a short fixed phrase
-  ("Checking the lease…") or plays an earcon, rather than relying on the
-  model to say one first (production reports show model fillers arriving
-  late).
+- **Voice prompt.** Added to voice turns as turn context (prepended to the
+  person's message once, withdrawn by a typed turn), never to the system
+  prompt, so the cached prefix is untouched. It does not ask for short
+  answers. When the answer needs work (a tool call, a search, more
+  thinking), the model first says a sentence or two: an acknowledgement and
+  what it can tell already ("Termination is in clause 12. Let me read the
+  notice period."), then does the work and carries on with what it found.
+  Otherwise it just answers. Answer first then detail, one question at a
+  time, no markdown, the main source named in words ("clause 4 of the
+  lease"), tables and long quotes left on screen. OpenAI's voice prompting
+  guide is the best reference.
+- **Tool calls.** The text before a tool call or a thinking step is spoken
+  at once, however short (`lib/voice/spokenAnswer.ts`; the clause cutter's
+  `flush`), so the person hears it while the work runs. A short fixed phrase
+  or an earcon at tool start remains an option if model acknowledgements
+  arrive late in practice.
 - **Interrupted answers.** Keep two things per assistant message: the full
   text (for the record) and the spoken prefix with an `interrupted` mark.
   The next turn's context uses the spoken prefix, so the model knows what

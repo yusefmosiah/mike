@@ -98,16 +98,29 @@ export class ClauseCutter {
         return this.cut(false);
     }
 
+    /**
+     * The answer has paused (a tool call or thinking follows): everything
+     * pushed so far, spoken now, however short. More text may follow.
+     */
+    flush(): Clause[] {
+        return this.drainAll(false);
+    }
+
     /** The answer has ended: the clauses left, the last one marked `final`. */
     finish(): Clause[] {
+        return this.drainAll(true);
+    }
+
+    private drainAll(final: boolean): Clause[] {
         const clauses = this.cut(true);
         const words = [...this.pending.matchAll(TOKENS)];
         if (words.some(([token]) => isWord(token))) {
             const start = words[0].index;
             const last = words[words.length - 1];
             const end = last.index + last[0].length;
-            clauses.push({ ...this.clause(start, end, this.pending.slice(start, end), true), final: true });
-        } else if (clauses.length > 0) {
+            const clause = this.clause(start, end, this.pending.slice(start, end), true);
+            clauses.push(final ? { ...clause, final: true } : clause);
+        } else if (final && clauses.length > 0) {
             clauses[clauses.length - 1].final = true;
         }
         this.base += this.pending.length;

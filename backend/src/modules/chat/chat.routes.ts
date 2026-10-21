@@ -742,7 +742,7 @@ chatRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
     }
     const autoMode = rawAutoMode === true;
     // A hands-free voice turn: the answer is read aloud, so the model is asked
-    // for short spoken answers. Off unless the caller asks; boolean only.
+    // for spoken answers (prompts.ts). Off unless the caller asks; boolean only.
     const rawVoice = body.voice;
     if (rawVoice !== undefined && typeof rawVoice !== "boolean") {
         return void res.status(400).json({ detail: "voice must be a boolean" });
