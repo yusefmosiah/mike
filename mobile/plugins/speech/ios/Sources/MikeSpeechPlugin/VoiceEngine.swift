@@ -456,6 +456,7 @@ actor VoiceEngine {
         self.fluidDirectory = fluidDirectory
         input = continuation
         policy = TurnPolicy(config: config)
+        policy.echoCancelled = audio.echoCancelled
         queue = ClauseQueue()
         pendingActions = []
         metrics = nil

@@ -326,6 +326,45 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertNil(trace.policy.answerTurnId)
     }
 
+    // MARK: - Without echo cancellation
+
+    /// An answer playing with no echo cancellation: the microphone hears it.
+    private func uncancelledSpeaking() -> Trace {
+        var trace = Trace()
+        trace.policy.echoCancelled = false
+        trace.committedTurn("t1")
+        trace.feed(.clausePlaying(turnId: "t1", text: "You can open it from the channel list."))
+        trace.feed(.clausePlaying(turnId: "t1", text: "Only the channel owner can rename it."))
+        return trace
+    }
+
+    func testWithoutEchoCancellationFragmentsOfTheAnswerAreNotABargeIn() {
+        var trace = uncancelledSpeaking()
+        trace.speech(1)
+        trace.partial("ly the chann")
+        let out = trace.speech(2) + trace.partial("ly the chann el list")
+        XCTAssertFalse(out.contains(.bargeIn(turnId: "t1")), "echo heard in pieces")
+        XCTAssertFalse(out.contains(.pausePlayback), "sound alone does not hold playback")
+        XCTAssertEqual(trace.policy.answerTurnId, "t1")
+    }
+
+    func testWithoutEchoCancellationTwoNewWordsAreNotEnough() {
+        var trace = uncancelledSpeaking()
+        trace.speech(2)
+        XCTAssertFalse(trace.partial("wait hold").contains(.bargeIn(turnId: "t1")))
+        XCTAssertEqual(trace.partial("wait hold please").first, .bargeIn(turnId: "t1"))
+    }
+
+    func testWithoutEchoCancellationTheAnswersTailIsNotThePersonsTurn() {
+        var trace = uncancelledSpeaking()
+        trace.speech(1)
+        let out = trace.feed(.answerEnded(turnId: "t1"))
+        XCTAssertEqual(Trace.states(out), [.listening])
+        XCTAssertTrue(Trace.states(trace.speech(1)).isEmpty, "the same sound does not open a turn")
+        trace.silence(2)
+        XCTAssertEqual(Trace.states(trace.speech(1)), [.userSpeaking], "new speech does")
+    }
+
     func testEchoOfTheClausePlayingDoesNotBargeInButHoldsPlayback() {
         var trace = Trace()
         trace.committedTurn("t1")

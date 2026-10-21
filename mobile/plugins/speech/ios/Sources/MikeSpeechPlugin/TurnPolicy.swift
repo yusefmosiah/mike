@@ -81,6 +81,14 @@ struct TurnPolicy {
     let config: VoiceConfig
     /// Outside the person's turn the transcript is cleared beyond this.
     static let maxHeldWords = 200
+    /// Without echo cancellation a barge-in needs at least this many words.
+    static let uncancelledBargeInWords = 3
+    private static let answerRunLimit = 4000
+    /// Set by the engine: false when the microphone has no echo cancellation
+    /// (a Mac where it cannot start). The answer is then heard as it plays,
+    /// so its words and fragments of them never count, sound alone does not
+    /// hold playback, and more words are needed to barge in.
+    var echoCancelled = true
     private(set) var state: VoiceState = .listening
     private var phase: Phase = .listening
     private var nowMs = 0
@@ -111,6 +119,10 @@ struct TurnPolicy {
     /// The words of the turn being answered: the EOU stream's last ones
     /// arrive after the commit and must not count as a barge-in.
     private var committedKeys: Set<String> = []
+    /// Every clause of the answer so far, as keys and run together (EOU
+    /// fragments of echo like "chann" are pieces of these).
+    private var answerKeys: Set<String> = []
+    private var answerRun = ""
     private var paused = false
     private var falseStartSpent = false
     /// What the last barge-in heard, for the engine's log.
@@ -180,6 +192,7 @@ struct TurnPolicy {
             clauseKeys = []
             previousClauseKeys = []
             committedKeys = Set(VoiceWords.normalised(text))
+            forgetAnswer()
             releasePause(&out)
             setState(.thinking, &out)
             evaluate(&out)
@@ -189,7 +202,10 @@ struct TurnPolicy {
         case let .clausePlaying(turnId, text):
             guard answerTurnId == turnId else { break }
             previousClauseKeys = clauseKeys
-            clauseKeys = Set(VoiceWords.normalised(text))
+            let keys = VoiceWords.normalised(text)
+            clauseKeys = Set(keys)
+            answerKeys.formUnion(keys)
+            answerRun = String((answerRun + keys.joined()).suffix(Self.answerRunLimit))
             if case .thinking = phase {
                 phase = .speaking(turnId: turnId)
                 setState(.speaking, &out)
@@ -199,8 +215,11 @@ struct TurnPolicy {
             clauseKeys = []
             previousClauseKeys = []
             committedKeys = []
+            forgetAnswer()
             // A held answer must not leave the player paused for the next one.
             releasePause(&out)
+            // Without echo cancellation, sound still going is the answer's own tail.
+            if !echoCancelled { runOnsetMs = nil }
             returnToListening(&out)
         }
         return out
@@ -316,6 +335,7 @@ struct TurnPolicy {
             let key = VoiceWords.normalised(word).joined()
             guard !key.isEmpty, !clauseKeys.contains(key), !previousClauseKeys.contains(key),
                   !committedKeys.contains(key) else { return count }
+            if !echoCancelled, answerKeys.contains(key) || answerRun.contains(key) { return count }
             return count + 1
         }
     }
@@ -329,20 +349,22 @@ struct TurnPolicy {
         if runLive {
             let speechMs = (inSpeech ? lastSpeechEndMs : (silenceStartMs ?? lastSpeechEndMs)) - onset
             let enoughSpeech = speechMs >= config.bargeInSpeechMs
-            if enoughSpeech, foreignWordCount >= config.bargeInWords {
+            let needed = echoCancelled ? config.bargeInWords : max(config.bargeInWords, Self.uncancelledBargeInWords)
+            if enoughSpeech, foreignWordCount >= needed {
                 lastBargeIn = (speechMs, foreignWordCount, words.dropFirst(runBaseline).joined(separator: " "))
                 paused = false
                 out.append(.bargeIn(turnId: turnId))
                 clauseKeys = []
                 previousClauseKeys = []
                 committedKeys = []
+                forgetAnswer()
                 phase = .listening
                 beginUtterance(at: onset, baseline: runBaseline, &out)
                 // A run that already ended goes straight to its pause check.
                 evaluate(&out)
                 return
             }
-            if enoughSpeech, inSpeech, !paused, !falseStartSpent, case .speaking = phase {
+            if enoughSpeech, inSpeech, !paused, !falseStartSpent, echoCancelled, case .speaking = phase {
                 paused = true
                 out.append(.pausePlayback)
             }
@@ -352,6 +374,11 @@ struct TurnPolicy {
             falseStartSpent = true
             out.append(.resumePlayback)
         }
+    }
+
+    private mutating func forgetAnswer() {
+        answerKeys = []
+        answerRun = ""
     }
 
     private mutating func releasePause(_ out: inout [Decision]) {

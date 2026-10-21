@@ -32,6 +32,13 @@ final class VoiceAudioEngine: @unchecked Sendable {
     /// Whether the graph uses the system's echo cancellation. On by default;
     /// off only where it cannot start (a Mac with headphones, for one).
     private var voiceProcessing = true
+
+    /// Whether the running graph has echo cancellation.
+    var echoCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return voiceProcessing
+    }
     /// The microphone format the current tap was built for.
     private var inputFormat: AVAudioFormat?
     /// When recent rebuilds happened, to stop a rebuild loop.
