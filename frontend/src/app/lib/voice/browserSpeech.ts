@@ -35,8 +35,21 @@ interface RecognitionConstructor {
     install?: (options: { langs: string[]; processLocally: boolean }) => Promise<boolean>;
 }
 
+/**
+ * Android's WebView (the Android app, and any app embedding a web view)
+ * exposes `SpeechRecognition` but has no on-device service behind it: asking
+ * it to recognise locally (`available`, `install`, `processLocally`) makes the
+ * browser side terminate the page ("No binder found for interface
+ * media.mojom.OnDeviceSpeechRecognition"). Its user agent carries "; wv)".
+ */
+function inAndroidWebView(): boolean {
+    // Only called once `window` exists, so `navigator` does too.
+    const agent = navigator.userAgent;
+    return /Android/.test(agent) && /; wv\)/.test(agent);
+}
+
 function recognitionConstructor(): RecognitionConstructor | null {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined" || inAndroidWebView()) return null;
     const w = window as unknown as { SpeechRecognition?: RecognitionConstructor; webkitSpeechRecognition?: RecognitionConstructor };
     return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }

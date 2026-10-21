@@ -77,6 +77,30 @@ describe("on-device recognition status and install", () => {
         Object.assign(FakeRecognition, { available: undefined, install: undefined });
     });
 
+    it("never asks Android's WebView, which terminates the page for on-device recognition", async () => {
+        const available = vi.fn().mockResolvedValue("available");
+        const install = vi.fn().mockResolvedValue(true);
+        (window as unknown as Record<string, unknown>).SpeechRecognition = Object.assign(class extends FakeRecognition {}, {
+            available,
+            install,
+        });
+        const agent = vi.spyOn(navigator, "userAgent", "get");
+        agent.mockReturnValue(
+            "Mozilla/5.0 (Linux; Android 14; moto g stylus 5G - 2023 Build/U1TGNS34; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36",
+        );
+        expect(await onDeviceRecognitionStatus("en-US")).toBe("unavailable");
+        expect(await installOnDeviceRecognition("en-US")).toBe(false);
+        expect(() => startOnDeviceRecognition("en-US")).toThrow(BrowserRecognitionError);
+        expect(available).not.toHaveBeenCalled();
+        expect(install).not.toHaveBeenCalled();
+        // Chrome on Android (not a web view) is asked as usual.
+        agent.mockReturnValue(
+            "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
+        );
+        expect(await onDeviceRecognitionStatus("en-US")).toBe("available");
+        agent.mockRestore();
+    });
+
     it("treats a throwing browser as unavailable and a failed install as false", async () => {
         const Ctor = Object.assign(class extends FakeRecognition {}, {
             available: vi.fn().mockRejectedValue(new Error("boom")),
