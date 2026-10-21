@@ -593,10 +593,11 @@ describe("ChatView header actions", () => {
         expect(push).not.toHaveBeenCalled();
     });
 
-    it("sizes the final response from the scroll viewport so the latest question lands at the top offset", async () => {
+    it("sizes the streaming response from the scroll viewport so the latest question lands at the top offset", async () => {
         // An 800px scroll viewport and a 44px user message. Scrolled to the
         // bottom, the question must sit 76px below the top: 800 - 76 - 44 -
         // two 32px list gaps (response, trailing anchor) - 116px padding.
+        // The room is reserved only while the answer arrives.
         const clientHeight = vi
             .spyOn(HTMLElement.prototype, "clientHeight", "get")
             .mockImplementation(function (this: HTMLElement) {
@@ -609,10 +610,22 @@ describe("ChatView header actions", () => {
             .spyOn(HTMLElement.prototype, "offsetHeight", "get")
             .mockReturnValue(44);
         try {
-            renderView(vi.fn(), [
-                { id: "m1", role: "user", content: "Question" },
-                { id: "m2", role: "assistant", content: "Answer" },
-            ]);
+            render(
+                <PageChromeContext.Provider value={{ mobileActionsContainer: null }}>
+                    <ChatView
+                        chatId="chat-1"
+                        chat={activeChat}
+                        messages={[
+                            { id: "m1", role: "user", content: "Question" },
+                            { id: "m2", role: "assistant", content: "Answer" },
+                        ]}
+                        isResponseLoading
+                        handleChat={vi.fn().mockResolvedValue("chat-1")}
+                        cancel={vi.fn()}
+                        onNewChat={vi.fn()}
+                    />
+                </PageChromeContext.Provider>,
+            );
 
             await waitFor(() =>
                 expect(screen.getByTestId("assistant-message")).toHaveStyle({

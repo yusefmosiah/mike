@@ -558,6 +558,29 @@ describe("ChatThread composer", () => {
 });
 
 describe("ChatThread scrolling", () => {
+    it("reserves room under the newest answer only while it arrives", () => {
+        // A tall scroll viewport, so the reservation has something to fill.
+        const clientHeight = vi
+            .spyOn(HTMLElement.prototype, "clientHeight", "get")
+            .mockReturnValue(800);
+        try {
+            const view = renderThread({ variant: "pane", isResponseLoading: true });
+            act(() => resizeCallbacks.forEach((callback) => callback()));
+            const reserved = () =>
+                screen.getByTestId("assistant-message").style.minHeight;
+            expect(parseFloat(reserved())).toBeGreaterThan(0);
+
+            view.rerender(
+                <div className="relative flex flex-col">
+                    <ChatThread {...props({ variant: "pane", isResponseLoading: false })} />
+                </div>,
+            );
+            expect(reserved()).toBe("0px");
+        } finally {
+            clientHeight.mockRestore();
+        }
+    });
+
     it("shows the scroll button away from the end and follows back to it", () => {
         const frames: FrameRequestCallback[] = [];
         vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

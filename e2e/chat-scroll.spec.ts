@@ -5,12 +5,13 @@ test.use({ storageState: { cookies: [], origins: [] }, actionTimeout: 30_000 });
 
 // How a streamed answer scrolls, against a scripted backend in the browser:
 // the view follows the newest text, stays where the reader scrolled to, and
-// never jumps when the answer finishes; the collapsed thought process shows
-// its newest lines; Enter in the composer starts a new line.
+// never jumps when the answer finishes; a short answer ends right above the
+// composer; the collapsed thought process shows its newest lines; Enter in
+// the composer starts a new line.
 
 const CHUNKS = 90;
 
-async function stubBackend(page: Page, { reasoning = false } = {}) {
+async function stubBackend(page: Page, { reasoning = false, chunks = CHUNKS } = {}) {
     await page.addInitScript(({ CHUNKS, reasoning }) => {
         const originalFetch = window.fetch.bind(window);
         const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,7 +96,7 @@ async function stubBackend(page: Page, { reasoning = false } = {}) {
             if (path === "/api/chat") return json([chat]);
             return json([]);
         };
-    }, { CHUNKS, reasoning });
+    }, { CHUNKS: chunks, reasoning });
 }
 
 /**
@@ -208,7 +209,29 @@ for (const [name, viewport] of [
             expect(await topOf(page, held.text), "not moved when the answer ends").toBeCloseTo(held.top, 0);
         });
 
+        test("a short answer ends right above the composer, with no empty space below it", async ({ page }) => {
+            await stubBackend(page, { chunks: 1 });
+            await openChat(page);
+            await send(page, "Hi.");
+            await streamDone(page);
+            await expect(page.getByRole("button", { name: "Stop response", exact: true })).toBeHidden();
+            await page.waitForTimeout(500);
+            const gap = await page.evaluate(() => {
+                const answer = [...document.querySelectorAll("p")].find((p) => p.textContent === "Sentence 0 of the answer.")!;
+                const composer = document.querySelector('[data-slot="chat-composer"]')!.getBoundingClientRect();
+                return composer.top - answer.getBoundingClientRect().bottom;
+            });
+            // The answer's actions and the thread's bottom padding sit between
+            // them; the space reserved while it streamed is gone.
+            expect(gap).toBeGreaterThan(0);
+            expect(gap).toBeLessThan(260);
+            expect((await scrollState(page)).fromBottom).toBeLessThanOrEqual(4);
+        });
+
         test("shows the newest reasoning in the collapsed thought process while it streams", async ({ page }) => {
+            // A thought opens in full unless the reader collapsed the last
+            // one (shared/hooks/disclosurePreference.ts): start collapsed.
+            await page.addInitScript(() => localStorage.setItem("mike.disclosure.reasoning", "0"));
             await stubBackend(page, { reasoning: true });
             await openChat(page);
             await send(page, "Think it through.");

@@ -394,10 +394,11 @@ export function ChatThread({
         const content = messagesContentRef.current;
         const userMessage = latestUserMessageRef.current;
         if (!container || !content || !userMessage) return;
-        // Size the latest response so that, scrolled to the bottom, the latest
-        // user message sits at the content's top padding below the viewport
-        // top — the same place scrollLatestUserToTop puts it. Measure the real
-        // scroll viewport: it is not the full dynamic viewport height.
+        // Size the latest response while it streams so that, scrolled to the
+        // bottom, the latest user message sits at the content's top padding
+        // below the viewport top — the same place scrollLatestUserToTop puts
+        // it. The reservation is released when the answer ends. Measure the
+        // real scroll viewport: it is not the full dynamic viewport height.
         const update = () => {
             const messageGap =
                 window.innerWidth < MOBILE_BREAKPOINT_PX ? 24 : 32;
@@ -448,7 +449,8 @@ export function ChatThread({
     // While an answer streams, keep its newest text in view, as long as the
     // reader is at the end of the thread. Scrolling up stops following and
     // scrolling back to the end resumes it; the answer finishing moves
-    // nothing. Any upward scroll is the reader's, except the one correction
+    // nothing, except that a short answer drops to the composer as the
+    // space reserved for it is released. Any upward scroll is the reader's, except the one correction
     // below, which is recorded in ownScrollTopRef.
     const followRef = useRef(true);
     const followStreamRef = useRef(isResponseLoading);
@@ -470,11 +472,23 @@ export function ChatThread({
             inContent(promptBox.top) -
             computedPadding(content, "top", CHAT_MESSAGE_TOP_PADDING);
         // The answer's wrapper carries the reserved height; its last child
-        // ends where the answer's content does.
-        const answer = prompt.nextElementSibling?.firstElementChild;
+        // ends where the answer's content does. Below the wrapper, the list's
+        // gap before the trailing anchor (messagesEndRef) is part of the end.
+        const wrapper = prompt.nextElementSibling;
+        const answer = wrapper?.firstElementChild;
         const textEnd = answer?.lastElementChild ?? answer ?? prompt;
+        const anchor = messagesEndRef.current;
+        const anchorGap =
+            wrapper && anchor
+                ? Math.max(
+                      0,
+                      anchor.getBoundingClientRect().top -
+                          wrapper.getBoundingClientRect().bottom,
+                  )
+                : 0;
         const reach =
             inContent(textEnd.getBoundingClientRect().bottom) +
+            anchorGap +
             computedPadding(content, "bottom", DEFAULT_ASSISTANT_BOTTOM_PADDING) -
             viewport.height;
         return Math.max(pinned, reach);
@@ -781,7 +795,12 @@ export function ChatThread({
                             onOpenCitationSource={onOpenCitationSource}
                             onCaseClick={onCaseClick}
                             minHeight={
-                                i === lastAssistantIndex ? minHeight : "0px"
+                                // Only while the answer arrives: once it is in,
+                                // a short answer sits right above the composer
+                                // instead of over an empty reservation.
+                                i === lastAssistantIndex && isResponseLoading
+                                    ? minHeight
+                                    : "0px"
                             }
                             onWorkflowClick={onWorkflowClick}
                             onEditViewClick={onEditViewClick}
