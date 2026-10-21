@@ -177,7 +177,9 @@ let
       };
 
       # Waits (restarting every minute) until there is a login and a
-      # checkout; `tmux attach -t remote-control` shows it.
+      # checkout; `tmux attach -t remote-control` shows it. Sessions run in
+      # bypass mode, like the orchestrator on the iMac: cross-session messages
+      # between sessions in different modes wait for a human (owner, 2026-10-21).
       systemd.services.claude-remote-control = {
         description = "Claude Code Remote Control for ~/go-choir";
         wantedBy = [ "multi-user.target" ];
@@ -190,7 +192,7 @@ let
           Type = "forking";
           User = "agent";
           WorkingDirectory = "/home/agent/go-choir";
-          ExecStart = "${pkgs.tmux}/bin/tmux new-session -d -s remote-control claude remote-control --spawn worktree --capacity 6";
+          ExecStart = "${pkgs.tmux}/bin/tmux new-session -d -s remote-control claude remote-control --spawn worktree --capacity 6 --permission-mode bypassPermissions";
           ExecStop = "${pkgs.tmux}/bin/tmux kill-session -t remote-control";
           Restart = "always";
           RestartSec = 60;
