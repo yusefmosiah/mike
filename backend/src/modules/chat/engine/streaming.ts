@@ -35,6 +35,7 @@ import {
   TOOL_ERROR_MESSAGE,
 } from "./types";
 import {
+  MEMORY_TOOLS,
   TOOLS,
   WORKFLOW_TOOLS,
   VAULT_TOOLS,
@@ -69,6 +70,7 @@ import {
 } from "./tools/documentOps";
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
+import type { MemoryEditTarget } from "../../memory/memory.service";
 import { TURN_CONTEXT_PROMPT, type TurnContextSection } from "../../../lib/llm/turnContext";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
@@ -489,6 +491,12 @@ export async function runLLMStream(params: {
   /** Tell the memory policy whether other people can see the persisted turn. */
   memorySharedAudience?: boolean;
   /**
+   * Which memory this conversation may change with edit_memory: app memory
+   * when it is the person's private conversation, and the project's when they
+   * may edit its content. Absent, or nothing writable, offers no tool.
+   */
+  memoryEdit?: Omit<MemoryEditTarget, "userId"> | null;
+  /**
    * If set, generate_docx will attach created docs to this project so
    * they appear in the project sidebar. Leave null for general chats —
    * generated docs still get persisted, but as standalone documents.
@@ -554,6 +562,7 @@ export async function runLLMStream(params: {
     includeMemory = false,
     memoryProjectId,
     memorySharedAudience = false,
+    memoryEdit = null,
     nonce,
     conversationId,
   } = params;
@@ -585,10 +594,15 @@ export async function runLLMStream(params: {
     : isGuest
       ? WORKSTATION_TOOLS.filter((tool) => tool.function.name === "run_command")
       : [...WORKSTATION_TOOLS, ...(vaultEnabled() ? VAULT_TOOLS : [])];
+  const memoryEditTarget: MemoryEditTarget | null =
+    includeMemory && memoryEdit && (memoryEdit.appWritable || memoryEdit.projectId)
+      ? { ...memoryEdit, userId }
+      : null;
   const baseTools = [
     ...conversationTools,
     ...researchTools,
     ...WORKFLOW_TOOLS,
+    ...(memoryEditTarget ? MEMORY_TOOLS : []),
     ...workstationTools,
   ];
   const advertisedTools = [
@@ -1424,6 +1438,7 @@ export async function runLLMStream(params: {
         courtlistenerEvents,
         caseCitationEvents,
         mcpEvents,
+        memoryUpdates = [],
       } = await runToolCalls(
         toolCalls,
         docStore,
@@ -1450,6 +1465,8 @@ export async function runLLMStream(params: {
           workspaceOwned: !!workstation && !isGuest,
           workstationGate,
           chatId: conversationId ?? null,
+          // Memory is the person's: a delegated subagent does not change it.
+          memoryEdit: scope === "parent" ? memoryEditTarget : null,
         },
       );
       throwIfAborted(signal);
@@ -1498,6 +1515,9 @@ export async function runLLMStream(params: {
           title: wf.title,
           ...(wf.action ? { action: wf.action, version_number: wf.version_number } : {}),
         });
+      }
+      for (const update of memoryUpdates) {
+        record(update);
       }
       for (const e of docsEdited) {
         record({

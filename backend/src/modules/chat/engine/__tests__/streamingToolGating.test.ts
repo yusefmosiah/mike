@@ -222,6 +222,33 @@ describe("runLLMStream document-mutation gating", () => {
   });
 });
 
+describe("runLLMStream memory editing", () => {
+  const target = {
+    surface: "chat" as const,
+    conversationId: "chat-1",
+    appWritable: true,
+    projectId: null,
+  };
+
+  it("offers edit_memory only when this conversation may change some memory", async () => {
+    await runLLMStream({ ...baseParams(), includeMemory: true, memoryEdit: target });
+    expect(advertisedToolNames()).toContain("edit_memory");
+
+    for (const memoryEdit of [
+      null,
+      { ...target, appWritable: false },
+    ]) {
+      vi.clearAllMocks();
+      await runLLMStream({ ...baseParams(), includeMemory: true, memoryEdit });
+      expect(advertisedToolNames()).not.toContain("edit_memory");
+    }
+
+    vi.clearAllMocks();
+    await runLLMStream({ ...baseParams(), memoryEdit: target });
+    expect(advertisedToolNames()).not.toContain("edit_memory");
+  });
+});
+
 describe("runLLMStream turn usage", () => {
   const usage = { input: 1000, output: 200, cost: 0.003 };
 

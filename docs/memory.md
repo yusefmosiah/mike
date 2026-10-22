@@ -109,6 +109,11 @@ permissions, change policy, or trigger tools by itself.
   failures, and a History view of its versions. Viewers can read the file and
   its history, editors can edit and restore, and only owners can change the
   enabled setting.
+- **In a chat**, the assistant can change memory itself with the `edit_memory`
+  tool when the person asks it to remember, correct or forget something. Each
+  change shows in the answer as a blue "Memory updated" row with the
+  assistant's one-line summary; it opens that file's version history at the
+  version the change made, where the person can compare and restore.
 - **Settings > Model Preferences** contains the memory-curation model selector.
   Automatic mode uses the effective model selected for the conversation. A
   deployment-wide `MEMORY_CURATOR_MODEL` override takes precedence.
@@ -181,8 +186,9 @@ control characters are rejected, and a file may contain at most 16 KiB.
 Every write also records a row in `memory_file_versions`, inside the same
 transaction (`record_memory_file_version`, called by `write_memory_file` and
 `wipe_memory_file`). A version keeps the body, its hash and size, the source
-(`manual`, `curator`, `restore`, `settings`, `wipe`), who made it, the chat it
-came from, and for a curator update its change summary.
+(`manual`, `curator`, `restore`, `assistant`, `settings`, `wipe`), who made
+it, the chat it came from, and for a curator or assistant update its change
+summary.
 
 Editor autosaves are coalesced: a manual save by the same person that directly
 follows their own manual version (the version's revision is the one before)
@@ -205,6 +211,22 @@ body in the same statement that advances the revision. A body whose hash
 matches the current one is not written at all, and a retried curator job is
 recognised by its job id and applied once. A curator that loses that race
 reloads and regenerates rather than overwriting newer content.
+
+### The assistant's edits
+
+`edit_memory` (`modules/memory/memory.assistant.ts`) takes a scope (`app` or
+`project`), a list of exact replacements (`old_text` matching one place, or
+empty to append) and a summary. It applies them to the file as it is now and
+writes through `write_memory_file` with source `assistant`, retrying once
+against newer text if another write won the race. The tool is offered only
+when the conversation may change some memory — the same scopes the curator
+may write for it: app memory in the person's own private conversation, and a
+project's memory when they hold `content.edit` there. A delegated subagent
+cannot call it. Under its locks, `write_memory_file` requires the source
+conversation for this source, takes the same conversation lock the curator
+does, and refuses app memory unless the conversation is the person's own and
+private, and project memory unless the conversation is in that project. Each
+change streams and persists a `memory_updated` event in the answer.
 
 ## Disable, wipe, and deletion
 

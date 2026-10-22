@@ -49,6 +49,8 @@ export function memoryVersionLabel(
         : "Edited";
     case "curator":
       return "Updated from a chat";
+    case "assistant":
+      return "Changed by the assistant in a chat";
     case "restore":
       return version.change_summary ?? "Restored an earlier version";
     case "settings":
@@ -184,7 +186,9 @@ export function MemoryVersionHistory({
       setRestoreError(
         cause instanceof MikeApiError && cause.status === 409
           ? "Memory changed while you were looking. Check the newest version, then try again."
-          : userFacingApiError(
+          : cause instanceof MikeApiError && cause.status === 403
+            ? "You can view this memory but not restore it."
+            : userFacingApiError(
               cause,
               "That version could not be restored. Please try again.",
             ),
@@ -289,7 +293,8 @@ export function MemoryVersionHistory({
               </PillButtonUI>
             ) : null}
           </div>
-          {selected.source === "curator" && selected.change_summary ? (
+          {(selected.source === "curator" || selected.source === "assistant") &&
+          selected.change_summary ? (
             <p className="break-words text-sm text-gray-600">
               {selected.change_summary}
             </p>

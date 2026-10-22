@@ -197,3 +197,8 @@ export async function restoreMemoryVersion(
 }
 
 export { handleMemoryConsolidation, markMemoryConsolidationFailed } from "./memory.curator";
+export {
+    editMemoryFromConversation,
+    type MemoryEditOutcome,
+    type MemoryEditTarget,
+} from "./memory.assistant";

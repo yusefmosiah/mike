@@ -270,6 +270,7 @@ export type AssistantEvent =
       isStreaming?: boolean;
     })
   | WireActivity<"workflow_applied">
+  | WireActivity<"memory_updated">
   | (Omit<
       WireActivity<"doc_edited">,
       "version_number" | "annotations" | "error" | "isStreaming"

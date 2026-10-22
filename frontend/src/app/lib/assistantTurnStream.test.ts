@@ -601,6 +601,19 @@ describe("content and reasoning deltas", () => {
     ]);
   });
 
+  it("keeps a memory update, and drops one with no known scope", async () => {
+    expect(
+      await eventsOf([
+        { type: "memory_updated", scope: "project", project_id: "p1", version_id: "v7", version_number: 7, summary: "Added the governing law." },
+        { type: "memory_updated", scope: "app", version_number: "x" },
+        { type: "memory_updated", scope: "elsewhere", summary: "No." },
+      ]),
+    ).toEqual([
+      { type: "memory_updated", scope: "project", project_id: "p1", version_id: "v7", version_number: 7, summary: "Added the governing law." },
+      { type: "memory_updated", scope: "app", project_id: null, version_id: null, version_number: null, summary: "" },
+    ]);
+  });
+
   it("merges consecutive reasoning deltas and finalizes them at the end of the stream", async () => {
     expect(
       await eventsOf([

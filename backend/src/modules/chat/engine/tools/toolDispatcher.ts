@@ -15,6 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
+import type { AssistantEvent } from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
@@ -28,6 +29,8 @@ import {
   skillSavedMessage,
 } from "./skillTools";
 
+type MemoryUpdatedEvent = Extract<AssistantEvent, { type: "memory_updated" }>;
+
 /** A skill read, saved or installed in this turn, shown in the chat. */
 type WorkflowAppliedResult = {
   workflow_id: string;
@@ -40,6 +43,7 @@ import {
   planConnectorToolCall,
 } from "./connectorApprovals";
 import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
+import type { MemoryEditTarget } from "../../../memory/memory.service";
 import { parseAskInputs } from "./askInputs";
 import {
   GOOGLE_DRIVE_TOOL_PREFIX,
@@ -270,6 +274,8 @@ export async function runToolCalls(
     workstationGate?: (callId: string, summary: string) => Promise<string | null>;
     /** The conversation, which vault leases are issued for (audit only). */
     chatId?: string | null;
+    /** The memory edit_memory may change here; null refuses every call. */
+    memoryEdit?: MemoryEditTarget | null;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -295,6 +301,7 @@ export async function runToolCalls(
   courtlistenerEvents: CourtlistenerToolEvent[];
   caseCitationEvents: CaseCitationEvent[];
   mcpEvents: McpToolEvent[];
+  memoryUpdates: MemoryUpdatedEvent[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: {
@@ -319,6 +326,7 @@ export async function runToolCalls(
   const courtlistenerEvents: CourtlistenerToolEvent[] = [];
   const caseCitationEvents: CaseCitationEvent[] = [];
   const mcpEvents: McpToolEvent[] = [];
+  const memoryUpdates: MemoryUpdatedEvent[] = [];
   const approvalItems: AskInputItem[] = [];
   const courtState: CourtlistenerTurnState = courtlistenerState ?? {
     casesByClusterId: new Map(),
@@ -907,6 +915,34 @@ export async function runToolCalls(
         tool_call_id: tc.id,
         // Part of the skill, so the skill's own fence: follow, never override.
         content: nonce && wf ? spotlightWorkflow(content, nonce) : content,
+      });
+    } else if (tc.function.name === "edit_memory") {
+      const target = options.memoryEdit ?? null;
+      // Loaded on use: the memory module brings its curator (and the model
+      // client) with it, which no other tool needs.
+      const outcome = target
+        ? await (await import("../../../memory/memory.service.js")).editMemoryFromConversation(db, target, args)
+        : { ok: false as const, error: "Memory cannot be changed from this conversation." };
+      if (outcome.ok && outcome.changed) {
+        const event: MemoryUpdatedEvent = {
+          type: "memory_updated",
+          scope: outcome.scope,
+          project_id: outcome.projectId,
+          version_id: outcome.versionId,
+          version_number: outcome.versionNumber,
+          summary: outcome.summary,
+        };
+        write(`data: ${JSON.stringify(event)}\n\n`);
+        memoryUpdates.push(event);
+      }
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: !outcome.ok
+          ? JSON.stringify({ error: outcome.error })
+          : outcome.changed
+            ? `Memory updated${outcome.versionNumber ? ` (version ${outcome.versionNumber})` : ""}. The person can see the change and undo it.`
+            : "Nothing changed: the memory file already says this.",
       });
     } else if (tc.function.name === "save_skill" || tc.function.name === "install_skill") {
       const installing = tc.function.name === "install_skill";
@@ -2466,5 +2502,6 @@ export async function runToolCalls(
     courtlistenerEvents,
     caseCitationEvents,
     mcpEvents,
+    memoryUpdates,
   };
 }

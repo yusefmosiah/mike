@@ -15,7 +15,7 @@ export type MemoryCurrent = {
   hash: string | null;
   updated_at: string | null;
   updated_by: string | null;
-  source: MemorySource | "wipe" | "settings" | null;
+  source: MemorySource | "assistant" | "wipe" | "settings" | null;
   status: MemoryStatus;
   status_updated_at: string;
 };
@@ -35,7 +35,7 @@ export type MemoryFileRow = {
   last_source_job_id: string | null;
   status: MemoryStatus;
   last_error_code: string | null;
-  last_source: MemorySource | "wipe" | "settings" | null;
+  last_source: MemorySource | "assistant" | "wipe" | "settings" | null;
   updated_by: string | null;
   created_at: string;
   updated_at: string;
@@ -47,6 +47,8 @@ export class MemoryDisabledError extends Error {}
 export class MemoryJobSupersededError extends Error {}
 export class MemoryEpochSupersededError extends Error {}
 export class MemoryConversationNotQuietError extends Error {}
+/** The conversation may not write this file (shared, or another project). */
+export class MemoryScopeIneligibleError extends Error {}
 
 function numberValue(value: number | string): number {
   const parsed = Number(value);
@@ -166,8 +168,12 @@ export async function writeMemoryFile(args: {
   file: MemoryFileRow;
   content: string;
   expectedRevision: number;
-  /** "restore" is the person writing an earlier version back. */
-  source: MemorySource | "restore";
+  /**
+   * "restore" is the person writing an earlier version back; "assistant" is
+   * the assistant editing from a conversation (sourceSurface and
+   * sourceChatId name it).
+   */
+  source: MemorySource | "restore" | "assistant";
   updatedBy: string | null;
   /** Why the file changed, kept with the version. */
   changeSummary?: string | null;
@@ -179,7 +185,7 @@ export async function writeMemoryFile(args: {
   conversationGeneration?: number | null;
   sourceEpoch?: number | null;
   expectedEpoch?: number | null;
-}): Promise<{ current: MemoryCurrent; applied: boolean }> {
+}): Promise<{ current: MemoryCurrent; applied: boolean; revision: number }> {
   const content = normalizeMemoryMarkdown(args.content);
   const expectedRevision = numberValue(args.expectedRevision);
   // The row lock inside write_memory_file is the only place the enabled,
@@ -214,6 +220,9 @@ export async function writeMemoryFile(args: {
   });
   if (error) {
     const message = error.message ?? "";
+    if (message.includes("memory_assistant_scope_ineligible")) {
+      throw new MemoryScopeIneligibleError("This conversation may not edit that memory");
+    }
     if (message.includes("memory_conversation_not_quiet")) {
       throw new MemoryConversationNotQuietError(
         "Memory conversation is not quiet",
@@ -244,6 +253,8 @@ export async function writeMemoryFile(args: {
   const applied = result?.applied !== false;
   return {
     applied,
+    // The revision this write made (or found, when nothing changed).
+    revision: numberValue(result?.new_revision ?? expectedRevision),
     current: (
       await getMemoryCurrent(
         args.db,
@@ -336,7 +347,7 @@ export type MemoryVersion = {
   id: string;
   version_number: number;
   revision: number;
-  source: "manual" | "curator" | "restore" | "settings" | "wipe";
+  source: "manual" | "curator" | "restore" | "assistant" | "settings" | "wipe";
   change_summary: string | null;
   updated_by: string | null;
   source_chat_id: string | null;
@@ -383,4 +394,25 @@ export async function getMemoryVersion(
   if (!data) return null;
   const row = data as Record<string, unknown>;
   return { ...versionFromRow(row), content: String(row.content ?? "") };
+}
+
+/**
+ * The version a write made, found by the revision it produced. Only a manual
+ * version absorbs later saves, so for any other source this is exact.
+ */
+export async function findMemoryVersionAt(
+  db: Db,
+  file: MemoryFileRow,
+  revision: number,
+): Promise<MemoryVersion | null> {
+  const { data, error } = await db
+    .from("memory_file_versions")
+    .select(VERSION_COLUMNS)
+    .eq("memory_file_id", file.id)
+    .eq("revision", revision)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error("Failed to load memory version");
+  return data ? versionFromRow(data as Record<string, unknown>) : null;
 }

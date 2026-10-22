@@ -410,6 +410,18 @@ export type AssistantEvent =
       version_number?: number;
     }
   | {
+      /** The assistant changed a memory file; the change is one version of it. */
+      type: "memory_updated";
+      scope: "app" | "project";
+      /** The project whose memory changed; null for app memory. */
+      project_id: string | null;
+      /** The version the edit made; null if it could not be found afterwards. */
+      version_id: string | null;
+      version_number: number | null;
+      /** What changed and why, in the assistant's words. */
+      summary: string;
+    }
+  | {
       type: "doc_edited";
       filename: string;
       document_id: string;

@@ -233,6 +233,15 @@ export async function driveTabularChatTurn(
             includeMemory: true,
             memoryProjectId: readableMemoryProjectId,
             memorySharedAudience,
+            // The same scopes the curator may write for this chat.
+            memoryEdit: chatId
+                ? {
+                      surface: "tabular",
+                      conversationId: chatId,
+                      appWritable: !memorySharedAudience,
+                      projectId: writableMemoryProjectId,
+                  }
+                : null,
             emitDone: false,
             durableTurn: durable
                 ? { context: durable, resume: args.resume }

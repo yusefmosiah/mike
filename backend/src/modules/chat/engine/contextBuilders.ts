@@ -793,6 +793,7 @@ const COMPLETES_TEXTLESS_TURN = {
   doc_download: true,
   doc_replicated: true,
   workflow_applied: true,
+  memory_updated: true,
   doc_edited: true,
   case_citation: false,
   courtlistener_search_case_law: false,

@@ -5018,7 +5018,7 @@ create table if not exists public.memory_files (
     check (status in ('idle', 'scheduled', 'processing', 'failed')),
   last_error_code text,
   last_source text check (
-    last_source is null or last_source in ('manual', 'curator', 'wipe', 'settings')
+    last_source is null or last_source in ('manual', 'curator', 'assistant', 'wipe', 'settings')
   ),
   updated_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -5047,7 +5047,7 @@ create table if not exists public.memory_file_versions (
   size_bytes integer not null default 0
     check (size_bytes >= 0 and size_bytes <= 16384),
   source text not null
-    check (source in ('manual', 'curator', 'restore', 'settings', 'wipe')),
+    check (source in ('manual', 'curator', 'restore', 'assistant', 'settings', 'wipe')),
   change_summary text check (change_summary is null or char_length(change_summary) <= 500),
   updated_by uuid references auth.users(id) on delete set null,
   source_chat_id uuid,
@@ -5929,8 +5929,9 @@ declare
   target public.memory_files%rowtype;
   consolidation public.memory_consolidation_states%rowtype;
   activity public.memory_conversation_activity%rowtype;
+  assistant_project_id uuid;
 begin
-  if p_source not in ('manual', 'curator', 'restore') then
+  if p_source not in ('manual', 'curator', 'restore', 'assistant') then
     raise exception using errcode = '22023', message = 'invalid_memory_source';
   end if;
   if p_size_bytes < 0 or p_size_bytes > 16384 then
@@ -5991,6 +5992,25 @@ begin
     end if;
   end if;
 
+  -- The assistant edits memory from inside one conversation, on behalf of
+  -- the person in it. Lock that conversation the way the curator does, so
+  -- its project and sharing cannot change under the write.
+  if p_source = 'assistant' then
+    if p_source_surface is null
+      or p_source_chat_id is null
+      or p_updated_by is null
+    then
+      raise exception using errcode = '22023', message = 'memory_assistant_source_required';
+    end if;
+    select locked.locked_project_id into assistant_project_id
+    from public.lock_memory_conversation_source(
+      p_source_surface, p_source_chat_id, p_updated_by
+    ) locked;
+    if not found then
+      raise exception using errcode = 'P0001', message = 'memory_assistant_scope_ineligible';
+    end if;
+  end if;
+
   select * into target from public.memory_files
   where id = p_memory_file_id
   for update;
@@ -6019,6 +6039,23 @@ begin
       )
     then
       raise exception using errcode = 'P0001', message = 'memory_scope_ineligible';
+    end if;
+  end if;
+
+  -- App memory only from the person's own private conversation; project
+  -- memory only from a conversation in that project. Whether the person may
+  -- edit the project's content is checked before the call.
+  if p_source = 'assistant' then
+    if (target.scope = 'user' and (
+          target.user_id <> p_updated_by
+          or not public.memory_source_allows_app_memory(
+            p_source_surface, p_source_chat_id, p_updated_by, assistant_project_id
+          )
+        ))
+      or (target.scope = 'project'
+        and target.project_id is distinct from assistant_project_id)
+    then
+      raise exception using errcode = 'P0001', message = 'memory_assistant_scope_ineligible';
     end if;
   end if;
 
@@ -8300,5 +8337,6 @@ insert into public.schema_migrations (filename) values
   ('20261013_01_autocompact_tokens.sql'),
   ('20261020_01_dictation_vocabulary.sql'),
   ('20261020_02_spoken_answers.sql'),
-  ('20261022_01_memory_file_versions.sql')
+  ('20261022_01_memory_file_versions.sql'),
+  ('20261022_02_memory_assistant_edits.sql')
 on conflict (filename) do nothing;

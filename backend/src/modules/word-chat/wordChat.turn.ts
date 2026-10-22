@@ -338,6 +338,10 @@ export async function driveWordChatTurn(
             : undefined,
         includeMemory: true,
         memoryProjectId: null,
+        // A local chat has no stored conversation to attribute an edit to.
+        memoryEdit: persistChat
+          ? { surface: "word", conversationId: chatId, appWritable: true, projectId: null }
+          : null,
         nonce,
         emitDone: false,
         durableTurn: durable

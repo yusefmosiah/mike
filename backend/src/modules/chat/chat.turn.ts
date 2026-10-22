@@ -310,6 +310,15 @@ export async function driveChatTurn(
                     ? resolvedProjectId
                     : null,
                 memorySharedAudience,
+                // The same scopes the curator may write for this chat.
+                memoryEdit: {
+                    surface: "chat",
+                    conversationId: chatId,
+                    appWritable: !memorySharedAudience,
+                    projectId: canCurateProjectMemory
+                        ? resolvedProjectId
+                        : null,
+                },
                 nonce,
                 // This route first makes the advertised assistant ID durable.
                 // It emits [DONE] only after the reserved row has been

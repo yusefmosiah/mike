@@ -630,6 +630,24 @@ export async function consumeAssistantTurnStream(
           continue;
         }
 
+        if (data.type === "memory_updated") {
+          if (data.scope !== "app" && data.scope !== "project") continue;
+          pushEvent({
+            type: "memory_updated",
+            scope: data.scope,
+            project_id:
+              typeof data.project_id === "string" ? data.project_id : null,
+            version_id:
+              typeof data.version_id === "string" ? data.version_id : null,
+            version_number:
+              typeof data.version_number === "number"
+                ? data.version_number
+                : null,
+            summary: typeof data.summary === "string" ? data.summary : "",
+          });
+          continue;
+        }
+
         if (data.type === "workflow_applied") {
           pushEvent({
             type: "workflow_applied",

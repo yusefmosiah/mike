@@ -332,6 +332,13 @@ export async function driveProjectChatTurn(
                 }),
                 memoryProjectId: projectId,
                 memorySharedAudience,
+                // The same scopes the curator may write for this chat.
+                memoryEdit: {
+                    surface: "chat",
+                    conversationId: chatId,
+                    appWritable: !memorySharedAudience,
+                    projectId: allowDocumentMutation ? projectId : null,
+                },
                 nonce,
                 emitDone: false,
                 durableTurn: args.durableContext

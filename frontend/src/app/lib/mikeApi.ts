@@ -580,7 +580,7 @@ export interface MemoryCurrent {
     updated_at: string | null;
     /** Actor provenance only. The endpoint deliberately does not expose email. */
     updated_by: string | null;
-    source: "manual" | "curator" | "wipe" | "settings" | null;
+    source: "manual" | "curator" | "assistant" | "wipe" | "settings" | null;
     status: MemoryStatus;
     /** Changes whenever scheduling, processing, or failure status changes. */
     status_updated_at?: string;
@@ -663,7 +663,7 @@ export interface MemoryVersion {
     id: string;
     version_number: number;
     revision: number;
-    source: "manual" | "curator" | "restore" | "settings" | "wipe";
+    source: "manual" | "curator" | "restore" | "assistant" | "settings" | "wipe";
     /** Why it changed: the curator's summary, or "Restored version N". */
     change_summary: string | null;
     updated_by: string | null;
