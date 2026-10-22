@@ -5,11 +5,12 @@ import {
   dominantScript,
   fallbackSummary,
   matchesPersonsScript,
-  serializeForSummary,
   summaryInstructions,
+  summaryRequest,
   urlLedger,
   withLedger,
   writeSummary,
+  type Complete,
 } from "./compaction.mjs";
 
 const user = (text: string): Message => ({ role: "user", content: text, timestamp: 0 });
@@ -47,15 +48,6 @@ const thread: Message[] = [
 ];
 
 describe("the compaction summary", () => {
-  it("serializes the transcript without the model's private thinking", () => {
-    const text = serializeForSummary(thread);
-    expect(text).toContain("[Person]\nReview this podcast");
-    expect(text).toContain("[Assistant used fetch_web_page]");
-    expect(text).toContain("[fetch_web_page returned]");
-    expect(text).not.toContain("private planning");
-    expect(serializeForSummary([earlierSummary("old")])).toContain("[Earlier summary]");
-  });
-
   it("clips the middle of a long text and keeps both ends", () => {
     expect(clip("short", 10)).toBe("short");
     const clipped = clip(`${"a".repeat(60)}${"b".repeat(60)}`, 20);
@@ -78,10 +70,9 @@ describe("the compaction summary", () => {
   });
 
   it("asks for the person's language without assuming English", () => {
-    expect(summaryInstructions(undefined, false)).toContain("the language the person writes in");
-    expect(summaryInstructions(undefined, false)).not.toMatch(/English/);
-    expect(summaryInstructions("French", true)).toContain("Write the summary in French");
-    expect(summaryInstructions(undefined, true)).toContain("earlier summary");
+    expect(summaryInstructions("Summarize.", false)).toContain("the language the person writes in");
+    expect(summaryInstructions("Summarize.", false)).not.toMatch(/English/);
+    expect(summaryInstructions("Summarize.", true)).toContain("earlier summary");
   });
 
   it("tells the writing systems apart", () => {
@@ -96,63 +87,117 @@ describe("the compaction summary", () => {
     expect(matchesPersonsScript("anything", "123")).toBe(true);
   });
 
-  it("writes the summary with the model and completes the ledger", async () => {
-    const prompts: string[] = [];
-    const { summary, fallback } = await writeSummary(
-      thread,
-      async ({ prompt }) => {
-        prompts.push(prompt);
-        return `## What the person is working on\n${"Reviewing a podcast. ".repeat(12)}https://youtu.be/S6l3aRsecuE`;
-      },
-      { instructions: "Keep the quotes." },
-    );
-    expect(fallback).toBe(false);
-    expect(prompts[0]).toContain("<conversation>");
-    expect(prompts[0]).toContain("Also: Keep the quotes.");
-    expect(summary).toContain("- https://example.com/source-only-in-a-result");
+  it("asks for the summary as the next message of the conversation, naming the first message kept", () => {
+    const system = { role: "system", content: "You are the assistant.", timestamp: 0 } as unknown as Message;
+    const conversation = [system, ...thread];
+    const request = summaryRequest(conversation, [thread[0]!, system, ...thread.slice(1, 3)], { instructions: "Keep the quotes.", now: 5 });
+    // Sent unchanged, its tool results whole, then one instruction.
+    expect(request.slice(0, -1)).toEqual(conversation);
+    const note = request.at(-1)!;
+    expect(note).toMatchObject({ role: "user", timestamp: 5 });
+    expect(note.content).toContain("This conversation is being compacted");
+    expect(note.content).toContain("Do not call any tool");
+    expect(note.content).toContain("Where it ends: summarize everything before the message that reads “Here is my review. 你好 is not here.”");
+    expect(note.content).toContain("and the 1 after it stay in the conversation word for word, so do not restate them");
+    expect(note.content).toContain("## Sources");
+    expect(note.content).toContain("Also: Keep the quotes.");
   });
 
-  it("asks again when the summary is in another language, then falls back", async () => {
-    const attempts: number[] = [];
-    const chinese = "## 目标\n".concat("用户正在利用一名助手。".repeat(30));
-    const second = await writeSummary(thread, async ({ attempt, prompt }) => {
-      attempts.push(attempt);
-      if (attempt === 2) expect(prompt).toContain("not in the language the person writes in");
-      return attempt === 1 ? chinese : `## What the person is working on\n${"English. ".repeat(40)}`;
-    });
-    expect(attempts).toEqual([1, 2]);
-    expect(second.fallback).toBe(false);
+  it("names a repeated message by its occurrence, without the turn context", () => {
+    const twice = [user("<turn-context>\nToday is Thursday.\n</turn-context>\nGo on."), answer("First part."), user("Go on."), answer("Second.")];
+    expect(summaryRequest(twice, twice.slice(0, 2)).at(-1)!.content).toContain("before the second occurrence of the message that reads “Go on.”");
+    expect(summaryRequest(thread, thread).at(-1)!.content).toContain("Summarize the conversation above.");
+  });
 
-    const failed = await writeSummary(thread, async () => chinese);
-    expect(failed.fallback).toBe(true);
-    expect(failed.summary).toContain("## What the person said");
+  it("leaves out a tool call still waiting for its results", () => {
+    const waiting = [...thread, answer("", [{ name: "fetch_web_page", arguments: { url: "https://example.com/next" } }])];
+    expect(summaryRequest(waiting, thread.slice(0, 3)).slice(0, -1)).toEqual(thread);
+    expect(() => summaryRequest(thread, [user("Something else.")])).toThrow("does not start with");
+  });
+
+  const replies = (...messages: AssistantMessage[]) => {
+    const asked: Message[][] = [];
+    const complete: Complete = async (request) => {
+      asked.push(request);
+      const next = messages.shift();
+      if (!next) throw new Error("chunk timeout");
+      return next;
+    };
+    return { asked, complete };
+  };
+  const written = `## What the person is working on\n${"Reviewing a podcast. ".repeat(12)}https://youtu.be/S6l3aRsecuE`;
+  const range = thread.slice(0, 3);
+
+  it("writes the summary with the model and completes the ledger", async () => {
+    const { complete } = replies(answer(written));
+    const { summary, usage, failure } = await writeSummary(thread, range, complete);
+    expect(failure).toBeUndefined();
+    expect(usage).toBeDefined();
+    expect(summary).toContain("Reviewing a podcast.");
+    expect(summary).toContain("- https://example.com/source-only-in-a-result");
+    // The person's messages follow the summary word for word, and their links are not listed twice.
+    expect(summary.endsWith("## The person's messages, word for word\n\n> Review this podcast for delusion: https://youtu.be/S6l3aRsecuE")).toBe(true);
+    expect(summary).not.toContain("- https://youtu.be/S6l3aRsecuE");
+  });
+
+  it("keeps the person's words without the blocks put in front of them, and carries them through the next compaction", async () => {
+    const first = [
+      user("<thread-memory>\nPrefers British spelling.\n</thread-memory>\n<turn-context>\nToday is Thursday.\n</turn-context>\n[Sent: Thu 14:03]\nDraft the notice.\n\nKeep it short."),
+      answer("Here is the draft."),
+      user("Now the cover letter."),
+    ];
+    const once = await writeSummary(first, first.slice(0, 2), replies(answer(written)).complete);
+    expect(once.summary).toContain("> [Sent: Thu 14:03]\n> Draft the notice.\n>\n> Keep it short.");
+    expect(once.summary).not.toContain("Today is Thursday");
+    expect(once.summary).not.toContain("> Prefers British spelling");
+
+    const second = [earlierSummary(once.summary), answer("Noted."), user("Send both to the client."), answer("Sent."), user("Thanks.")];
+    const asked = replies(answer(written));
+    const twice = await writeSummary(second, second.slice(0, 4), asked.complete);
+    expect(asked.asked[0]!.at(-1)!.content).toContain("Leave out its record of the person's messages");
+    const record = twice.summary.slice(twice.summary.indexOf("## The person's messages"));
+    expect(record).toBe(
+      "## The person's messages, word for word\n\n> [Sent: Thu 14:03]\n> Draft the notice.\n>\n> Keep it short.\n\n> Send both to the client.",
+    );
+  });
+
+  it("asks again after a tool call or a reply in another language, then falls back", async () => {
+    const tool = answer("", [{ name: "fetch_web_page", arguments: {} }]);
+    const retried = replies({ ...tool, stopReason: "toolUse" }, answer(written));
+    expect((await writeSummary(thread, range, retried.complete)).failure).toBeUndefined();
+    expect(retried.asked[1]!.at(-1)!.content).toContain("Your previous reply was not a usable summary");
+
+    const chinese = "## 目标\n".concat("用户正在利用一名助手。".repeat(30));
+    const failed = await writeSummary(thread, range, replies(answer(chinese), answer(chinese)).complete);
+    expect(failed.failure).toBe("the reply was not a usable summary");
+    expect(failed.summary).toContain("## The person's messages, word for word");
   });
 
   it("falls back when the model fails or answers too little", async () => {
-    const thrown = await writeSummary(thread, async () => {
-      throw new Error("chunk timeout");
-    });
-    expect(thrown.fallback).toBe(true);
-    const short = await writeSummary(thread, async () => "ok");
-    expect(short.fallback).toBe(true);
+    expect((await writeSummary(thread, range, replies().complete)).failure).toBe("the request failed");
+    expect((await writeSummary(thread, range, replies(answer("ok"), answer("ok")).complete)).failure).toBe("the reply was not a usable summary");
   });
 
   it("builds a summary without a model that loses nothing the person said", () => {
     const text = fallbackSummary([earlierSummary("Earlier goals."), ...thread]);
     expect(text).toContain("could not be written");
     expect(text).toContain("## Earlier summary\n<summary>\nEarlier goals.");
-    expect(text).toContain("- Review this podcast for delusion");
-    expect(text).toContain("- Notice they never say the word social.");
+    expect(text).toContain("> Review this podcast for delusion");
+    expect(text).toContain("> Notice they never say the word social.");
     expect(text).toContain("## The assistant's last answer\nHere is my review.");
     expect(text).toContain("- https://example.com/source-only-in-a-result");
   });
 
   it("keeps the newest messages when they do not all fit", () => {
-    const many = Array.from({ length: 10 }, (_, index) => user(`${index} ${"x".repeat(15_000)}`));
+    const many = Array.from({ length: 15 }, (_, index) => user(`${index} ${"x".repeat(15_000)}`));
     const text = fallbackSummary(many);
-    expect(text).toContain("earlier messages left out");
-    expect(text).toContain("- 9 ");
-    expect(text).not.toContain("- 0 ");
-    expect(fallbackSummary([])).not.toContain("## What the person said");
+    expect(text).toContain("(5 earlier messages left out)");
+    expect(text).toContain("> 14 ");
+    expect(text).not.toContain("> 4 ");
+    expect(text).toContain("characters left out");
+    // The count carries into the next compaction.
+    const next = fallbackSummary([earlierSummary(text), user(`15 ${"y".repeat(15_000)}`)]);
+    expect(next).toContain("(6 earlier messages left out)");
+    expect(fallbackSummary([])).not.toContain("## The person's messages");
   });
 });

@@ -111,3 +111,16 @@ export function withoutTurnContext(text: string): string {
   const end = text.indexOf(`\n${TURN_CONTEXT_CLOSE}`);
   return end < 0 ? text : text.slice(end + TURN_CONTEXT_CLOSE.length + 1).trim();
 }
+
+// A thread's memory is snapshotted once, into its first user message, and never
+// re-sent: the prefix stays byte-stable for the provider cache and forks inherit
+// it with the history. Comparisons with the client's history ignore it.
+export const THREAD_MEMORY_OPEN = "<thread-memory>";
+export const THREAD_MEMORY_CLOSE = "</thread-memory>";
+
+/** A user message's text without a leading thread-memory block. */
+export function withoutThreadMemory(text: string): string {
+  if (!text.startsWith(THREAD_MEMORY_OPEN)) return text;
+  const end = text.indexOf(THREAD_MEMORY_CLOSE);
+  return end < 0 ? text : text.slice(end + THREAD_MEMORY_CLOSE.length).trim();
+}

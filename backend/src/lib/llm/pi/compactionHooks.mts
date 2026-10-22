@@ -10,18 +10,13 @@ import {
   GenerationTask,
   hook,
   ProviderDoc,
+  type Agent,
   type ConversationId,
   type Extension,
   type Harness,
-  type HookApi,
 } from "@earendil-works/pi-durable";
 import { safeError } from "../../safeError.js";
 import { defaultAutocompactTokens, writeSummary } from "./compaction.mjs";
-import { lightestThinkingLevel } from "./providers.mjs";
-
-/** Room for a summary of a long thread, on top of what a thinking model spends first. */
-const SUMMARY_MAX_TOKENS = 24_000;
-const SUMMARY_THINKING_HEADROOM = 16_000;
 
 /**
  * The settings Mike opens the Harness with. A 32k reserve leaves a thinking
@@ -45,12 +40,6 @@ export function setAutocompactThreshold(conversation: number, tokens: number | u
   else thresholds.set(conversation, tokens);
 }
 
-/** The model the summary is written with: the one that last answered in the range. */
-function summarizerModel(messages: readonly Message[], api: HookApi) {
-  const last = [...messages].reverse().find((message): message is AssistantMessage => message.role === "assistant");
-  return last ? api.models.getModel(last.provider, last.model) : undefined;
-}
-
 /** How much of the window a response's request and answer took. */
 export function contextTokens(message: AssistantMessage): number {
   const usage = message.usage;
@@ -63,7 +52,6 @@ export function compactionExtension(harness: () => Harness | undefined): Extensi
     hooks: [
       hook(CompactionTask, {
         async beforeCompact(compaction, api, context) {
-          const model = summarizerModel(compaction.messages, api);
           let sessionId: string = randomUUID();
           try {
             // The conversation's provider session carries the turn's user keys.
@@ -71,32 +59,41 @@ export function compactionExtension(harness: () => Harness | undefined): Extensi
           } catch {
             // A fresh session: endpoints with server-side keys still answer.
           }
-          const { summary, fallback } = await writeSummary(
+          // The next turn's request, sent with its model and options (compaction.mts).
+          let conversation: readonly Message[] = [];
+          let agent: Agent | undefined;
+          try {
+            const handle = await harness()?.conversation(api.conversationId, context);
+            if (handle) [{ messages: conversation }, agent] = await Promise.all([handle.context(context), handle.agent(context)]);
+          } catch (error) {
+            console.error("[pi] compaction could not read the conversation", safeError(error));
+          }
+          const model = agent?.model && api.models.getModel(agent.model.provider, agent.model.modelId);
+          const thinkingLevel = agent?.thinkingLevel;
+          const { summary, usage, failure } = await writeSummary(
+            conversation,
             compaction.messages,
-            async ({ system, prompt }) => {
-              if (!model) throw new Error("no summarizer model");
-              const effort = lightestThinkingLevel(model);
-              const message = await api.models.completeSimple(
+            async (messages) => {
+              if (!model) throw new Error("no model");
+              // As pi-durable sends a turn: Mike's Harness sets no stream options.
+              return api.models.completeSimple(
                 model,
-                { systemPrompt: system, messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-                {
-                  maxTokens: Math.min(
-                    model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-                    SUMMARY_MAX_TOKENS + (model.reasoning ? SUMMARY_THINKING_HEADROOM : 0),
-                  ),
-                  ...(effort ? { reasoning: effort } : {}),
-                  cacheRetention: "none",
-                  sessionId,
-                },
+                { messages },
+                { sessionId, ...(thinkingLevel === undefined || thinkingLevel === "off" ? {} : { reasoning: thinkingLevel }) },
               );
-              if (message.stopReason === "error" || message.stopReason === "aborted" || message.stopReason === "length") {
-                throw new Error(`summary ${message.stopReason}`);
-              }
-              return message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
             },
             compaction.instructions === undefined ? {} : { instructions: compaction.instructions },
           );
-          if (fallback) console.warn("[pi] compaction summary fell back to the excerpt", { conversation: api.conversationId });
+          if (failure !== undefined) {
+            console.warn("[pi] compaction summary fell back to the excerpt", { conversation: api.conversationId, reason: failure });
+          } else if (usage) {
+            const tokens = usage.input + usage.cacheRead + usage.cacheWrite;
+            console.info("[pi] compaction summary written", {
+              conversation: api.conversationId,
+              tokens,
+              fromCache: `${Math.round((100 * usage.cacheRead) / Math.max(1, tokens))}%`,
+            });
+          }
           return { summary };
         },
       }),

@@ -77,7 +77,15 @@ import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold } fro
 import { PostgresStorage } from "./postgres/storage.mjs";
 import { nodePostgresDatabase } from "./postgres/node.mjs";
 import pg from "pg";
-import { escapeTurnContextMarkup, planTurnContext, replayTurnContext, withoutTurnContext } from "../turnContext.js";
+import {
+  escapeTurnContextMarkup,
+  planTurnContext,
+  replayTurnContext,
+  THREAD_MEMORY_CLOSE,
+  THREAD_MEMORY_OPEN,
+  withoutThreadMemory,
+  withoutTurnContext,
+} from "../turnContext.js";
 import type {
   LlmMessage,
   LlmUserContent,
@@ -919,18 +927,6 @@ function userText(content: LlmUserContent | Message["content"] | undefined): str
     .map((part: { type: string; text?: string }) => (part.type === "text" ? (part.text ?? "") : ""))
     .join("\n")
     .trim();
-}
-
-// A thread's memory is snapshotted once, into its first user message, and never
-// re-sent: the prefix stays byte-stable for the provider cache and forks inherit
-// it with the history. Comparisons with the client's history ignore it.
-const THREAD_MEMORY_OPEN = "<thread-memory>";
-const THREAD_MEMORY_CLOSE = "</thread-memory>";
-
-function withoutThreadMemory(text: string): string {
-  if (!text.startsWith(THREAD_MEMORY_OPEN)) return text;
-  const end = text.indexOf(THREAD_MEMORY_CLOSE);
-  return end < 0 ? text : text.slice(end + THREAD_MEMORY_CLOSE.length).trim();
 }
 
 // Mike stamps user messages with their send time when it builds a request, and
