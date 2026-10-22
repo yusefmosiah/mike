@@ -45,7 +45,6 @@ create table if not exists public.user_profiles (
   credits_reset_date timestamptz not null default (now() + interval '30 days'),
   title_model text,
   tabular_model text,
-  memory_curator_model text,
   auto_mode_decision_model text,
   -- Per-model auto-compact thresholds in tokens ({ "<model id>": 500000 }),
   -- set with `/autocompact`; a model without an entry uses the default.
@@ -7734,10 +7733,12 @@ create index if not exists db_jobs_pending_kind_idx
 -- resolve claim_db_jobs(5, 600) when both a 2-arg and a 3-arg (defaulted)
 -- candidate exist.
 drop function if exists public.claim_db_jobs(integer, integer);
+drop function if exists public.claim_db_jobs(integer, integer, text);
 create or replace function public.claim_db_jobs(
   p_limit integer default 5,
   p_stale_seconds integer default 600,
-  p_kind text default null
+  p_kind text default null,
+  p_exclude_kinds text[] default null
 )
 returns setof public.db_jobs
 language sql set search_path = ''
@@ -7754,11 +7755,14 @@ as $$
        and claimed_at < now() - make_interval(secs => p_stale_seconds)
        and attempts >= max_attempts
        and kind not in ('storage.cleanup', 'document.cleanup')
+       and (p_kind is null or kind = p_kind)
+       and (p_exclude_kinds is null or kind <> all(p_exclude_kinds))
     returning id
   ), candidates as (
     select id
       from public.db_jobs
      where (p_kind is null or kind = p_kind)
+       and (p_exclude_kinds is null or kind <> all(p_exclude_kinds))
        and ((status = 'pending' and run_at <= now())
         -- Cleanup intents are retried forever, but politely: a revived
         -- `failed` row waits for its own run_at like everything else.
@@ -7811,9 +7815,9 @@ as $$
    where j.id = c.id
   returning j.*;
 $$;
-revoke all on function public.claim_db_jobs(integer, integer, text)
+revoke all on function public.claim_db_jobs(integer, integer, text, text[])
   from public, anon, authenticated;
-grant execute on function public.claim_db_jobs(integer, integer, text)
+grant execute on function public.claim_db_jobs(integer, integer, text, text[])
   to service_role;
 
 -- Claim ONE job by id — the Redis-delivery path (transactional-outbox
@@ -8338,5 +8342,7 @@ insert into public.schema_migrations (filename) values
   ('20261020_01_dictation_vocabulary.sql'),
   ('20261020_02_spoken_answers.sql'),
   ('20261022_01_memory_file_versions.sql'),
-  ('20261022_02_memory_assistant_edits.sql')
+  ('20261022_02_memory_assistant_edits.sql'),
+  ('20261022_03_db_jobs_exclude_kinds.sql'),
+  ('20261022_04_drop_memory_curator_model.sql')
 on conflict (filename) do nothing;

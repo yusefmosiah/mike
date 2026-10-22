@@ -138,6 +138,20 @@ const HOSTED: Record<string, Provider> = {
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+/**
+ * A provider session id with a suffix after this mark is a side session of
+ * the one before it (a memory review on a fork of a conversation): its keys
+ * are its own, while providers see the parent's id, so prompt-cache keys and
+ * replica affinity still match the conversation it forked.
+ */
+export const SIDE_SESSION_MARK = "~";
+
+/** The id a provider sees: a side session's parent. */
+export function providerSessionId(sessionId: string): string {
+  const mark = sessionId.indexOf(SIDE_SESSION_MARK);
+  return mark < 0 ? sessionId : sessionId.slice(0, mark);
+}
+
 /** The user keys of turns in flight, by the conversation's provider session id. */
 const requestKeys = new Map<string, UserApiKeys>();
 
@@ -347,7 +361,9 @@ export function createMikeModels(
   /** The request options Mike adds: the turn's key and endpoint headers. */
   const withRequest = (model: Model<Api>, options: SimpleStreamOptions | undefined): SimpleStreamOptions => {
     const route = routes.get(model.provider);
-    if (!route) return options ?? {};
+    if (!route) {
+      return options?.sessionId ? { ...options, sessionId: providerSessionId(options.sessionId) } : options ?? {};
+    }
     const keys = options?.sessionId ? requestKeys.get(options.sessionId) : undefined;
     // Mike's key resolution (a user's key, then the deployment's, with Mike's env
     // aliases); without one, a hosted provider falls back to its own env lookup.
@@ -359,6 +375,7 @@ export function createMikeModels(
     const keyless = !apiKey && !HOSTED[model.provider];
     return {
       ...options,
+      ...(options?.sessionId ? { sessionId: providerSessionId(options.sessionId) } : {}),
       ...(apiKey ? { apiKey } : keyless ? { apiKey: KEYLESS, fetch: withoutPlaceholderAuth(options?.fetch) } : {}),
       ...(route.headers ? { headers: { ...route.headers, ...options?.headers } } : {}),
       // An ACI endpoint is only ever reached over TLS pinned to its attested keys.

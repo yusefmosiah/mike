@@ -14,6 +14,9 @@ import {
   forkChatLineageOnPi,
   interruptedTurnsOnPi,
   finishTurnOnPi,
+  markMemoryReviewedOnPi,
+  memoryReviewPointsOnPi,
+  reviewMemoryOnPi,
   piRuntime,
   resetPiRuntime,
   streamChatWithToolsOnPi,
@@ -797,6 +800,100 @@ describe("Pi runtime: compaction", () => {
     // Sources the summary did not name survive in its ledger.
     expect(seen).toContain("https://example.com/source-1");
     expect(requests.some((request) => request.users.at(-1)?.includes("<conversation>"))).toBe(true);
+  });
+});
+
+describe("Pi runtime: memory review on a fork", () => {
+  const editMemory: OpenAIToolSchema = {
+    type: "function",
+    function: {
+      name: "edit_memory",
+      description: "Edit memory",
+      parameters: { type: "object", properties: { scope: { type: "string" } }, required: ["scope"] },
+    },
+  };
+
+  it("reviews from the chat's latest answer on a fork, leaving the chat's own transcript alone", async () => {
+    const { harness } = await piRuntime();
+    const a1 = await turn([{ role: "user", content: "I prefer British spelling." }], { user: "u1", parent: null, assistant: "a1" });
+    const h2 = [
+      { role: "user" as const, content: "I prefer British spelling." },
+      { role: "assistant" as const, content: a1.fullText },
+      { role: "user" as const, content: "second question" },
+    ];
+    await turn(h2, { user: "u2", parent: "a1", assistant: "a2" });
+    const map = await lineage();
+    const source = (await harness.conversation(map.messages.a2.conversation as never, context))!;
+    const entriesBefore = (await source.entries({ order: "ascending" }, 500, undefined, context)).items.length;
+
+    const review = await memoryReviewPointsOnPi({ chatId: "chat-1", reviewer: "user-1", atMessageId: "a2", messageIds: ["u1", "gone"] });
+    expect(review!.points).toEqual([
+      { conversation: map.messages.a2.conversation, entry: map.messages.a2.entry, contextStart: expect.any(Number) },
+    ]);
+    expect(review!.points[0]!.contextStart).toBeLessThanOrEqual(map.messages.u1.entry);
+    expect(review!.places).toEqual({ u1: map.messages.u1.entry, gone: null });
+
+    scripted.push(
+      () => fauxAssistantMessage([fauxToolCall("edit_memory", { scope: "app" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage([fauxText("Added the spelling preference.")]),
+    );
+    const calls: string[] = [];
+    const result = await reviewMemoryOnPi({
+      point: review!.points[0]!,
+      prompt: "[Memory review] Review the conversation.",
+      tools: [editMemory],
+      runTools: async (batch) => batch.map((call) => (calls.push(call.name), { tool_use_id: call.id, content: '{"ok":true}' })),
+      maxRounds: 4,
+    });
+    expect(result).toMatchObject({ status: "done", reply: "Added the spelling preference." });
+    expect(calls).toEqual(["edit_memory"]);
+    // The review saw the conversation, then its own prompt.
+    const reviewed = requests.at(-2)!.users;
+    expect(reviewed.join("|")).toContain("British spelling");
+    expect(reviewed.at(-1)).toContain("[Memory review]");
+
+    // Nothing was added to the chat: its next turn does not see the review.
+    expect((await source.entries({ order: "ascending" }, 500, undefined, context)).items.length).toBe(entriesBefore);
+    await turn([...h2, { role: "assistant", content: "x" }, { role: "user", content: "third" }], { user: "u3", parent: "a2", assistant: "a3" });
+    expect(requests.at(-1)!.users.join("|")).not.toContain("[Memory review]");
+  });
+
+  it("looks back past a compaction since the last review, once", async () => {
+    const long = (n: number) => `Section ${n}: ${"The parties agree to the terms. ".repeat(2_000)}`;
+    const history: LlmMessage[] = [];
+    let parent: string | null = null;
+    for (let index = 1; index <= 3; index += 1) {
+      history.push({ role: "user", content: long(index) });
+      const answer = await turn(history, { user: `u${index}`, parent, assistant: `a${index}` }, { autocompactTokens: 40_000 });
+      history.push({ role: "assistant", content: answer.fullText });
+      parent = `a${index}`;
+    }
+    const { harness } = await piRuntime();
+    await harness.waitForIdle(context);
+    history.push({ role: "user", content: "What did we cover?" });
+    await turn(history, { user: "u4", parent, assistant: "a4" });
+
+    const map = await lineage();
+    const review = await memoryReviewPointsOnPi({ chatId: "chat-1", reviewer: "user-1", atMessageId: "a4", messageIds: ["u1"] });
+    const points = review!.points;
+    expect(points.length).toBe(2);
+    const [before, head] = points as [(typeof points)[0], (typeof points)[0]];
+    expect(head.entry).toBe(map.messages.a4.entry);
+    expect(before.entry).toBeLessThan(head.entry);
+    // Before the compaction the first prompt is still verbatim; after it, not.
+    expect(before.contextStart).toBeLessThanOrEqual(map.messages.u1.entry);
+    expect(head.contextStart).toBeGreaterThan(map.messages.u1.entry);
+
+    await markMemoryReviewedOnPi({ chatId: "chat-1", reviewer: "user-1", through: head.entry });
+    const again = await memoryReviewPointsOnPi({ chatId: "chat-1", reviewer: "user-1", atMessageId: "a4", messageIds: [] });
+    expect(again!.points.map((point) => point.entry)).toEqual([head.entry]);
+    // Another person's reviews keep their own place.
+    const other = await memoryReviewPointsOnPi({ chatId: "chat-1", reviewer: "user-2", atMessageId: "a4", messageIds: [] });
+    expect(other!.points).toHaveLength(2);
+  });
+
+  it("has no review points for an answer the runtime never stored", async () => {
+    expect(await memoryReviewPointsOnPi({ chatId: "chat-1", reviewer: "user-1", atMessageId: "nope", messageIds: [] })).toBeNull();
   });
 });
 

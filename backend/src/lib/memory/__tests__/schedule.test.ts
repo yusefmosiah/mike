@@ -46,7 +46,7 @@ describe("scheduleMemoryConsolidation", () => {
       p_actor_user_id: "user-1",
       p_activity_id: result?.activityId,
       p_lease_seconds: 1_800,
-      p_quiet_seconds: 300,
+      p_quiet_seconds: 120,
     });
   });
 
@@ -105,8 +105,8 @@ describe("scheduleMemoryConsolidation", () => {
     }
   });
 
-  it("uses the five-minute quiet window", async () => {
-    expect(MEMORY_INACTIVITY_MS).toBe(300_000);
+  it("uses the two-minute quiet window", async () => {
+    expect(MEMORY_INACTIVITY_MS).toBe(120_000);
     const rpc = vi.fn(async () => ({
       data: [{ job_id: "job-1", generation: 3 }],
       error: null,
@@ -130,7 +130,7 @@ describe("scheduleMemoryConsolidation", () => {
       p_project_id: "00000000-0000-4000-8000-000000000003",
       p_activity_id: "00000000-0000-4000-8000-000000000005",
       p_turn_id: "00000000-0000-4000-8000-000000000004",
-      p_quiet_seconds: 300,
+      p_quiet_seconds: 120,
     });
   });
 
@@ -146,13 +146,12 @@ describe("scheduleMemoryConsolidation", () => {
       p_surface: "tabular",
       p_conversation_id: "chat-1",
       p_activity_id: "activity-1",
-      p_quiet_seconds: 300,
+      p_quiet_seconds: 120,
     });
   });
 
-  it("keeps Postgres authoritative and treats Redis delivery as best effort", async () => {
+  it("leaves the job to the API process's poll, never to Redis delivery", async () => {
     redisEnabled.mockReturnValue(true);
-    enqueueAppJobDelivery.mockRejectedValue(new Error("redis unavailable"));
     const rpc = vi.fn(async () => ({
       data: [{ job_id: "job-1", generation: 1 }],
       error: null,
@@ -167,9 +166,7 @@ describe("scheduleMemoryConsolidation", () => {
         turn: { activityId: "activity" },
       }),
     ).resolves.toEqual({ job_id: "job-1", generation: 1 });
-    expect(enqueueAppJobDelivery).toHaveBeenCalledWith("job-1", {
-      delayMs: expect.any(Number),
-    });
+    expect(enqueueAppJobDelivery).not.toHaveBeenCalled();
   });
 
   it("does not create stuck scheduled state when DB jobs are disabled", async () => {

@@ -14,11 +14,12 @@
 // stale-work reaper, and the workflow catalog boot sync.
 
 import { anyWorkerEnabled, startWorkers, stopWorkers } from "./workers";
-import { startDbJobRunner, stopDbJobRunner } from "./lib/dbq/runner";
+import { startDbJobRunner, stopDbJobRunner, type DbJobClaimScope } from "./lib/dbq/runner";
 import {
     DB_JOB_HANDLERS,
     DB_JOB_FAILURE_HOOKS,
     MCP_TOKEN_REFRESH_WINDOW_MS,
+    API_PROCESS_JOB_KIND,
 } from "./jobs/registry";
 import { enqueueDbJob } from "./lib/dbq/enqueue";
 import { runStaleWorkSweep } from "./jobs/staleWork";
@@ -86,8 +87,26 @@ async function runMcpTokenRefreshSweep(): Promise<void> {
 }
 let started = false;
 
-/** Start every background worker (idempotent). */
-export function startAllWorkers(): void {
+/**
+ * The API process's own job runner: only the kinds whose handlers need what
+ * the API process alone holds (API_PROCESS_JOB_KIND). Used when the general
+ * runner lives in a worker thread or process; inline, startAllWorkers covers
+ * them.
+ */
+export function startApiProcessJobRunner(): void {
+    startDbJobRunner(
+        { [API_PROCESS_JOB_KIND]: DB_JOB_HANDLERS[API_PROCESS_JOB_KIND]! },
+        { [API_PROCESS_JOB_KIND]: DB_JOB_FAILURE_HOOKS[API_PROCESS_JOB_KIND]! },
+        { kind: API_PROCESS_JOB_KIND, redeliver: false },
+    );
+}
+
+/**
+ * Start every background worker (idempotent). A worker beside the API process
+ * (its thread, or a separate process) passes the API's own job kinds in
+ * `jobScope.excludeKinds`; run inline, it takes every kind.
+ */
+export function startAllWorkers(jobScope: DbJobClaimScope = {}): void {
     if (started) return;
     started = true;
 
@@ -100,7 +119,7 @@ export function startAllWorkers(): void {
 
     // The DB queue runs in every deployment (fast delivery when Redis is
     // up, poll-driven otherwise) — see lib/dbq/runner.ts.
-    startDbJobRunner(DB_JOB_HANDLERS, DB_JOB_FAILURE_HOOKS);
+    startDbJobRunner(DB_JOB_HANDLERS, DB_JOB_FAILURE_HOOKS, jobScope);
 
     // Upload-session processing: lease-based claims over Postgres, so any
     // number of runtimes can poll concurrently without double-processing.

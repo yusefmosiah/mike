@@ -8,7 +8,15 @@ import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { queryReceipts } from "../attestation/index.js";
 import { resetModelRegistryCache } from "../registry.js";
 import { providerFailureStatus } from "../providerErrors.js";
-import { asOverflow, createMikeModels, providerError, tolerantMessage, useRequestKeys } from "./providers.mjs";
+import {
+  asOverflow,
+  createMikeModels,
+  providerError,
+  providerSessionId,
+  SIDE_SESSION_MARK,
+  tolerantMessage,
+  useRequestKeys,
+} from "./providers.mjs";
 
 /** A local OpenAI-compatible endpoint: records each request and answers with the next scripted text. */
 type Seen = { path: string; authorization?: string; body: Record<string, unknown> };
@@ -120,6 +128,28 @@ describe("Mike's catalog on pi-ai", () => {
     await models.completeSimple(model, context(), { sessionId: "session-1" });
     delete process.env.ANTHROPIC_API_KEY;
     expect(keys).toEqual(["user-key", "deployment-key"]);
+  });
+
+  it("keeps a side session's own keys but asks the provider for the parent's session, and so its cache", async () => {
+    expect(providerSessionId("parent")).toBe("parent");
+    expect(providerSessionId(`parent${SIDE_SESSION_MARK}review-1`)).toBe("parent");
+    const faux = fauxProvider({ provider: "anthropic", models: [{ id: "claude-sonnet-4-6" }] });
+    const seenOptions: { apiKey?: string; sessionId?: string }[] = [];
+    faux.setResponses([
+      (_ctx: unknown, options: { apiKey?: string; sessionId?: string } | undefined) => {
+        seenOptions.push({ apiKey: options?.apiKey, sessionId: options?.sessionId });
+        return fauxAssistantMessage([fauxText("hi")]);
+      },
+    ]);
+    const base = createModels();
+    base.setProvider(faux.provider);
+    const { models } = createMikeModels(base);
+    const model = base.getModel("anthropic", "claude-sonnet-4-6")!;
+    const side = `parent${SIDE_SESSION_MARK}review-1`;
+    const release = useRequestKeys(side, { claude: "review-key" });
+    await models.completeSimple(model, context(), { sessionId: side });
+    release();
+    expect(seenOptions).toEqual([{ apiKey: "review-key", sessionId: "parent" }]);
   });
 
   it("reaches a configured endpoint with its declared key and upstream model name", async () => {

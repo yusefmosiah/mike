@@ -43,9 +43,13 @@ and heavy thinking spend a budget fastest.
 
 1. **Volume work runs on subscription flash models.** Any work that makes many
    calls nobody chose a model for: citation checks (two calls per citation),
-   chat titles, memory curation, classifier fallbacks, document diligence.
+   chat titles, classifier fallbacks, document diligence.
    The list is `OPENCODE_FLASH_MODELS` in `backend/src/lib/llm/models.ts`:
    DeepSeek V4.1 Flash, GLM-5.3-Flash, Muse Spark 1.3 Contributor.
+   Memory curation is the exception: it runs as a turn on the conversation's
+   own model, on a fork of the conversation, so the provider's prompt cache
+   for that conversation is reused rather than a second model reading it
+   from scratch.
 2. **When a flash model fails or its allowance runs out, hand over to the next
    flash model,** not to a pay-per-token one. The citation checker does this
    (`citations.tasks.ts`).
@@ -54,20 +58,22 @@ and heavy thinking spend a budget fastest.
    ([decision-models.md](decision-models.md)). They are small calls with high
    stakes.
 4. **The person's own choice wins.** A model someone selects for a chat, or
-   saves in settings (title, tabular or curator model), is used as chosen.
+   saves in settings (title or tabular model), is used as chosen.
    Defaults only fill gaps. A new person with nothing chosen starts on the
    first flash model they can run, and their OpenCode Go model list starts as
    the three flash models until they save their own.
 5. **Never default a multi-call feature to the conversation's model.** It may
-   be a premium model, and the feature multiplies its price.
+   be a premium model, and the feature multiplies its price. A memory review
+   is one turn per quiet spell, not many, and on the conversation's model
+   most of its input is a cache read, at a fraction of that model's price.
 
 ## Where the defaults live
 
 - Backend: `OPENCODE_FLASH_MODELS` and `flashModelsFor()`
   (`backend/src/lib/modelSelection.ts`), used by the citation checker, title
-  generation for OpenCode Go chats, the memory curator and the default OpenCode
-  Go selection (`backend/src/lib/routerModels.ts`). The classifier and
-  diligence defaults (`opencode-go/glm-5.3-flash`) predate the list.
+  generation for OpenCode Go chats and the default OpenCode Go selection
+  (`backend/src/lib/routerModels.ts`). The classifier and diligence defaults
+  (`opencode-go/glm-5.3-flash`) predate the list.
 - Frontend: `PREFERRED_FIRST_MODEL_IDS` in
   `frontend/src/app/hooks/useSelectedModel.ts`.
-- Overrides: `CITATION_CHECK_MODEL` and `MEMORY_CURATOR_MODEL`.
+- Override: `CITATION_CHECK_MODEL`.

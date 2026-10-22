@@ -2,6 +2,7 @@
 // (`./pi/runtime.mts`); the runtime is ESM-only, so it is loaded with a
 // dynamic import.
 import type {
+    OpenAIToolSchema,
     StreamChatParams,
     StreamChatResult,
     SubagentTranscript,
@@ -16,6 +17,21 @@ export async function streamChatWithTools(
 ): Promise<StreamChatResult> {
     const { streamChatWithToolsOnPi } = await import("./pi/runtime.mjs");
     return streamChatWithToolsOnPi(params);
+}
+
+let conversationStoreOwner = false;
+
+/**
+ * Mark this process as the owner of the durable conversation store: the one
+ * serving chat turns. A background worker thread or process never is, and
+ * must leave work that forks a conversation to the process that is.
+ */
+export function declareConversationStoreOwner(): void {
+    conversationStoreOwner = true;
+}
+
+export function ownsConversationStore(): boolean {
+    return conversationStoreOwner;
 }
 
 /**
@@ -40,6 +56,67 @@ export async function forkChatLineage(params: {
 }): Promise<void> {
     const { forkChatLineageOnPi } = await import("./pi/runtime.mjs");
     await forkChatLineageOnPi(params);
+}
+
+/** One place a memory review forks from, and the first entry its context holds verbatim. */
+export type MemoryReviewPoint = {
+    conversation: number;
+    entry: number;
+    contextStart: number;
+};
+
+/**
+ * Where a memory review of a chat looks from, through `atMessageId`: just
+ * before each compaction since `reviewer`'s last review, then that answer.
+ * `places` gives each of `messageIds` its entry (null when it has none).
+ * Null when the answer has no place in the conversation store.
+ */
+export async function memoryReviewPoints(params: {
+    chatId: string;
+    reviewer: string;
+    atMessageId: string;
+    messageIds: readonly string[];
+}): Promise<{
+    points: MemoryReviewPoint[];
+    places: Record<string, number | null>;
+} | null> {
+    const { memoryReviewPointsOnPi } = await import("./pi/runtime.mjs");
+    return memoryReviewPointsOnPi(params);
+}
+
+/** Record how far `reviewer`'s memory reviews of a chat have looked. */
+export async function markMemoryReviewed(params: {
+    chatId: string;
+    reviewer: string;
+    through: number;
+}): Promise<void> {
+    const { markMemoryReviewedOnPi } = await import("./pi/runtime.mjs");
+    await markMemoryReviewedOnPi(params);
+}
+
+export type MemoryReviewResult = {
+    status: "done" | "failed";
+    reply: string;
+    usage: { input: number; output: number; cost: number };
+};
+
+/**
+ * One memory-review turn on a fork of a conversation at `point`, which
+ * repeats the conversation's cached prefix; the conversation is unchanged.
+ */
+export async function reviewMemory(params: {
+    point: { conversation: number; entry: number };
+    prompt: string;
+    tools: readonly OpenAIToolSchema[];
+    runTools: NonNullable<StreamChatParams["runTools"]>;
+    readMemory?: () => Promise<string>;
+    apiKeys?: UserApiKeys;
+    model?: string;
+    maxRounds: number;
+    signal?: AbortSignal;
+}): Promise<MemoryReviewResult> {
+    const { reviewMemoryOnPi } = await import("./pi/runtime.mjs");
+    return reviewMemoryOnPi(params);
 }
 
 /** A turn a previous process left in flight, with the context its caller stored. */

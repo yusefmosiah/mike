@@ -285,7 +285,6 @@ function profileRow(overrides: Record<string, unknown> = {}) {
         tier: "Pro",
         title_model: null,
         tabular_model: "gemini-3-flash-preview",
-        memory_curator_model: null,
         last_selected_chat_model: null,
         mfa_on_login: false,
         legal_research_us: true,
@@ -401,50 +400,15 @@ describe("user.routes", () => {
             expect(requireMfaIfEnrolled).not.toHaveBeenCalled();
         });
 
-        it("keeps existing preferences before the memory curator migration", async () => {
-            const preMigrationRow = profileRow({
-                title_model: "gpt-5.4-mini",
-            });
-            delete (preMigrationRow as Record<string, unknown>)
-                .memory_curator_model;
-            dbState.tables.user_profiles = [
-                {
-                    data: null,
-                    error: {
-                        code: "42703",
-                        message:
-                            "column user_profiles.memory_curator_model does not exist",
-                    },
-                },
-                { data: preMigrationRow, error: null },
-            ];
-
-            const res = await request(app)
-                .get("/user/profile")
-                .set(...AUTH);
-
-            expect(res.status).toBe(200);
-            expect(res.body.titleModel).toBe("gpt-5.4-mini");
-            expect(res.body.memoryCuratorModel).toBeNull();
-            expect(res.body.projectMemoryDefault).toBe(true);
-        });
-
-        it("drops project_memory_default from the retry, not just memory_curator_model", async () => {
-            // Both columns arrive in the SAME migration (#451). A database
-            // that has the new code but not the migration rejects every select
-            // naming either one. A retry tier that still names
-            // project_memory_default therefore fails with the identical 42703
-            // and the cascade falls further than it should, dropping
-            // preference columns the database actually has.
+        it("retries without project_memory_default before the scoped-memory migration", async () => {
+            // A database that has the new code but not the 20260905
+            // scoped-memory migration rejects every select naming
+            // project_memory_default. The retry tier drops that column and
+            // nothing else, so it keeps every preference the database has.
             const preMigrationRow = profileRow({ title_model: "gpt-5.4-mini" });
             delete (preMigrationRow as Record<string, unknown>)
-                .memory_curator_model;
-            delete (preMigrationRow as Record<string, unknown>)
                 .project_memory_default;
-            dbState.missingColumns = [
-                "memory_curator_model",
-                "project_memory_default",
-            ];
+            dbState.missingColumns = ["project_memory_default"];
             dbState.tables.user_profiles = {
                 data: preMigrationRow,
                 error: null,
@@ -457,16 +421,31 @@ describe("user.routes", () => {
             expect(res.status).toBe(200);
             const selects = dbState.selects.user_profiles ?? [];
             // Exactly one retry: the full select, then the tier that drops
-            // both columns of that migration and nothing else.
+            // project_memory_default and nothing else.
             expect(selects).toHaveLength(2);
             expect(selects[0]).toContain("project_memory_default");
             expect(selects[1]).not.toContain("project_memory_default");
-            expect(selects[1]).not.toContain("memory_curator_model");
-            // The tier keeps every other preference the database does have.
             expect(selects[1]).toContain("last_selected_reasoning_level");
             expect(selects[1]).toContain("dark_mode");
             expect(res.body.titleModel).toBe("gpt-5.4-mini");
-            expect(res.body.memoryCuratorModel).toBeNull();
+            expect(res.body.projectMemoryDefault).toBe(true);
+        });
+
+        it("no longer reads or returns a memory curation model", async () => {
+            dbState.tables.user_profiles = {
+                data: profileRow(),
+                error: null,
+            };
+
+            const res = await request(app)
+                .get("/user/profile")
+                .set(...AUTH);
+
+            expect(res.status).toBe(200);
+            expect(res.body).not.toHaveProperty("memoryCuratorModel");
+            for (const select of dbState.selects.user_profiles ?? []) {
+                expect(select).not.toContain("memory_curator_model");
+            }
         });
 
         it("keeps saved preferences on a database without the onboarding migration", async () => {
@@ -618,6 +597,19 @@ describe("user.routes", () => {
             expect(res.body.detail).toMatch(
                 /projectMemoryDefault must be a boolean/,
             );
+        });
+
+        it("rejects the removed memory curation model preference", async () => {
+            const res = await request(app)
+                .patch("/user/profile")
+                .set(...AUTH)
+                .send({ memoryCuratorModel: "gpt-5.4-mini" });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toMatch(
+                /Unsupported profile field: memoryCuratorModel/,
+            );
+            expect(dbState.updates.user_profiles ?? []).toHaveLength(0);
         });
 
         it("rejects the removed transparentTables preference", async () => {
@@ -776,36 +768,6 @@ describe("user.routes", () => {
                 }),
             );
             expect(res.body.lastSelectedChatModel).toBe("gpt-5.6-sol");
-        });
-
-        it("persists and returns the memory curator model", async () => {
-            dbState.tables.user_profiles = {
-                data: profileRow({ memory_curator_model: "gpt-5.4-mini" }),
-                error: null,
-            };
-
-            const res = await request(app)
-                .patch("/user/profile")
-                .set(...AUTH)
-                .send({ memoryCuratorModel: "gpt-5.4-mini" });
-
-            expect(res.status).toBe(200);
-            expect(res.body.memoryCuratorModel).toBe("gpt-5.4-mini");
-            expect(dbState.updates.user_profiles).toContainEqual(
-                expect.objectContaining({
-                    memory_curator_model: "gpt-5.4-mini",
-                }),
-            );
-        });
-
-        it("rejects an unsupported memory curator model", async () => {
-            const res = await request(app)
-                .patch("/user/profile")
-                .set(...AUTH)
-                .send({ memoryCuratorModel: "unknown-model" });
-
-            expect(res.status).toBe(400);
-            expect(res.body.detail).toBe("Unsupported memoryCuratorModel");
         });
 
         it("persists OpenRouter selections through the router-neutral table function", async () => {

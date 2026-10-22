@@ -629,7 +629,12 @@ export async function runLLMStream(params: {
   const codeMode = !!kernelLauncher && kernels.available(kernelLauncher);
   const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
   const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
-  const modelTools = codeMode ? [RUN_PYTHON_SCHEMA] : activeTools;
+  // edit_memory stays a direct tool in code mode: memory edits are never
+  // scripted, and the background memory review forks this conversation with
+  // the same tools, so its cached prefix must already offer it.
+  const modelTools = codeMode
+    ? [RUN_PYTHON_SCHEMA, ...(memoryEditTarget ? MEMORY_TOOLS : [])]
+    : activeTools;
 
   // Extract system prompt; pass remaining turns to the adapter as
   // plain user/assistant messages.

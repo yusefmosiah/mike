@@ -114,6 +114,18 @@ export class NonRetryableJobError extends Error {
 }
 
 /**
+ * Which jobs a runner takes. A process that runs only some kinds (or all but
+ * some) claims just those, and a kind that must run in this process is never
+ * handed to Redis delivery, which reaches the background worker instead.
+ */
+export type DbJobClaimScope = {
+    kind?: string;
+    excludeKinds?: readonly string[];
+    /** False: a retried job waits for this runner's poll, not a Redis delivery. */
+    redeliver?: boolean;
+};
+
+/**
  * Run one claimed job through its handler and persist the outcome:
  *   handler resolves        -> done (+ optional result)
  *   handler throws, retries -> pending again with run_at pushed back
@@ -127,6 +139,7 @@ export async function processClaimedJob(
     handlers: DbJobHandlers,
     job: DbJob,
     failureHooks: Readonly<Record<string, DbJobFailureHook>> = {},
+    scope: DbJobClaimScope = {},
 ): Promise<void> {
     /**
      * FENCING TOKEN. Every write below is addressed to "the job as THIS claim
@@ -251,7 +264,7 @@ export async function processClaimedJob(
                     });
                 }
             }
-        } else if (redisEnabled()) {
+        } else if (redisEnabled() && scope.redeliver !== false) {
             // Redeliver the retry at its backoff time so it doesn't wait for
             // the (slow, backstop-cadence) poller. Best-effort — the poller
             // covers a failed redelivery.
@@ -317,10 +330,15 @@ export async function runDbJobTick(
     handlers: DbJobHandlers,
     failureHooks: Readonly<Record<string, DbJobFailureHook>> = {},
     claimGate: PollFailureGate = defaultClaimGate,
+    scope: DbJobClaimScope = {},
 ): Promise<number> {
     const { data, error } = await db.rpc("claim_db_jobs", {
         p_limit: CLAIM_BATCH,
         p_stale_seconds: STALE_SECONDS,
+        ...(scope.kind ? { p_kind: scope.kind } : {}),
+        ...(scope.excludeKinds?.length
+            ? { p_exclude_kinds: [...scope.excludeKinds] }
+            : {}),
     });
     if (error) {
         // Table/function missing (migration not applied yet) or transient DB
@@ -346,7 +364,9 @@ export async function runDbJobTick(
     // allSettled defensively: processClaimedJob handles its own errors, but
     // one job's unexpected rejection must never abandon the rest of a batch.
     await Promise.allSettled(
-        jobs.map((job) => processClaimedJob(db, handlers, job, failureHooks)),
+        jobs.map((job) =>
+            processClaimedJob(db, handlers, job, failureHooks, scope),
+        ),
     );
     return jobs.length;
 }
@@ -441,7 +461,11 @@ export function dbJobsEnabled(): boolean {
  * Start the poll loop (idempotent). Ticks never overlap: a tick that is
  * still running when the next interval fires simply skips that interval.
  */
-export function startDbJobRunner(handlers: DbJobHandlers, failureHooks: Readonly<Record<string, DbJobFailureHook>> = {}): void {
+export function startDbJobRunner(
+    handlers: DbJobHandlers,
+    failureHooks: Readonly<Record<string, DbJobFailureHook>> = {},
+    scope: DbJobClaimScope = {},
+): void {
     if (!dbJobsEnabled()) {
         console.log("[dbq] disabled via DB_JOBS_ENABLED=false");
         return;
@@ -453,7 +477,7 @@ export function startDbJobRunner(handlers: DbJobHandlers, failureHooks: Readonly
         // While claims keep failing, skip ticks until the backed-off retry
         // time instead of hitting the broken dependency every interval.
         if (inFlight || !defaultClaimGate.ready()) return;
-        inFlight = runDbJobTick(db, handlers, failureHooks)
+        inFlight = runDbJobTick(db, handlers, failureHooks, defaultClaimGate, scope)
             .catch((err) => {
                 reportError(err, { tags: { component: "dbq", stage: "tick" } });
                 console.error("[dbq] tick failed", err);
@@ -468,17 +492,20 @@ export function startDbJobRunner(handlers: DbJobHandlers, failureHooks: Readonly
     // without waiting a full interval.
     setTimeout(tick, 1_000).unref();
 
-    const sweep = () =>
-        void runDbJobRetentionSweep(db).catch((err) => {
-            reportError(err, { tags: { component: "dbq", stage: "retention" } });
-            console.error("[dbq] retention sweep failed", err);
-        });
-    sweepTimer = setInterval(sweep, SWEEP_EVERY_MS);
-    sweepTimer.unref();
-    setTimeout(sweep, 60_000).unref();
+    // A runner for one kind leaves retention to the general runner.
+    if (!scope.kind) {
+        const sweep = () =>
+            void runDbJobRetentionSweep(db).catch((err) => {
+                reportError(err, { tags: { component: "dbq", stage: "retention" } });
+                console.error("[dbq] retention sweep failed", err);
+            });
+        sweepTimer = setInterval(sweep, SWEEP_EVERY_MS);
+        sweepTimer.unref();
+        setTimeout(sweep, 60_000).unref();
+    }
 
     console.log(
-        `[dbq] runner started (poll ${pollMs()}ms, driver ${redisEnabled() ? "redis" : "postgres"})`,
+        `[dbq] runner started (poll ${pollMs()}ms, driver ${redisEnabled() ? "redis" : "postgres"}${scope.kind ? `, ${scope.kind} only` : ""}${scope.excludeKinds?.length ? `, not ${scope.excludeKinds.join(", ")}` : ""})`,
     );
 }
 

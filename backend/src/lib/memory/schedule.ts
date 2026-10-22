@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { envInt } from "../runtimeConfig";
 import type { Db } from "../dbq/types";
-import { redisEnabled } from "../dbq/driver";
-import { enqueueAppJobDelivery } from "../queue/appJobsQueue";
 import type { MemorySurface } from "./files";
 
+// Two minutes: the review runs on the conversation's cached context, which a
+// provider keeps only for a few minutes after the last turn.
 export const MEMORY_INACTIVITY_MS =
-  envInt("MEMORY_INACTIVITY_SECONDS", 300) * 1_000;
+  envInt("MEMORY_INACTIVITY_SECONDS", 120) * 1_000;
 const MEMORY_INACTIVITY_SECONDS = Math.max(
   1,
   Math.min(3_600, Math.ceil(MEMORY_INACTIVITY_MS / 1_000)),
@@ -135,15 +135,9 @@ export async function scheduleMemoryConsolidation(args: {
       job_id: String(row.job_id),
       generation: Number(row.generation),
     };
-    if (redisEnabled()) {
-      try {
-        await enqueueAppJobDelivery(scheduled.job_id, {
-          delayMs: MEMORY_INACTIVITY_MS,
-        });
-      } catch {
-        // Postgres is the durable outbox; the worker poller is the backstop.
-      }
-    }
+    // Never handed to Redis delivery: that reaches the background worker,
+    // and a memory review runs in the API process (API_PROCESS_JOB_KIND),
+    // whose runner polls for it.
     return scheduled;
   } catch {
     // The caller owns the lease: it releases every turn that was not

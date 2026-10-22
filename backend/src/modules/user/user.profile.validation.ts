@@ -153,7 +153,6 @@ export function validateProfilePayload(body: unknown):
               practice_areas?: string[];
               title_model?: string | null;
               tabular_model?: string | null;
-              memory_curator_model?: string | null;
               last_selected_chat_model?: string | null;
               last_selected_reasoning_level?: string | null;
               legal_research_us?: boolean;
@@ -177,7 +176,6 @@ export function validateProfilePayload(body: unknown):
         "practiceAreas",
         "titleModel",
         "tabularModel",
-        "memoryCuratorModel",
         "lastSelectedChatModel",
         "lastSelectedReasoningLevel",
         "legalResearchUs",
@@ -205,7 +203,6 @@ export function validateProfilePayload(body: unknown):
         practice_areas?: string[];
         title_model?: string | null;
         tabular_model?: string | null;
-        memory_curator_model?: string | null;
         last_selected_chat_model?: string | null;
         last_selected_reasoning_level?: string | null;
         legal_research_us?: boolean;
@@ -279,29 +276,6 @@ export function validateProfilePayload(body: unknown):
                 return { ok: false, detail: "Unsupported titleModel" };
             }
             update.title_model = resolved;
-        }
-    }
-
-    if ("memoryCuratorModel" in raw) {
-        if (
-            raw.memoryCuratorModel === null ||
-            raw.memoryCuratorModel === ""
-        ) {
-            update.memory_curator_model = null;
-        } else if (typeof raw.memoryCuratorModel !== "string") {
-            return {
-                ok: false,
-                detail: "memoryCuratorModel must be a string or null",
-            };
-        } else {
-            const resolved = resolveModel(raw.memoryCuratorModel, "");
-            if (!resolved) {
-                return {
-                    ok: false,
-                    detail: "Unsupported memoryCuratorModel",
-                };
-            }
-            update.memory_curator_model = resolved;
         }
     }
 

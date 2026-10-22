@@ -42,10 +42,6 @@ export function serializeProfile(
             row.tabular_model,
             routerModels,
         ),
-        memoryCuratorModel: normalizeOptionalModelPreference(
-            row.memory_curator_model,
-            routerModels,
-        ),
         lastSelectedChatModel: normalizeOptionalModelPreference(
             row.last_selected_chat_model,
             routerModels,

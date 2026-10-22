@@ -705,7 +705,6 @@ describe("POST /chat — streaming endpoint", () => {
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             legal_research_us: false,
             title_model: null,
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: null,
             last_selected_chat_model: "gpt-5.6-luna",
@@ -1297,7 +1296,6 @@ describe("POST /chat — streaming endpoint", () => {
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             legal_research_us: false,
             title_model: null,
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: null,
             last_selected_chat_model: "gpt-5.6-luna",
@@ -2005,7 +2003,6 @@ describe("POST /chat — streaming endpoint", () => {
         const userSettings = await import("../../modules/user/user.settings.js");
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             title_model: "test-model",
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: "test-model",
             last_selected_chat_model: null,
@@ -2419,7 +2416,6 @@ async function seedResolvableModel() {
     vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
         legal_research_us: false,
         title_model: null,
-        memory_curator_model: null,
         last_selected_reasoning_level: null,
         tabular_model: null,
         last_selected_chat_model: "gpt-5.6-luna",

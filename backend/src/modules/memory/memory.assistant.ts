@@ -118,6 +118,20 @@ export type MemoryEditTarget = {
     projectId: string | null;
     surface: MemorySurface;
     conversationId: string;
+    /**
+     * Set for the background memory review: its edits are the curator's,
+     * fenced to the job that scheduled it, and stop the moment the
+     * conversation resumes or memory is reset (those errors are thrown).
+     */
+    curator?: {
+        stateId: string;
+        generation: number;
+        conversationGeneration: number;
+        sourceEpoch: number;
+        /** Each file's epoch when the job was scheduled. */
+        appEpoch: number | null;
+        projectEpoch: number | null;
+    };
 };
 
 export type MemoryEditOutcome =
@@ -175,16 +189,27 @@ export async function editMemoryFromConversation(
             };
         }
         try {
+            const curator = target.curator;
             const written = await writeMemoryFile({
                 db,
                 file,
                 content: applied.content,
                 expectedRevision: current.revision,
-                source: "assistant",
+                source: curator ? "curator" : "assistant",
                 updatedBy: target.userId,
                 changeSummary: summary,
                 sourceSurface: target.surface,
                 sourceChatId: target.conversationId,
+                ...(curator
+                    ? {
+                          consolidationStateId: curator.stateId,
+                          consolidationGeneration: curator.generation,
+                          conversationGeneration: curator.conversationGeneration,
+                          sourceEpoch: curator.sourceEpoch,
+                          expectedEpoch:
+                              scope === "app" ? curator.appEpoch : curator.projectEpoch,
+                      }
+                    : {}),
             });
             const version = written.applied
                 ? await findMemoryVersionAt(db, file, written.revision)

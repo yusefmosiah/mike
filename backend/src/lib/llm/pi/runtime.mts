@@ -31,11 +31,13 @@ import {
   createMikeModels,
   lightestThinkingLevel,
   providerError,
+  SIDE_SESSION_MARK,
   tolerantMessage,
   useRequestKeys,
   type MikeModels,
 } from "./providers.mjs";
 import {
+  AgentDoc,
   configure,
   createRegistry,
   defineDoc,
@@ -1899,6 +1901,186 @@ export async function forkChatLineageOnPi(params: {
     },
     background,
   );
+}
+
+/** How far one person's memory reviews of a chat have looked: its newest reviewed entry. */
+const MemoryReviewed = defineDocFamily<{ through: number }, null>({
+  kind: "mike.memory-reviewed",
+  version: 1,
+  scope: "session",
+  checkpointWhen: () => false,
+  family: true,
+  initial: () => ({ through: 0 }),
+});
+
+/** Compactions a review looks back past at most, oldest dropped first. */
+const MAX_COMPACTION_POINTS = 2;
+
+/** One place a memory review forks from, and the first entry its context holds verbatim. */
+export type MemoryReviewPoint = { conversation: number; entry: number; contextStart: number };
+
+/**
+ * Where a memory review of a chat should look from, through the answer
+ * `atMessageId`: just before each compaction since the last review (the
+ * context that compaction replaced), then the answer itself. `places` maps
+ * each of `messageIds` to its entry, or null when it has none. Null when the
+ * answer has no place in Pi.
+ */
+export async function memoryReviewPointsOnPi(params: {
+  chatId: string;
+  reviewer: string;
+  atMessageId: string;
+  messageIds: readonly string[];
+}): Promise<{ points: MemoryReviewPoint[]; places: Record<string, number | null> } | null> {
+  const { harness } = await piRuntime();
+  const lineage = await harness.snapshot(ChatLineage, params.chatId, background);
+  const at = lineage?.messages?.[params.atMessageId];
+  if (!lineage || !at) return null;
+  const conversation = await harness.conversation(at.conversation as ConversationId, background);
+  if (!conversation) return null;
+  const reviewed = await harness.snapshot(MemoryReviewed, `${params.chatId}:${params.reviewer}`, background);
+  const after = reviewed?.through ?? 0;
+
+  const compactions: EntryId[] = [];
+  let cursor: Parameters<Conversation["entries"]>[2];
+  do {
+    const page = await conversation.entries(
+      { order: "ascending", minEntryId: (after + 1) as EntryId, maxEntryId: at.entry as EntryId },
+      200,
+      cursor,
+      background,
+    );
+    for (const entry of page.items) if (entry.head !== undefined && entry.id > after) compactions.push(entry.id);
+    cursor = page.next;
+  } while (cursor);
+
+  const entries: number[] = [];
+  for (const marker of compactions.slice(-MAX_COMPACTION_POINTS)) {
+    const before = await conversation.entries({ order: "descending", maxEntryId: (marker - 1) as EntryId }, 1, undefined, background);
+    const entry = before.items[0]?.id;
+    if (entry !== undefined && entry > after) entries.push(entry);
+  }
+  entries.push(at.entry);
+
+  const points: MemoryReviewPoint[] = [];
+  for (const entry of entries) {
+    const view = await conversation.context(background, { at: entry as EntryId });
+    const contextStart = view.head?.head ?? view.entries[0]?.id ?? entry;
+    points.push({ conversation: at.conversation, entry, contextStart });
+  }
+  const places: Record<string, number | null> = {};
+  for (const id of params.messageIds) places[id] = lineage.messages[id]?.entry ?? null;
+  return { points, places };
+}
+
+/** Record that one person's memory reviews of a chat have looked through `through`. */
+export async function markMemoryReviewedOnPi(params: { chatId: string; reviewer: string; through: number }): Promise<void> {
+  const { harness } = await piRuntime();
+  const lineage = await harness.snapshot(ChatLineage, params.chatId, background);
+  const conversationId = lineage?.conversations.at(-1);
+  if (conversationId === undefined) return;
+  const conversation = await harness.conversation(conversationId as ConversationId, background);
+  if (!conversation) return;
+  await conversation.commit(async (tx) => {
+    const reviewed = await tx.doc(MemoryReviewed, `${params.chatId}:${params.reviewer}`, null);
+    reviewed.through = Math.max(reviewed.through, params.through);
+  }, background);
+}
+
+export type MemoryReviewResult = {
+  status: "done" | "failed";
+  /** The model's closing words. */
+  reply: string;
+  usage: TurnUsage;
+};
+
+/**
+ * A memory review: one turn on a fork of a conversation at `point`, so the
+ * request repeats the conversation's own prefix (model, instructions, tools,
+ * messages) and the provider serves it from cache, followed by `prompt`. The
+ * fork keeps the conversation's tools and adds any of `tools` it lacks; the
+ * calls reach `runTools`, which decides what may run. Nothing is written to
+ * the conversation itself.
+ */
+export async function reviewMemoryOnPi(params: {
+  point: { conversation: number; entry: number };
+  prompt: string;
+  tools: readonly OpenAIToolSchema[];
+  runTools: NonNullable<StreamChatParams["runTools"]>;
+  readMemory?: () => Promise<string>;
+  apiKeys?: UserApiKeys;
+  /** A model other than the conversation's, when its own is not usable here (no cache then). */
+  model?: string;
+  maxRounds: number;
+  signal?: AbortSignal;
+}): Promise<MemoryReviewResult> {
+  const { harness, installTools, resolve, bindings } = await piRuntime();
+  installTools(params.tools);
+  const base = await harness.conversation(params.point.conversation as ConversationId, background);
+  if (!base) throw new Error("The conversation to review is missing.");
+  const parentSession = (await harness.snapshot(ProviderDoc, params.point.conversation as ConversationId, background))?.sessionId;
+  const session = `${parentSession ?? randomUUID()}${SIDE_SESSION_MARK}review-${randomUUID()}`;
+  const fork = await base.fork(
+    params.point.entry as EntryId,
+    {
+      ownership: { kind: "ownerless" },
+      init: async (tx: Tx, id: ConversationId) => {
+        (await tx.doc(ProviderDoc, id)).sessionId = session;
+        // A tool the conversation already offers keeps the request's prefix,
+        // and so its cache; one it lacks is appended (the prefix then differs).
+        const agent = await tx.doc(AgentDoc, id);
+        const offered = Array.isArray(agent.tools) ? agent.tools : null;
+        const missing = params.tools.map((tool) => tool.function.name).filter((name) => offered && !offered.includes(name));
+        if (offered && missing.length) {
+          await configure(tx, id, { tools: [...offered, ...missing].map((name) => ({ name }) as ToolRegistration) });
+        }
+        if (params.model) await configure(tx, id, { model: resolve(params.model) });
+      },
+    },
+    background,
+  );
+  let halted: unknown;
+  bindings.set(fork.id, {
+    runTools: params.runTools,
+    readMemory: params.readMemory,
+    maxRounds: params.maxRounds,
+    firstEntry: await nextEntryId(fork),
+    halt: (error) => {
+      halted ??= error;
+      void fork.abort(background).catch(() => undefined);
+    },
+  });
+  const releaseKeys = useRequestKeys(session, params.apiKeys);
+  const onAbort = () => void fork.abort(background).catch(() => undefined);
+  params.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    let settled = await (
+      await fork.submit({ type: "input", content: params.prompt, whenBusy: "reject" }, background)
+    ).wait(background);
+    for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const failure = settled.status === "unanswered" && settled.reason === "model_error" ? settled.detail : undefined;
+      if (typeof failure !== "string" || !isRecoverableFailure(failure) || params.signal?.aborted || halted) break;
+      await pauseFor(recoveryDelayMs(attempt - 1, failure), params.signal);
+      settled = await (
+        await fork.submit({ type: "input", content: noteFor({ kind: "retry", error: failure }), whenBusy: "reject" }, background)
+      ).wait(background);
+    }
+    if (halted) throw halted;
+    const usage = await usageOf(fork, fork.id);
+    if (settled.status !== "done" || settled.type !== "input") {
+      return { status: "failed", reply: await lastAssistantText(harness, fork.id).catch(() => ""), usage };
+    }
+    const answer = await fork.commit((tx) => tx.entry(settled.answer), background);
+    const message = answer?.model?.[0];
+    const reply = message?.role === "assistant"
+      ? message.content.map((part) => (part.type === "text" ? part.text : "")).join("").trim()
+      : "";
+    return { status: "done", reply, usage };
+  } finally {
+    params.signal?.removeEventListener("abort", onAbort);
+    releaseKeys();
+    bindings.delete(fork.id);
+  }
 }
 
 /** Output tokens added for a model's reasoning when it cannot turn thinking off. */

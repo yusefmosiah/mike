@@ -50,7 +50,6 @@ function apiProfile(darkMode: boolean) {
         tier: "Free",
         titleModel: "gemini-3.1-flash-lite-preview",
         tabularModel: "gemini-3-flash-preview",
-        memoryCuratorModel: null,
         lastSelectedChatModel: null,
         lastSelectedReasoningLevel: "high",
         mfaOnLogin: false,

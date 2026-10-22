@@ -7,7 +7,13 @@ import { app } from "./app";
 import { enforceDocumentLifecycleMigration } from "./lib/dbq/lifecycleGuard";
 import { manifestPublicKey } from "./lib/manifestSigning";
 import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
-import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
+import {
+  startAllWorkers,
+  startApiProcessJobRunner,
+  stopAllWorkers,
+} from "./workerRuntime";
+import { declareConversationStoreOwner } from "./lib/llm";
+import { stopDbJobRunner } from "./lib/dbq/runner";
 import { reportError } from "./lib/observability/sentry";
 import { createDb } from "./lib/db";
 import { assistantTurnsInFlight, waitForAssistantTurns } from "./lib/assistantTurnRuns";
@@ -127,13 +133,19 @@ async function main(): Promise<void> {
     console.log(
       `Mike backend running on port ${PORT} (workers: ${WORKERS_MODE})`,
     );
+    // This process serves chat turns, so it owns their durable conversation
+    // store; jobs that fork a conversation run here and nowhere else.
+    declareConversationStoreOwner();
     if (WORKERS_MODE === "thread") {
       spawnWorkerThread();
+      startApiProcessJobRunner();
     } else if (WORKERS_MODE === "inline") {
       startAllWorkers();
+    } else {
+      // WORKERS_MODE === "none": a standalone worker process owns the rest
+      // of the background work (node dist/worker.js).
+      startApiProcessJobRunner();
     }
-    // WORKERS_MODE === "none": a standalone worker process owns background
-    // work (node dist/worker.js).
 
     // Chat turns the previous process left in flight (a deploy, a crash)
     // continue now, into runs a reloading client attaches to.
@@ -159,6 +171,8 @@ async function stopBackgroundWork(): Promise<void> {
     await stopAllWorkers();
     return;
   }
+  // The API process's own job runner (startApiProcessJobRunner).
+  await stopDbJobRunner();
   const thread = workerThread;
   if (!thread) return;
   await new Promise<void>((resolve) => {

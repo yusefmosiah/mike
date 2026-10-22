@@ -831,7 +831,6 @@ export interface UserProfile {
     tier: string;
     titleModel: string | null;
     tabularModel: string | null;
-    memoryCuratorModel: string | null;
     lastSelectedChatModel: string | null;
     lastSelectedReasoningLevel: NonNullable<Message["reasoning"]>;
     mfaOnLogin: boolean;
@@ -947,7 +946,6 @@ export async function updateUserProfile(payload: {
     practiceAreas?: string[];
     titleModel?: string | null;
     tabularModel?: string | null;
-    memoryCuratorModel?: string | null;
     lastSelectedChatModel?: string | null;
     lastSelectedReasoningLevel?: NonNullable<Message["reasoning"]>;
     legalResearchUs?: boolean;

@@ -55,7 +55,6 @@ interface UserProfile {
     tier: string;
     titleModel: string | null;
     tabularModel: string | null;
-    memoryCuratorModel: string | null;
     lastSelectedChatModel: string | null;
     lastSelectedReasoningLevel: NonNullable<Message["reasoning"]>;
     mfaOnLogin: boolean;
@@ -89,7 +88,7 @@ interface UserProfileContextType {
     ) => Promise<boolean>;
     syncPasswordSet: () => Promise<boolean>;
     updateModelPreference: (
-        field: "titleModel" | "tabularModel" | "memoryCuratorModel",
+        field: "titleModel" | "tabularModel",
         value: string | null,
     ) => Promise<boolean>;
     persistChatModelSelection: (
@@ -165,7 +164,6 @@ function toProfile(data: ApiUserProfile): UserProfile {
         onboardingVersion: profile.onboardingVersion ?? null,
         onboardingComplete: profile.onboardingComplete !== false,
         passwordSet: profile.passwordSet === true,
-        memoryCuratorModel: profile.memoryCuratorModel ?? null,
         lastSelectedChatModel: profile.lastSelectedChatModel ?? null,
         lastSelectedReasoningLevel:
             profile.lastSelectedReasoningLevel ?? "high",
@@ -231,7 +229,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 tier: "Free",
                 titleModel: null,
                 tabularModel: null,
-                memoryCuratorModel: null,
                 lastSelectedChatModel: null,
                 lastSelectedReasoningLevel: "high",
                 mfaOnLogin: false,
@@ -342,7 +339,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
     const updateModelPreference = useCallback(
         async (
-            field: "titleModel" | "tabularModel" | "memoryCuratorModel",
+            field: "titleModel" | "tabularModel",
             value: string | null,
         ): Promise<boolean> => {
             if (!user) return false;
