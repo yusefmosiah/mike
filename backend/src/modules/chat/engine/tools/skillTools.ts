@@ -212,7 +212,7 @@ export function skillFilesNotice(
   const more = files.length > 50 ? `\n- ... and ${files.length - 50} more` : "";
   const name = skillName(skill.name ?? "") || "skill";
   const where = workstation
-    ? `They are in ~/skills/${name}/ in the workstation; run its scripts there with run_command. Text files can also be read with read_workflow and file.`
+    ? `They are in ~/skills/${name}/ in the workstation; run its scripts there from run_python. Text files can also be read with read_workflow and file.`
     : "Read a text file with read_workflow and file. Scripts cannot run here: there is no workstation in this chat.";
   return `\n\nThis skill's other files:\n${listing}${more}\n${where}`;
 }

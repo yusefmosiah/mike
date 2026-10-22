@@ -59,7 +59,13 @@ function positiveInteger(fields: Record<string, string>, key: string): number {
 }
 
 /** Tools no subagent may have, whatever its type file says. */
-export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set(["delegate", "ask_inputs"]);
+export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set([
+    "delegate",
+    "ask_inputs",
+    // Memory is the person's: a subagent neither reads it fresh nor changes it.
+    "read_memory",
+    "edit_memory",
+]);
 
 /**
  * Parse one type file. `tools: *` gives the child every tool the parent

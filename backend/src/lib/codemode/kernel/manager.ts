@@ -26,7 +26,7 @@ export type KernelLauncher = {
   snapshotPath: (key: string) => string;
 };
 
-/** Kernels in the employee's workstation VM, over the same ssh channel as run_command. */
+/** Kernels in the employee's workstation VM, over ssh. */
 export function sshKernelLauncher(target: WorkstationTarget): KernelLauncher {
   const bundle = kernelBundle();
   return {
@@ -71,14 +71,11 @@ type Entry = {
 export type KernelManagerOptions = {
   /** A kernel unused this long is snapshotted and stopped. */
   idleMs?: number;
-  /** After a kernel fails to start, its launcher counts as down this long. */
-  downMs?: number;
   startTimeoutMs?: number;
   now?: () => number;
 };
 
 export const DEFAULT_KERNEL_IDLE_MS = 30 * 60_000;
-const DEFAULT_DOWN_MS = 60_000;
 
 /** A conversation key safe in a file name. */
 export function kernelKey(raw: string): string {
@@ -88,25 +85,17 @@ export function kernelKey(raw: string): string {
 export class KernelManager {
   private entries = new Map<string, Entry>();
   private starting = new Map<string, Promise<Entry>>();
-  private downUntil = new Map<string, number>();
   /** Conversations reset since their last snapshot: their next kernel starts empty. */
   private fresh = new Set<string>();
   /** The names each conversation's kernel held after its last cell, for the next turn's prompt. */
   private names = new Map<string, string[]>();
   private reaper: NodeJS.Timeout | null = null;
   private readonly idleMs: number;
-  private readonly downMs: number;
   private readonly now: () => number;
 
   constructor(private readonly options: KernelManagerOptions = {}) {
     this.idleMs = options.idleMs ?? DEFAULT_KERNEL_IDLE_MS;
-    this.downMs = options.downMs ?? DEFAULT_DOWN_MS;
     this.now = options.now ?? Date.now;
-  }
-
-  /** False for a short while after this launcher's kernel failed to start. */
-  available(launcher: KernelLauncher): boolean {
-    return (this.downUntil.get(launcher.id) ?? 0) <= this.now();
   }
 
   /** The conversation's kernel, started (and restored) if needed, with this tool index bound. */
@@ -132,14 +121,7 @@ export class KernelManager {
     const already = this.starting.get(key);
     if (already) return already;
     const starting = (async () => {
-      let session: KernelSession;
-      try {
-        session = await KernelSession.start(launcher.spawn, { startTimeoutMs: this.options.startTimeoutMs });
-      } catch (error) {
-        this.downUntil.set(launcher.id, this.now() + this.downMs);
-        throw error;
-      }
-      this.downUntil.delete(launcher.id);
+      const session = await KernelSession.start(launcher.spawn, { startTimeoutMs: this.options.startTimeoutMs });
       const entry: Entry = { launcherId: launcher.id, session, toolsHash, lastUsed: this.now(), snapshots: true };
       await session.configure(tools);
       if (this.fresh.delete(key)) {

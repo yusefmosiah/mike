@@ -109,7 +109,6 @@ export async function reviewMemory(params: {
     prompt: string;
     tools: readonly OpenAIToolSchema[];
     runTools: NonNullable<StreamChatParams["runTools"]>;
-    readMemory?: () => Promise<string>;
     apiKeys?: UserApiKeys;
     model?: string;
     maxRounds: number;

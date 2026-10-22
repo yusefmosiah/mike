@@ -24,6 +24,7 @@ vi.mock("../../../../lib/memory/prompt", () => ({
 }));
 
 import { runLLMStream, type ClientToolsAdapter } from "../streaming";
+import { localKernelDir, pythonToolNames } from "./pythonToolIndex";
 
 type RunToolsFn = (
   calls: { id: string; name: string; input: Record<string, unknown> }[],
@@ -59,8 +60,11 @@ function baseParams() {
   };
 }
 
+const kernelDir = localKernelDir();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", kernelDir);
   streamChatWithTools.mockResolvedValue({ fullText: "" });
   buildMemoryTurn.mockImplementation(async (args: { systemPrompt: string }) => ({
     message: null as { role: string; content: string } | null,
@@ -124,7 +128,7 @@ describe("runLLMStream client-tool dispatch", () => {
     );
   });
 
-  it("advertises client tool schemas alongside server tools", async () => {
+  it("offers client tools in Python alongside server tools", async () => {
     const adapter: ClientToolsAdapter = {
       schemas: [
         {
@@ -142,7 +146,8 @@ describe("runLLMStream client-tool dispatch", () => {
     await runLLMStream({ ...baseParams(), clientTools: adapter });
 
     const params = streamChatWithTools.mock.calls[0]![0];
-    const names = params.tools.map((tool) => tool.function.name);
+    expect(params.tools.map((tool) => tool.function.name)).toEqual(["run_python"]);
+    const names = pythonToolNames(params as never);
     expect(names).toContain("apply_word_edits");
     expect(names).toContain("read_document");
     // Mirrors DEFAULT_MAX_ROUNDS in llm/pi/runtime.mts; see the note at the

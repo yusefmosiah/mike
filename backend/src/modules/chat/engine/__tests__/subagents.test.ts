@@ -6,6 +6,7 @@ import type { AssistantEvent, SubagentEvent } from "@mike/contracts";
 import type { Db } from "../../../../lib/db";
 import { DELEGATE_TOOL_SUMMARY, type SubagentSpec } from "../../../../lib/llm/types";
 import { isParallelSafeTool } from "../../../../lib/guardrails";
+import { pythonFunctionNames } from "./pythonToolIndex";
 
 const routerModels = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock("../../../../lib/routerModels", async (importOriginal) => ({
@@ -223,9 +224,12 @@ describe("subagent host", () => {
     };
     const tableType: SubagentType = { ...reviewType, name: "table_check", tools: ["read_table_cells"] };
     const generalType: SubagentType = { ...reviewType, name: "general", tools: "all" };
-    const runTools = vi.fn(async (calls: { id: string }[]) =>
-        calls.map((call) => ({ tool_use_id: call.id, content: "Clause 12" })),
-    );
+    const runPython = vi.fn(async () => "Clause 12");
+    const discardKernel = vi.fn();
+    const schema = (name: string) => ({
+        type: "function" as const,
+        function: { name, description: `The ${name} tool.`, parameters: { type: "object", properties: {} } },
+    });
 
     function args(overrides: Partial<SubagentHostArgs> = {}) {
         const writes: string[] = [];
@@ -235,12 +239,22 @@ describe("subagent host", () => {
             userId: "u1",
             chatModel: "chat-model",
             reasoning: "high" as never,
-            runTools,
+            runPython,
+            discardKernel,
             docIndex: {
                 "doc-0": { document_id: "11111111-aaaa", filename: "NDA.docx" },
                 "doc-1": { document_id: "22222222-bbbb", filename: "MSA.pdf" },
             },
-            offeredTools: ["read_document", "list_documents", "edit_document", "web_search", "delegate", "ask_inputs"],
+            offeredTools: [
+                "read_document",
+                "list_documents",
+                "edit_document",
+                "web_search",
+                "delegate",
+                "ask_inputs",
+                "read_memory",
+                "edit_memory",
+            ].map(schema),
             write: (chunk) => writes.push(chunk),
             events,
             types: new Map([
@@ -259,6 +273,7 @@ describe("subagent host", () => {
     it("offers only types whose tools the parent has, with the models table", async () => {
         const { hostArgs } = args();
         const { host, promptSection } = await createSubagentHost(hostArgs);
+        expect(promptSection).toContain("`await tools.delegate(type=..., task=...)`");
         expect(promptSection).toContain("- document_review: Reviews documents.");
         expect(promptSection).not.toContain("table_check");
         expect(promptSection).toContain("omit `model` to use chat-model");
@@ -293,12 +308,14 @@ describe("subagent host", () => {
             type: "document_review",
             model: "chat-model",
             reasoning: "high",
-            tools: ["read_document"],
+            tools: ["run_python"],
             maxRounds: 8,
             maxOutputTokens: 24000,
             timeoutMs: 300000,
         });
         expect(spec.instructions).toMatch(/^You are a reviewer\.\n\nRULES:/);
+        // The child's functions are its type's tools, offered from run_python.
+        expect(pythonFunctionNames(spec.instructions)).toEqual(["read_document"]);
         expect(spec.task).toBe(
             "Find the governing law\n\nDocuments named for this task:\n- doc-1: MSA.pdf\n- doc-0: NDA.docx",
         );
@@ -309,29 +326,44 @@ describe("subagent host", () => {
         expect(other.reasoning).toBeUndefined();
     });
 
-    it("gives a general child every tool the parent has, except delegate and ask_inputs", async () => {
+    it("gives a general child every tool the parent has, except delegate, ask_inputs and memory", async () => {
         const { host, promptSection } = await createSubagentHost(
             args({ types: new Map([[generalType.name, generalType]]) }).hostArgs,
         );
         expect(promptSection).toContain("- general:");
         const spec = (await host.prepare({ type: "general", task: "x" })) as SubagentSpec;
-        expect(spec.tools).toEqual(["read_document", "list_documents", "edit_document", "web_search"]);
+        expect(spec.tools).toEqual(["run_python"]);
+        expect(pythonFunctionNames(spec.instructions)).toEqual([
+            "read_document",
+            "list_documents",
+            "edit_document",
+            "web_search",
+        ]);
     });
 
-    it("runs only the child's own tools through the turn's runner, and answers the rest as unavailable", async () => {
-        runTools.mockClear();
+    it("runs the child's cells in a kernel of its own, refuses other tools, and ends the kernel on cleanup", async () => {
+        runPython.mockClear();
+        discardKernel.mockClear();
         const { host } = await createSubagentHost(args().hostArgs);
         const spec = (await host.prepare({ type: "document_review", task: "x" })) as SubagentSpec;
-        const results = await spec.runTools([
-            { id: "c1", name: "read_document", input: { doc_id: "doc-0" } },
-            { id: "c2", name: "edit_document", input: {} },
-        ]);
-        expect(runTools).toHaveBeenCalledTimes(1);
-        expect(runTools).toHaveBeenCalledWith([{ id: "c1", name: "read_document", input: { doc_id: "doc-0" } }]);
+        const cell = { id: "c1", name: "run_python", input: { code: "await tools.read_document(doc_id='doc-0')" } };
+        const results = await spec.runTools([cell, { id: "c2", name: "read_document", input: { doc_id: "doc-0" } }]);
+        expect(runPython).toHaveBeenCalledTimes(1);
+        expect(runPython).toHaveBeenCalledWith(cell, {
+            key: expect.stringMatching(/^subagent-/),
+            tools: [expect.objectContaining({ name: "read_document" })],
+        });
         expect(results).toEqual([
             { tool_use_id: "c1", content: "Clause 12" },
-            { tool_use_id: "c2", content: JSON.stringify({ error: "Tool 'edit_document' is not available to this subagent." }) },
+            { tool_use_id: "c2", content: JSON.stringify({ error: "Tool 'read_document' is not available to this subagent." }) },
         ]);
+
+        const key = (runPython.mock.calls[0] as unknown as [unknown, { key: string }])[1].key;
+        const other = (await host.prepare({ type: "document_review", task: "y" })) as SubagentSpec;
+        await other.runTools([{ ...cell, id: "c3" }]);
+        expect((runPython.mock.calls[1] as unknown as [unknown, { key: string }])[1].key).not.toBe(key);
+        spec.cleanup!();
+        expect(discardKernel).toHaveBeenCalledWith(key);
     });
 
     it("records a child's start and finish as one event, streamed both times", async () => {

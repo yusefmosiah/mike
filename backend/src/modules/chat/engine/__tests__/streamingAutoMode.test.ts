@@ -87,6 +87,7 @@ vi.mock("../tools/toolDispatcher", () => ({
 }));
 
 import { AssistantStreamError, runLLMStream } from "../streaming";
+import { localKernelDir, pythonToolNames } from "./pythonToolIndex";
 
 type RunToolsFn = (
   calls: { id: string; name: string; input: Record<string, unknown> }[],
@@ -132,8 +133,7 @@ function baseParams() {
 }
 
 function advertisedToolNames(): string[] {
-  const params = streamChatWithTools.mock.calls[0]?.[0];
-  return (params?.tools ?? []).map((tool) => tool.function.name);
+  return pythonToolNames(streamChatWithTools.mock.calls[0]?.[0] as never);
 }
 
 function dispatchedToolNames(): string[] {
@@ -165,8 +165,11 @@ function captureBatch(calls: ToolCallInput[]) {
   return capture;
 }
 
+const kernelDir = localKernelDir();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", kernelDir);
   streamChatWithTools.mockReset();
   runToolCalls.mockReset();
   classifyToolCall.mockReset();

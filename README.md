@@ -81,9 +81,10 @@ carry its own name.
   - A logging proxy is the VM's only way out.
   - Your documents appear read-only under `~/mike`, and files come back as
     new documents or versions.
-- **Code mode.** With a workstation, the assistant works in Python. Its code
-  cells call the same tools it would otherwise call one at a time, and
-  variables persist between cells.
+- **Code mode.** The assistant works in Python, in the account's workstation.
+  Its one tool runs a code cell, the cell calls the assistant's other tools
+  as functions, and variables persist between cells. An account without a
+  workstation has no tools: the assistant answers from the conversation.
 - **A secrets [vault](docs/vault.md)** lets the assistant use a credential
   without the model, the VM or the backend ever holding it.
 

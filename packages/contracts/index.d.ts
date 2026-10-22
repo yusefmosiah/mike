@@ -481,11 +481,11 @@ export type AssistantErrorCode = "invalid_api_key";
  */
 export type CodeApprovalEvent = {
   type: "code_approval";
-  /** The run_command tool call that is waiting. */
+  /** The run_python call that is waiting. */
   call_id: string;
   status: "waiting" | "allowed" | "denied" | "expired";
   host_name: string | null;
-  /** The command, cut at 2,000 characters. */
+  /** The code, cut at 2,000 characters. */
   summary: string;
 };
 

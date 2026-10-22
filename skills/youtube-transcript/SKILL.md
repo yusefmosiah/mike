@@ -6,7 +6,7 @@ description: Turn a YouTube link into a transcript document in Mike, from the vi
 # YouTube transcript
 
 Makes a Markdown transcript of a YouTube video and saves it to Mike as a
-document. It needs the workstation (`run_command` or `run_python`).
+document. It needs the workstation (`run_python`).
 
 ## Steps
 

@@ -100,7 +100,6 @@ let
         } > ${root}/src/.env
         # A private stack reports errors to no one.
         echo "SENTRY_DISABLED=true" >> ${root}/src/.env
-        echo "CODE_MODE_ENABLED=true" >> ${root}/src/.env
       }
 
       deploy() {

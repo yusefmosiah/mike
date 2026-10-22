@@ -259,7 +259,7 @@ export async function runToolCalls(
     userEmail?: string | null;
     /** The turn's model, which check_citations' checker uses by default. */
     model?: string | null;
-    /** The user's workstation VM, resolved once per turn (lib/workstation); run_command needs it. */
+    /** The user's workstation VM, resolved once per turn (lib/workstation); save_to_mike needs it. */
     workstation?: WorkstationTarget | null;
     /**
      * The workstation is this user's own (not a host's, for a guest): their
@@ -267,11 +267,6 @@ export async function runToolCalls(
      * save_to_mike is offered.
      */
     workspaceOwned?: boolean;
-    /**
-     * Runs before a command in someone else's workstation (a guest in a
-     * shared thread): resolves with why it may not run, or null when it may.
-     */
-    workstationGate?: (callId: string, summary: string) => Promise<string | null>;
     /** The conversation, which vault leases are issued for (audit only). */
     chatId?: string | null;
     /** The memory edit_memory may change here; null refuses every call. */
@@ -1893,53 +1888,6 @@ export async function runToolCalls(
           content: JSON.stringify({
             error: err instanceof Error ? err.message : String(err),
           }),
-        });
-      }
-    } else if (tc.function.name === "run_command") {
-      const target = options.workstation ?? null;
-      if (!target) {
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: "No workstation is configured for this user." }),
-        });
-      } else {
-        const refusal = options.workstationGate
-          ? await options.workstationGate(tc.id, String(args.command ?? ""))
-          : null;
-        if (refusal) {
-          toolResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: refusal }) });
-          continue;
-        }
-        const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
-        await snapshotOncePerTurn(turnEditState, target.snapshot);
-        const sync = options.workspaceOwned
-          ? await syncWorkspaceOncePerTurn(turnEditState, db, { id: userId, email: options.userEmail }, target)
-          : null;
-        const result = await runInWorkstation(target, {
-          command: String(args.command ?? ""),
-          cwd: typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined,
-          timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
-        });
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(
-            result.ok
-              ? {
-                  exit_code: result.exitCode,
-                  // Output can carry anything the command fetched or read.
-                  stdout: nonce && result.stdout ? spotlight(result.stdout, nonce) : result.stdout,
-                  stderr: nonce && result.stderr ? spotlight(result.stderr, nonce) : result.stderr,
-                  timed_out: result.timedOut,
-                  truncated: result.truncated,
-                  duration_ms: result.durationMs,
-                  ...(sync && !sync.ok
-                    ? { documents_note: "Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date." }
-                    : {}),
-                }
-              : { error: result.error },
-          ),
         });
       }
     } else if (tc.function.name === "save_to_mike") {

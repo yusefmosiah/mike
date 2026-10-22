@@ -115,33 +115,63 @@ describe("code mode", () => {
     expect(section(offered, "code-mode")).toMatch(/await tools\.read_document\(doc_id: str/);
     expect(section(offered, "code-mode")).toContain("await tools.list_documents(");
 
-    vi.stubEnv("CODE_MODE_ENABLED", "false");
+    // Without a workstation there is nothing to run code in, so no tools.
+    vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", "");
     await runLLMStream(baseParams() as never);
-    const direct = streamChatWithTools.mock.calls[1][0];
-    expect(direct.tools.map((t) => t.function.name)).not.toContain("run_python");
-    expect(direct.tools.map((t) => t.function.name)).toContain("read_document");
-    expect(section(direct, "code-mode")).toBeUndefined();
-    // Falling back to direct tools does not change the system prompt.
-    expect(direct.systemPrompt).toBe(offered.systemPrompt);
+    const none = streamChatWithTools.mock.calls[1][0];
+    expect(none.tools).toEqual([]);
+    expect(section(none, "code-mode")).toBeUndefined();
+    expect(section(none, "no-tools")).toContain("You have no tools in this conversation");
+    expect(none.systemPrompt).toBe(offered.systemPrompt);
   });
 
-  it("runs a guest's turn in the host's workstation, with direct tools until the host allows the thread", async () => {
+  it("puts memory and delegation in Python, never beside run_python", async () => {
+    await runLLMStream({
+      ...baseParams(),
+      includeMemory: true,
+      memoryEdit: { surface: "chat", conversationId: "c1", appWritable: true, projectId: null },
+    } as never);
+    const offered = streamChatWithTools.mock.calls[0][0];
+    expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
+    expect(section(offered, "code-mode")).toContain("await tools.read_memory()");
+    expect(section(offered, "code-mode")).toContain("await tools.edit_memory(scope: ");
+  });
+
+  it("answers tools.delegate with the subagent's report, through the call that ran the cell", async () => {
+    const delegate = vi.fn(async (input: Record<string, unknown>) => ({ content: `Report on ${String(input.task)}`, isError: false }));
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      results = (await params.runTools?.([
+        { ...cell(`print(await tools.delegate(type="general", task="the lease"))`), delegate } as never,
+      ])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), includeSubagents: true } as never);
+    expect(delegate).toHaveBeenCalledWith({ type: "general", task: "the lease" });
+    expect(results[0]!.content).toBe("Report on the lease");
+  });
+
+  it("runs a guest's turn in the host's workstation, asking the host before the first cell until they allow the thread", async () => {
     vi.stubEnv("WORKSTATION_USER_IDS", "host");
     vi.stubEnv("WORKSTATION_SSH_HOST", "127.0.0.1");
     vi.stubEnv("WORKSTATION_SSH_PORT", "2222");
     vi.stubEnv("WORKSTATION_SSH_IDENTITY_FILE", "/keys/dev");
+    const request = vi.fn(async () => "denied" as const);
     const guest = (standing: boolean | null) => ({
       ...baseParams(),
       userId: "guest",
       workstationUserId: "host",
-      guestCode: standing === null ? null : { hostName: "Pat", standing, request: vi.fn() },
+      guestCode: standing === null ? null : { hostName: "Pat", standing, request },
     });
     const names = (n: number) => streamChatWithTools.mock.calls[n][0].tools.map((t) => t.function.name);
 
-    await runLLMStream(guest(false) as never);
-    expect(names(0)).toContain("run_command");
-    expect(names(0)).not.toContain("run_python");
-    expect(section(streamChatWithTools.mock.calls[0][0], "workstation")).toContain("Each run_command asks Pat for permission first");
+    // Not yet allowed: the host is asked before the cell runs, and a refusal
+    // is the cell's answer.
+    const [refused] = await turn([cell("print('hi')")], guest(false));
+    expect(names(0)).toEqual(["run_python"]);
+    expect(section(streamChatWithTools.mock.calls[0][0], "workstation")).toContain("The first run_python in each message asks Pat for permission");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(refused.content).toMatch(/^\[error\]\nPat did not allow running code/);
 
     await runLLMStream(guest(true) as never);
     expect(names(1)).toEqual(["run_python"]);
@@ -150,8 +180,7 @@ describe("code mode", () => {
 
     // A surface that cannot ask the host gives a guest no workstation at all.
     await runLLMStream(guest(null) as never);
-    expect(names(2)).not.toContain("run_command");
-    expect(names(2)).not.toContain("run_python");
+    expect(names(2)).toEqual([]);
   });
 
   it("routes the cell's tool calls through the dispatcher", async () => {

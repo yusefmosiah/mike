@@ -1,6 +1,6 @@
 /**
- * Snapshots before the agent acts: the first `run_command` or `run_python`
- * cell of each turn asks the host to snapshot the workstation's disk, so
+ * Snapshots before the agent acts: the first `run_python` cell of each turn
+ * asks the host to snapshot the workstation's disk, so
  * whatever the turn does (`rm -rf ~` included) can be rolled back to how it
  * started.
  *

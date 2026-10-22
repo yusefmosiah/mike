@@ -46,7 +46,7 @@ ssh -i ~/.ssh/mike-workstation-dev -p 2222 agent@127.0.0.1 python3 --version
 ```
 
 and point the backend at it (`backend/.env.example`, `WORKSTATION_*`): the
-listed users' chat turns get the `run_command` tool.
+listed users' chat turns run `run_python` there.
 
 The dev lanes have open NAT networking and no snapshots: they are for
 building the harness, not a safety boundary. Recovery (host ZFS snapshots)

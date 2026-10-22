@@ -10,8 +10,8 @@ Memory has two separate paths:
 - **Use during chat:** before generating an answer, Mike loads the enabled
   memory files that are safe for that conversation and supplies them to the
   chat model as lower-authority reference context.
-- **Changing it:** the assistant changes memory with the `edit_memory` tool,
-  either during a chat when the person asks it to remember, correct or forget
+- **Changing it:** the assistant changes memory with `edit_memory`, a
+  function it calls from its Python session (`run_python`), either during a chat when the person asks it to remember, correct or forget
   something, or after the chat has gone quiet, when it reviews the
   conversation in the background and keeps what is worth keeping.
 
@@ -113,8 +113,8 @@ permissions, change policy, or trigger tools by itself.
   failures, and a History view of its versions. Viewers can read the file and
   its history, editors can edit and restore, and only owners can change the
   enabled setting.
-- **In a chat**, the assistant can change memory itself with the `edit_memory`
-  tool when the person asks it to remember, correct or forget something. Each
+- **In a chat**, the assistant can change memory itself by calling
+  `edit_memory` from Python when the person asks it to remember, correct or forget something. Each
   change shows in the answer as a blue "Memory updated" row with the
   assistant's one-line summary; it opens that file's version history at the
   version the change made, where the person can compare and restore.
@@ -154,8 +154,11 @@ The fork answers an application message, marked as such, that asks it to
 review the conversation for anything worth keeping, gives the scope policies
 and the current text of each file it may change (and, for app memory, the
 saved profile values to keep out of it), and asks for one closing sentence. It
-may call only `edit_memory`; every other tool of the conversation answers that
-it is unavailable. Its edits are written with source `curator` and the job's
+has the conversation's one tool, `run_python`, but its cells run in a Python
+kernel of the review's own in the person's workstation, where `edit_memory`
+is the only function (`reviewToolRunner` in `modules/memory/memory.curator.ts`).
+A person with no workstation has no tools, so no review runs: the job ends
+with no change. Its edits are written with source `curator` and the job's
 fences, so a conversation that resumes (`memory_conversation_not_quiet`) stops
 the review and defers the job, and a reset file drops out of it.
 
@@ -251,7 +254,7 @@ otherwise fails with a reason the model can act on.
 `project`), a list of exact replacements (`old_text` matching one place, or
 empty to append) and a summary. It applies them to the file as it is now and
 writes through `write_memory_file` with source `assistant`, retrying once
-against newer text if another write won the race. The tool is offered only
+against newer text if another write won the race. The function is offered only
 when the conversation may change some memory — the same scopes the curator
 may write for it: app memory in the person's own private conversation, and a
 project's memory when they hold `content.edit` there. A delegated subagent

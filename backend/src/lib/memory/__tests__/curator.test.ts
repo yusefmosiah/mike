@@ -60,10 +60,11 @@ describe("memory review prompt", () => {
     expect(prompt).toMatch(/^\[Memory review\] This message comes from the application/);
     expect(prompt).toContain('Only "app" memory may be changed now.');
     expect(prompt).toContain('Scope "app" is the person\'s private memory');
-    expect(prompt).not.toContain('Scope "project"');
+    expect(prompt).not.toContain("Keep only durable matter facts");
     expect(prompt).toMatch(/<app-memory-[0-9a-f-]+>\n- Prefers British spelling\.\n<\/app-memory-/);
     expect(prompt).toMatch(/<saved-profile-[0-9a-f-]+>\n\{"organisation":"Acme"\}/);
-    expect(prompt).toContain("call no other tool");
+    expect(prompt).toContain("call no other tool or function");
+    expect(prompt).toMatch(/await tools\.edit_memory\(scope: /);
   });
 
   it("says when it is looking at the context a compaction replaced", () => {

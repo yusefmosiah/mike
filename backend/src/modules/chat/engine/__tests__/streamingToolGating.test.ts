@@ -42,6 +42,7 @@ vi.mock("../tools/toolDispatcher", () => ({
 }));
 
 import { runLLMStream } from "../streaming";
+import { localKernelDir, pythonToolNames } from "./pythonToolIndex";
 import { PROJECT_EXTRA_TOOLS } from "../tools/toolSchemas";
 
 type RunToolsFn = (
@@ -77,10 +78,7 @@ function baseParams() {
 }
 
 function advertisedToolNames(): string[] {
-  const params = streamChatWithTools.mock.calls[0]?.[0] as {
-    tools: { function: { name: string } }[];
-  };
-  return params.tools.map((tool) => tool.function.name);
+  return pythonToolNames(streamChatWithTools.mock.calls[0]?.[0] as never);
 }
 
 const WRITERS = [
@@ -91,8 +89,11 @@ const WRITERS = [
   "generate_ppt",
 ];
 
+const kernelDir = localKernelDir();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", kernelDir);
   streamChatWithTools.mockResolvedValue({ fullText: "" });
 });
 

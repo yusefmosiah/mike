@@ -13,8 +13,8 @@ export const RUN_PYTHON_TOOL = "run_python";
 export const DEFAULT_CELL_TIMEOUT_MS = 300_000;
 export const MAX_CELL_TIMEOUT_MS = 60 * 60_000;
 
-/** Tools never offered inside Python: run_python itself, and run_command, which subprocess replaces. */
-export const NOT_IN_PYTHON: ReadonlySet<string> = new Set([RUN_PYTHON_TOOL, "run_command"]);
+/** Tools never offered inside Python: run_python itself. */
+export const NOT_IN_PYTHON: ReadonlySet<string> = new Set([RUN_PYTHON_TOOL]);
 
 export const RUN_PYTHON_SCHEMA = {
   type: "function",
@@ -139,9 +139,9 @@ const indent = (text: string) =>
 
 /**
  * How the model works in code mode. It reaches the model as turn context
- * (lib/llm/turnContext.ts), not in the system prompt, because a turn falls
- * back to direct tools when the kernel cannot start; it says how each rule of
- * the base prompt, written for direct tool calls, maps onto run_python.
+ * (lib/llm/turnContext.ts), not in the system prompt, because a user with no
+ * workstation has no tools; it says how each rule of the base prompt, written
+ * in terms of tool calls, maps onto run_python.
  */
 export const CODE_MODE_GUIDE = `CODE MODE:
 You work through one tool, run_python. It runs Python in a persistent kernel on the user's own workstation: a Linux machine with a home directory that persists (/home/agent), internet access, and common data libraries (pandas, openpyxl, python-docx and requests; try an import before relying on others). Shell commands run through subprocess.

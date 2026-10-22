@@ -61,6 +61,12 @@ export type NormalizedToolCall = {
     id: string;
     name: string;
     input: Record<string, unknown>;
+    /**
+     * Start a subagent from this call and wait for its report: set on a
+     * parent turn's calls when it may delegate (the code a `run_python` call
+     * runs calls it as `tools.delegate`).
+     */
+    delegate?: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
 };
 
 export type NormalizedToolResult = {
@@ -154,8 +160,6 @@ export type StreamChatParams = {
      * `turn`, which a continuation does not have.
      */
     continuesAnswer?: string;
-    /** Reads the memory this conversation may see, as of now (the memory tool). */
-    readMemory?: () => Promise<string>;
     /**
      * Make this turn survive the process. `context` is the caller's own record
      * of how to drive the turn again (opaque here, JSON only); after a restart
@@ -164,9 +168,9 @@ export type StreamChatParams = {
      */
     durableTurn?: { context: Record<string, unknown>; resume?: boolean };
     /**
-     * Let the model delegate to subagents: offers the `delegate` tool, whose
-     * calls this host checks and reports on. Omitted, there is no delegation
-     * (a child turn never has it: depth 1).
+     * Let the turn delegate to subagents: its tool calls carry `delegate`,
+     * whose children this host checks and reports on. Omitted, there is no
+     * delegation (a child turn never has it: depth 1).
      */
     subagents?: SubagentHost;
     /**
@@ -179,7 +183,7 @@ export type StreamChatParams = {
 
 /** The first line of the delegate tool's description; the host appends the model memo. */
 export const DELEGATE_TOOL_SUMMARY =
-    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with the tools its type allows, and cannot talk to the user. Several delegate calls in one response run at the same time, so split independent work into separate calls.";
+    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with the tools its type allows, and cannot talk to the user. Delegate calls run at the same time when you gather them (`await tools.gather(tools.delegate(...), tools.delegate(...))`), so split independent work into separate calls.";
 
 /**
  * A child the `delegate` tool may start: what the parent turn's host decided
@@ -203,6 +207,8 @@ export type SubagentSpec = {
     timeoutMs: number;
     apiKeys?: UserApiKeys;
     runTools: NonNullable<StreamChatParams["runTools"]>;
+    /** Called once the child has finished, however it ended. */
+    cleanup?: () => void;
 };
 
 /** How a child's run ended, as the parent's host is told. */
@@ -222,9 +228,9 @@ export type SubagentOutcome = {
  */
 export type SubagentHost = {
     /**
-     * The delegate tool's description, model-selection memo included. One
-     * registry serves every user, so it must not vary by user: per-user
-     * choices (types, allowed models) belong in the system prompt.
+     * The delegate tool's description, model-selection memo included. It is
+     * the same for every user: per-user choices (types, allowed models)
+     * belong in the turn context.
      */
     toolDescription: string;
     /** The child's spec, or the refusal the model reads instead. */

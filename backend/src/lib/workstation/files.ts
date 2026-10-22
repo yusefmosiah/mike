@@ -1,6 +1,6 @@
 /**
  * Files in and out of a workstation VM, over the same ssh channel as
- * run_command (goals/mission-16-documents-in-workstation.md).
+ * run_python's kernel (goals/mission-16-documents-in-workstation.md).
  *
  * In: `writeWorkspaceBatch` streams a JSON header line and then the files'
  * bytes to a short Python receiver in the guest, which writes them under
