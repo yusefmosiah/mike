@@ -111,9 +111,10 @@ describe("code mode", () => {
     expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
     // The tool index is turn context; the system prompt never mentions it.
     expect(offered.systemPrompt).not.toContain("TOOLS IN PYTHON:");
-    expect(section(offered, "code-mode")).toContain("TOOLS IN PYTHON:");
-    expect(section(offered, "code-mode")).toMatch(/await tools\.read_document\(doc_id: str/);
-    expect(section(offered, "code-mode")).toContain("await tools.list_documents(");
+    expect(section(offered, "code-mode")).toContain("CODE MODE:");
+    expect(section(offered, "tool-index")).toContain("TOOLS IN PYTHON:");
+    expect(section(offered, "tool-index")).toMatch(/^- read_document\(doc_id, \*, .+\): .+Use before answering/m);
+    expect(section(offered, "tool-index")).toContain("- list_documents(): ");
 
     // Without a workstation there is nothing to run code in, so no tools.
     vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", "");
@@ -121,6 +122,7 @@ describe("code mode", () => {
     const none = streamChatWithTools.mock.calls[1][0];
     expect(none.tools).toEqual([]);
     expect(section(none, "code-mode")).toBeUndefined();
+    expect(section(none, "tool-index")).toBeUndefined();
     expect(section(none, "no-tools")).toContain("You have no tools in this conversation");
     expect(none.systemPrompt).toBe(offered.systemPrompt);
   });
@@ -133,8 +135,8 @@ describe("code mode", () => {
     } as never);
     const offered = streamChatWithTools.mock.calls[0][0];
     expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
-    expect(section(offered, "code-mode")).toContain("await tools.read_memory()");
-    expect(section(offered, "code-mode")).toContain("await tools.edit_memory(scope: ");
+    expect(section(offered, "tool-index")).toContain("- read_memory(): ");
+    expect(section(offered, "tool-index")).toContain("- edit_memory(scope, edits, summary): ");
   });
 
   it("answers tools.delegate with the subagent's report, through the call that ran the cell", async () => {
@@ -153,7 +155,7 @@ describe("code mode", () => {
 
   it("offers a saved chat its history in Python, answered from the call that ran the cell", async () => {
     await runLLMStream(baseParams() as never);
-    expect(section(streamChatWithTools.mock.calls[0][0], "code-mode")).not.toContain("tools.history_search(");
+    expect(section(streamChatWithTools.mock.calls[0][0], "tool-index")).not.toContain("history_search(");
 
     const history = {
       search: vi.fn(async (input: Record<string, unknown>) => ({
@@ -178,8 +180,9 @@ describe("code mode", () => {
       return { fullText: "" };
     });
     await runLLMStream({ ...baseParams(), conversationId: "chat-history" } as never);
-    expect(section(offered!, "code-mode")).toContain("await tools.history_search(query: str");
-    expect(section(offered!, "code-mode")).toContain("await tools.history_read(id: str");
+    // Its line says when to reach for it, not only what it does.
+    expect(section(offered!, "tool-index")).toMatch(/^- history_search\(query, \*, .+\): .+Use when the person refers back/m);
+    expect(section(offered!, "tool-index")).toContain("- history_read(id, *, ");
     expect(history.search).toHaveBeenCalledWith({ query: "escrow agent" });
     expect(results[0]!.content).toContain("m41 found escrow agent");
     expect(results[0]!.content).toContain('refused: history_read: No message "m9" in this conversation.');

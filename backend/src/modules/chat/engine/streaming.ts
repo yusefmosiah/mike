@@ -87,8 +87,9 @@ import {
   kernelLauncherFor,
   kernels,
   MAX_CELL_TIMEOUT_MS,
+  CODE_MODE_GUIDE,
   pythonSessionPromptSection,
-  pythonToolsPromptSection,
+  pythonToolIndex,
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,
   RUN_PYTHON_TOOL,
@@ -696,10 +697,10 @@ export async function runLLMStream(params: {
     ...(workflowStore
       ? [{ key: "skills", text: skillsPromptSection(workflowStore, { workstation: !!workstation && !isGuest }) }]
       : []),
-    // Code mode: the guide and the tool index, which changes when the tool
-    // set does (a connector added, say).
+    // Code mode: the guide, fixed, and the tool index, which changes only
+    // when the tool set does (a connector added, say), so only it is re-sent.
     ...(codeMode
-      ? [{ key: "code-mode", text: pythonToolsPromptSection(pythonSpecs) }]
+      ? [{ key: "code-mode", text: CODE_MODE_GUIDE }, { key: "tool-index", text: pythonToolIndex(pythonSpecs) }]
       : [{ key: "no-tools", text: NO_TOOLS_PROMPT }]),
     ...(pythonSession ? [{ key: "python-session", text: pythonSession }] : []),
     ...(isGuest && workstation

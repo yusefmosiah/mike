@@ -17,7 +17,13 @@ import { randomUUID } from "node:crypto";
 import { Capped } from "../../workstation/exec";
 import { KERNEL_PROTOCOL_VERSION, LineSplitter, parseKernelEvent, type KernelEvent } from "./protocol";
 
-export type KernelToolSpec = { name: string; description?: string; parameters?: unknown };
+export type KernelToolSpec = {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+  /** The tool index's one line for it (toolStubs.ts), which tools.search shows. */
+  summary?: string;
+};
 
 /** What the harness answers a host request with (PROTOCOL.md, "Host requests"). */
 export type HostReply =

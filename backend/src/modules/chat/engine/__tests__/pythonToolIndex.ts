@@ -12,12 +12,17 @@ export function localKernelDir(): string {
   return mkdtempSync(path.join(tmpdir(), "mike-kernel-"));
 }
 
-/** The functions a prompt's Python index lists. */
+/** The functions a prompt's Python index lists: one line each, or a connector's names on one line. */
 export function pythonFunctionNames(text: string): string[] {
-  return [...text.matchAll(/^await tools\.(\w+)\(/gm)].map((match) => match[1]!);
+  const index = text.slice(text.indexOf("TOOLS IN PYTHON:"));
+  const names = [
+    ...[...index.matchAll(/^\s*- (\w+)\(/gm)].map((match) => match[1]!),
+    ...[...index.matchAll(/^- .+, \d+ functions: (.+)$/gm)].flatMap((match) => match[1]!.split(", ")),
+  ];
+  return [...new Set(names)];
 }
 
-/** The functions a turn's Python has, from its code-mode turn context. */
+/** The functions a turn's Python has, from its tool-index turn context. */
 export function pythonToolNames(params: { turnContext?: { key: string; text: string }[] } | undefined): string[] {
-  return pythonFunctionNames(params?.turnContext?.find((section) => section.key === "code-mode")?.text ?? "");
+  return pythonFunctionNames(params?.turnContext?.find((section) => section.key === "tool-index")?.text ?? "");
 }

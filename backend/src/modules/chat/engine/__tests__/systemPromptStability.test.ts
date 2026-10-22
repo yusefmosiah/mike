@@ -206,6 +206,7 @@ describe("the chat system prompt", () => {
       "memory-audience",
       "skills",
       "code-mode",
+      "tool-index",
       "python-session",
       "subagents",
     ]);
@@ -216,8 +217,9 @@ describe("the chat system prompt", () => {
     expect(section(call, "documents")).toContain("board memo.docx");
     expect(section(call, "memory-audience")).toContain("CURRENT MEMORY AUDIENCE: SHARED");
     expect(section(call, "skills")).toContain("nda-triage");
-    expect(section(call, "code-mode")).toContain("TOOLS IN PYTHON:");
-    expect(section(call, "code-mode")).toContain("await tools.crm_lookup(");
+    expect(section(call, "code-mode")).toContain("CODE MODE:");
+    expect(section(call, "tool-index")).toContain("TOOLS IN PYTHON:");
+    expect(section(call, "tool-index")).toMatch(/^- crm_lookup\(/m);
     expect(section(call, "python-session")).toContain("rates, helper");
     expect(section(call, "subagents")).toContain("gpt-5.4");
     // Memory's own content is the thread's first user message, never turn context.
