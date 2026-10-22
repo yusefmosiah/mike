@@ -87,6 +87,7 @@ import {
     partitionSupportedDocumentFiles,
     incomingFiles,
 } from "@/app/lib/documentUploadValidation";
+import { isLongPaste, pastedTextFile } from "@/app/lib/pastedText";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
     AUTOCOMPACT_COMMAND,
@@ -803,11 +804,18 @@ function ChatInputForChatImpl(
     const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const el = event.currentTarget;
         if (!composerOpen || event.clipboardData.files.length > 0) return;
+        const pasted = event.clipboardData.getData("text/plain");
+        // A long paste is attached as a document (lib/pastedText).
+        if (isLongPaste(pasted)) {
+            event.preventDefault();
+            const taken = [...attachedDocs, ...uploadingFiles].map((file) => file.filename);
+            void handleDroppedFiles([pastedTextFile(pasted, taken)]);
+            return;
+        }
         // Preserve spacing when inserting into an existing sentence or code.
         const replacesMessage = !el.value.trim()
             || (el.selectionStart === 0 && el.selectionEnd === el.value.length);
         if (!replacesMessage) return;
-        const pasted = event.clipboardData.getData("text/plain");
         const trimmed = pasted.trim();
         if (!pasted || pasted === trimmed) return;
         event.preventDefault();

@@ -165,6 +165,20 @@ describe("ChatInput canSend gating", () => {
         expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     });
 
+    it("attaches a long paste as a text document, as a dropped file would be, and leaves the message to the person", async () => {
+        vi.mocked(uploadProjectDocuments).mockResolvedValue([]);
+        const user = userEvent.setup();
+        renderInput(true);
+        const input = screen.getByRole("combobox");
+        await user.click(input);
+        await user.paste(`Clause 1. ${"The supplier gives notice in writing. ".repeat(120)}`);
+        expect(input).toHaveValue("");
+        await waitFor(() => expect(uploadProjectDocuments).toHaveBeenCalledOnce());
+        const [, [uploaded]] = vi.mocked(uploadProjectDocuments).mock.calls[0]!;
+        expect(uploaded!.file.name).toBe("Pasted text.txt");
+        expect(await uploaded!.file.text()).toMatch(/^Clause 1\. The supplier/);
+    });
+
     it("renders a read-only composer when canSend is false", () => {
         renderInput(false);
 
