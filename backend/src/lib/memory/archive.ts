@@ -1,7 +1,7 @@
 import { checkProjectAccess, listAccessibleProjectIds } from "../access";
 import { chunkArray } from "../arrays";
 import type { Db } from "../dbq/types";
-import { getMemoryCurrent } from "./files";
+import { getMemoryCurrent, type MemoryFileRow } from "./files";
 
 const PROJECT_BATCH_SIZE = 200;
 
@@ -43,8 +43,28 @@ async function loadProjectLabels(
   );
 }
 
+/** A file's versions, oldest first, as `versions/0001-<source>.md` beside it. */
+async function addVersions(
+  zip: { file(path: string, content: string): unknown },
+  db: Db,
+  file: MemoryFileRow,
+  directory: string,
+): Promise<void> {
+  const { data, error } = await db
+    .from("memory_file_versions")
+    .select("version_number, source, content")
+    .eq("memory_file_id", file.id)
+    .order("version_number", { ascending: true });
+  if (error) throw new Error("Failed to load memory versions for export");
+  for (const version of (data ?? []) as { version_number: number; source: string; content: string }[]) {
+    const number = String(version.version_number).padStart(4, "0");
+    zip.file(`${directory}/versions/${number}-${version.source}.md`, version.content ?? "");
+  }
+}
+
 /** Build a ZIP containing the caller's app memory and every project memory
- * they can still view when the background export actually runs. */
+ * they can still view when the background export actually runs, each with
+ * its earlier versions. */
 export async function buildMemoryArchive(
   db: Db,
   userId: string,
@@ -54,6 +74,7 @@ export async function buildMemoryArchive(
   const zip = new JSZip();
   const appMemory = await getMemoryCurrent(db, "user", userId);
   zip.file("app/memory.md", appMemory.current.content);
+  await addVersions(zip, db, appMemory.file, "app");
 
   const projectIds = await listAccessibleProjectIds(userId, userEmail, db);
   const projects = await loadProjectLabels(db, projectIds);
@@ -66,6 +87,7 @@ export async function buildMemoryArchive(
     const safeId = project.id.replace(/[^a-zA-Z0-9-]/g, "") || "project";
     const directory = `${archiveSegment(project.name ?? "project")}--${safeId}`;
     zip.file(`projects/${directory}/memory.md`, memory.current.content);
+    await addVersions(zip, db, memory.file, `projects/${directory}`);
   }
 
   return zip.generateAsync({

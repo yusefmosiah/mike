@@ -168,8 +168,9 @@ describe.each(sources)("%s direct memory writes", (_name, sql) => {
 
 describe.each(sources)("%s inline memory schema", (_name, sql) => {
   it("never creates the superseded object-storage model", () => {
+    // memory_file_versions is back (20261022_01) as rows holding the body
+    // itself, not as the object-storage model it once named.
     for (const gone of [
-      "memory_file_versions",
       "memory_object_candidates",
       "memory.candidate_cleanup",
       "claim_memory_upload_candidate",
@@ -184,6 +185,39 @@ describe.each(sources)("%s inline memory schema", (_name, sql) => {
     expect(table).not.toContain("current_version_id");
     expect(table).toContain("content text not null default ''");
     expect(table).toContain("last_source_job_id uuid");
+  });
+});
+
+const versionsMigration = readFileSync(
+  resolve(backendRoot, "migrations/20261022_01_memory_file_versions.sql"),
+  "utf8",
+);
+
+describe.each([
+  ["schema", schemaSql],
+  ["versions migration", versionsMigration],
+] as const)("%s memory versions", (_name, sql) => {
+  it("records every write as a version holding its body", () => {
+    expect(sql).toContain("create table if not exists public.memory_file_versions");
+    expect(sql).not.toMatch(/memory_file_versions[\s\S]{0,400}storage_path/);
+    expect(functionBody(sql, "write_memory_file")).toContain("perform public.record_memory_file_version(");
+    const record = functionBody(sql, "record_memory_file_version");
+    expect(record).toContain("interval '10 minutes'");
+    expect(record).toContain("latest.revision = p_revision - 1");
+  });
+
+  it("keeps the history when memory is turned off and deletes it with the memory", () => {
+    const wipe = functionBody(sql, "wipe_memory_file");
+    expect(wipe).toContain("p_delete_history boolean default false");
+    expect(wipe).toContain("delete from public.memory_file_versions where memory_file_id = target.id");
+    expect(functionBody(sql, "delete_user_private_memories")).toContain(
+      "perform public.wipe_memory_file(target.id, null, p_user_id, 'wipe', true);",
+    );
+  });
+
+  it("keeps the versions table and its functions service-only", () => {
+    expect(sql).toContain("revoke all on public.memory_file_versions from public, anon, authenticated;");
+    expect(sql).toMatch(/revoke all on function public\.record_memory_file_version\([^)]*\)\s+from public, anon, authenticated;/);
   });
 });
 

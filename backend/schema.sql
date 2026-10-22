@@ -5033,6 +5033,97 @@ create unique index if not exists memory_files_user_unique
 create unique index if not exists memory_files_project_unique
   on public.memory_files(project_id);
 
+create table if not exists public.memory_file_versions (
+  id uuid primary key default gen_random_uuid(),
+  memory_file_id uuid not null references public.memory_files(id) on delete cascade,
+  version_number integer not null check (version_number > 0),
+  -- The file revision this version became (a coalesced editor version
+  -- advances with each save it absorbs).
+  revision bigint not null check (revision >= 0),
+  content text not null default '',
+  content_sha256 text check (
+    content_sha256 is null or content_sha256 ~ '^[0-9a-f]{64}$'
+  ),
+  size_bytes integer not null default 0
+    check (size_bytes >= 0 and size_bytes <= 16384),
+  source text not null
+    check (source in ('manual', 'curator', 'restore', 'settings', 'wipe')),
+  change_summary text check (change_summary is null or char_length(change_summary) <= 500),
+  updated_by uuid references auth.users(id) on delete set null,
+  source_chat_id uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint memory_file_versions_number_unique unique (memory_file_id, version_number)
+);
+create index if not exists memory_file_versions_file_idx
+  on public.memory_file_versions(memory_file_id, version_number desc);
+alter table public.memory_file_versions enable row level security;
+revoke all on public.memory_file_versions from public, anon, authenticated;
+grant select, insert, update, delete on public.memory_file_versions to service_role;
+
+-- Records a write as a version: the body as it became, who or what wrote it,
+-- and why. The person's own editor saves within ten minutes of each other,
+-- with nothing else written between them, are one version. The newest 200
+-- versions of a file are kept. Callers hold the memory_files row lock, which
+-- serializes version numbers.
+create or replace function public.record_memory_file_version(
+  p_memory_file_id uuid,
+  p_revision bigint,
+  p_content text,
+  p_content_sha256 text,
+  p_size_bytes integer,
+  p_source text,
+  p_change_summary text,
+  p_updated_by uuid,
+  p_source_chat_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  latest public.memory_file_versions%rowtype;
+begin
+  select * into latest from public.memory_file_versions
+  where memory_file_id = p_memory_file_id
+  order by version_number desc
+  limit 1
+  for update;
+
+  if found
+    and p_source = 'manual'
+    and latest.source = 'manual'
+    and latest.updated_by is not distinct from p_updated_by
+    and latest.revision = p_revision - 1
+    and latest.updated_at > now() - interval '10 minutes'
+  then
+    update public.memory_file_versions
+    set revision = p_revision,
+        content = p_content,
+        content_sha256 = p_content_sha256,
+        size_bytes = p_size_bytes,
+        updated_at = now()
+    where id = latest.id;
+    return;
+  end if;
+
+  insert into public.memory_file_versions(
+    memory_file_id, version_number, revision, content, content_sha256,
+    size_bytes, source, change_summary, updated_by, source_chat_id
+  ) values (
+    p_memory_file_id, coalesce(latest.version_number, 0) + 1, p_revision,
+    p_content, p_content_sha256, p_size_bytes, p_source,
+    nullif(btrim(coalesce(p_change_summary, '')), ''), p_updated_by,
+    p_source_chat_id
+  );
+
+  delete from public.memory_file_versions
+  where memory_file_id = p_memory_file_id
+    and version_number <= coalesce(latest.version_number, 0) + 1 - 200;
+end;
+$$;
+
 create table if not exists public.memory_consolidation_states (
   id uuid primary key default gen_random_uuid(),
   surface text not null check (surface in ('chat', 'word', 'tabular')),
@@ -5826,7 +5917,8 @@ create or replace function public.write_memory_file(
   p_consolidation_state_id uuid default null,
   p_consolidation_generation bigint default null,
   p_conversation_generation bigint default null,
-  p_source_epoch bigint default null
+  p_source_epoch bigint default null,
+  p_change_summary text default null
 )
 returns table(applied boolean, new_revision bigint)
 language plpgsql
@@ -5838,7 +5930,7 @@ declare
   consolidation public.memory_consolidation_states%rowtype;
   activity public.memory_conversation_activity%rowtype;
 begin
-  if p_source not in ('manual', 'curator') then
+  if p_source not in ('manual', 'curator', 'restore') then
     raise exception using errcode = '22023', message = 'invalid_memory_source';
   end if;
   if p_size_bytes < 0 or p_size_bytes > 16384 then
@@ -5967,15 +6059,21 @@ begin
       size_bytes = p_size_bytes,
       revision = target.revision + 1,
       status = case
-        when p_source = 'manual' and target.status = 'failed' then 'idle'
+        when p_source in ('manual', 'restore') and target.status = 'failed' then 'idle'
         else target.status
       end,
       last_error_code = null,
-      last_source = p_source,
+      -- A restore is the person's own write of an earlier version.
+      last_source = case when p_source = 'restore' then 'manual' else p_source end,
       last_source_job_id = p_source_job_id,
       updated_by = p_updated_by,
       updated_at = now()
   where id = p_memory_file_id;
+
+  perform public.record_memory_file_version(
+    target.id, target.revision + 1, p_content, p_content_sha256, p_size_bytes,
+    p_source, p_change_summary, p_updated_by, p_source_chat_id
+  );
 
   if p_source_job_id is not null then
     insert into public.memory_consolidation_results(
@@ -6003,7 +6101,8 @@ create or replace function public.wipe_memory_file(
   p_memory_file_id uuid,
   p_enabled boolean,
   p_updated_by uuid default null,
-  p_source text default 'wipe'
+  p_source text default 'wipe',
+  p_delete_history boolean default false
 )
 returns table(
   new_epoch bigint,
@@ -6047,6 +6146,16 @@ begin
       updated_by = p_updated_by,
       updated_at = changed_at
   where id = target.id;
+
+  -- Turning memory off keeps what it held as a version, so it can be
+  -- restored; deleting memory deletes its history with it.
+  if p_delete_history then
+    delete from public.memory_file_versions where memory_file_id = target.id;
+  elsif target.content_sha256 is not null then
+    perform public.record_memory_file_version(
+      target.id, target.revision + 1, '', null, 0, p_source, null, p_updated_by, null
+    );
+  end if;
 
   return query select
     target.epoch + 1,
@@ -6107,7 +6216,7 @@ begin
     ) eligible
     order by eligible.id
   loop
-    perform public.wipe_memory_file(target.id, null, p_user_id, 'wipe');
+    perform public.wipe_memory_file(target.id, null, p_user_id, 'wipe', true);
     if target.scope = 'project' then
       deleted_projects := deleted_projects + 1;
     end if;
@@ -6980,9 +7089,11 @@ revoke all on function public.memory_source_allows_app_memory(text, uuid, uuid, 
   from public, anon, authenticated;
 revoke all on function public.fence_memory_conversation_delete()
   from public, anon, authenticated;
-revoke all on function public.write_memory_file(uuid, bigint, bigint, text, text, integer, text, uuid, text, uuid, uuid, uuid, bigint, bigint, bigint)
+revoke all on function public.record_memory_file_version(uuid, bigint, text, text, integer, text, text, uuid, uuid)
   from public, anon, authenticated;
-revoke all on function public.wipe_memory_file(uuid, boolean, uuid, text)
+revoke all on function public.write_memory_file(uuid, bigint, bigint, text, text, integer, text, uuid, text, uuid, uuid, uuid, bigint, bigint, bigint, text)
+  from public, anon, authenticated;
+revoke all on function public.wipe_memory_file(uuid, boolean, uuid, text, boolean)
   from public, anon, authenticated;
 revoke all on function public.delete_user_private_memories(uuid)
   from public, anon, authenticated;
@@ -7322,10 +7433,13 @@ grant execute
 grant execute on function public.fence_memory_conversation_delete()
   to service_role;
 grant execute
-  on function public.write_memory_file(uuid, bigint, bigint, text, text, integer, text, uuid, text, uuid, uuid, uuid, bigint, bigint, bigint)
+  on function public.record_memory_file_version(uuid, bigint, text, text, integer, text, text, uuid, uuid)
   to service_role;
 grant execute
-  on function public.wipe_memory_file(uuid, boolean, uuid, text)
+  on function public.write_memory_file(uuid, bigint, bigint, text, text, integer, text, uuid, text, uuid, uuid, uuid, bigint, bigint, bigint, text)
+  to service_role;
+grant execute
+  on function public.wipe_memory_file(uuid, boolean, uuid, text, boolean)
   to service_role;
 grant execute
   on function public.delete_user_private_memories(uuid)
@@ -8185,5 +8299,6 @@ insert into public.schema_migrations (filename) values
   ('20261012_01_web_reader_snapshots.sql'),
   ('20261013_01_autocompact_tokens.sql'),
   ('20261020_01_dictation_vocabulary.sql'),
-  ('20261020_02_spoken_answers.sql')
+  ('20261020_02_spoken_answers.sql'),
+  ('20261022_01_memory_file_versions.sql')
 on conflict (filename) do nothing;

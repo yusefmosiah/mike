@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   wipeMemoryFile: vi.fn(),
   writeMemoryFile: vi.fn(),
   enableMemoryFile: vi.fn(),
+  listMemoryVersions: vi.fn(),
+  getMemoryVersion: vi.fn(),
 }));
 
 vi.mock("../../middleware/auth", () => ({
@@ -41,6 +43,8 @@ vi.mock("../../lib/memory/files", async (importOriginal) => {
     wipeMemoryFile: (...args: unknown[]) => mocks.wipeMemoryFile(...args),
     writeMemoryFile: (...args: unknown[]) => mocks.writeMemoryFile(...args),
     enableMemoryFile: (...args: unknown[]) => mocks.enableMemoryFile(...args),
+    listMemoryVersions: (...args: unknown[]) => mocks.listMemoryVersions(...args),
+    getMemoryVersion: (...args: unknown[]) => mocks.getMemoryVersion(...args),
   };
 });
 
@@ -142,6 +146,67 @@ describe("scoped memory routes", () => {
     expect(mocks.wipeMemoryFile).toHaveBeenLastCalledWith(
       expect.objectContaining({ enabled: null }),
     );
+  });
+
+  it("deletes the history with the memory, but keeps it when memory is turned off", async () => {
+    await request(testApp()).delete("/user/memory").expect(200);
+    expect(mocks.wipeMemoryFile).toHaveBeenLastCalledWith(expect.objectContaining({ deleteHistory: true }));
+    await request(testApp()).patch("/user/memory/settings").send({ enabled: false }).expect(200);
+    expect(mocks.wipeMemoryFile).toHaveBeenLastCalledWith(expect.not.objectContaining({ deleteHistory: true }));
+  });
+
+  it("lists, reads and restores versions, only of the caller's own file", async () => {
+    const versionId = "00000000-0000-4000-8000-000000000030";
+    const version = {
+      id: versionId,
+      version_number: 1,
+      revision: 1,
+      source: "curator",
+      change_summary: "Remember concise answers",
+      updated_by: null,
+      source_chat_id: null,
+      size_bytes: 9,
+      created_at: "2026-10-22T00:00:00.000Z",
+      updated_at: "2026-10-22T00:00:00.000Z",
+    };
+    mocks.listMemoryVersions.mockResolvedValue([version]);
+    mocks.getMemoryVersion.mockImplementation(async (_db, _file, id) =>
+      id === versionId ? { ...version, content: "# Earlier" } : null,
+    );
+
+    const listed = await request(testApp()).get("/user/memory/versions").expect(200);
+    expect(listed.body).toEqual({ versions: [{ ...version, updated_by_name: null }] });
+    expect(mocks.listMemoryVersions).toHaveBeenCalledWith(expect.anything(), file);
+    const read = await request(testApp()).get(`/user/memory/versions/${versionId}`).expect(200);
+    expect(read.body.content).toBe("# Earlier");
+    await request(testApp()).get("/user/memory/versions/not-a-version").expect(404);
+    await request(testApp()).get("/user/memory/versions/00000000-0000-4000-8000-000000000031").expect(404);
+
+    await request(testApp())
+      .post(`/user/memory/versions/${versionId}/restore`)
+      .send({ expected_revision: 2 })
+      .expect(200);
+    expect(mocks.writeMemoryFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "# Earlier",
+        expectedRevision: 2,
+        source: "restore",
+        changeSummary: "Restored version 1",
+      }),
+    );
+    await request(testApp()).post(`/user/memory/versions/${versionId}/restore`).send({}).expect(400);
+  });
+
+  it("lets project viewers read versions but only editors restore them", async () => {
+    mocks.checkProjectAccess.mockResolvedValue({ ok: true, projectRole: "viewer" });
+    mocks.listMemoryVersions.mockResolvedValue([]);
+    const base = "/projects/00000000-0000-4000-8000-000000000020/memory";
+    await request(testApp()).get(`${base}/versions`).expect(200);
+    await request(testApp())
+      .post(`${base}/versions/00000000-0000-4000-8000-000000000030/restore`)
+      .send({ expected_revision: 2 })
+      .expect(403);
+    expect(mocks.writeMemoryFile).not.toHaveBeenCalled();
   });
 
   it("allows project viewers to read but only editors to write", async () => {

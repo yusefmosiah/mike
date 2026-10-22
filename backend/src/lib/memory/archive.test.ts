@@ -29,19 +29,35 @@ describe("buildMemoryArchive", () => {
           content:
             scope === "user" ? "# App memory" : `# Project ${ownerId}`,
         },
+        file: { id: `file-${ownerId}` },
       }),
     );
+    const versions = (fileId: string) =>
+      fileId === "file-u1"
+        ? [
+            { version_number: 1, source: "manual", content: "# First" },
+            { version_number: 2, source: "curator", content: "# App memory" },
+          ]
+        : [];
     const db = {
-      from: vi.fn(() => ({
-        select: vi.fn(() => ({
-          in: vi.fn(async () => ({
-            data: [
-              { id: "p2", name: "Revoked" },
-              { id: "p1", name: "../Matter/Alpha" },
-            ],
-            error: null,
-          })),
-        })),
+      from: vi.fn((table: string) => ({
+        select: vi.fn(() =>
+          table === "memory_file_versions"
+            ? {
+                eq: vi.fn((_column: string, fileId: string) => ({
+                  order: vi.fn(async () => ({ data: versions(fileId), error: null })),
+                })),
+              }
+            : {
+                in: vi.fn(async () => ({
+                  data: [
+                    { id: "p2", name: "Revoked" },
+                    { id: "p1", name: "../Matter/Alpha" },
+                  ],
+                  error: null,
+                })),
+              },
+        ),
       })),
     };
 
@@ -54,11 +70,13 @@ describe("buildMemoryArchive", () => {
     const fileNames = Object.keys(zip.files).filter(
       (name) => !zip.files[name].dir,
     );
-    const projectFile = fileNames.find((name) => name.includes("--p1/"));
+    const projectFile = fileNames.find((name) => name.includes("--p1/") && name.endsWith("/memory.md"));
 
     expect(await zip.file("app/memory.md")?.async("string")).toBe(
       "# App memory",
     );
+    expect(await zip.file("app/versions/0001-manual.md")?.async("string")).toBe("# First");
+    expect(await zip.file("app/versions/0002-curator.md")?.async("string")).toBe("# App memory");
     expect(projectFile).toBeTruthy();
     expect(projectFile).not.toContain("..");
     expect(projectFile).not.toContain("\\");

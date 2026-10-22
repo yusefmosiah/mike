@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Brain } from "lucide-react";
 import {
     MemoryConflictNotice,
@@ -8,8 +8,10 @@ import {
     memoryActivityLabel,
 } from "@/app/components/memory/MemoryEditorState";
 import { MemoryUpdateFailedPopup } from "@/app/components/memory/MemoryUpdateFailedPopup";
+import { MemoryVersionHistory } from "@/app/components/memory/MemoryVersionHistory";
 import { useMemoryFileController } from "@/app/components/memory/useMemoryFileController";
 import { Modal } from "@/app/components/modals/Modal";
+import { ModalSegmentedToggle } from "@/app/components/modals/ModalSegmentedToggle";
 import { ConfirmPopup } from "@/app/components/popups/ConfirmPopup";
 import { EmptyState } from "@/app/components/ui/empty-state";
 import { FieldLabel } from "@/app/components/ui/form-field";
@@ -54,6 +56,11 @@ export function ProjectMemoryModal({
     const [closing, setClosing] = useState(false);
     const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
     const [savedNotice, setSavedNotice] = useState<string | null>(null);
+    const [view, setView] = useState<"memory" | "history">("memory");
+    const fileRef = useMemo(
+        () => ({ scope: "project" as const, projectId }),
+        [projectId],
+    );
     const loadMemory = useCallback(
         (signal?: AbortSignal) => getProjectMemory(projectId, signal),
         [projectId],
@@ -113,6 +120,7 @@ export function ProjectMemoryModal({
             setSettingsMutation(null);
             setDisableMemoryConfirmOpen(false);
             setDiscardConfirmOpen(false);
+            setView("memory");
         }
     }, [open]);
 
@@ -184,10 +192,24 @@ export function ProjectMemoryModal({
                 "Project Memory",
             ]}
             headerAction={
-                memory?.enabled && memoryActivityLabel(memory) ? (
-                    <p className="text-xs text-gray-400" role="status">
-                        {memoryActivityLabel(memory)}
-                    </p>
+                memory?.enabled ? (
+                    <div className="flex flex-wrap items-center justify-end gap-3">
+                        {memoryActivityLabel(memory) ? (
+                            <p className="text-xs text-gray-400" role="status">
+                                {memoryActivityLabel(memory)}
+                            </p>
+                        ) : null}
+                        <ModalSegmentedToggle
+                            value={view}
+                            onChange={setView}
+                            options={[
+                                { value: "memory", label: "Memory" },
+                                { value: "history", label: "History" },
+                            ]}
+                            size="sm"
+                            disabled={closing || settingsMutation !== null}
+                        />
+                    </div>
                 ) : undefined
             }
             footerStatus={
@@ -274,7 +296,22 @@ export function ProjectMemoryModal({
                             />
                         </div>
 
-                        {!memory.enabled ? (
+                        {memory.enabled && view === "history" ? (
+                            <MemoryVersionHistory
+                                fileRef={fileRef}
+                                current={memory}
+                                canRestore={canEdit}
+                                restoreBlockedReason={
+                                    dirty || autosave.inFlight
+                                        ? "Your latest edits are still saving. You can restore once they are saved."
+                                        : null
+                                }
+                                onRestored={(current) => {
+                                    syncCurrent(current);
+                                    setSavedNotice(null);
+                                }}
+                            />
+                        ) : !memory.enabled ? (
                             <GlassCardUI>
                                 <EmptyState
                                     icon={<Brain />}
@@ -333,7 +370,7 @@ export function ProjectMemoryModal({
             <ConfirmPopup
                 open={disableMemoryConfirmOpen}
                 title="Turn off project memory?"
-                message={`This will delete the existing project memory.md file${dirty ? " and your unsaved draft" : ""}, cancel pending memory updates, and stop future memory updates until you turn project memory on again.`}
+                message={`This will clear the project memory.md file${dirty ? " and discard your unsaved draft" : ""}, cancel pending memory updates, and stop future memory updates until you turn project memory on again. Earlier versions stay in the version history.`}
                 confirmLabel="Disable"
                 confirmVariant="danger"
                 confirmStatus={

@@ -166,8 +166,11 @@ export async function writeMemoryFile(args: {
   file: MemoryFileRow;
   content: string;
   expectedRevision: number;
-  source: MemorySource;
+  /** "restore" is the person writing an earlier version back. */
+  source: MemorySource | "restore";
   updatedBy: string | null;
+  /** Why the file changed, kept with the version. */
+  changeSummary?: string | null;
   sourceSurface?: MemorySurface | null;
   sourceChatId?: string | null;
   sourceJobId?: string | null;
@@ -207,6 +210,7 @@ export async function writeMemoryFile(args: {
     p_consolidation_generation: args.consolidationGeneration ?? null,
     p_conversation_generation: args.conversationGeneration ?? null,
     p_source_epoch: args.sourceEpoch ?? null,
+    p_change_summary: args.changeSummary ?? null,
   });
   if (error) {
     const message = error.message ?? "";
@@ -257,12 +261,15 @@ export async function wipeMemoryFile(args: {
   enabled: boolean | null;
   updatedBy: string | null;
   source?: "wipe" | "settings";
+  /** Delete the file's versions too; otherwise what it held is kept as one. */
+  deleteHistory?: boolean;
 }): Promise<MemoryCurrent> {
   const { data, error } = await args.db.rpc("wipe_memory_file", {
     p_memory_file_id: args.file.id,
     p_enabled: args.enabled,
     p_updated_by: args.updatedBy,
     p_source: args.source ?? "wipe",
+    p_delete_history: args.deleteHistory ?? false,
   });
   if (error) throw new Error("Failed to wipe memory");
   const result = Array.isArray(data) ? data[0] : data;
@@ -322,4 +329,58 @@ export async function enableMemoryFile(
         ? result.mutation_at
         : new Date().toISOString(),
   };
+}
+
+/** One saved state of a memory file (memory_file_versions). */
+export type MemoryVersion = {
+  id: string;
+  version_number: number;
+  revision: number;
+  source: "manual" | "curator" | "restore" | "settings" | "wipe";
+  change_summary: string | null;
+  updated_by: string | null;
+  source_chat_id: string | null;
+  size_bytes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+const VERSION_COLUMNS =
+  "id, version_number, revision, source, change_summary, updated_by, source_chat_id, size_bytes, created_at, updated_at";
+
+function versionFromRow(row: Record<string, unknown>): MemoryVersion {
+  return {
+    ...(row as MemoryVersion),
+    version_number: numberValue(row.version_number as number | string),
+    revision: numberValue(row.revision as number | string),
+  };
+}
+
+/** A file's versions, newest first, without their bodies. */
+export async function listMemoryVersions(db: Db, file: MemoryFileRow): Promise<MemoryVersion[]> {
+  const { data, error } = await db
+    .from("memory_file_versions")
+    .select(VERSION_COLUMNS)
+    .eq("memory_file_id", file.id)
+    .order("version_number", { ascending: false });
+  if (error) throw new Error("Failed to load memory versions");
+  return ((data ?? []) as Record<string, unknown>[]).map(versionFromRow);
+}
+
+/** One version of the file with its body, or null when the file has no such version. */
+export async function getMemoryVersion(
+  db: Db,
+  file: MemoryFileRow,
+  versionId: string,
+): Promise<(MemoryVersion & { content: string }) | null> {
+  const { data, error } = await db
+    .from("memory_file_versions")
+    .select(`${VERSION_COLUMNS}, content`)
+    .eq("memory_file_id", file.id)
+    .eq("id", versionId)
+    .maybeSingle();
+  if (error) throw new Error("Failed to load memory version");
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  return { ...versionFromRow(row), content: String(row.content ?? "") };
 }

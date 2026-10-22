@@ -849,6 +849,7 @@ export async function runMemoryCuratorScope(
               expectedRevision: args.current.revision,
               source: "curator",
               updatedBy: args.actorUserId,
+              changeSummary: changeSummary.trim(),
               sourceSurface: args.surface,
               sourceChatId: args.conversationId,
               sourceJobId: args.jobId,

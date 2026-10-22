@@ -543,9 +543,8 @@ describe("scope-bound memory curator tool", () => {
         sourceJobId: "job",
       }),
     );
-    // The tool still demands a rationale so the model has to justify the
-    // rewrite, but nothing stores it: the file keeps only its current body.
-    expect(svc.write.mock.calls[0]![0]).not.toHaveProperty("changeSummary");
+    // The rationale is kept with the version the write creates.
+    expect(svc.write.mock.calls[0]![0]).toHaveProperty("changeSummary", "Remember concise response preference");
     expect(
       Object.keys(
         MEMORY_CURATOR_WRITE_TOOL.function.parameters.properties as object,

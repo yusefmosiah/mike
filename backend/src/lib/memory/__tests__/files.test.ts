@@ -248,6 +248,7 @@ describe("direct memory file writes", () => {
       p_enabled: null,
       p_updated_by: "user-1",
       p_source: "settings",
+      p_delete_history: false,
     });
     expect(current).toMatchObject({
       enabled: false,

@@ -67,8 +67,8 @@ the answer being shown to the user.
   `access.manage` can enable or destructively disable it.
 - Both scopes are on by default: a new account's app memory is enabled when
   the account is created, and a new project's shared memory is enabled unless
-  its creator clears the toggle. Turning either off is destructive — see
-  "Disable, wipe, and deletion".
+  its creator clears the toggle. Turning either off clears the file but keeps
+  its version history — see "Disable, wipe, and deletion".
 - A user's own standalone main chats and durable Word add-in chats may update
   app memory. Chats and tabular reviews in a private personal project may
   update both app and project memory. A conversation is private only while it
@@ -96,21 +96,26 @@ permissions, change policy, or trigger tools by itself.
 - **Settings > Memory** contains the app-memory toggle and its `memory.md`
   editor. The file saves automatically after the user stops typing; there are
   no Save or Cancel buttons. Turning memory off requires confirmation and
-  deletes the existing file while cancelling pending and future updates.
+  clears the file while cancelling pending and future updates; earlier
+  versions stay in its history. **Version history** lists every saved version
+  with who or what made it, shows each as changes from the one before or as
+  full text, and restores an earlier one.
 - The same settings page contains the default applied when that user creates a
   project. New projects default to memory on, but the creator can change the
   value during project creation.
 - **Project Memory** is a normal-size modal available from a project and from
   the project assistant chat menu. It contains the project-memory toggle,
   current file, automatic-save state, curation activity, conflicts, and
-  failures. Viewers can read, editors can edit, and only owners can change the
+  failures, and a History view of its versions. Viewers can read the file and
+  its history, editors can edit and restore, and only owners can change the
   enabled setting.
 - **Settings > Model Preferences** contains the memory-curation model selector.
   Automatic mode uses the effective model selected for the conversation. A
   deployment-wide `MEMORY_CURATOR_MODEL` override takes precedence.
 - **Settings > Privacy & Data** can export the app file plus every project file
-  the user can still view as a ZIP. Its Delete Memory action clears app memory
-  and memories for private projects created by that user, while leaving memory
+  the user can still view, with their versions, as a ZIP. Its Delete Memory
+  action clears app memory and memories for private projects created by that
+  user, and deletes their version history, while leaving memory
   enabled so future eligible conversations can rebuild it. It does not erase
   organization or otherwise shared project memory.
 
@@ -166,11 +171,33 @@ and document metadata are not treated as memory evidence.
 
 Each memory file is one `memory_files` row that carries the canonical UTF-8
 Markdown body itself, alongside its SHA-256, size, settings, provenance, job
-receipts, and scheduling fences. There is no history: an editor save and a
-curator update both replace the body in place. `revision` is a monotonic
-change token for compare-and-swap — no value of it is retained. Content is
-normalized to LF, raw executable HTML and unsafe control characters are
-rejected, and a file may contain at most 16 KiB.
+receipts, and scheduling fences. An editor save and a curator update both
+replace the body in place; `revision` is a monotonic change token for
+compare-and-swap. Content is normalized to LF, raw executable HTML and unsafe
+control characters are rejected, and a file may contain at most 16 KiB.
+
+### Versions
+
+Every write also records a row in `memory_file_versions`, inside the same
+transaction (`record_memory_file_version`, called by `write_memory_file` and
+`wipe_memory_file`). A version keeps the body, its hash and size, the source
+(`manual`, `curator`, `restore`, `settings`, `wipe`), who made it, the chat it
+came from, and for a curator update its change summary.
+
+Editor autosaves are coalesced: a manual save by the same person that directly
+follows their own manual version (the version's revision is the one before)
+within ten minutes updates that version instead of adding one, so a typing
+session is one version rather than dozens. Any other write starts a new
+version. Each file keeps its newest 200 versions.
+
+Restoring writes the old body as a new version (source `restore`, summary
+"Restored version N") through the same compare-and-swap, so nothing is
+rewritten and a restore made against a stale revision is refused. Turning
+memory off records an empty version and keeps the history; Delete Memory in
+Privacy & Data, account deletion, and project deletion remove it. Users read
+versions through `GET /user/memory/versions`, `GET .../versions/:id`, and
+`POST .../versions/:id/restore` (and the same under `/projects/:id/memory`,
+where reading needs `project.view` and restoring needs `content.edit`).
 
 Manual and curator writes use compare-and-swap. `write_memory_file` takes the
 file's row lock, re-checks the expected revision and epoch, and updates the
@@ -181,14 +208,15 @@ reloads and regenerates rather than overwriting newer content.
 
 ## Disable, wipe, and deletion
 
-Disabling memory is destructive. It fences queued and in-flight work, empties
-the body under the file's row lock, and advances both the epoch and the
-learning cutoff. Re-enabling starts with a blank file and learns only from
-later completed turns.
+Disabling memory fences queued and in-flight work, empties the body under the
+file's row lock, records the empty version, and advances both the epoch and
+the learning cutoff. Earlier versions stay in the history and can be restored
+once memory is on again. Re-enabling starts with a blank file and learns only
+from later completed turns.
 
 Clearing a file in its editor saves an empty Markdown body without disabling
-memory. The Privacy & Data bulk-delete action similarly purges eligible private
-files while preserving their enabled setting, so future conversations may
+memory. The Privacy & Data bulk-delete action purges eligible private files and
+their version history while preserving their enabled setting, so future conversations may
 recreate them. Account deletion purges the user's app memory. Project deletion
 purges that project's shared memory; deleting a contributor does not delete
 project memory.
@@ -219,7 +247,8 @@ Configuration:
 
 Operational logs contain sanitized identifiers and outcomes only. Queue
 payloads contain IDs and cursors, not transcripts, credentials, or memory
-content. Account exports include the applicable current memory body.
+content. Account exports include the applicable current memory body and, under
+`versions/`, each earlier version.
 
 New accounts start with app memory enabled. Existing accounts are opted out by
 the upgrade migration. Existing projects receive an enabled project file;

@@ -9,7 +9,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MikeApiError,
+  getMemoryVersion,
   getProjectMemory,
+  listMemoryVersions,
+  restoreMemoryVersion,
   setProjectMemoryEnabled,
   updateProjectMemory,
 } from "@/app/lib/mikeApi";
@@ -43,6 +46,13 @@ vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
   getProjectMemory: vi.fn(),
   setProjectMemoryEnabled: vi.fn(),
   updateProjectMemory: vi.fn(),
+  listMemoryVersions: vi.fn(),
+  getMemoryVersion: vi.fn(),
+  restoreMemoryVersion: vi.fn(),
+}));
+
+vi.mock("@/app/contexts/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "me" } }),
 }));
 
 const CURRENT = {
@@ -112,6 +122,58 @@ describe("ProjectMemoryModal", () => {
       "project-1",
       expect.anything(),
     );
+  });
+
+  it("lets an editor restore an earlier version from the History view", async () => {
+    const user = userEvent.setup();
+    const version = (n: number) => ({
+      id: `v${n}`,
+      version_number: n,
+      revision: n,
+      source: "curator" as const,
+      change_summary: null,
+      updated_by: null,
+      updated_by_name: null,
+      source_chat_id: null,
+      size_bytes: 10,
+      created_at: "2026-09-05T01:00:00Z",
+      updated_at: "2026-09-05T01:00:00Z",
+    });
+    vi.mocked(listMemoryVersions).mockResolvedValue([version(2), version(1)]);
+    vi.mocked(getMemoryVersion).mockImplementation(async (_ref, id) => ({
+      ...version(id === "v1" ? 1 : 2),
+      content: id === "v1" ? "# Earlier facts" : "# Matter facts",
+    }));
+    vi.mocked(restoreMemoryVersion).mockResolvedValue({
+      ...CURRENT,
+      content: "# Earlier facts",
+      revision: 3,
+      source: "manual",
+    });
+    renderModal({ canEdit: true });
+
+    await screen.findByRole("textbox", { name: "Project memory" });
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(listMemoryVersions).toHaveBeenCalledWith(
+      { scope: "project", projectId: "project-1" },
+      expect.anything(),
+    );
+    await user.click(await screen.findByRole("button", { name: /Version 1/ }));
+    await user.click(screen.getByRole("button", { name: "Restore this version" }));
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() =>
+      expect(restoreMemoryVersion).toHaveBeenCalledWith(
+        { scope: "project", projectId: "project-1" },
+        "v1",
+        2,
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Memory" }));
+    expect(
+      await screen.findByRole("textbox", { name: "Project memory" }),
+    ).toHaveValue("# Earlier facts");
+    expect(updateProjectMemory).not.toHaveBeenCalled();
   });
 
   it("lets viewers read memory without edit or delete controls", async () => {
@@ -430,7 +492,7 @@ describe("ProjectMemoryModal", () => {
     expect(setProjectMemoryEnabled).not.toHaveBeenCalled();
     expect(screen.getByText("Turn off project memory?")).toBeVisible();
     expect(
-      screen.getByText(/delete the existing project memory\.md file/),
+      screen.getByText(/clear the project memory\.md file/),
     ).toBeVisible();
     expect(screen.getByText(/cancel pending memory updates/)).toBeVisible();
     expect(screen.getByText(/stop future memory updates/)).toBeVisible();

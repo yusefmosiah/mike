@@ -574,7 +574,7 @@ export type MemoryStatus = "idle" | "scheduled" | "processing" | "failed";
 export interface MemoryCurrent {
     enabled: boolean;
     content: string;
-    /** Monotonic change token for compare-and-swap; nothing is kept per value. */
+    /** Monotonic change token for compare-and-swap. */
     revision: number;
     hash: string | null;
     updated_at: string | null;
@@ -654,6 +654,69 @@ export async function setProjectMemoryEnabled(
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ enabled }),
+        },
+    );
+}
+
+/** One saved state of a memory file, without its body. */
+export interface MemoryVersion {
+    id: string;
+    version_number: number;
+    revision: number;
+    source: "manual" | "curator" | "restore" | "settings" | "wipe";
+    /** Why it changed: the curator's summary, or "Restored version N". */
+    change_summary: string | null;
+    updated_by: string | null;
+    updated_by_name: string | null;
+    source_chat_id: string | null;
+    size_bytes: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/** Whose memory file: the caller's own, or a project's. */
+export type MemoryFileRef = { scope: "user" } | { scope: "project"; projectId: string };
+
+function memoryPath(ref: MemoryFileRef): string {
+    return ref.scope === "user"
+        ? "/user/memory"
+        : `/projects/${encodeURIComponent(ref.projectId)}/memory`;
+}
+
+export async function listMemoryVersions(
+    ref: MemoryFileRef,
+    signal?: AbortSignal,
+): Promise<MemoryVersion[]> {
+    const { versions } = await apiRequest<{ versions: MemoryVersion[] }>(
+        `${memoryPath(ref)}/versions`,
+        { signal },
+    );
+    return versions;
+}
+
+export async function getMemoryVersion(
+    ref: MemoryFileRef,
+    versionId: string,
+    signal?: AbortSignal,
+): Promise<MemoryVersion & { content: string }> {
+    return apiRequest<MemoryVersion & { content: string }>(
+        `${memoryPath(ref)}/versions/${encodeURIComponent(versionId)}`,
+        { signal },
+    );
+}
+
+/** Write an earlier version back as the newest one. */
+export async function restoreMemoryVersion(
+    ref: MemoryFileRef,
+    versionId: string,
+    expectedRevision: number,
+): Promise<MemoryCurrent> {
+    return apiRequest<MemoryCurrent>(
+        `${memoryPath(ref)}/versions/${encodeURIComponent(versionId)}/restore`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expected_revision: expectedRevision }),
         },
     );
 }
