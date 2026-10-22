@@ -151,6 +151,53 @@ describe("code mode", () => {
     expect(results[0]!.content).toBe("Report on the lease");
   });
 
+  it("runs gathered delegates at once, and their wait does not count against the cell's time", async () => {
+    const delegate = vi.fn(async (input: Record<string, unknown>) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      return { content: `Report on ${String(input.task)}`, isError: false };
+    });
+    const code = [
+      `a, b = await tools.gather(tools.delegate(type="general", task="A"), tools.delegate(type="general", task="B"))`,
+      `print(a, "|", b)`,
+    ].join("\n");
+    const started = Date.now();
+    const [result] = await turn([{ ...cell(code), input: { code, timeout_seconds: 1 }, delegate } as never], {
+      includeSubagents: true,
+    });
+    expect(result!.content).toBe("Report on A | Report on B");
+    expect(delegate).toHaveBeenCalledTimes(2);
+    // Both waited 1.5 s together, past the cell's 1 s.
+    expect(Date.now() - started).toBeLessThan(2_900);
+  });
+
+  it("raises a refused delegate as a ToolError the cell can catch", async () => {
+    const delegate = vi.fn(async () => ({ content: "Not run: 4 subagents are already running.", isError: true }));
+    const code = [
+      `try:`,
+      `    await tools.delegate(type="general", task="A")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    const [result] = await turn([{ ...cell(code), delegate } as never], { includeSubagents: true });
+    expect(result!.content).toContain("refused: delegate: Not run: 4 subagents are already running.");
+  });
+
+  it("ends a cell waiting on a delegate when the turn is stopped", async () => {
+    const controller = new AbortController();
+    const delegate = vi.fn(() => {
+      setTimeout(() => controller.abort(), 200);
+      return new Promise<{ content: string; isError: boolean }>(() => {});
+    });
+    const started = Date.now();
+    const run = turn([{ ...cell(`await tools.delegate(type="general", task="A")`), delegate } as never], {
+      includeSubagents: true,
+      signal: controller.signal,
+    });
+    await run.catch(() => undefined);
+    expect(delegate).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   it("runs a guest's turn in the host's workstation, asking the host before the first cell until they allow the thread", async () => {
     vi.stubEnv("WORKSTATION_USER_IDS", "host");
     vi.stubEnv("WORKSTATION_SSH_HOST", "127.0.0.1");
