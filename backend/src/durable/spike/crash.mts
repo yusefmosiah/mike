@@ -21,8 +21,8 @@ import {
   type ConversationId,
   type EntryRecord,
 } from "@earendil-works/pi-durable";
-import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
-import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
+import { PostgresStorage } from "../../lib/llm/pi/postgres/storage.mjs";
+import { nodePostgresDatabase } from "../../lib/llm/pi/postgres/node.mjs";
 import pg from "pg";
 
 const url = process.env.PI_SPIKE_DATABASE_URL!;
@@ -63,7 +63,7 @@ function setup(stage: "child" | "parent") {
           signal(`tool:${name}`);
           await new Promise((resolve) => setTimeout(resolve, 60_000));
         }
-        return { content: [{ type: "text", text: `${name} finished in ${stage}` }] };
+        return { output: [{ type: "text", text: `${name} finished in ${stage}` }] };
       },
     });
   const registry = createRegistry();

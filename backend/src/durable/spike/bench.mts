@@ -9,8 +9,8 @@ import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, defineExtension, defineTool, Harness, type Storage } from "@earendil-works/pi-durable";
-import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
-import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
+import { PostgresStorage } from "../../lib/llm/pi/postgres/storage.mjs";
+import { nodePostgresDatabase } from "../../lib/llm/pi/postgres/node.mjs";
 import pg from "pg";
 
 const url = process.env.PI_SPIKE_DATABASE_URL;

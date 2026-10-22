@@ -157,6 +157,7 @@ async function lineage(chat = "chat-1") {
     kind: "mike.chat",
     version: 2,
     scope: "session",
+    checkpointWhen: () => false,
     family: true,
     initial: () => ({ conversations: [], messages: {} }),
   });
@@ -176,6 +177,41 @@ afterEach(async () => {
 });
 
 describe("Pi runtime: turns, branches and memory", () => {
+  it("opens the runtime again after a storage error closed its session", async () => {
+    let failing = false;
+    const storage = new Proxy(current.storage, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key === "commit") {
+          return (...args: unknown[]) => {
+            if (failing) return Promise.reject(new Error("connection terminated unexpectedly"));
+            return (value as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    await resetPiRuntime({ ...current, storage });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const first = await piRuntime();
+    await turn([{ role: "user", content: "hello" }], { user: "u1", parent: null, assistant: "a1" });
+
+    failing = true;
+    await turn([{ role: "user", content: "hello" }, { role: "assistant", content: "ok" }, { role: "user", content: "again" }], {
+      user: "u2",
+      parent: "a1",
+      assistant: "a2",
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledWith("[pi] session_failed", expect.anything()));
+
+    failing = false;
+    const second = await piRuntime();
+    expect(second).not.toBe(first);
+    const answer = await turn([{ role: "user", content: "after" }], { user: "u3", parent: null, assistant: "a3" });
+    expect(answer.fullText).toBeTruthy();
+    errors.mockRestore();
+  });
+
   it("continues the parent's conversation, and later turns see earlier tool results", async () => {
     const q1 = "Please read NDA";
     const a1 = await turn([{ role: "user", content: q1 }], { user: "u1", parent: null, assistant: "a1" });

@@ -3,8 +3,8 @@
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import pg from "pg";
-import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
-import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
+import { PostgresStorage } from "../../lib/llm/pi/postgres/storage.mjs";
+import { nodePostgresDatabase } from "../../lib/llm/pi/postgres/node.mjs";
 
 export const spikeUrl = process.env.PI_SPIKE_DATABASE_URL;
 

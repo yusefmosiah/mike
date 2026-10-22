@@ -60,7 +60,7 @@ const a3 = await turn("turn3-regenerate", history2, []);
 
 const { harness } = await piRuntime();
 const lineage = await harness.snapshot(
-  (await import("@earendil-works/pi-durable")).defineDocFamily({ kind: "mike.chat", version: 1, scope: "session", family: true, initial: () => ({ conversations: [] as number[] }) }) as never,
+  (await import("@earendil-works/pi-durable")).defineDocFamily({ kind: "mike.chat", version: 1, scope: "session", family: true, checkpointWhen: () => false, initial: () => ({ conversations: [] as number[] }) }) as never,
   chatId,
   context,
 );

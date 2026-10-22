@@ -72,8 +72,8 @@ import {
 } from "./continuation.mjs";
 import { answerLanguageDrift, LANGUAGE_DRIFT_NOTE } from "./languageGuard.mjs";
 import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold } from "./compactionHooks.mjs";
-import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
-import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
+import { PostgresStorage } from "./postgres/storage.mjs";
+import { nodePostgresDatabase } from "./postgres/node.mjs";
 import pg from "pg";
 import { DELEGATE_TOOL_SUMMARY } from "../types.js";
 import { escapeTurnContextMarkup, planTurnContext, replayTurnContext, withoutTurnContext } from "../turnContext.js";
@@ -108,6 +108,9 @@ const ChatLineage = defineDocFamily<LineageState, null>({
   kind: "mike.chat",
   version: 2,
   scope: "session",
+  // Changes stay deltas (Pi's behaviour before 1.4 made the policy required);
+  // the same on every document here.
+  checkpointWhen: () => false,
   family: true,
   initial: () => ({ conversations: [], messages: {} }),
   migrate: (value) => ({
@@ -128,6 +131,7 @@ const ToolSchemas = defineDoc<Record<string, StoredToolSchema>>({
   kind: "mike.tools",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({}),
 });
 
@@ -153,6 +157,7 @@ const DurableTurns = defineDoc<Record<string, DurableTurnRecord>>({
   kind: "mike.turns",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({}),
 });
 
@@ -258,6 +263,8 @@ type Runtime = {
 const DEFAULT_MAX_ROUNDS = 1_000;
 
 let opening: Promise<Runtime> | undefined;
+/** The Harness `opening` resolved to, so a report from an older one changes nothing. */
+let live: Harness | undefined;
 
 /** What a test substitutes for the deployment's storage and model catalog. */
 export type RuntimeOverrides = { storage?: Storage; models?: MikeModels };
@@ -275,6 +282,7 @@ export function piRuntime(): Promise<Runtime> {
 export async function resetPiRuntime(next?: RuntimeOverrides): Promise<void> {
   const current = opening;
   opening = undefined;
+  live = undefined;
   overrides = next;
   catalog = undefined;
   if (current) await (await current.catch(() => undefined))?.harness.close(background);
@@ -383,10 +391,20 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
         toolExecution: "parallel",
         progress: { partialIntervalMs: 100, outputIntervalMs: 250 },
       },
+      // Since Pi 1.2 any Storage error (a dropped Postgres connection) closes
+      // the Session for good; the next turn opens the runtime again.
+      onReport: (error, info) => {
+        console.error(`[pi] ${info.type}`, safeError(error));
+        if (info.type === "session_failed" && opened !== undefined && live === opened) {
+          live = undefined;
+          opening = undefined;
+        }
+      },
     },
     background,
   );
   opened = harness;
+  live = harness;
   // Rebuild what the previous process offered before resuming its work: the
   // tools a resumed call needs, and the turns that may be driven again.
   installTools(
@@ -473,7 +491,7 @@ const readMemoryTool = (bindings: Bindings) => defineTool({
   execute: async (_args, api) => {
     const binding = await bindings.wait(api.conversationId, undefined);
     if (!binding?.readMemory) throw new Error("Memory is not available in this conversation.");
-    return { content: [{ type: "text", text: await binding.readMemory() }] };
+    return { output: [{ type: "text", text: await binding.readMemory() }] };
   },
 });
 
@@ -536,13 +554,13 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
       if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");
       if ((await roundsSince(api, binding.firstEntry)) > binding.maxRounds) {
         return {
-          content: [{ type: "text", text: `Not run: this turn has used its ${binding.maxRounds} tool rounds. Answer now with what you have, and say what is left undone.` }],
+          output: [{ type: "text", text: `Not run: this turn has used its ${binding.maxRounds} tool rounds. Answer now with what you have, and say what is left undone.` }],
           isError: true,
         };
       }
       if (binding.maxOutputTokens !== undefined && (await usageOf(api, api.conversationId)).output >= binding.maxOutputTokens) {
         return {
-          content: [{ type: "text", text: `Not run: you have used your ${binding.maxOutputTokens} output tokens. Report now with what you have, and say what is left undone.` }],
+          output: [{ type: "text", text: `Not run: you have used your ${binding.maxOutputTokens} output tokens. Report now with what you have, and say what is left undone.` }],
           isError: true,
         };
       }
@@ -554,9 +572,9 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings): ToolRegistratio
       } catch (error) {
         if (context.abortSignal?.aborted) throw error;
         binding.halt(error);
-        return { content: [{ type: "text", text: "The turn ended here." }], isError: true, control: { terminate: true } };
+        return { output: [{ type: "text", text: "The turn ended here." }], isError: true, control: { terminate: true } };
       }
-      return { content: [{ type: "text", text: result?.content ?? "" }] };
+      return { output: [{ type: "text", text: result?.content ?? "" }] };
     },
   });
 }
@@ -623,6 +641,7 @@ const Subagents = defineDocFamily<SubagentRecord, null>({
   kind: "mike.subagent",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   family: true,
   initial: () => ({
     parentConversation: 0,
@@ -645,6 +664,7 @@ const SubagentChildren = defineDocFamily<{ children: number[] }, null>({
   kind: "mike.subagent-children",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   family: true,
   initial: () => ({ children: [] }),
 });
@@ -687,7 +707,7 @@ function delegateTool(bindings: Bindings, resolve: MikeModels["resolve"], descri
     // made (request id), so it waits for that child instead of starting another.
     replay: "safe",
     execute: async (args, api, context) => {
-      const refuse = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
+      const refuse = (text: string) => ({ output: [{ type: "text" as const, text }], isError: true });
       const binding = await bindings.wait(api.conversationId, context.abortSignal);
       if (!binding) throw new Error("The request that asked for this tool has ended; it did not run.");
       const delegation = binding.subagents;
@@ -866,7 +886,7 @@ function delegateTool(bindings: Bindings, resolve: MikeModels["resolve"], descri
         }, context);
         delegation.host.finished?.({ callId: api.callId, childId: String(childId), status, report, usage });
         return {
-          content: [{ type: "text", text: `Report from the ${spec.type} subagent (${spec.model}, ${status}):\n\n${report || "(empty report)"}` }],
+          output: [{ type: "text", text: `Report from the ${spec.type} subagent (${spec.model}, ${status}):\n\n${report || "(empty report)"}` }],
           isError: status !== "done",
         };
       } finally {

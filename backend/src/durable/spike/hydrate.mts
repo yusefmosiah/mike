@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createRegistry, Harness, UserEntry, AssistantEntry } from "@earendil-works/pi-durable";
-import { PostgresStorage } from "@netzlabor/pi-durable-postgres";
-import { nodePostgresDatabase } from "@netzlabor/pi-durable-postgres/node";
+import { PostgresStorage } from "../../lib/llm/pi/postgres/storage.mjs";
+import { nodePostgresDatabase } from "../../lib/llm/pi/postgres/node.mjs";
 import pg from "pg";
 
 const url = process.env.PI_SPIKE_DATABASE_URL!;
