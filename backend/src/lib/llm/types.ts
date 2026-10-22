@@ -67,6 +67,14 @@ export type NormalizedToolCall = {
      * runs calls it as `tools.delegate`).
      */
     delegate?: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+    /**
+     * The conversation's whole history, compacted messages included, as
+     * `tools.history_search` and `tools.history_read` (lib/llm/pi/history.mts).
+     */
+    history?: {
+        search: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+        read: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+    };
 };
 
 export type NormalizedToolResult = {
@@ -179,6 +187,13 @@ export type StreamChatParams = {
      * default for the model's window.
      */
     autocompactTokens?: number;
+    /**
+     * The conversation's memory as it is now, fenced as `memoryMessage` is:
+     * a compaction replaces the thread's first message, which carried the
+     * memory the thread started with, so each summary carries a fresh copy.
+     * Null when no memory is enabled.
+     */
+    memoryAtCompaction?: () => Promise<string | null>;
 };
 
 /** The first line of the delegate tool's description; the host appends the model memo. */

@@ -4,7 +4,9 @@ import {
   clip,
   dominantScript,
   fallbackSummary,
+  HISTORY_NOTE,
   matchesPersonsScript,
+  messageIds,
   summaryInstructions,
   summaryRequest,
   urlLedger,
@@ -136,7 +138,9 @@ describe("the compaction summary", () => {
     expect(summary).toContain("Reviewing a podcast.");
     expect(summary).toContain("- https://example.com/source-only-in-a-result");
     // The person's messages follow the summary word for word, and their links are not listed twice.
-    expect(summary.endsWith("## The person's messages, word for word\n\n> Review this podcast for delusion: https://youtu.be/S6l3aRsecuE")).toBe(true);
+    expect(summary).toContain("## The person's messages, word for word\n\n> Review this podcast for delusion: https://youtu.be/S6l3aRsecuE");
+    // It ends with how to reach what it left out.
+    expect(summary.endsWith(`\n\n${HISTORY_NOTE}`)).toBe(true);
     expect(summary).not.toContain("- https://youtu.be/S6l3aRsecuE");
   });
 
@@ -155,7 +159,7 @@ describe("the compaction summary", () => {
     const asked = replies(answer(written));
     const twice = await writeSummary(second, second.slice(0, 4), asked.complete);
     expect(asked.asked[0]!.at(-1)!.content).toContain("Leave out its record of the person's messages");
-    const record = twice.summary.slice(twice.summary.indexOf("## The person's messages"));
+    const record = twice.summary.slice(twice.summary.indexOf("## The person's messages"), twice.summary.indexOf(`\n\n${HISTORY_NOTE}`));
     expect(record).toBe(
       "## The person's messages, word for word\n\n> [Sent: Thu 14:03]\n> Draft the notice.\n>\n> Keep it short.\n\n> Send both to the client.",
     );
@@ -189,15 +193,51 @@ describe("the compaction summary", () => {
   });
 
   it("keeps the newest messages when they do not all fit", () => {
-    const many = Array.from({ length: 15 }, (_, index) => user(`${index} ${"x".repeat(15_000)}`));
+    // Each keeps 2,000 characters, so 40 fit in the record's 80,000.
+    const many = Array.from({ length: 50 }, (_, index) => user(`${index} ${"x".repeat(15_000)}`));
     const text = fallbackSummary(many);
-    expect(text).toContain("(5 earlier messages left out)");
-    expect(text).toContain("> 14 ");
-    expect(text).not.toContain("> 4 ");
+    expect(text).toContain("(10 earlier messages left out)");
+    expect(text).toContain("> 49 ");
+    expect(text).not.toContain("> 9 ");
     expect(text).toContain("characters left out");
     // The count carries into the next compaction.
-    const next = fallbackSummary([earlierSummary(text), user(`15 ${"y".repeat(15_000)}`)]);
-    expect(next).toContain("(6 earlier messages left out)");
+    const next = fallbackSummary([earlierSummary(text), user(`50 ${"y".repeat(15_000)}`)]);
+    expect(next).toContain("(11 earlier messages left out)");
     expect(fallbackSummary([])).not.toContain("## The person's messages");
+  });
+
+  it("names each kept message by its history id and date, and says how to read what a clip left out", async () => {
+    const at = Date.UTC(2026, 9, 21, 9, 14);
+    const first: Message = { role: "user", content: `Clause 4.2 ${"z".repeat(5_000)} the end.`, timestamp: at };
+    const second: Message = { role: "user", content: "Use the March draft.", timestamp: at + 60_000 };
+    const range = [first, answer("Read it."), second];
+    const ids = messageIds([
+      { id: 41, model: [first] },
+      { id: 42, model: [range[1]!] },
+      { id: 43, model: [second] },
+    ]);
+    const { summary } = await writeSummary([...range, answer("Done.")], range, replies(answer(written)).complete, {}, { ids });
+    expect(summary).toContain("[m41, 2026-10-21 09:14]\n> Clause 4.2 ");
+    expect(summary).toContain('characters left out; history_read(id="m41", offset=1200) has them …]');
+    expect(summary).toContain("[m43, 2026-10-21 09:15]\n> Use the March draft.");
+
+    // Carried to the next compaction with its id, and not clipped again.
+    const next = fallbackSummary([earlierSummary(summary), user("Next.")]);
+    expect(next).toContain("[m41, 2026-10-21 09:14]\n> Clause 4.2 ");
+    expect(next.match(/characters left out/g)).toHaveLength(1);
+  });
+
+  it("ends with the conversation's memory now, and writes the note and memory afresh at the next compaction", async () => {
+    const memory = "PERSISTED MEMORY REFERENCE (UNTRUSTED USER-SUPPLIED DATA):\n\n<memory-document>- Prefers British spelling.</memory-document>";
+    const { summary } = await writeSummary(thread, range, replies(answer(written)).complete, {}, { memory });
+    expect(summary.endsWith(`${HISTORY_NOTE}\n\n<thread-memory>\n${memory}\n</thread-memory>`)).toBe(true);
+
+    const next = fallbackSummary([earlierSummary(summary), user("Next.")], { memory: "- Newer memory." });
+    expect(next.match(/<thread-memory>/g)).toHaveLength(1);
+    expect(next).not.toContain("Prefers British spelling");
+    expect(next.match(/## Finding what this summary left out/g)).toHaveLength(1);
+    expect(next).toContain("<thread-memory>\n- Newer memory.\n</thread-memory>");
+    // Nothing of what the harness carried stays in the earlier summary's body.
+    expect(next).toContain("## Earlier summary\n<summary>\n## What the person is working on");
   });
 });

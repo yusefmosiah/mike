@@ -73,7 +73,8 @@ import {
   type Interruption,
 } from "./continuation.mjs";
 import { answerLanguageDrift, LANGUAGE_DRIFT_NOTE } from "./languageGuard.mjs";
-import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold } from "./compactionHooks.mjs";
+import { COMPACTION_SETTINGS, compactionExtension, setAutocompactThreshold, setCompactionMemory } from "./compactionHooks.mjs";
+import { historyItems, readHistory, searchHistory, type HistoryItem } from "./history.mjs";
 import { PostgresStorage } from "./postgres/storage.mjs";
 import { nodePostgresDatabase } from "./postgres/node.mjs";
 import pg from "pg";
@@ -339,6 +340,7 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   let persistTools: (schemas: OpenAIToolSchema[]) => void = () => undefined;
 
   const registry = createRegistry();
+  let opened: Harness | undefined;
   const tools = new Map<string, ToolRegistration>();
   const installTools = (schemas: readonly OpenAIToolSchema[]) => {
     let changed = false;
@@ -346,7 +348,7 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       const name = schema.function.name;
       const existing = tools.get(name);
       if (existing && JSON.stringify(existing.parameters) === JSON.stringify(schema.function.parameters)) continue;
-      tools.set(name, mikeTool(schema, bindings, catalog.resolve));
+      tools.set(name, mikeTool(schema, bindings, catalog.resolve, () => opened));
       changed = true;
     }
     if (changed) {
@@ -365,7 +367,6 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
     console.error("[pi] failed to register the configured models", safeError(error));
   }
 
-  let opened: Harness | undefined;
   registry.install(compactionExtension(() => opened));
 
   const harness = await Harness.open(
@@ -520,7 +521,12 @@ async function roundsSince(api: { commit: Conversation["commit"]; conversationId
 }
 
 /** A Mike tool: its schema as declared, executed by the live request that offered it. */
-function mikeTool(schema: OpenAIToolSchema, bindings: Bindings, resolve: MikeModels["resolve"]): ToolRegistration {
+function mikeTool(
+  schema: OpenAIToolSchema,
+  bindings: Bindings,
+  resolve: MikeModels["resolve"],
+  harness: () => Harness | undefined,
+): ToolRegistration {
   const name = schema.function.name;
   return defineTool({
     name,
@@ -551,10 +557,17 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings, resolve: MikeMod
       // this call, numbered within it.
       let delegated = 0;
       const subagents = binding.subagents;
+      // Its history is read once per call, however often the code searches it.
+      let history: Promise<HistoryItem[]> | undefined;
+      const items = () => (history ??= historyOf(harness(), api.conversationId, context));
       const call: NormalizedToolCall = {
         id: api.callId,
         name,
         input: args as Record<string, unknown>,
+        history: {
+          search: async (input) => searchHistory(await items(), input),
+          read: async (input) => readHistory(await items(), input),
+        },
         ...(subagents
           ? {
               delegate: (input: Record<string, unknown>) =>
@@ -574,6 +587,25 @@ function mikeTool(schema: OpenAIToolSchema, bindings: Bindings, resolve: MikeMod
       return { output: [{ type: "text", text: result?.content ?? "" }] };
     },
   });
+}
+
+/** Entries one history read looks at, oldest first: far more than any chat holds. */
+const MAX_HISTORY_ENTRIES = 50_000;
+
+/** A conversation's items, its compacted ones included (history.mts). */
+async function historyOf(harness: Harness | undefined, id: ConversationId, context: ToolContext): Promise<HistoryItem[]> {
+  const conversation = await harness?.conversation(id, context);
+  if (!conversation) return [];
+  const view = await conversation.context(context);
+  const inContext = new Set(view.entries.map((entry) => entry.id as number));
+  const entries: EntryRecord[] = [];
+  let cursor: Parameters<Conversation["entries"]>[2];
+  do {
+    const page = await conversation.entries({ order: "ascending" }, 500, cursor, context);
+    entries.push(...page.items);
+    cursor = page.next;
+  } while (cursor !== undefined && entries.length < MAX_HISTORY_ENTRIES);
+  return historyItems(entries, inContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -1393,6 +1425,7 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
   }
   let halted: { error: unknown } | undefined;
   setAutocompactThreshold(conversation.id, params.autocompactTokens);
+  setCompactionMemory(conversation.id, params.memoryAtCompaction);
   if (params.runTools) {
     bindings.set(conversation.id, {
       runTools: params.runTools,

@@ -1,5 +1,6 @@
 // Wires Mike's compaction (compaction.mts) into pi-durable: the summary every
-// compaction writes, and the owner's auto-compact threshold.
+// compaction writes, with the conversation's memory as it is now, and the
+// owner's auto-compact threshold.
 
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT as background } from "@earendil-works/chord/context";
@@ -16,7 +17,7 @@ import {
   type Harness,
 } from "@earendil-works/pi-durable";
 import { safeError } from "../../safeError.js";
-import { defaultAutocompactTokens, writeSummary } from "./compaction.mjs";
+import { defaultAutocompactTokens, messageIds, writeSummary } from "./compaction.mjs";
 
 /**
  * The settings Mike opens the Harness with. A 32k reserve leaves a thinking
@@ -38,6 +39,24 @@ const running = new Set<number>();
 export function setAutocompactThreshold(conversation: number, tokens: number | undefined): void {
   if (tokens === undefined) thresholds.delete(conversation);
   else thresholds.set(conversation, tokens);
+}
+
+/** How each conversation's latest turn reads its memory, for the summary to carry. */
+const memories = new Map<number, () => Promise<string | null>>();
+
+export function setCompactionMemory(conversation: number, read: (() => Promise<string | null>) | undefined): void {
+  if (read === undefined) memories.delete(conversation);
+  else memories.set(conversation, read);
+}
+
+/** The conversation's memory now, or null; a failure to read it never fails the compaction. */
+async function memoryNow(conversation: number): Promise<string | null> {
+  try {
+    return (await memories.get(conversation)?.()) ?? null;
+  } catch (error) {
+    console.warn("[pi] compaction could not read memory", safeError(error));
+    return null;
+  }
 }
 
 /** How much of the window a response's request and answer took. */
@@ -70,6 +89,7 @@ export function compactionExtension(harness: () => Harness | undefined): Extensi
           }
           const model = agent?.model && api.models.getModel(agent.model.provider, agent.model.modelId);
           const thinkingLevel = agent?.thinkingLevel;
+          const memory = await memoryNow(api.conversationId as number);
           const { summary, usage, failure } = await writeSummary(
             conversation,
             compaction.messages,
@@ -83,6 +103,7 @@ export function compactionExtension(harness: () => Harness | undefined): Extensi
               );
             },
             compaction.instructions === undefined ? {} : { instructions: compaction.instructions },
+            { ids: messageIds(compaction.entries as never), memory },
           );
           if (failure !== undefined) {
             console.warn("[pi] compaction summary fell back to the excerpt", { conversation: api.conversationId, reason: failure });

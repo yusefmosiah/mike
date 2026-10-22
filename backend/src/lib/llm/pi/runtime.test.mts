@@ -809,6 +809,51 @@ describe("Pi runtime: compaction", () => {
     expect(requests[asked]!.messages.slice(0, turnBefore.messages.length)).toEqual(turnBefore.messages);
     expect(requests[asked]!.users).toContain(history[0]!.content);
   });
+
+  it("carries memory and message ids in the summary, and finds a fact it compacted away", async () => {
+    // A fact the faux summary never mentions, planted in the first message.
+    const planted = "The escrow agent is Halvorsen & Pike LLP.";
+    const long = (n: number) => `Section ${n}: ${"The parties agree to the terms. ".repeat(2_000)}`;
+    const history: LlmMessage[] = [];
+    let parent: string | null = null;
+    const memoryAtCompaction = async () => "PERSISTED MEMORY REFERENCE:\n- Prefers British spelling.";
+    for (let index = 1; index <= 3; index += 1) {
+      history.push({ role: "user", content: index === 1 ? `${planted} ${long(index)}` : long(index) });
+      const answer = await turn(history, { user: `u${index}`, parent, assistant: `a${index}` }, { autocompactTokens: 40_000, memoryAtCompaction });
+      history.push({ role: "assistant", content: answer.fullText });
+      parent = `a${index}`;
+    }
+    const { harness } = await piRuntime();
+    await harness.waitForIdle(context);
+
+    // The next turn's code searches the history for it.
+    scripted.push(
+      () => fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "history" })], { stopReason: "toolUse" }),
+      () => fauxAssistantMessage([fauxText("Halvorsen & Pike LLP.")]),
+    );
+    let found: { content: string; isError: boolean } | undefined;
+    let read: { content: string; isError: boolean } | undefined;
+    history.push({ role: "user", content: "Who is the escrow agent?" });
+    await turn(history, { user: "u4", parent, assistant: "a4" }, {
+      runTools: async (calls) => {
+        found = await calls[0]!.history!.search({ query: "Halvorsen", roles: ["user"] });
+        const id = JSON.parse(found.content).matches[0].id as string;
+        read = await calls[0]!.history!.read({ id, limit_chars: 80 });
+        return calls.map((call) => ({ tool_use_id: call.id, content: found!.content }));
+      },
+    });
+
+    // What the summary carried: the record under ids, the note, and memory.
+    const seen = requests.at(-2)!.users.join("\n");
+    expect(seen).toMatch(/\[m\d+, \d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\n> The escrow agent is Halvorsen/);
+    expect(seen).toContain("## Finding what this summary left out");
+    expect(seen).toContain("<thread-memory>\nPERSISTED MEMORY REFERENCE:\n- Prefers British spelling.\n</thread-memory>");
+
+    const match = JSON.parse(found!.content).matches[0];
+    expect(match).toMatchObject({ role: "user", compacted: true });
+    expect(match.snippet).toContain(planted);
+    expect(JSON.parse(read!.content).text).toBe(`${planted} Section 1: The parties agree to the te`);
+  });
 });
 
 describe("Pi runtime: memory review on a fork", () => {

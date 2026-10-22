@@ -35,6 +35,7 @@ import {
   TOOL_ERROR_MESSAGE,
 } from "./types";
 import {
+  HISTORY_TOOLS,
   MEMORY_TOOLS,
   TOOLS,
   WORKFLOW_TOOLS,
@@ -613,6 +614,8 @@ export async function runLLMStream(params: {
     ...WORKFLOW_TOOLS,
     ...(includeMemory ? [READ_MEMORY_TOOL] : []),
     ...(memoryEditTarget ? MEMORY_TOOLS : []),
+    // A saved conversation's own history, compacted messages included.
+    ...(conversationId ? HISTORY_TOOLS : []),
     ...(params.includeSubagents && kernelLauncher ? [delegateToolSchema()] : []),
     ...workstationTools,
   ];
@@ -637,7 +640,9 @@ export async function runLLMStream(params: {
   const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
   const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
   const modelTools = codeMode ? [RUN_PYTHON_SCHEMA] : [];
-  const readMemory = async () =>
+  // Memory as it is now: for tools.read_memory, and for the summary each
+  // compaction writes, which replaces the thread's first message.
+  const memoryNow = async () =>
     (
       await buildMemoryTurn({
         db,
@@ -647,7 +652,8 @@ export async function runLLMStream(params: {
         projectId: memoryProjectId,
         sharedAudience: memorySharedAudience,
       })
-    ).message?.content ?? "No memory is enabled for this conversation.";
+    ).message?.content ?? null;
+  const readMemory = async () => (await memoryNow()) ?? "No memory is enabled for this conversation.";
 
   // Extract system prompt; pass remaining turns to the adapter as
   // plain user/assistant messages.
@@ -1219,6 +1225,11 @@ export async function runLLMStream(params: {
             return { ok: false, error: "memory could not be read" };
           }
         }
+        if (name === "history_search" || name === "history_read") {
+          if (!call.history) return { ok: false, error: "This conversation's history is not available here." };
+          const reply = await (name === "history_search" ? call.history.search(args) : call.history.read(args));
+          return reply.isError ? { ok: false, error: reply.content } : { ok: true, content: reply.content };
+        }
         if (name === "delegate") {
           if (!call.delegate) return { ok: false, error: "Delegation is not available here." };
           const report = await call.delegate(args);
@@ -1678,6 +1689,7 @@ export async function runLLMStream(params: {
       ...(params.continuesAnswer ? { continuesAnswer: params.continuesAnswer } : {}),
       durableTurn: params.durableTurn,
       memoryMessage: memory.message ?? undefined,
+      ...(includeMemory ? { memoryAtCompaction: memoryNow } : {}),
       callbacks: {
         onContentDelta: (delta) => {
           iterText += delta;

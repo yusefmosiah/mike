@@ -151,6 +151,40 @@ describe("code mode", () => {
     expect(results[0]!.content).toBe("Report on the lease");
   });
 
+  it("offers a saved chat its history in Python, answered from the call that ran the cell", async () => {
+    await runLLMStream(baseParams() as never);
+    expect(section(streamChatWithTools.mock.calls[0][0], "code-mode")).not.toContain("tools.history_search(");
+
+    const history = {
+      search: vi.fn(async (input: Record<string, unknown>) => ({
+        content: JSON.stringify({ matches: [{ id: "m41", snippet: `found ${String(input.query)}` }], total: 1 }),
+        isError: false,
+      })),
+      read: vi.fn(async () => ({ content: "No message \"m9\" in this conversation.", isError: true })),
+    };
+    const code = [
+      `hits = await tools.history_search(query="escrow agent")`,
+      `print(hits["matches"][0]["id"], hits["matches"][0]["snippet"])`,
+      `try:`,
+      `    await tools.history_read(id="m9")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    let offered: StreamChatCall | undefined;
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      offered = params;
+      results = (await params.runTools?.([{ ...cell(code), history } as never])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), conversationId: "chat-history" } as never);
+    expect(section(offered!, "code-mode")).toContain("await tools.history_search(query: str");
+    expect(section(offered!, "code-mode")).toContain("await tools.history_read(id: str");
+    expect(history.search).toHaveBeenCalledWith({ query: "escrow agent" });
+    expect(results[0]!.content).toContain("m41 found escrow agent");
+    expect(results[0]!.content).toContain('refused: history_read: No message "m9" in this conversation.');
+  });
+
   it("runs gathered delegates at once, and their wait does not count against the cell's time", async () => {
     const delegate = vi.fn(async (input: Record<string, unknown>) => {
       await new Promise((resolve) => setTimeout(resolve, 1_500));

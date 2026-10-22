@@ -20,21 +20,38 @@
 // request; it is written in the language the person writes in; and what can be
 // kept without the model is: the URLs it dropped, in a ledger, and the person's
 // own messages, word for word (the newest, up to about 20k tokens), carried
-// from one compaction to the next.
+// from one compaction to the next, each named by its id in the conversation's
+// history (history.mts) so the model can read it back whole.
+// Every summary ends with a note on finding what it left out, and a fresh
+// copy of the conversation's memory: the thread's first message, which
+// carried memory, is the first thing a compaction replaces.
 // When the model fails, a summary built without a model takes its place, so a
 // compaction never fails the turn.
 
 import { isDeepStrictEqual } from "node:util";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import { withoutThreadMemory, withoutTurnContext } from "../turnContext.js";
+import { THREAD_MEMORY_CLOSE, THREAD_MEMORY_OPEN, withoutThreadMemory, withoutTurnContext } from "../turnContext.js";
+import { historyId } from "./history.mjs";
 
 /** How pi-durable introduces a summary in the transcript; a previous summary is folded into the next. */
 const SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:";
 
-/** The person's messages kept word for word with each summary: each up to 8,000 characters, the newest 80,000 in all (about 20k tokens). */
-const RECORD_MESSAGE_CHARS = 8_000;
+/**
+ * The person's messages kept word for word with each summary: each up to
+ * 2,000 characters, the newest 80,000 in all (about 20k tokens). A long paste
+ * is a document now, and the rest of a long message is a history_read away.
+ */
+const RECORD_MESSAGE_CHARS = 2_000;
 const RECORD_CHARS = 80_000;
 const RECORD_HEADING = "## The person's messages, word for word";
+/** A record entry's label: its history id and when it was sent. */
+const RECORD_LABEL = /^\[(m\d+(?:\.\d+)?)(?:, ([^\]\n]+))?\]$/;
+const HISTORY_HEADING = "## Finding what this summary left out";
+/** The note every summary ends with: what is left out is still stored, and how to reach it. */
+export const HISTORY_NOTE = [
+  HISTORY_HEADING,
+  "Everything before this summary is still stored word for word: the person's messages, your answers and every tool result. In run_python, `await tools.history_search(query=...)` finds messages by their words, newest first, with ids like m41 (the ids above), and `await tools.history_read(id=...)` reads one in full. Search before you quote exact wording, a figure, a date or a source from before this point, and before telling the person something was not discussed.",
+].join("\n");
 /** What the model-free summary keeps of the last answer. */
 const ASSISTANT_MAX_CHARS = 8_000;
 /** How much of the first kept message the instruction quotes. */
@@ -44,7 +61,7 @@ const QUOTE_CHARS = 160;
 export function summaryInstructions(scope: string, earlierSummary: boolean): string {
   const fold = [
     "The conversation starts with an earlier summary. Update it; do not start over. Keep every item in it that is still true and relevant, under the same headings. Newer messages win where they change, resolve or contradict something: update the item, and note a superseded decision in one line with the reason instead of silently deleting it. Never drop an earlier source, quote, standing instruction or open request unless a later message withdrew or answered it. Condense old narrative, never old identifiers.",
-    "Leave out its record of the person's messages and its list of other links: both are carried forward without you.",
+    "Leave out its record of the person's messages, its list of other links, its note on finding what it left out and its memory block: all are carried forward without you.",
   ].join(" ");
   return [
     scope,
@@ -94,12 +111,19 @@ function textOf(content: UserMessage["content"] | ToolResultMessage["content"]):
   return content.map((part) => (part.type === "text" ? part.text : "[image]")).join("\n");
 }
 
-/** Keep the head and the tail of a long text: a long paste's end is often what was asked about. */
-export function clip(text: string, max: number): string {
+const CLIP_MARK = /\n\[… \d+ characters left out[^\]\n]*…\]\n/;
+
+/**
+ * Keep the head and the tail of a long text: a long paste's end is often what
+ * was asked about. Given the text's history id, the marker says how to read
+ * what it leaves out (an already clipped text no longer knows its offsets).
+ */
+export function clip(text: string, max: number, id?: string): string {
   if (text.length <= max) return text;
   const head = Math.floor(max * 0.6);
   const tail = max - head;
-  return `${text.slice(0, head)}\n[… ${text.length - max} characters left out …]\n${text.slice(text.length - tail)}`;
+  const where = id && !CLIP_MARK.test(text) ? `; history_read(id="${id}", offset=${head}) has them` : "";
+  return `${text.slice(0, head)}\n[… ${text.length - max} characters left out${where} …]\n${text.slice(text.length - tail)}`;
 }
 
 function isSummary(message: Message): boolean {
@@ -169,36 +193,91 @@ function personsWords(message: UserMessage): string {
   return withoutTurnContext(withoutThreadMemory(textOf(message.content).trim())).trim();
 }
 
-function personsMessages(messages: readonly Message[]): string[] {
+/** Where the range's messages are stored: each message's history id, by its timestamp and text. */
+export type MessageIds = ReadonlyMap<string, string>;
+
+const idKey = (message: Message) => `${message.timestamp}\u0000${message.role === "assistant" ? "" : textOf(message.content)}`;
+
+/** The history ids of the messages in `entries` (pi-durable's, as a compaction hook receives them). */
+export function messageIds(entries: readonly { readonly id: number; readonly model?: readonly Message[] }[]): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const entry of entries) (entry.model ?? []).forEach((message, index) => ids.set(idKey(message), historyId(entry.id, index)));
+  return ids;
+}
+
+/** One of the person's messages in the record: its words, and where and when it is stored when known. */
+type Said = { text: string; id?: string; at?: string };
+
+function personsMessages(messages: readonly Message[], ids?: MessageIds): Said[] {
   return messages
     .filter((message): message is UserMessage => message.role === "user" && !isSummary(message))
-    .map(personsWords)
-    .filter(Boolean);
+    .flatMap((message) => {
+      const text = personsWords(message);
+      if (!text) return [];
+      const id = ids?.get(idKey(message));
+      const at = typeof message.timestamp === "number" && message.timestamp > 0
+        ? new Date(message.timestamp).toISOString().slice(0, 16).replace("T", " ")
+        : undefined;
+      return [{ text, ...(id ? { id } : {}), ...(at ? { at } : {}) }];
+    });
 }
 
 /** The person's own words in the range: what the summary's language should follow. */
 export function personsText(messages: readonly Message[]): string {
-  return personsMessages(messages).join("\n");
+  return personsMessages(messages).map((said) => said.text).join("\n");
+}
+
+/**
+ * An earlier summary's text without what the harness added after the model's
+ * part (the note on finding what it left out, and the memory block), which
+ * each compaction writes afresh.
+ */
+function withoutCarried(summary: string): string {
+  let text = summary;
+  const open = text.lastIndexOf(`\n${THREAD_MEMORY_OPEN}\n`);
+  if (open >= 0) {
+    const close = text.indexOf(THREAD_MEMORY_CLOSE, open);
+    if (close >= 0) text = `${text.slice(0, open)}${text.slice(close + THREAD_MEMORY_CLOSE.length)}`;
+  }
+  const lines = text.split("\n");
+  const note = lines.lastIndexOf(HISTORY_HEADING);
+  if (note >= 0) {
+    // The note is its heading and one paragraph.
+    let end = note + 1;
+    while (end < lines.length && lines[end]!.trim() !== "") end += 1;
+    lines.splice(note, end - note);
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 /** An earlier summary's text, split from the record of the person's messages it carries. */
-function splitRecord(summary: string): { body: string; said: string[]; leftOut: number } {
-  const lines = summary.split("\n");
+function splitRecord(summary: string): { body: string; said: Said[]; leftOut: number } {
+  const lines = withoutCarried(summary).split("\n");
   const at = lines.lastIndexOf(RECORD_HEADING);
-  if (at < 0) return { body: summary, said: [], leftOut: 0 };
-  const said: string[] = [];
+  if (at < 0) return { body: lines.join("\n"), said: [], leftOut: 0 };
+  const said: Said[] = [];
   let leftOut = 0;
   let current: string[] | undefined;
+  let label: Omit<Said, "text"> = {};
   let end = lines.length;
+  const close = () => {
+    if (current) said.push({ text: current.join("\n"), ...label });
+    current = undefined;
+    label = {};
+  };
   for (let index = at + 1; index < lines.length; index += 1) {
     const line = lines[index]!;
     if (line.startsWith(">")) {
       (current ??= []).push(line.replace(/^> ?/, ""));
       continue;
     }
-    if (current) said.push(current.join("\n"));
-    current = undefined;
+    close();
     if (line.trim() === "") continue;
+    const labelled = RECORD_LABEL.exec(line);
+    if (labelled) {
+      label = { id: labelled[1]!, ...(labelled[2] ? { at: labelled[2] } : {}) };
+      continue;
+    }
     const count = /^\((\d+) earlier messages? left out/.exec(line);
     if (count && said.length === 0) {
       leftOut = Number(count[1]);
@@ -207,24 +286,26 @@ function splitRecord(summary: string): { body: string; said: string[]; leftOut: 
     end = index;
     break;
   }
-  if (current) said.push(current.join("\n"));
+  close();
   return { body: [...lines.slice(0, at), ...lines.slice(end)].join("\n").trimEnd(), said, leftOut };
 }
 
 /**
  * The person's messages in the range, word for word, oldest first: those an
- * earlier summary carried, then the newer ones. A long message keeps its head
- * and tail; when they do not all fit, the newest are kept.
+ * earlier summary carried, then the newer ones, each under its history id
+ * and date when known. A long message keeps its head and tail, and its marker
+ * says how to read the rest; when they do not all fit, the newest are kept.
  */
-export function personsRecord(messages: readonly Message[]): string {
+export function personsRecord(messages: readonly Message[], ids?: MessageIds): string {
   const earlier = messages.filter((message): message is UserMessage => message.role === "user" && isSummary(message)).at(-1);
   const carried = earlier ? splitRecord(textOf(earlier.content)) : { said: [], leftOut: 0 };
-  const said = [...carried.said, ...personsMessages(messages)];
-  const kept: string[] = [];
+  const said = [...carried.said, ...personsMessages(messages, ids)];
+  const kept: Said[] = [];
   let budget = RECORD_CHARS;
   for (let index = said.length - 1; index >= 0 && budget > 0; index -= 1) {
-    const text = clip(said[index]!, Math.min(budget, RECORD_MESSAGE_CHARS));
-    kept.unshift(text);
+    const item = said[index]!;
+    const text = clip(item.text, Math.min(budget, RECORD_MESSAGE_CHARS), item.id);
+    kept.unshift({ ...item, text });
     budget -= text.length;
   }
   if (kept.length === 0) return "";
@@ -232,15 +313,34 @@ export function personsRecord(messages: readonly Message[]): string {
   return [
     RECORD_HEADING,
     ...(leftOut > 0 ? [`(${leftOut} earlier message${leftOut === 1 ? "" : "s"} left out)`] : []),
-    ...kept.map((text) => text.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n")),
+    ...kept.map((item) => {
+      const quote = item.text.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n");
+      return item.id ? `[${item.id}${item.at ? `, ${item.at}` : ""}]\n${quote}` : quote;
+    }),
   ].join("\n\n");
 }
 
-/** The summary as stored: the text, the links it left out, then the person's messages. */
-function completed(text: string, messages: readonly Message[]): string {
-  const record = personsRecord(messages);
+/** What a compaction adds to the model's summary without the model. */
+export type Carried = {
+  /** The history ids of the range's messages (`messageIds`). */
+  ids?: MessageIds;
+  /** The conversation's memory now, fenced; null or absent when it has none. */
+  memory?: string | null;
+};
+
+/**
+ * The summary as stored: the text, the links it left out, the person's
+ * messages, the note on finding what it left out, then the memory.
+ */
+function completed(text: string, messages: readonly Message[], carried: Carried = {}): string {
+  const record = personsRecord(messages, carried.ids);
   const summary = withLedger(text, urlLedger(messages).filter((url) => !record.includes(url)));
-  return record ? `${summary.trimEnd()}\n\n${record}` : summary;
+  return [
+    summary.trimEnd(),
+    ...(record ? [record] : []),
+    HISTORY_NOTE,
+    ...(carried.memory?.trim() ? [`${THREAD_MEMORY_OPEN}\n${carried.memory.trim()}\n${THREAD_MEMORY_CLOSE}`] : []),
+  ].join("\n\n");
 }
 
 /** Whether a summary is in the same writing system as the person's messages. */
@@ -255,7 +355,7 @@ export function matchesPersonsScript(summary: string, person: string): boolean {
  * URL ledger and the person's messages. Worse than a written summary, but
  * nothing the person said is lost to a failed model call.
  */
-export function fallbackSummary(messages: readonly Message[]): string {
+export function fallbackSummary(messages: readonly Message[], carried: Carried = {}): string {
   const sections: string[] = [
     "(The automatic summary could not be written, so this is an excerpt of the earlier conversation.)",
   ];
@@ -268,7 +368,7 @@ export function fallbackSummary(messages: readonly Message[]): string {
         message.role === "assistant" && message.content.some((part) => part.type === "text" && part.text.trim()),
     );
   if (lastAnswer) sections.push(`## The assistant's last answer\n${clip(answerText(lastAnswer), ASSISTANT_MAX_CHARS)}`);
-  return completed(sections.join("\n\n"), messages);
+  return completed(sections.join("\n\n"), messages, carried);
 }
 
 function answerText(message: AssistantMessage): string {
@@ -380,6 +480,7 @@ export async function writeSummary(
   range: readonly Message[],
   complete: Complete,
   options: { instructions?: string } = {},
+  carried: Carried = {},
 ): Promise<{ summary: string; usage?: AssistantMessage["usage"]; failure?: string }> {
   const person = personsText(range);
   let failure = "";
@@ -403,9 +504,9 @@ export async function writeSummary(
       failure = "the reply was not a usable summary";
       continue;
     }
-    return { summary: completed(text, range), usage: message.usage };
+    return { summary: completed(text, range, carried), usage: message.usage };
   }
-  return { summary: fallbackSummary(range), failure };
+  return { summary: fallbackSummary(range, carried), failure };
 }
 
 /** The owner's suggestion for million-token models: compact well before the window, at 500k. */

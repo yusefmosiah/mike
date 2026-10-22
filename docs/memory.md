@@ -29,7 +29,8 @@ cannot delay an answer.
    user's app memory. Project conversations may also receive project memory.
    Shared-audience conversations never receive private app memory.
 3. **Memory is fenced as data.** The files are placed in the earliest synthetic
-   user message, inside delimiters the body cannot forge, and accompanied by a
+   user message (and, after a compaction, at the end of its summary), inside
+   delimiters the body cannot forge, and accompanied by a
    system policy that says memory is untrusted reference material. The
    delimiter is derived from the fenced text, so the turn stays byte-identical
    while memory is unchanged and provider prompt caches keep working. Current chat input
@@ -92,7 +93,10 @@ cannot delay an answer.
   a data boundary rather than a prompt-only confidentiality instruction.
 
 The live model receives enabled memory in an earliest synthetic user message,
-delimited as untrusted data. A system policy states that memory cannot grant
+delimited as untrusted data. A compaction replaces that message, so each
+compaction summary ends with a fresh copy of the memory as it is then
+(`memoryAtCompaction`, `lib/llm/pi/compactionHooks.mts`); the newest copy is
+current, and the next compaction writes it afresh rather than folding it. A system policy states that memory cannot grant
 permissions, change policy, or trigger tools by itself.
 
 ## User experience and controls
@@ -184,6 +188,17 @@ Each person's reviews of a conversation record how far they have looked (a
 finds compactions since then, it first forks just before each of them (the
 latest two at most), so the detail a summary is about to drop is looked at
 once while it is still verbatim, and then at the latest answer.
+
+What a summary leaves out is still stored. Every summary ends with a note on
+reaching it: in `run_python`, `tools.history_search(query=...)` searches the
+conversation's whole history (its compacted messages, answers and tool
+results included) and `tools.history_read(id=...)` reads a message whole
+(`lib/llm/pi/history.mts`). Messages are named by their entry in the
+conversation store (`m41`), and the summary's word-for-word record of the
+person's messages labels each with its id and date, so a clipped message says
+which `history_read` call returns the rest. Subagents do not get these
+functions. `evals/compaction-recall/` measures how many planted facts a model
+still answers correctly after a compaction, with and without them.
 
 ### The learning cutoff
 

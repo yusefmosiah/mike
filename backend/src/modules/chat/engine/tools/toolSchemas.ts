@@ -115,6 +115,57 @@ export const TABULAR_TOOLS = [
  */
 export const MEMORY_TOOLS = [EDIT_MEMORY_TOOL];
 
+/**
+ * The conversation's own history, compacted messages included
+ * (lib/llm/pi/history.mts), offered in every saved conversation. The turn
+ * answers them itself from its Pi transcript.
+ */
+export const HISTORY_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "history_search",
+      description:
+        "Search this conversation's whole history, including what a compaction summary left out: the person's messages, your answers and tool results. Returns matches newest first, each with its id (like m41), role, date, whether it was compacted, and a snippet around the first hit.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words to find (case-insensitive), or a regular expression with regex=true." },
+          regex: { type: "boolean", description: "Treat query as a regular expression." },
+          roles: {
+            type: "array",
+            items: { type: "string", enum: ["user", "assistant", "tool"] },
+            description: "Only these speakers: user (the person), assistant (you), tool (tool results).",
+          },
+          compacted_only: { type: "boolean", description: "Only messages the current context holds as a summary." },
+          limit: { type: "integer", description: "Matches to return (default 20, at most 100)." },
+          before: { type: "string", description: "Only matches older than this id: the next page of a search." },
+          context_chars: { type: "integer", description: "Characters of snippet on each side of the hit (default 200)." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "history_read",
+      description:
+        "Read one message of this conversation's history in full by its id (from history_search, or a summary's record), from an offset; or the messages from id through another id, in order.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The message's id, like m41." },
+          offset: { type: "integer", description: "Character to start at (default 0)." },
+          limit_chars: { type: "integer", description: "Characters to return (default 8000, at most 40000)." },
+          through: { type: "string", description: "Read every message from id through this id." },
+        },
+        required: ["id"],
+      },
+    },
+  },
+];
+
 export const WORKFLOW_TOOLS = [
   {
     type: "function",

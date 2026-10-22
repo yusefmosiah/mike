@@ -64,7 +64,7 @@ export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set([
     "ask_inputs",
     // Memory is the person's: a subagent neither reads it fresh nor changes it.
     "read_memory",
-    "edit_memory",
+    "edit_memory", "history_search", "history_read",
 ]);
 
 /**
