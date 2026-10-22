@@ -18,7 +18,9 @@
  * early turns are compacted. Each question is then asked on its own branch
  * from the last answer, once with no tools and once with history_search and
  * history_read offered as tools (the functions code mode gives run_python;
- * offered directly here, so no kernel is needed). Prints a table and appends
+ * offered directly here, so no kernel is needed), and once more with them
+ * offered and the tool index's lines for them, which say when to reach for
+ * them, in the system prompt as a chat has them. Prints a table and appends
  * one JSON line per question and arm to --out.
  *
  * Needs the model's provider key in the environment. A run costs a few cents
@@ -32,6 +34,7 @@ import { defineDocFamily, MemoryStorage } from "@earendil-works/pi-durable";
 import { piRuntime, resetPiRuntime, streamChatWithToolsOnPi } from "../../src/lib/llm/pi/runtime.mts";
 import type { LlmMessage, NormalizedToolCall, OpenAIToolSchema } from "../../src/lib/llm/types.ts";
 import { HISTORY_TOOLS } from "../../src/modules/chat/engine/tools/toolSchemas.ts";
+import { pythonToolIndex, pythonToolSpecs } from "../../src/lib/codemode/python.ts";
 
 const { values } = parseArgs({
   options: {
@@ -89,16 +92,20 @@ function excerpt(turn: number, notes: string[]): string {
 const SYSTEM = "You are a legal assistant helping a lawyer with a share purchase. Answer briefly. During document review, reply with one sentence acknowledging the excerpt.";
 
 const historyTools = HISTORY_TOOLS as unknown as OpenAIToolSchema[];
+const ARMS = ["none", "history", "index"] as const;
+type Arm = (typeof ARMS)[number];
+/** The index lines a chat shows for the history functions, without its Python preamble. */
+const HISTORY_INDEX = `Your tools:\n${pythonToolIndex(pythonToolSpecs(historyTools)).split("\n").filter((line) => line.startsWith("- ")).join("\n")}`;
 
 async function turn(
   messages: LlmMessage[],
   identity: { user: string; parent: string | null; assistant: string },
-  options: { tools?: OpenAIToolSchema[]; lookups?: string[]; autocompactTokens?: number } = {},
+  options: { tools?: OpenAIToolSchema[]; lookups?: string[]; autocompactTokens?: number; index?: boolean } = {},
 ) {
   return streamChatWithToolsOnPi({
     conversationId: "recall-eval",
     model: MODEL,
-    systemPrompt: SYSTEM,
+    systemPrompt: options.index ? `${SYSTEM}\n\n${HISTORY_INDEX}` : SYSTEM,
     messages,
     tools: options.tools ?? [],
     turn: { userMessageId: identity.user, parentMessageId: identity.parent, assistantMessageId: identity.assistant },
@@ -158,7 +165,7 @@ process.stderr.write(`summary: ${summary.length} characters\n`);
 type Row = {
   model: string;
   planted: string;
-  arm: "none" | "history";
+  arm: Arm;
   fact: string;
   /** Where the answer still was before the question: in the summary, still verbatim, or gone. */
   held: "summary" | "verbatim" | "gone";
@@ -168,14 +175,14 @@ type Row = {
 };
 const rows: Row[] = [];
 for (const [index, fact] of FACTS.entries()) {
-  for (const arm of ["none", "history"] as const) {
+  for (const arm of ARMS) {
     const lookups: string[] = [];
     const id = `${arm}-${index}`;
     const result = await turn(
       [...history, { role: "user", content: fact.question }],
       { user: `q-${id}`, parent, assistant: `r-${id}` },
       // A question's branch does not compact again after it answers.
-      { autocompactTokens: 10_000_000, ...(arm === "history" ? { tools: historyTools, lookups } : {}) },
+      { autocompactTokens: 10_000_000, ...(arm === "none" ? {} : { tools: historyTools, lookups, index: arm === "index" }) },
     );
     const held = fact.answer.test(verbatim) ? "verbatim" : fact.answer.test(summary) ? "summary" : "gone";
     const row: Row = { model: MODEL, planted: PLANTED, arm, fact: fact.question, held, right: fact.answer.test(result.fullText), lookups, answer: result.fullText.slice(0, 300) };
@@ -185,7 +192,7 @@ for (const [index, fact] of FACTS.entries()) {
   }
 }
 
-for (const arm of ["none", "history"] as const) {
+for (const arm of ARMS) {
   const mine = rows.filter((row) => row.arm === arm);
   const right = mine.filter((row) => row.right).length;
   const looked = mine.filter((row) => row.lookups.length > 0).length;

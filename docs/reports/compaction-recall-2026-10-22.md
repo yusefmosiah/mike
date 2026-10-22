@@ -48,7 +48,31 @@ such statements, and every one was kept.
   for the question's key terms before answering, and offer the hits as turn
   context.
 
+## Second run: the tool index's lines
+
+The tool index now gives each function one line saying when to reach for it
+(`backend/src/lib/codemode/toolStubs.ts`); history_search's says to use it
+"before quoting exact wording, a number, date or source from earlier". A
+third arm offers the same two functions with those lines in the system
+prompt. Same matter, same eight questions, one sample each:
+
+| Model | Summary | Held by the summary / verbatim / gone | Lookups: functions only | Lookups: with the index lines | Recall (none / functions / lines) |
+|---|---|---|---|---|---|
+| DeepSeek V4.1 Flash | 22,097 chars | 6 / 2 / 0 | 0 of 8 | 7 of 8 | 8 / 8 / 8 |
+| GLM-5.3-Flash | 7,051 chars | 1 / 7 / 0 | 1 of 8 | 0 of 8 | 8 / 7 / 8 |
+
+- **The line moved DeepSeek from never looking to nearly always looking**,
+  for facts it still had, in the summary or verbatim: it checked the record
+  before quoting a figure, as the line asks. GLM ignored the line entirely.
+- **Neither summary lost a fact this time**, so recall cannot separate the
+  arms. GLM's one miss is garbled formatting ("in\*\*es.okafor@…"), not a
+  wrong fact.
+- The cost of the lookups is a round trip each (one or two searches per
+  question), paid where the answer was already in the summary. Whether that
+  is worth it depends on how often a summary is wrong, which the next run
+  has to measure with more facts than a summary can hold.
+
 Run: `npx tsx --env-file=.env evals/compaction-recall/run.mts --model
-opencode-go/deepseek-v4.1-flash --out recall.jsonl` (about two dozen requests
+opencode-go/deepseek-v4.1-flash --out recall.jsonl` (about thirty requests
 of 20k to 80k tokens; on OpenCode Go they come out of the subscription's
 allowance).
