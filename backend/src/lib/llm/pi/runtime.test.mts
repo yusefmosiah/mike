@@ -41,7 +41,7 @@ const editDocument: OpenAIToolSchema = {
   },
 };
 
-type Seen = { users: string[]; toolResults: string[]; text: string };
+type Seen = { users: string[]; toolResults: string[]; text: string; messages: readonly unknown[] };
 let requests: Seen[];
 /** Responses a test scripts for the next model requests, consulted before the usual ones. */
 type Scripted = (ctx: { messages: readonly { role: string; content?: unknown }[] }) => ReturnType<typeof fauxAssistantMessage>;
@@ -68,6 +68,7 @@ function setup(options: { tokensPerSecond?: number } = {}) {
       users: ctx.messages.filter((m) => m.role === "user").map((m) => text(m.content)),
       toolResults: ctx.messages.filter((m) => m.role === "toolResult").map((m) => text(m.content)),
       text: "",
+      messages: ctx.messages,
     };
     requests.push(seen);
     const next = scripted.shift();
@@ -95,8 +96,8 @@ function setup(options: { tokensPerSecond?: number } = {}) {
     if (last?.role === "user" && text(last.content).includes("read NDA")) {
       return fauxAssistantMessage([fauxToolCall("read_document", { doc_id: "nda" })], { stopReason: "toolUse" });
     }
-    // Mike's compaction asks for a summary of the conversation it is given.
-    if (last?.role === "user" && text(last.content).includes("<conversation>")) {
+    // Mike's compaction asks for a summary as the conversation's next message.
+    if (last?.role === "user" && text(last.content).includes("This conversation is being compacted")) {
       return fauxAssistantMessage([fauxText(`## What the person is working on\nReviewing long documents. ${"Detail. ".repeat(40)}`)]);
     }
     // What a request that filled the context window gets back: cut off at once.
@@ -796,7 +797,14 @@ describe("Pi runtime: compaction", () => {
     expect(seen).toContain("## What the person is working on");
     // Sources the summary did not name survive in its ledger.
     expect(seen).toContain("https://example.com/source-1");
-    expect(requests.some((request) => request.users.at(-1)?.includes("<conversation>"))).toBe(true);
+    // The summary was asked for as the next message of the conversation itself:
+    // the last turn's request and answer unchanged, its long messages whole, so
+    // the provider reads it from its cache.
+    const asked = requests.findIndex((request) => request.users.at(-1)?.includes("This conversation is being compacted"));
+    expect(asked).toBeGreaterThan(0);
+    const turnBefore = requests[asked - 1]!;
+    expect(requests[asked]!.messages.slice(0, turnBefore.messages.length)).toEqual(turnBefore.messages);
+    expect(requests[asked]!.users).toContain(history[0]!.content);
   });
 });
 
