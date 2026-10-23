@@ -267,7 +267,15 @@ voice and checks speech against it (`SpeakerProfile.swift`,
 - **The models:** two, both downloaded with the other voice models, run side
   by side on every check, and both logged:
   - WeSpeaker ResNet34-LM, pyannote's VoxCeleb model (CC BY 4.0),
-    FluidAudio's Core ML conversion (about 8 MB, on the GPU): 256 numbers.
+    FluidAudio's Core ML conversion as two models (about 15 MB): a filterbank
+    on the CPU (`FBank`, about 4 ms) and the embedding network in half
+    precision on the Neural Engine (`Embedding`, 99.8 % of it on the Neural
+    Engine, about 6 ms a window on a Mac): 256 numbers. One 10 s window is
+    used, the speech repeated to fill it, so every frame weight is 1. It
+    replaced the single `wespeaker_v2` model on the GPU, which took 75 s to
+    compile on a first load; the two score alike (cosine 0.996 to 0.999 on
+    test clips) but are different conversions, so a profile learned with the
+    old one is not comparable (see "Learning").
   - CAM++, FunASR's model trained on Mandarin speech (Apache 2.0 on
     ModelScope; the conversion points to FunASR's model licence, which allows
     use with attribution), Fluid Inference's Core ML conversion (about 17 MB:
@@ -288,6 +296,13 @@ voice and checks speech against it (`SpeakerProfile.swift`,
   nudge it (a cold, another microphone). It is kept on the phone in
   `Application Support/MikeVoice/speaker.json` (excluded from backup), and
   "Forget my voice" in Settings, or removing the voice models, deletes it.
+  The profile carries a version that names the speaker models it was made
+  with (`SpeakerProfile.currentVersion`, 3 for the FBank + Embedding pair).
+  A profile of an older version is deleted at launch and at the start of a
+  run, with `voice speaker: profile from an older speaker model discarded` in
+  the log, and the voice is learned again from the next turns (the normal
+  path above, with nothing to configure). Raise the version whenever a speaker
+  model changes.
 - **Turns:** once learned, a finished turn of a second or more scoring under
   the threshold (WeSpeaker 0.35, CAM++ 0.39, both 0.27) is not sent: the engine sends `ignored` and
   listens again (the panel says "Another voice, not sent."). Shorter turns
@@ -388,7 +403,7 @@ clauses, and the engine speaks one clause per call.
 | Parakeet EOU 120M | about 300 MB (speech-swift's figure; to be measured) | continuously, every 320 ms |
 | Phonon 31m | about 95 MB | while speaking |
 | Smart Turn v3.2 | about 17 MB | once per candidate pause |
-| WeSpeaker ResNet34-LM | about 8 MB | once per turn and per barge-in candidate |
+| WeSpeaker ResNet34-LM | about 15 MB | once per turn and per barge-in candidate |
 | CAM++ | about 17 MB | the same, beside WeSpeaker |
 | Silero VAD | under 2 MB | continuously |
 
@@ -406,9 +421,13 @@ are well inside real time, but Instruments decides. Fallbacks:
 ### Start-up and loading
 
 Loading is the slow part of a start: Core ML specialises each model for its
-compute units when it is loaded (the EOU encoder and WeSpeaker run on the
-GPU, where the work is not kept between loads), about a minute in all on a
-first load. Three things hide it:
+compute units when it is loaded or first run. On the Neural Engine the system
+keeps the compiled result across launches, so the cost is paid once after an
+install or an update of the app or of iOS (measured on a phone, first start
+after an install: Smart Turn 2.4 s, VAD 2.7 s, EOU 16.6 s, the old GPU
+WeSpeaker with CAM++ 75 s; the next launch: 70 ms, 70 ms, 1.1 s, and the whole
+start about 5 s). The EOU encoder is the one model on the GPU, where the work
+is not kept between loads. Four things hide the cost:
 
 - **Models are kept.** `VoiceModelCache` loads each listening model once per
   app run and keeps it across starts; Fluid Speech Mini and Phonon keep their
@@ -424,7 +443,12 @@ first load. Three things hide it:
   would make every answer wait), there are no live words and no barge-in by
   words, and every voice is taken as the person's. A model that fails to load
   keeps that fallback for the run. The first-prediction warm-ups of Fluid
-  Speech Mini and Phonon ("Ready.") run after listening has begun.
+  Speech Mini and Phonon ("Ready.") run after listening has begun, and only
+  when they are done do the late models (Smart Turn, speaker, EOU) start
+  loading, at utility priority, so the compiles of the big late models do not
+  compete with the ones the first turn waits on. (The prewarm uses the same
+  order: VAD, Fluid Speech Mini and Phonon, then Smart Turn, the speaker
+  models, the EOU encoder.)
 - **A prewarm at launch.** When the app launches (the plugin's `load()`), a
   phone where the person has used voice mode before loads the models in the
   background at utility priority, about 3 s later so the web view's first load
@@ -435,6 +459,21 @@ first load. Three things hide it:
   a native flag (`UserDefaults`, set at the first start that reaches
   listening). The web app's `voicePrewarm` still works and is a duplicate the
   cache absorbs.
+- **First-time preparation, in the background and said out loud.** The slow
+  compile happens on the first load after an install or an update, so the
+  app does it as early as it can instead of at the first tap: when the voice
+  models finish installing (`VoiceMode.install` starts a prewarm), and at
+  launch whenever the build (`CFBundleShortVersionString` and
+  `CFBundleVersion`) or iOS differs from the one the models were last prepared
+  under, whether or not voice mode was used before (both are gated like any
+  prewarm: not in Low Power Mode or when hot). `VoicePreparation` keeps that
+  record (`UserDefaults`, set once every model has loaded and warmed) and the
+  state the web app reads: `voiceStatus` and a `preparation` event carry
+  `{ preparing, firstTime, ready }` (docs/voice-chat-contract.md). A load of
+  10 s or more also counts as a cold cache (`firstTime`), whatever the build.
+  While a start waits and `preparing && firstTime`, the voice panel says
+  "Preparing voice mode for first use…"; in Settings, where the models are
+  installed, "Preparing on this iPhone…" shows until it is done.
 
 #### Seeing the timings
 
@@ -446,16 +485,33 @@ names are public, never text or audio.
 
 1. Connect the iPhone, open Console.app, select the phone in the sidebar and
    press Start (Console shows nothing until streaming starts).
-2. Search `subsystem:MikeSpeech` (or `voice cache`, `voice start`,
-   `voice prewarm`). For `info` lines too, use Action > Include Info Messages.
+2. Search `voice cache` and `voice start` (also `voice prewarm`, `voice
+   prepare`, `voice speaker`) for the timings. Searching only
+   `subsystem:MikeSpeech` shows over 400,000 lines, almost all `info`
+   diagnostics, which bury these. For `info` lines too, use Action > Include
+   Info Messages.
 3. Launch the app (or tap voice mode) after streaming has started; lines from
    before it started are not replayed.
 
-The lines: `voice cache: <model> ready in N ms` (each load, once per app run),
-`voice start: vad, speech recogniser and voice loaded at N ms`,
-`voice start: listening in N ms (eou pending, smart turn pending, speaker
-pending)`, then `voice start: <model> attached at N ms` for each late arrival,
-and `voice prewarm: done in N ms`.
+The lines, all `notice` level:
+
+- `voice cache: <model> ready in N ms` for `vad`, `smart turn`, `eou`,
+  `speaker` (both speaker models together), `fluid mini` (load plus first
+  prediction) and, as `voice cache: phonon loaded in N ms` then
+  `voice cache: phonon first utterance in N ms`, the voice. Each is once per
+  app run. Finer: `voice cache: fluid mini loaded in N ms`, and for the
+  speaker models each part, `voice cache: speaker wespeaker fbank loaded in
+  N ms` / `... first prediction in N ms` (also `embedding`; CAM++ is
+  `preprocessor` and `campplus`). The first prediction is where the Neural
+  Engine compile happens.
+- `voice start: vad, speech recogniser and voice loaded at N ms`,
+  `voice start: listening in N ms (eou pending, smart turn pending, speaker
+  pending)`, then `voice start: <model> attached at N ms` for each late
+  arrival.
+- `voice prewarm: started`, `voice prewarm: done in N ms`, or `stopped`/
+  `skipped` with the reason.
+- `voice prepare: preparing true, first time true, ready ...` on each change
+  of the state the web app shows.
 
 ### Lifetime
 

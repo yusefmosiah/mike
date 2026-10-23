@@ -126,11 +126,17 @@ enum FluidSpeechMini {
                 running -= 1
                 scheduleUnload()
             }
+            let started = ContinuousClock.now
             // A failure here surfaces, with its code, on the transcription.
             guard let manager = try? loaded(modelDirectory) else { return }
+            let predicting = ContinuousClock.now
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
             _ = try? await manager.transcribe([Float](repeating: 0, count: 16_000), decoderState: &state)
             warm = true
+            let ms = VoiceEngine.milliseconds(since: started)
+            VoiceMode.log.notice("voice cache: fluid mini ready in \(ms, privacy: .public) ms (first prediction \(VoiceEngine.milliseconds(since: predicting), privacy: .public) ms)")
+            VoicePreparation.shared.noteLoad(VoiceModelName.fluidMini.rawValue, ms: ms)
+            VoicePreparation.shared.markReady(VoiceModelName.fluidMini.rawValue)
         }
 
         /// The warm models for a live dictation, which keeps them loaded until
@@ -186,7 +192,9 @@ enum FluidSpeechMini {
         private func loaded(_ directory: URL) throws -> AsrManager {
             if let manager { return manager }
             // loadLocal reads exactly this directory and never downloads.
+            let started = ContinuousClock.now
             let models = try AsrModels.loadLocal(from: directory, version: .ultra)
+            VoiceMode.log.notice("voice cache: fluid mini loaded in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms")
             let created = AsrManager(config: .default, models: models)
             self.models = models
             manager = created
@@ -211,6 +219,7 @@ enum FluidSpeechMini {
             manager = nil
             models = nil
             warm = false
+            VoicePreparation.shared.markUnloaded([VoiceModelName.fluidMini.rawValue])
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []
         }

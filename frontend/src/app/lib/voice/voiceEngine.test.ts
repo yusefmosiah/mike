@@ -69,19 +69,21 @@ describe("voiceChatSupported", () => {
     });
 });
 
+const IDLE = { preparing: false, firstTime: false, ready: [] as string[] };
+
 describe("voiceStatus and voiceInstall", () => {
     it("reads the engine's status, and anything wrong as unavailable", async () => {
-        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false });
+        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE });
         inApp();
         nativePromise.mockResolvedValueOnce({ available: false, missing: ["eou", 3, "phonon"], downloadBytes: 450e6 });
-        expect(await voiceStatus()).toEqual({ available: false, missing: ["eou", "phonon"], downloadBytes: 450e6, speakerLearned: false });
+        expect(await voiceStatus()).toEqual({ available: false, missing: ["eou", "phonon"], downloadBytes: 450e6, speakerLearned: false, ...IDLE });
         expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "voiceStatus", undefined);
         nativePromise.mockResolvedValueOnce({ available: true, downloadBytes: -1 });
-        expect(await voiceStatus()).toEqual({ available: true, missing: [], downloadBytes: 0, speakerLearned: false });
+        expect(await voiceStatus()).toEqual({ available: true, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE });
         nativePromise.mockResolvedValueOnce(null);
-        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false });
+        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE });
         nativePromise.mockRejectedValueOnce({ code: "failed" });
-        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false });
+        expect(await voiceStatus()).toEqual({ available: false, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE });
     });
 
     it("installs, and says why it could not", async () => {
@@ -103,7 +105,7 @@ describe("voiceForgetSpeaker and voiceMicrophoneModes", () => {
         inApp(["voiceStatus", "voiceForgetSpeaker"]);
         expect(voiceForgetSpeakerSupported()).toBe(true);
         nativePromise.mockResolvedValueOnce({ available: true, missing: [], downloadBytes: 0, speakerLearned: false });
-        expect(await voiceForgetSpeaker()).toEqual({ available: true, missing: [], downloadBytes: 0, speakerLearned: false });
+        expect(await voiceForgetSpeaker()).toEqual({ available: true, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE });
         expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "voiceForgetSpeaker", undefined);
         nativePromise.mockRejectedValueOnce(new Error("disk"));
         await expect(voiceForgetSpeaker()).rejects.toMatchObject({ message: VOICE_FORGET_FAILURE_MESSAGE, code: undefined });
@@ -115,6 +117,19 @@ describe("voiceForgetSpeaker and voiceMicrophoneModes", () => {
         expect((await voiceStatus()).speakerLearned).toBe(true);
         nativePromise.mockResolvedValueOnce({ available: true, speakerLearned: "yes" });
         expect((await voiceStatus()).speakerLearned).toBe(false);
+    });
+
+    it("reads the preparation fields, and reads an older app build as idle", async () => {
+        inApp();
+        nativePromise.mockResolvedValueOnce({
+            available: true,
+            preparing: true,
+            firstTime: true,
+            ready: ["vad", 3, "phonon"],
+        });
+        expect(await voiceStatus()).toMatchObject({ preparing: true, firstTime: true, ready: ["vad", "phonon"] });
+        nativePromise.mockResolvedValueOnce({ available: true, preparing: "yes", ready: "vad" });
+        expect(await voiceStatus()).toMatchObject({ preparing: false, firstTime: false, ready: [] });
     });
 
     it("opens the microphone modes only where the app has them, and never rejects", async () => {
@@ -134,7 +149,7 @@ describe("voiceRemove", () => {
         await expect(voiceRemove()).rejects.toMatchObject({ message: VOICE_REMOVE_FAILURE_MESSAGE, code: "unavailable" });
         inApp();
         nativePromise.mockResolvedValueOnce({ available: false, missing: ["vad", "eou", "smart-turn"], downloadBytes: 9e6 });
-        expect(await voiceRemove()).toEqual({ available: false, missing: ["vad", "eou", "smart-turn"], downloadBytes: 9e6, speakerLearned: false });
+        expect(await voiceRemove()).toEqual({ available: false, missing: ["vad", "eou", "smart-turn"], downloadBytes: 9e6, speakerLearned: false, ...IDLE });
         expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "voiceRemove", undefined);
         nativePromise.mockRejectedValueOnce({ code: "busy" });
         await expect(voiceRemove()).rejects.toMatchObject({ message: VOICE_BUSY_MESSAGE, code: "busy" });
@@ -230,6 +245,11 @@ describe("events", () => {
             [{ type: "metrics", stages: {} }, null],
             [{ type: "ignored", reason: "other-voice" }, { type: "ignored", reason: "other-voice" }],
             [{ type: "ignored" }, { type: "ignored", reason: "other-voice" }],
+            [
+                { type: "preparation", preparing: true, firstTime: true, ready: ["vad"] },
+                { type: "preparation", preparing: true, firstTime: true, ready: ["vad"] },
+            ],
+            [{ type: "preparation" }, { type: "preparation", preparing: false, firstTime: false, ready: [] }],
             [{ type: "unknown" }, null],
             [null, null],
         ];

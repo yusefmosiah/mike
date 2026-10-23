@@ -45,7 +45,17 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Runs once when the app launches: loads voice mode's models in the
     /// background for someone who has used it before (see `VoiceMode.prewarmAtLaunch`).
     public override func load() {
+        // The web app hears when the models start and finish preparing.
+        preparationToken = VoicePreparation.shared.observe { [weak self] snapshot in
+            self?.sendVoiceEvent(.preparation(snapshot))
+        }
         VoiceMode.prewarmAtLaunch()
+    }
+
+    private var preparationToken: UUID?
+
+    deinit {
+        if let preparationToken { VoicePreparation.shared.remove(preparationToken) }
     }
 
     /// About half an hour of the web view's AAC recording.

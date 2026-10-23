@@ -640,6 +640,32 @@ describe("useVoiceChat", () => {
         expect(calls("voiceStop")).toHaveLength(1);
     });
 
+    it("reports the models preparing for first use while starting, from the status and the engine's events", async () => {
+        status = { available: true, missing: [], downloadBytes: 0, preparing: true, firstTime: true, ready: [] };
+        let finishStart: () => void = () => undefined;
+        nativePromise.mockImplementation((_plugin: string, method: string) => {
+            if (method === "voiceStatus") return Promise.resolve(status);
+            if (method === "voiceStart") return new Promise<void>((resolve) => (finishStart = resolve));
+            return Promise.resolve(undefined);
+        });
+        const view = renderVoiceChat();
+        expect(view.result.current.voice.preparation).toEqual({ preparing: false, firstTime: false });
+        let starting: Promise<void> = Promise.resolve();
+        act(() => {
+            starting = view.result.current.voice.start();
+        });
+        await waitFor(() => expect(view.result.current.voice.phase).toBe("starting"));
+        expect(view.result.current.voice.preparation).toEqual({ preparing: true, firstTime: true });
+        await waitFor(() => expect(calls("voiceStart")).toHaveLength(1));
+        emit({ type: "preparation", preparing: false, firstTime: false, ready: ["vad"] });
+        expect(view.result.current.voice.preparation).toEqual({ preparing: false, firstTime: false });
+        await act(async () => {
+            finishStart();
+            await starting;
+        });
+        expect(view.result.current.voice.phase).toBe("on");
+    });
+
     it("ends voice mode when leaving a chat for the new-chat screen", async () => {
         const view = await started();
         view.rerender({ chatId: null });

@@ -114,12 +114,13 @@ export function VoiceModePanel({
         | "ignoredOtherVoice"
         | "installProgress"
         | "downloadBytes"
+        | "preparation"
         | "error"
         | "install"
         | "stop"
     >;
 }) {
-    const { phase, activity, partial, ignoredOtherVoice, installProgress, downloadBytes, error } = voice;
+    const { phase, activity, partial, ignoredOtherVoice, installProgress, downloadBytes, preparation, error } = voice;
 
     if (phase === "setup" || phase === "installing") {
         const fraction = installProgress ?? 0;
@@ -182,6 +183,9 @@ export function VoiceModePanel({
     }
 
     if (phase === "checking" || phase === "starting") {
+        // The phone compiles each model once after an install or an update
+        // (about a minute), then keeps the result; say so instead of a bare wait.
+        const firstUse = preparation.preparing && preparation.firstTime;
         return (
             <Frame label="Voice mode" phase={phase}>
                 <span
@@ -190,7 +194,16 @@ export function VoiceModePanel({
                 >
                     <Loader2 className="h-4 w-4 animate-spin" />
                 </span>
-                <p className="min-w-0 flex-1 text-sm font-medium text-gray-800">Starting voice mode…</p>
+                <div role="status" aria-live="polite" className="min-w-0 flex-1 basis-40">
+                    <p className="text-sm font-medium text-gray-800">
+                        {firstUse ? "Preparing voice mode for first use…" : "Starting voice mode…"}
+                    </p>
+                    {firstUse && (
+                        <p className="text-sm text-gray-600">
+                            This happens once after an install or an update and can take about a minute.
+                        </p>
+                    )}
+                </div>
                 <EndButton onClick={voice.stop} label="Cancel" />
             </Frame>
         );

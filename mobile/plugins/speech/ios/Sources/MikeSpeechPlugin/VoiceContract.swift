@@ -129,6 +129,8 @@ enum VoiceIgnoreReason: String, Equatable, Sendable {
 /// Every event the engine sends on the `voiceEvent` listener.
 enum VoiceEvent: Equatable, Sendable {
     case install(fraction: Double)
+    /// Voice mode's models started or finished preparing for this phone.
+    case preparation(VoicePreparation.Snapshot)
     case state(VoiceState)
     case partial(text: String)
     /// `continues`: the earlier turn this one replaces (its words are in `text`).
@@ -151,6 +153,10 @@ enum VoiceEvent: Equatable, Sendable {
         switch self {
         case let .install(fraction):
             return ["type": "install", "fraction": min(1, max(0, fraction))]
+        case let .preparation(snapshot):
+            var payload = snapshot.payload
+            payload["type"] = "preparation"
+            return payload
         case let .state(state):
             return ["type": "state", "state": state.rawValue]
         case let .partial(text):

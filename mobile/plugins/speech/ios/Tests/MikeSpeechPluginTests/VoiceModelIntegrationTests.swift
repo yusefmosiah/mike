@@ -188,6 +188,27 @@ final class VoiceModelIntegrationTests: XCTestCase {
         XCTAssertEqual(Set(both.keys), Set(SpeakerModelKind.allCases))
     }
 
+    /// The WeSpeaker FBank + Embedding pair gives a 256-number, unit-length
+    /// embedding and reports each part's load and prediction time.
+    func testTheWeSpeakerPairGivesA256NumberEmbeddingAndReportsEachPart() throws {
+        guard let root = modelsRoot else { throw XCTSkip("MIKE_VOICE_MODELS not set") }
+        let directory = root.appendingPathComponent(VoiceModels.speaker.name.rawValue)
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("Embedding.mlmodelc").path) else {
+            throw XCTSkip("the WeSpeaker pair is not downloaded")
+        }
+        var loaded: [String] = []
+        var predicted: [String] = []
+        let embedder = try SpeakerEmbedder(kind: .wespeaker, directory: directory, onPart: { part, ms in
+            XCTAssertGreaterThanOrEqual(ms, 0)
+            loaded.append(part)
+        })
+        XCTAssertEqual(loaded, ["fbank", "embedding"])
+        let embedding = try XCTUnwrap(embedder.embedding(of: try clip(), onPart: { part, _ in predicted.append(part) }))
+        XCTAssertEqual(predicted, ["fbank", "embedding"])
+        XCTAssertEqual(embedding.count, 256)
+        XCTAssertEqual(embedding.reduce(0) { $0 + $1 * $1 }.squareRoot(), 1, accuracy: 1e-3)
+    }
+
     /// The clip, then silence, through the listening pipeline and the turn
     /// policy as the engine runs them: one or more commits whose final-pass
     /// text covers the clip.

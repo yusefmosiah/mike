@@ -56,6 +56,8 @@ const END_REASONS: readonly VoiceEndReason[] = ["stopped", "interruption", "rout
 
 export type VoiceEvent =
     | { type: "install"; fraction: number }
+    /** Voice mode's models started or finished preparing for this phone (see `VoiceStatus.preparing`). */
+    | ({ type: "preparation" } & VoicePreparation)
     | { type: "state"; state: VoiceEngineState }
     | { type: "partial"; text: string }
     /**
@@ -74,7 +76,21 @@ export type VoiceEvent =
     /** Stage timings in ms, by name (for example `micDroppedMs`); unknown names are kept. */
     | { type: "metrics"; turnId: string; stages: Record<string, number> };
 
-export interface VoiceStatus {
+/**
+ * What voice mode's models are doing for this phone. The first load after an
+ * install or an update is slow (the phone compiles each model once and keeps
+ * the result); the app does it in the background as early as it can.
+ */
+export interface VoicePreparation {
+    /** Models are loading or warming now. */
+    preparing: boolean;
+    /** This is that first, slow preparation (after an install, an update, or with cold caches). */
+    firstTime: boolean;
+    /** Models loaded and warm ("vad", "smart-turn", "eou", "speaker", "phonon", "fluid-mini"). */
+    ready: string[];
+}
+
+export interface VoiceStatus extends VoicePreparation {
     /** Every model voice mode needs is installed and this device can run it. */
     available: boolean;
     /** Models still to download ("vad", "eou", "smart-turn", "speaker", "speaker-campplus", "phonon", "fluid-mini"). */
@@ -169,9 +185,19 @@ const record = (value: unknown): Record<string, unknown> =>
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const unit = (value: number) => Math.min(1, Math.max(0, value));
 
+/** The preparation fields of a status or an event; an app build without them reads as idle. */
+function parsePreparation(result: Record<string, unknown>): VoicePreparation {
+    return {
+        preparing: result.preparing === true,
+        firstTime: result.firstTime === true,
+        ready: Array.isArray(result.ready) ? result.ready.filter((name): name is string => typeof name === "string") : [],
+    };
+}
+
 function parseStatus(value: unknown): VoiceStatus {
     const result = record(value);
     return {
+        ...parsePreparation(result),
         available: result.available === true,
         missing: Array.isArray(result.missing) ? result.missing.filter((name): name is string => typeof name === "string") : [],
         downloadBytes: finite(result.downloadBytes) && result.downloadBytes > 0 ? result.downloadBytes : 0,
@@ -184,7 +210,7 @@ export async function voiceStatus(): Promise<VoiceStatus> {
     try {
         return parseStatus(await call("voiceStatus"));
     } catch {
-        return { available: false, missing: [], downloadBytes: 0, speakerLearned: false };
+        return { available: false, missing: [], downloadBytes: 0, speakerLearned: false, ...parsePreparation({}) };
     }
 }
 
@@ -318,6 +344,8 @@ export function parseVoiceEvent(data: unknown): VoiceEvent | null {
     switch (event.type) {
         case "install":
             return finite(event.fraction) ? { type: "install", fraction: unit(event.fraction) } : null;
+        case "preparation":
+            return { type: "preparation", ...parsePreparation(event) };
         case "state": {
             const state = STATES.find((known) => known === event.state);
             return state ? { type: "state", state } : null;

@@ -165,6 +165,44 @@ final class SpeakerProfileTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
+    func testAProfileFromAnOlderSpeakerModelIsDiscardedAndLearnedAgain() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "speaker-\(UUID().uuidString)/speaker.json", directoryHint: .notDirectory)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        XCTAssertEqual(SpeakerProfile().version, SpeakerProfile.currentVersion)
+        XCTAssertGreaterThanOrEqual(SpeakerProfile.currentVersion, 3, "WeSpeaker moved to the FBank + Embedding pair at 3")
+        XCTAssertFalse(SpeakerStore.discardOutdated(at: url), "no file, nothing to discard")
+        var voices = Voices(seed: 9)
+        SpeakerStore.save(learned(&voices, voices.voice()), to: url)
+        XCTAssertFalse(SpeakerStore.discardOutdated(at: url), "a current profile is kept")
+        XCTAssertTrue(SpeakerStore.load(from: url).learned)
+        // The profile the single-model WeSpeaker made (version 2) is gone, file and all.
+        try Data(#"{"version":2,"centroids":{"wespeaker":[1]},"candidates":[]}"#.utf8).write(to: url)
+        XCTAssertTrue(SpeakerStore.discardOutdated(at: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertFalse(SpeakerStore.load(from: url).learned)
+        try Data("not json".utf8).write(to: url)
+        XCTAssertFalse(SpeakerStore.discardOutdated(at: url), "a damaged file is left to load() to ignore")
+    }
+
+    func testWeSpeakerInputsAreOneWindowOfRepeatedSpeechAndFrameWeights() throws {
+        let window = try SpeakerEmbedder.wespeakerWindow([1, 2, 3])
+        XCTAssertEqual(window.shape, [1, 1, 160_000])
+        XCTAssertEqual(window.dataType, .float32)
+        XCTAssertEqual(window[0].floatValue, 1)
+        XCTAssertEqual(window[4].floatValue, 2, "the speech repeats to fill the window")
+        XCTAssertEqual(window[159_999].floatValue, Float(159_999 % 3 + 1))
+        let all = try SpeakerEmbedder.wespeakerWeights()
+        XCTAssertEqual(all.shape, [1, 589])
+        XCTAssertEqual((0..<589).map { all[$0].floatValue }, [Float](repeating: 1, count: 589), "a full window of speech")
+        let half = try SpeakerEmbedder.wespeakerWeights(speechFraction: 0.5)
+        XCTAssertEqual((0..<589).filter { half[$0].floatValue == 1 }.count, 295)
+        XCTAssertEqual(half[294].floatValue, 1)
+        XCTAssertEqual(half[295].floatValue, 0)
+        XCTAssertEqual(try SpeakerEmbedder.wespeakerWeights(speechFraction: 7)[588].floatValue, 1, "clamped")
+        XCTAssertEqual(try SpeakerEmbedder.wespeakerWeights(speechFraction: -1)[0].floatValue, 0, "clamped")
+    }
+
     func testCamPlusFeaturesHaveEachBinsMeanRemoved() throws {
         let features = try MLMultiArray(shape: [1, 3, 2], dataType: .float32)
         let values: [Float] = [1, 10, 2, 20, 6, 60]  // frames × bins

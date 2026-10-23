@@ -14,7 +14,8 @@ import Foundation
 ///   FluidAudio's Core ML conversion.
 /// - Smart Turn v3.2 (BSD-2-Clause), aufklarer's Core ML port.
 /// - WeSpeaker ResNet34-LM (CC BY 4.0, pyannote's VoxCeleb model),
-///   FluidAudio's Core ML conversion: the voice voice mode listens to.
+///   FluidAudio's Core ML conversion, as a filterbank and an embedding network
+///   that runs on the Neural Engine: the voice voice mode listens to.
 /// - CAM++ (FunASR's model licence; Apache 2.0 on ModelScope), Fluid
 ///   Inference's Core ML conversion: the same, to compare and combine.
 ///
@@ -103,11 +104,16 @@ enum VoiceModels {
         revision: "7eab74f3463c736418d0eb10296261ae581146c9",
         folder: "",
         files: [
-            File(path: "wespeaker_v2.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "d2b1fcde6121aea3ff0e14c1dc50d09dacb0314a2e89156353c31804230a422f"),
-            File(path: "wespeaker_v2.mlmodelc/coremldata.bin", size: 359, sha256: "6feb2472a71fa9d8a84020c85206138a4f6261c565c9884bf518d59dd5838da7"),
-            File(path: "wespeaker_v2.mlmodelc/metadata.json", size: 2738, sha256: "ddc4858b4051254098015cd0b97080149839d697faf7b036f933190e70b26758"),
-            File(path: "wespeaker_v2.mlmodelc/model.mil", size: 706_900, sha256: "2850f775d6ba659f01f616fed77ce6a45a25de3eb7e4bf3a4b07b658be4e13dd"),
-            File(path: "wespeaker_v2.mlmodelc/weights/weight.bin", size: 7_243_904, sha256: "34004f6798d35cad7071e2fdc67e63faaa782f53697e1cb49bcb452cf81ae151"),
+            File(path: "FBank.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "0e8bd3a8b82ac123580989f490e4d9245127c535857630b543311268accc3f0a"),
+            File(path: "FBank.mlmodelc/coremldata.bin", size: 853, sha256: "57ac436bb0671cbb5527a339134d695f752eb77f7a18966b93c6835335595759"),
+            File(path: "FBank.mlmodelc/metadata.json", size: 3409, sha256: "2623785f5d186893b82d01e84aa33a7704ef763c3309e02055f22dc9d871ce9a"),
+            File(path: "FBank.mlmodelc/model.mil", size: 15_667, sha256: "27aaeb21569e81bdbe2eef87789f50a37cfea800039bd134448a9417de2f30ed"),
+            File(path: "FBank.mlmodelc/weights/weight.bin", size: 1_776_896, sha256: "9e83fdd3ea78064b078069e4d9141603c61c47a27fd19e7e3142ff7476f8db36"),
+            File(path: "Embedding.mlmodelc/analytics/coremldata.bin", size: 243, sha256: "8d6706436639b53830b4dbe8aaf9c9a843f7f582d63e16f3cb8bb7c6ccd58682"),
+            File(path: "Embedding.mlmodelc/coremldata.bin", size: 704, sha256: "4a705bac27d151d9642f37609296042a15602a42253039e0921dc9e75da7e004"),
+            File(path: "Embedding.mlmodelc/metadata.json", size: 2818, sha256: "1854371eb6b438fb8aeac96afb45c999af7902581c06afdfcd7ff3cb1ce66be5"),
+            File(path: "Embedding.mlmodelc/model.mil", size: 78_432, sha256: "22fa958aef72a561c21f874a07cbdcd30fdf40ee961c0bc2fb67c119273b46d3"),
+            File(path: "Embedding.mlmodelc/weights/weight.bin", size: 13_412_288, sha256: "99356b2985b8d43880a657024d941d450b38820451ccff903f76ed4e52d1868b"),
         ])
 
     static let speakerCampplus = Model(
@@ -206,6 +212,7 @@ enum VoiceModels {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? url.setResourceValues(values)
+        if model.name == .speaker { removeLegacySpeaker() }
     }
 
     /// The folder a download of `model` at its pinned commit is staged in;
@@ -222,6 +229,29 @@ enum VoiceModels {
         for name in names where name.hasPrefix("\(model.name.rawValue).partial-") && name != keep {
             try? fm.removeItem(at: root.appendingPathComponent(name))
         }
+    }
+
+    /// The WeSpeaker model this one replaced (a single GPU model, not
+    /// comparable with the pair that runs on the Neural Engine).
+    static let legacySpeakerFiles = ["wespeaker_v2.mlmodelc"]
+
+    /// Deletes the replaced WeSpeaker model from `directory` once the pair that
+    /// replaces it is installed there. Installing the pair replaces the whole
+    /// folder, so this matters only for a folder left by an earlier build.
+    /// Returns whether it deleted anything.
+    @discardableResult
+    static func removeLegacySpeaker(in directory: URL = speaker.directory) -> Bool {
+        guard isInstalled(speaker) || directory != speaker.directory else { return false }
+        var removed = false
+        for name in legacySpeakerFiles {
+            let url = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+                removed = true
+            }
+        }
+        if removed { VoiceMode.log.notice("voice models: removed the replaced WeSpeaker model") }
+        return removed
     }
 
     /// Deletes every downloaded voice model, installed or partly downloaded

@@ -34,12 +34,14 @@ import {
 } from "@/app/lib/voice/voiceEngine";
 import { VoiceModeSetup } from "./VoiceModeSetup";
 
-const INSTALLED: VoiceStatus = { available: true, missing: [], downloadBytes: 0, speakerLearned: false };
+const IDLE = { preparing: false, firstTime: false, ready: [] };
+const INSTALLED: VoiceStatus = { available: true, missing: [], downloadBytes: 0, speakerLearned: false, ...IDLE };
 const MISSING: VoiceStatus = {
     available: false,
     missing: ["vad", "eou", "smart-turn", "speaker", "speaker-campplus"],
     downloadBytes: 42e6,
     speakerLearned: false,
+    ...IDLE,
 };
 
 beforeEach(() => {
@@ -80,7 +82,7 @@ describe("VoiceModeSetup", () => {
     });
 
     it("offers removal when only another model is missing", async () => {
-        engine.status.mockResolvedValue({ available: false, missing: ["phonon"], downloadBytes: 160e6, speakerLearned: false });
+        engine.status.mockResolvedValue({ available: false, missing: ["phonon"], downloadBytes: 160e6, speakerLearned: false, ...IDLE });
         render(<VoiceModeSetup />);
         expect(await screen.findByRole("button", { name: "Remove voice mode models" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Download speech models" })).toBeInTheDocument();
@@ -114,7 +116,49 @@ describe("VoiceModeSetup", () => {
         expect(bar).toHaveAttribute("aria-valuenow", "50");
         await act(async () => finish(true));
         expect(await screen.findByText(/speech models are on this phone/)).toBeInTheDocument();
+        // Only the listener for the preparation stays, until the page closes.
+        expect(engine.handlers.size).toBe(1);
+    });
+
+    it("says the phone is preparing the models until it is done, and releases the listener", async () => {
+        engine.status.mockResolvedValue({ ...INSTALLED, preparing: true, firstTime: true });
+        const { unmount } = render(<VoiceModeSetup />);
+        const status = await screen.findByText(/Preparing on this iPhone…/);
+        expect(status).toHaveTextContent("once after an install or an update");
+        expect(status.closest("[role='status']")).toHaveAttribute("aria-live", "polite");
+        // A later preparation that is not the first time says less.
+        act(() => {
+            for (const handler of engine.handlers) {
+                handler({ type: "state", state: "listening" });
+                handler({ type: "preparation", preparing: true, firstTime: false, ready: ["vad"] });
+            }
+        });
+        expect(screen.getByText(/Preparing on this iPhone…/)).not.toHaveTextContent("once after");
+        act(() => {
+            for (const handler of engine.handlers) handler({ type: "preparation", preparing: false, firstTime: false, ready: [] });
+        });
+        expect(screen.queryByText(/Preparing on this iPhone…/)).not.toBeInTheDocument();
+        unmount();
         expect(engine.handlers.size).toBe(0);
+    });
+
+    it("does not say preparing while models are still to download", async () => {
+        engine.status.mockResolvedValue({ ...MISSING, preparing: true });
+        render(<VoiceModeSetup />);
+        expect(await screen.findByRole("button", { name: "Download speech models" })).toBeInTheDocument();
+        expect(screen.queryByText(/Preparing on this iPhone…/)).not.toBeInTheDocument();
+    });
+
+    it("ignores a preparation event that arrives before the status", async () => {
+        let answer: (status: VoiceStatus) => void = () => {};
+        engine.status.mockReturnValue(new Promise<VoiceStatus>((resolve) => (answer = resolve)));
+        render(<VoiceModeSetup />);
+        act(() => {
+            for (const handler of engine.handlers) handler({ type: "preparation", preparing: true, firstTime: true, ready: [] });
+        });
+        await act(async () => answer(INSTALLED));
+        expect(await screen.findByText(/speech models are on this phone/)).toBeInTheDocument();
+        expect(screen.queryByText(/Preparing on this iPhone…/)).not.toBeInTheDocument();
     });
 
     it("says why the download failed", async () => {

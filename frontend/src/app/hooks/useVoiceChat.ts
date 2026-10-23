@@ -34,6 +34,7 @@ import {
     type VoiceConfig,
     type VoiceEngineState,
     type VoiceEvent,
+    type VoicePreparation,
 } from "@/app/lib/voice/voiceEngine";
 
 /**
@@ -120,6 +121,12 @@ export interface UseVoiceChatResult {
     installProgress: number | null;
     /** Size of the models still to download. */
     downloadBytes: number;
+    /**
+     * Whether the phone is still preparing voice mode's models (the slow first
+     * load after an install or an update is `firstTime`), as of the start and
+     * the engine's later `preparation` events.
+     */
+    preparation: Pick<VoicePreparation, "preparing" | "firstTime">;
     error: string | null;
     /** "Voice mode on" or "Voice mode ended", for a polite live region; never the live words. */
     announcement: string;
@@ -246,6 +253,7 @@ export function useVoiceChat({
     const [ignoredOtherVoice, setIgnoredOtherVoice] = useState(false);
     const [installProgress, setInstallProgress] = useState<number | null>(null);
     const [downloadBytes, setDownloadBytes] = useState(0);
+    const [preparation, setPreparation] = useState({ preparing: false, firstTime: false });
     const [error, setError] = useState<string | null>(null);
     // Bumped when a turn is waiting to be sent, so the effect below runs.
     const [queued, setQueued] = useState(0);
@@ -402,6 +410,12 @@ export function useVoiceChat({
 
     const handleEvent = useCallback(
         (event: VoiceEvent) => {
+            // The phone's preparing the models is news at any time, the start
+            // included (which is when it matters).
+            if (event.type === "preparation") {
+                setPreparation({ preparing: event.preparing, firstTime: event.firstTime });
+                return;
+            }
             // Until this session's engine has started, anything heard is left
             // over from an earlier one (its `ended`, above all).
             if (liveRef.current !== sessionRef.current) return;
@@ -543,6 +557,7 @@ export function useVoiceChat({
         setPhase("checking");
         const status = await voiceStatus();
         if (sessionRef.current !== session) return;
+        setPreparation({ preparing: status.preparing, firstTime: status.firstTime });
         if (status.available) {
             await begin(session);
             return;
@@ -738,6 +753,7 @@ export function useVoiceChat({
         ignoredOtherVoice,
         installProgress,
         downloadBytes,
+        preparation,
         error,
         announcement,
         start,

@@ -83,8 +83,29 @@ final class VoiceModelsTests: XCTestCase {
             XCTAssertTrue(model.files.allSatisfy { file in compiled.contains { file.path.hasPrefix($0 + "/") } }, kind.rawValue)
             for name in compiled { XCTAssertTrue(model.files.contains { $0.path == "\(name)/weights/weight.bin" }, name) }
         }
-        XCTAssertEqual(VoiceModels.speaker.totalBytes, 7_954_144)
+        XCTAssertEqual(VoiceModels.speaker.totalBytes, 15_291_553)
+        XCTAssertEqual(VoiceModels.speaker.revision, "7eab74f3463c736418d0eb10296261ae581146c9")
+        XCTAssertFalse(VoiceModels.speaker.files.contains { $0.path.hasPrefix("wespeaker_v2") }, "the replaced model is not downloaded")
+        XCTAssertEqual(SpeakerEmbedder.files(.wespeaker).map(\.name), ["FBank.mlmodelc", "Embedding.mlmodelc"])
+        XCTAssertEqual(SpeakerEmbedder.files(.wespeaker).map(\.units), [.cpuOnly, .cpuAndNeuralEngine])
+        XCTAssertEqual(SpeakerEmbedder.files(.campplus).map(\.units), [.cpuOnly, .cpuAndNeuralEngine], "CAM++ already runs on the Neural Engine")
+        for kind in SpeakerModelKind.allCases {
+            XCTAssertEqual(SpeakerEmbedder.parts(kind).count, SpeakerEmbedder.files(kind).count)
+        }
         XCTAssertEqual(VoiceModels.speakerCampplus.totalBytes, 16_615_589)
+    }
+
+    func testTheReplacedWeSpeakerModelIsDeletedFromAFolderThatHasIt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-speaker-\(UUID().uuidString)")
+        let legacy = directory.appendingPathComponent("wespeaker_v2.mlmodelc/weights")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("FBank.mlmodelc"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("x".utf8).write(to: legacy.appendingPathComponent("weight.bin"))
+        XCTAssertTrue(VoiceModels.removeLegacySpeaker(in: directory))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("wespeaker_v2.mlmodelc").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("FBank.mlmodelc").path), "the new pair stays")
+        XCTAssertFalse(VoiceModels.removeLegacySpeaker(in: directory), "nothing left to delete")
     }
 
     func testFilesAreKeptOnlyWhenSizeAndHashMatch() throws {

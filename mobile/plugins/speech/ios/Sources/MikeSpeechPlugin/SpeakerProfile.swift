@@ -110,7 +110,14 @@ struct SpeakerProfile: Codable, Equatable {
         static let unknown = Verdict(outcome: .unknown)
     }
 
-    private(set) var version = 2
+    /// The profile's format and the speaker models it was made with. Raised
+    /// when a model changes (the embeddings of two models cannot be compared),
+    /// so an older profile is discarded and the voice is learned again:
+    /// 2 was WeSpeaker's single-model conversion, 3 is its FBank + Embedding
+    /// pair on the Neural Engine.
+    static let currentVersion = 3
+
+    private(set) var version = SpeakerProfile.currentVersion
     /// The learned voice as each model has it (unit length).
     private(set) var centroids: [String: [Float]] = [:]
     /// Turns heard while learning, oldest first.
@@ -243,10 +250,25 @@ enum SpeakerStore {
         URL.applicationSupportDirectory.appending(path: "MikeVoice/speaker.json", directoryHint: .notDirectory)
     }
 
+    /// Deletes a profile made with an older speaker model, so the voice is
+    /// learned again from the next turns (the "learning" path), and says so in
+    /// the log. Returns whether it deleted one. A missing or unreadable file
+    /// is left alone.
+    @discardableResult
+    static func discardOutdated(at url: URL = url) -> Bool {
+        struct Header: Decodable { let version: Int? }
+        guard let data = try? Data(contentsOf: url),
+              let header = try? JSONDecoder().decode(Header.self, from: data),
+              header.version != SpeakerProfile.currentVersion else { return false }
+        remove(at: url)
+        VoiceMode.log.notice("voice speaker: profile from an older speaker model discarded, learning the voice again")
+        return true
+    }
+
     static func load(from url: URL = url) -> SpeakerProfile {
         guard let data = try? Data(contentsOf: url),
               let profile = try? JSONDecoder().decode(SpeakerProfile.self, from: data),
-              profile.version == SpeakerProfile().version else { return SpeakerProfile() }
+              profile.version == SpeakerProfile.currentVersion else { return SpeakerProfile() }
         return profile
     }
 

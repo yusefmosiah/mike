@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   loadSpeakerModel,
   saveSpeakerModel,
@@ -56,8 +57,16 @@ export function VoiceModeSetup() {
     void voiceStatus().then((next) => {
       if (live) setStatus(next);
     });
+    // The phone prepares the models in the background after an install or an
+    // update; the engine says when it starts and when it is done.
+    const off = onVoiceEvent((event) => {
+      if (event.type !== "preparation") return;
+      const { preparing, firstTime, ready } = event;
+      setStatus((current) => (current ? { ...current, preparing, firstTime, ready } : current));
+    });
     return () => {
       live = false;
+      off();
     };
   }, []);
 
@@ -115,6 +124,17 @@ export function VoiceModeSetup() {
                 ? `Voice mode needs speech models on this phone (${formatDownloadSize(status.downloadBytes)}, downloaded once). They download here or the first time you start voice mode. What you say stays on the phone.`
                 : "Voice mode's speech models are on this phone. What you say stays on the phone."}
             </SettingsDescription>
+          </div>
+          <div role="status" aria-live="polite" className="empty:hidden">
+            {status.preparing && !missing && progress === null && (
+              <p className="flex items-start gap-2 text-sm text-gray-700">
+                <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  Preparing on this iPhone…
+                  {status.firstTime ? " This happens once after an install or an update and can take about a minute." : ""}
+                </span>
+              </p>
+            )}
           </div>
           {progress !== null ? (
             <div className="space-y-1">

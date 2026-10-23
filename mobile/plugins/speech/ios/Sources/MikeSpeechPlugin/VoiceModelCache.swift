@@ -11,9 +11,10 @@ import FluidAudio
 /// kept across voice sessions.
 ///
 /// Loading them is the slow part of a start: Core ML specialises each model
-/// for its compute units when it is loaded (the EOU encoder and WeSpeaker run
-/// on the GPU, where the specialisation is not kept between loads), then a
-/// first prediction warms it. Before this cache every start loaded VAD, EOU,
+/// for its compute units when it is loaded (the EOU encoder runs on the GPU,
+/// where the specialisation is not kept between loads; the rest on the Neural
+/// Engine, where the system keeps it across launches once it has compiled it
+/// after an install or an update), then a first prediction warms it. Before this cache every start loaded VAD, EOU,
 /// Smart Turn and the speaker models one after another and every stop dropped
 /// them, so each start paid the full cost again. The models hold no per-run
 /// state (streams and VAD state are made fresh for each run), so one set
@@ -33,6 +34,16 @@ actor VoiceModelCache {
     /// for the VAD; the rest attach to the running listener as they arrive.
     enum Model: String, CaseIterable, Sendable {
         case vad, smartTurn, speaker, eou
+
+        /// Its name in `VoicePreparation` and the contract's `ready` list.
+        var readyName: String {
+            switch self {
+            case .vad: return VoiceModelName.vad.rawValue
+            case .smartTurn: return VoiceModelName.smartTurn.rawValue
+            case .speaker: return VoiceModelName.speaker.rawValue
+            case .eou: return VoiceModelName.eou.rawValue
+            }
+        }
     }
 
     private var tasks: [String: Any] = [:]
@@ -75,6 +86,7 @@ actor VoiceModelCache {
     /// Drops every model; a running voice mode keeps the copies it holds.
     func release() {
         tasks = [:]
+        VoicePreparation.shared.markUnloaded(Model.allCases.map(\.readyName))
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
         VoiceMode.log.notice("voice cache: released")
@@ -107,14 +119,21 @@ actor VoiceModelCache {
 
     private static let units = MLComputeUnits.cpuAndNeuralEngine
 
-    private static func timed<T>(_ name: String, _ work: () async throws -> T) async rethrows -> T {
+    /// Runs a load, logging how long it took (the lines `voice cache: <model>
+    /// ready in N ms`) and reporting it to `VoicePreparation`. `ok` says
+    /// whether the result is a usable model.
+    private static func timed<T>(_ model: Model, _ name: String, ok: (T) -> Bool = { _ in true }, _ work: () async throws -> T) async rethrows -> T {
         let started = ContinuousClock.now
-        defer { VoiceMode.log.notice("voice cache: \(name, privacy: .public) ready in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms") }
-        return try await work()
+        let result = try await work()
+        let ms = VoiceEngine.milliseconds(since: started)
+        VoiceMode.log.notice("voice cache: \(name, privacy: .public) ready in \(ms, privacy: .public) ms")
+        VoicePreparation.shared.noteLoad(model.readyName, ms: ms)
+        if ok(result) { VoicePreparation.shared.markReady(model.readyName) }
+        return result
     }
 
     private static func loadVad() async throws -> MLModel {
-        try await timed("vad") {
+        try await timed(.vad, "vad") {
             let configuration = MLModelConfiguration()
             configuration.computeUnits = units
             let model = try MLModel(
@@ -127,7 +146,7 @@ actor VoiceModelCache {
     }
 
     private static func loadEou() async throws -> EouStream.Models {
-        try await timed("eou") {
+        try await timed(.eou, "eou") {
             // The streaming encoder fails the Neural Engine compiler on device
             // (ANECCompile FAILED) and the fallback can stall; run it on the GPU.
             let models = try await EouStream.loadModels(directory: VoiceModels.eou.directory, computeUnits: .cpuAndGPU)
@@ -137,7 +156,7 @@ actor VoiceModelCache {
     }
 
     private static func loadSmartTurn() async throws -> SmartTurn.Model {
-        try await timed("smart turn") {
+        try await timed(.smartTurn, "smart turn") {
             let model = try SmartTurn.Model(directory: VoiceModels.smartTurn.directory, computeUnits: units)
             _ = try? model.probability(of: [])
             return model
@@ -147,13 +166,21 @@ actor VoiceModelCache {
     /// Both speaker models, side by side; one that fails is left out, and nil
     /// if none loads (every voice is then taken as the person's).
     private static func loadSpeaker() async -> SpeakerModels? {
-        await timed("speaker") {
+        await timed(.speaker, "speaker", ok: { $0 != nil }) {
             let embedders = await withTaskGroup(of: SpeakerEmbedder?.self) { group in
                 for kind in SpeakerModelKind.allCases {
                     group.addTask {
                         do {
-                            let embedder = try SpeakerEmbedder(kind: kind, directory: VoiceModels.speakerModel(kind).directory)
-                            _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600))
+                            // Each part's own load and first prediction (where the
+                            // Neural Engine compile happens) is logged separately.
+                            let embedder = try SpeakerEmbedder(
+                                kind: kind, directory: VoiceModels.speakerModel(kind).directory,
+                                onPart: { part, ms in
+                                    VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) loaded in \(ms, privacy: .public) ms")
+                                })
+                            _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600), onPart: { part, ms in
+                                VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) first prediction in \(ms, privacy: .public) ms")
+                            })
                             return embedder
                         } catch {
                             VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) failed to load")

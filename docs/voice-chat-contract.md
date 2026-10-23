@@ -16,8 +16,8 @@ listener, `voiceEvent`, with a `type` field.
 
 | Method | Arguments | Resolves |
 |---|---|---|
-| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number, speakerLearned: boolean }`. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"speaker"`, `"speaker-campplus"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size; `speakerLearned` means the person's voice has been learned and other voices are ignored. |
-| `voiceInstall` | — | `{ available }` once the missing models are downloaded and compiled. Progress arrives as `voiceEvent` `{ type: "install", fraction }`. |
+| `voiceStatus` | — | `{ available: boolean, missing: string[], downloadBytes: number, speakerLearned: boolean, preparing: boolean, firstTime: boolean, ready: string[] }`. The last three are the preparation state (below); a build without them reads as idle. `available` means every model voice mode needs is installed and this device can run it; `missing` names the models still to download (`"vad"`, `"eou"`, `"smart-turn"`, `"speaker"`, `"speaker-campplus"`, `"phonon"`, `"fluid-mini"`); `downloadBytes` is their total size; `speakerLearned` means the person's voice has been learned and other voices are ignored. |
+| `voiceInstall` | — | `{ available }` once the missing models are downloaded and compiled. Progress arrives as `voiceEvent` `{ type: "install", fraction }`. When it resolves the engine starts preparing the models in the background (below), so `preparing` is soon true. |
 | `voiceRemove` | — | The `voiceStatus` payload, after deleting the VAD, EOU, Smart Turn and both speaker models and the learned voice, and cancelling an install in progress. Phonon keeps its own `remove`. Rejects with `busy` while voice mode runs. |
 | `voiceForgetSpeaker` | — | The `voiceStatus` payload, after forgetting the learned voice; it is learned again from the next turns. Works while voice mode runs. |
 | `voiceMicrophoneModes` | — | Once the system's microphone modes (Voice Isolation, Wide Spectrum) are shown. iOS lists them only while the app holds the microphone, so the web app offers this during voice mode. |
@@ -54,6 +54,7 @@ interface VoiceConfig {
 ```ts
 type VoiceEvent =
   | { type: "install"; fraction: number }
+  | { type: "preparation"; preparing: boolean; firstTime: boolean; ready: string[] } // see "Preparation"
   | { type: "state"; state: "listening" | "user-speaking" | "confirming-end" | "thinking" | "speaking" }
   | { type: "partial"; text: string }                       // live words, replaced by `turn`
   | { type: "turn"; turnId: string; text: string; audioMs: number; continues?: string } // `continues`: see below
@@ -67,6 +68,22 @@ type VoiceEvent =
   | { type: "metrics"; turnId: string; stages: Record<string, number> }; // milliseconds
 ```
 
+- **Preparation.** The first load of the models after an install, an update
+  of the app or of iOS (or when the phone's compiled copies are gone, which
+  shows as a load of 10 s or more) is slow, tens of seconds, because Core ML
+  compiles each model once. The engine does it in the background as early as
+  it can: right after `voiceInstall`, and at launch when the app's version or
+  build, or the OS, changed since the models were last prepared (whether or
+  not voice mode was used before), skipping Low Power Mode and a hot phone.
+  `preparing` is true while models are loading or warming (a prewarm, or a
+  start's loads); `firstTime` is true until every model has been prepared
+  once for this build and system; `ready` lists the models loaded and warm
+  (`"vad"`, `"smart-turn"`, `"eou"`, `"speaker"`, `"phonon"`, `"fluid-mini"`).
+  `voiceStatus` returns the current state and a `preparation` event is sent on
+  each change, including while `voiceStart` is pending, so the web app can say
+  "Preparing voice mode for first use…" while it waits (`preparing &&
+  firstTime`). Older web builds ignore the extra status fields and the
+  unknown event type; an older plugin sends neither, which reads as idle.
 - The engine creates `turnId` when it commits a person's turn (`turn`), and
   the answer to that turn uses the same id. The text in `turn` is Fluid Speech
   Mini's final pass (vocabulary is applied by the web app).

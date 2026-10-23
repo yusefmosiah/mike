@@ -34,8 +34,16 @@ enum VoiceMode {
         /// Whether the person's voice has been learned (see SpeakerProfile).
         var speakerLearned = false
 
+        /// What the models are doing for this phone (docs/voice-chat-contract.md,
+        /// "Preparation"). Older web builds ignore the fields.
+        var preparation = VoicePreparation.Snapshot(preparing: false, firstTime: false, ready: [])
+
         var payload: [String: Any] {
-            ["available": available, "missing": missing, "downloadBytes": downloadBytes, "speakerLearned": speakerLearned]
+            var payload: [String: Any] = [
+                "available": available, "missing": missing, "downloadBytes": downloadBytes, "speakerLearned": speakerLearned,
+            ]
+            payload.merge(preparation.payload) { current, _ in current }
+            return payload
         }
     }
 
@@ -71,7 +79,7 @@ enum VoiceMode {
         missing.sort { (order.firstIndex(of: $0) ?? 0) < (order.firstIndex(of: $1) ?? 0) }
         return Status(
             available: canRunHere && missing.isEmpty, missing: missing, downloadBytes: bytes,
-            speakerLearned: SpeakerStore.load().learned)
+            speakerLearned: SpeakerStore.load().learned, preparation: VoicePreparation.shared.snapshot)
     }
 
     /// Loads and warms the models ahead of a start, at low priority, so the tap
@@ -85,6 +93,10 @@ enum VoiceMode {
         guard #available(iOS 18.0, *), canRunHere, PrewarmGate.allowsNow, await status().available else { return }
         guard await !VoiceEngine.shared.isRunning, let fluid = FluidSpeechMini.modelDirectory() else { return }
         let started = ContinuousClock.now
+        // Tells the web app (and `voiceStatus`) that models are preparing, first time or not.
+        let preparation = VoicePreparation.shared.begin(wantsSpeaker: speaker)
+        defer { preparation.end() }
+        log.notice("voice prewarm: started, first time \(VoicePreparation.shared.snapshot.firstTime, privacy: .public)")
         async let vad: Void = VoiceModelCache.shared.load(.vad)
         async let fluidLoaded: Void = FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluid)
         async let phononLoaded: Void = PhononVoice.Runtime.shared.prepare()
@@ -116,7 +128,20 @@ enum VoiceMode {
         #if canImport(FluidAudio) && canImport(PhononTTS)
         let first = launchPrewarm.current == 0
         launchPrewarm.bump()
-        guard first, canRunHere, VoiceUsage.hasBeenUsed(), PrewarmGate.allowsNow else { return }
+        guard first, canRunHere else { return }
+        // Models made for an older speaker model do not belong here any more.
+        SpeakerStore.discardOutdated()
+        VoiceModels.removeLegacySpeaker()
+        // Someone who has used voice mode gets the models loaded; so does a
+        // phone whose build or system changed since they were last prepared
+        // (the system's compiled copies are gone), used before or not.
+        let used = VoiceUsage.hasBeenUsed()
+        let firstTime = VoicePreparation.shared.needsFirstPreparation
+        guard used || firstTime else { return }
+        guard PrewarmGate.allowsNow else {
+            log.notice("voice prewarm: skipped at launch, low power mode or hot phone")
+            return
+        }
         Task.detached(priority: .utility) {
             try? await Task.sleep(for: PrewarmGate.launchDelay)
             guard await MainActor.run(body: { UIApplication.shared.applicationState == .active }) else {
@@ -132,6 +157,11 @@ enum VoiceMode {
     /// the bytes still to fetch. A second call while one runs joins it.
     static func install(progress: @escaping @Sendable (Double) -> Void) async throws {
         try await Installer.shared.run(progress: progress)
+        // The models are in: compile and warm them now, in the background, so
+        // the first tap does not pay for it (skipped in Low Power Mode or when hot).
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        Task.detached(priority: .utility) { await prewarm(speaker: true) }
+        #endif
     }
 
     /// Deletes the downloaded voice models (VAD, the speaker models, EOU, Smart Turn)
@@ -497,8 +527,7 @@ actor VoiceEngine {
     private var fluidDirectory: URL?
     private var input: AsyncStream<[Float]>.Continuation?
     private var listenTask: Task<Void, Never>?
-    /// Waits for the models the run started without, and the warm-ups after the start.
-    private var lateTask: Task<Void, Never>?
+    /// The warm-ups after the start, then loading the models the run started without.
     private var warmTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
     private var synthTask: Task<Void, Never>?
@@ -572,14 +601,18 @@ actor VoiceEngine {
         let tts: Phonon
         let wantsSpeaker = config.speakerModel != nil
         let late = LateModels(started: started, expecting: ["eou", "smart turn"] + (wantsSpeaker ? ["speaker"] : []))
-        let lateTask = Self.loadLate(into: late, speaker: wantsSpeaker)
+        // Open from here until the late models have loaded (or the start fails).
+        let preparation = VoicePreparation.shared.begin(wantsSpeaker: wantsSpeaker)
         do {
             let units = MLComputeUnits.cpuAndNeuralEngine
             // Progressive start: wait only for what listening cannot begin
             // without, the VAD, Fluid Speech Mini and the Phonon voice, loaded
             // side by side. The EOU, Smart Turn and speaker models are loading
-            // meanwhile (VoiceModelCache) and attach to the running listener
-            // as they finish; until then a turn ends on silence alone.
+            // after the first-prediction warm-ups below (VoiceModelCache) and
+            // attach to the running listener as they finish; until then a turn
+            // ends on silence alone. They start only then so that their GPU and
+            // Neural Engine compiles, the long ones after an install or an
+            // update, do not compete with the ones the first turn waits on.
             async let vadLoad = Self.attempt { Held(try await VoiceModelCache.shared.vad()) }
             async let fluidLoad = Self.attempt { Held(try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)) }
             async let phononLoad = Self.attempt { Held(try await PhononVoice.Runtime.shared.beginVoice(voice: voice)) }
@@ -594,7 +627,7 @@ actor VoiceEngine {
             // Fresh per run: the threshold is the run's, and the state is the stream's.
             vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: vadModel)
         } catch {
-            lateTask.cancel()
+            preparation.end()
             if heldFluid { await FluidSpeechMini.Runtime.shared.endLive() }
             if heldPhonon { await PhononVoice.Runtime.shared.endVoice() }
             if (error as? OnDeviceSpeech.Failure) != .cancelled {
@@ -618,7 +651,7 @@ actor VoiceEngine {
                 },
                 notify: { notice in Task { await VoiceEngine.shared.handle(notice, generation: current) } })
         } catch {
-            lateTask.cancel()
+            preparation.end()
             continuation.finish()
             await FluidSpeechMini.Runtime.shared.endLive()
             await PhononVoice.Runtime.shared.endVoice()
@@ -637,12 +670,12 @@ actor VoiceEngine {
         policy = TurnPolicy(config: config)
         policy.echoCancelled = audio.echoCancelled
         self.config = config
+        SpeakerStore.discardOutdated()
         speaker = SpeakerStore.load()
         speakerKinds = []
         // No EOU model, no Smart Turn, no speaker check until they attach.
         policy.smartTurnAvailable = false
         policy.checksSpeaker = false
-        self.lateTask = lateTask
         queue = ClauseQueue()
         pendingActions = []
         metrics = nil
@@ -666,6 +699,10 @@ actor VoiceEngine {
             // is still seconds away. Both serialise behind real work.
             await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
             await PhononVoice.Runtime.shared.warmUp()
+            // The minimum set is ready: now the models that only improve the
+            // run (Smart Turn, the speaker check, live words) begin to load.
+            if !Task.isCancelled { await Self.loadLate(into: late, speaker: wantsSpeaker) }
+            preparation.end()
         }
     }
 
@@ -683,9 +720,7 @@ actor VoiceEngine {
         monitorTask?.cancel()
         // The loads themselves go on in the cache for the next start; nothing
         // of this run is left to receive them.
-        lateTask?.cancel()
         warmTask?.cancel()
-        lateTask = nil
         warmTask = nil
         listenTask = nil
         monitorTask = nil
@@ -740,22 +775,20 @@ actor VoiceEngine {
         do { return .success(try await work()) } catch { return .failure(error) }
     }
 
-    /// Waits for each model the start did not, all at once, handing each to `late`
-    /// as it finishes. A model that fails is delivered as nil.
-    private static func loadLate(into late: LateModels, speaker wantsSpeaker: Bool) -> Task<Void, Never> {
-        Task {
-            await withTaskGroup(of: Void.self) { group in
+    /// Loads each model the start did not wait for, all at once, handing each
+    /// to `late` as it finishes. A model that fails is delivered as nil.
+    private static func loadLate(into late: LateModels, speaker wantsSpeaker: Bool) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                let models = try? await VoiceModelCache.shared.eou()
+                late.deliver(.eou(models), name: "eou")
+            }
+            group.addTask {
+                late.deliver(.smartTurn(await VoiceModelCache.shared.smartTurn()), name: "smart turn")
+            }
+            if wantsSpeaker {
                 group.addTask {
-                    let models = try? await VoiceModelCache.shared.eou()
-                    late.deliver(.eou(models), name: "eou")
-                }
-                group.addTask {
-                    late.deliver(.smartTurn(await VoiceModelCache.shared.smartTurn()), name: "smart turn")
-                }
-                if wantsSpeaker {
-                    group.addTask {
-                        late.deliver(.speaker(await VoiceModelCache.shared.speaker()), name: "speaker")
-                    }
+                    late.deliver(.speaker(await VoiceModelCache.shared.speaker()), name: "speaker")
                 }
             }
         }

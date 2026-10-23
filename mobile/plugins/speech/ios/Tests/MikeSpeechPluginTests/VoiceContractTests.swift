@@ -103,6 +103,7 @@ final class VoiceContractTests: XCTestCase {
             .bargeIn(turnId: "t"), .clauseStarted(turnId: "t", clauseId: 0), .clausePlayed(turnId: "t", clauseId: 0),
             .interrupted(turnId: "t", clauseId: 0, fraction: 0.5), .answerFinished(turnId: "t"), .ended(.stopped),
             .metrics(turnId: "t", stages: ["finalPass": 1]),
+            .preparation(.init(preparing: true, firstTime: true, ready: ["vad", "phonon"])),
         ]
         for event in events {
             XCTAssertTrue(JSONSerialization.isValidJSONObject(event.payload), "\(event)")
@@ -117,7 +118,20 @@ final class VoiceContractTests: XCTestCase {
     func testStatusPayloadHasTheContractsFields() {
         let status = VoiceMode.Status(available: false, missing: ["vad", "phonon"], downloadBytes: 42, speakerLearned: true)
         XCTAssertEqual(status.payload as NSDictionary,
-                       ["available": false, "missing": ["vad", "phonon"], "downloadBytes": 42, "speakerLearned": true])
+                       ["available": false, "missing": ["vad", "phonon"], "downloadBytes": 42, "speakerLearned": true,
+                        "preparing": false, "firstTime": false, "ready": []])
+        var preparing = status
+        preparing.preparation = .init(preparing: true, firstTime: true, ready: ["vad"])
+        XCTAssertEqual(preparing.payload["preparing"] as? Bool, true)
+        XCTAssertEqual(preparing.payload["firstTime"] as? Bool, true)
+        XCTAssertEqual(preparing.payload["ready"] as? [String], ["vad"])
+        XCTAssertEqual(preparing.payload["available"] as? Bool, false, "the fields older builds read are unchanged")
+    }
+
+    func testPreparationEventCarriesTheSnapshot() {
+        let event = VoiceEvent.preparation(.init(preparing: true, firstTime: false, ready: ["smart-turn", "vad"]))
+        XCTAssertEqual(event.payload as NSDictionary,
+                       ["type": "preparation", "preparing": true, "firstTime": false, "ready": ["smart-turn", "vad"]])
     }
 
     func testStatusNamesWhatIsMissingInContractOrder() async {

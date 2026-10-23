@@ -12,6 +12,7 @@ function voice(overrides: Partial<UseVoiceChatResult> = {}) {
         ignoredOtherVoice: false,
         installProgress: null,
         downloadBytes: 0,
+        preparation: { preparing: false, firstTime: false },
         error: null,
         install: vi.fn(async () => undefined),
         stop: vi.fn(),
@@ -82,6 +83,21 @@ describe("VoiceModePanel", () => {
         expect(handlers.stop).toHaveBeenCalled();
         rerender(<VoiceModePanel voice={voice({ phase: "checking" })} />);
         expect(screen.getByText("Starting voice mode…")).toBeInTheDocument();
+    });
+
+    it("says the models are being prepared for first use, politely, until they are", () => {
+        const { rerender } = render(<VoiceModePanel voice={voice({ phase: "starting", preparation: { preparing: true, firstTime: true } })} />);
+        const status = screen.getByRole("status");
+        expect(status).toHaveAttribute("aria-live", "polite");
+        expect(status).toHaveTextContent("Preparing voice mode for first use…");
+        expect(status).toHaveTextContent("once after an install or an update");
+        expect(screen.queryByText("Starting voice mode…")).not.toBeInTheDocument();
+        // The same region carries the later text, so the change is announced.
+        rerender(<VoiceModePanel voice={voice({ phase: "starting", preparation: { preparing: true, firstTime: false } })} />);
+        expect(screen.getByRole("status")).toHaveTextContent("Starting voice mode…");
+        expect(screen.getByRole("status")).not.toHaveTextContent("once after");
+        rerender(<VoiceModePanel voice={voice({ phase: "checking", preparation: { preparing: false, firstTime: true } })} />);
+        expect(screen.getByRole("status")).toHaveTextContent("Starting voice mode…");
     });
 
     it("offers the model download with its size, and shows why it failed", () => {

@@ -4,17 +4,21 @@ import Foundation
 /// One speaker model on Core ML: 16 kHz speech in, a voice embedding out
 /// (unit length). Speech is judged on its last 10 s.
 ///
-/// - WeSpeaker ResNet34-LM (pyannote's VoxCeleb model, FluidAudio's
-///   conversion) takes a batch of three 10 s windows with a frame mask; one
-///   window is used, the speech repeated to fill it (padding with silence
-///   would pull every embedding toward the same point).
+/// - WeSpeaker ResNet34-LM (pyannote's community-1 VoxCeleb model, FluidAudio's
+///   conversion) is two models: a filterbank on the CPU (about 4 ms) feeding
+///   the embedding network in half precision on the Neural Engine (about 6 ms
+///   a window on a Mac). One 10 s window is used, the speech repeated to fill
+///   it (padding with silence would pull every embedding toward the same
+///   point); every frame of it is then speech, so the frame weights are all 1.
+///   The earlier single-model conversion ran on the GPU, took over a minute to
+///   specialise on a first load and is not comparable with this one (the
+///   speaker profile's version covers that).
 /// - CAM++ (FunASR, Fluid Inference's conversion) is a filterbank model on
 ///   the CPU, then the embedding model on the Neural Engine; it needs at least
 ///   0.66 s, so shorter speech is repeated to a second.
 final class SpeakerEmbedder {
     static let windowSamples = 160_000
-    private static let wespeakerBatch = 3
-    private static let wespeakerMaskFrames = 589
+    static let wespeakerFrames = 589
     private static let campplusMinimumSamples = 16_000
 
     let kind: SpeakerModelKind
@@ -23,29 +27,48 @@ final class SpeakerEmbedder {
     /// The compiled models of `kind`, with the units each runs on.
     static func files(_ kind: SpeakerModelKind) -> [(name: String, units: MLComputeUnits)] {
         switch kind {
-        // Its own filterbank is more than the Neural Engine takes whole.
-        case .wespeaker: return [("wespeaker_v2.mlmodelc", .cpuAndGPU)]
+        case .wespeaker: return [("FBank.mlmodelc", .cpuOnly), ("Embedding.mlmodelc", .cpuAndNeuralEngine)]
         case .campplus: return [("CamPlusPreprocessor.mlmodelc", .cpuOnly), ("CamPlusPlus.mlmodelc", .cpuAndNeuralEngine)]
         }
     }
 
-    init(kind: SpeakerModelKind, directory: URL, computeUnits: MLComputeUnits? = nil) throws {
-        self.kind = kind
-        models = try Self.files(kind).map { file in
-            let configuration = MLModelConfiguration()
-            configuration.computeUnits = computeUnits ?? file.units
-            return try MLModel(contentsOf: directory.appendingPathComponent(file.name), configuration: configuration)
+    /// Short names of the parts in `files(_:)` order, for the log.
+    static func parts(_ kind: SpeakerModelKind) -> [String] {
+        switch kind {
+        case .wespeaker: return ["fbank", "embedding"]
+        case .campplus: return ["preprocessor", "campplus"]
         }
     }
 
+    /// `onPart` hears how long each part took (its name, milliseconds): to load
+    /// in the initialiser, to predict in `embedding(of:onPart:)`.
+    init(kind: SpeakerModelKind, directory: URL, computeUnits: MLComputeUnits? = nil,
+         onPart: ((String, Double) -> Void)? = nil) throws {
+        self.kind = kind
+        let names = Self.parts(kind)
+        models = try Self.files(kind).enumerated().map { index, file in
+            let configuration = MLModelConfiguration()
+            configuration.computeUnits = computeUnits ?? file.units
+            let started = ContinuousClock.now
+            let model = try MLModel(contentsOf: directory.appendingPathComponent(file.name), configuration: configuration)
+            onPart?(names[index], Self.milliseconds(since: started))
+            return model
+        }
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = ContinuousClock.now - start
+        return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
+    }
+
     /// The embedding of `samples` (its last 10 s), or nil for no audio.
-    func embedding(of samples: [Float]) throws -> [Float]? {
+    func embedding(of samples: [Float], onPart: ((String, Double) -> Void)? = nil) throws -> [Float]? {
         guard !samples.isEmpty else { return nil }
         let speech = Array(samples.suffix(Self.windowSamples))
         let output: MLMultiArray?
         switch kind {
-        case .wespeaker: output = try wespeaker(speech)
-        case .campplus: output = try campplus(speech)
+        case .wespeaker: output = try wespeaker(speech, onPart: onPart)
+        case .campplus: output = try campplus(speech, onPart: onPart)
         }
         guard let output, output.count >= kind.dimensions else { return nil }
         var embedding = [Float](repeating: 0, count: kind.dimensions)
@@ -53,31 +76,49 @@ final class SpeakerEmbedder {
         return SpeakerProfile.normalised(embedding, kind: kind)
     }
 
-    private func wespeaker(_ speech: [Float]) throws -> MLMultiArray? {
-        let waveform = try MLMultiArray(
-            shape: [NSNumber(value: Self.wespeakerBatch), NSNumber(value: Self.windowSamples)], dataType: .float32)
-        let mask = try MLMultiArray(
-            shape: [NSNumber(value: Self.wespeakerBatch), NSNumber(value: Self.wespeakerMaskFrames)], dataType: .float32)
-        let wave = waveform.dataPointer.bindMemory(to: Float.self, capacity: waveform.count)
-        wave.update(repeating: 0, count: waveform.count)
-        Self.repeated(speech, into: wave, count: Self.windowSamples)
-        let frames = mask.dataPointer.bindMemory(to: Float.self, capacity: mask.count)
-        frames.update(repeating: 0, count: mask.count)
-        frames.update(repeating: 1, count: Self.wespeakerMaskFrames)
-        let input = try MLDictionaryFeatureProvider(dictionary: ["waveform": waveform, "mask": mask])
-        return try models[0].prediction(from: input).featureValue(for: "embedding")?.multiArrayValue
+    /// Runs part `index` on `input`, telling `onPart` how long it took.
+    private func predict(_ index: Int, _ input: [String: MLMultiArray], onPart: ((String, Double) -> Void)?) throws -> MLFeatureProvider {
+        let started = ContinuousClock.now
+        let result = try models[index].prediction(from: MLDictionaryFeatureProvider(dictionary: input))
+        onPart?(Self.parts(kind)[index], Self.milliseconds(since: started))
+        return result
     }
 
-    private func campplus(_ speech: [Float]) throws -> MLMultiArray? {
+    /// The window as the filterbank takes it: [1, 1, 160000], the speech repeated to fill it.
+    static func wespeakerWindow(_ speech: [Float]) throws -> MLMultiArray {
+        let waveform = try MLMultiArray(shape: [1, 1, NSNumber(value: windowSamples)], dataType: .float32)
+        repeated(speech, into: waveform.dataPointer.bindMemory(to: Float.self, capacity: waveform.count), count: windowSamples)
+        return waveform
+    }
+
+    /// The frame weights of the embedding network: [1, 589], 1 for a frame of
+    /// speech. `speechFraction` is the share of the window that is real speech
+    /// (the window is filled by repeating the speech, so it is 1).
+    static func wespeakerWeights(speechFraction: Float = 1) throws -> MLMultiArray {
+        let weights = try MLMultiArray(shape: [1, NSNumber(value: wespeakerFrames)], dataType: .float32)
+        let frames = weights.dataPointer.bindMemory(to: Float.self, capacity: weights.count)
+        let speech = Int((Float(wespeakerFrames) * min(1, max(0, speechFraction))).rounded(.up))
+        frames.update(repeating: 0, count: weights.count)
+        frames.update(repeating: 1, count: speech)
+        return weights
+    }
+
+    private func wespeaker(_ speech: [Float], onPart: ((String, Double) -> Void)?) throws -> MLMultiArray? {
+        let fbank = try predict(0, ["audio": Self.wespeakerWindow(speech)], onPart: onPart)
+            .featureValue(for: "fbank_features")?.multiArrayValue
+        guard let fbank else { return nil }
+        return try predict(1, ["fbank_features": fbank, "weights": Self.wespeakerWeights()], onPart: onPart)
+            .featureValue(for: "embedding")?.multiArrayValue
+    }
+
+    private func campplus(_ speech: [Float], onPart: ((String, Double) -> Void)?) throws -> MLMultiArray? {
         let count = max(speech.count, Self.campplusMinimumSamples)
         let waveform = try MLMultiArray(shape: [1, NSNumber(value: count)], dataType: .float32)
         Self.repeated(speech, into: waveform.dataPointer.bindMemory(to: Float.self, capacity: count), count: count)
-        let features = try models[0].prediction(from: MLDictionaryFeatureProvider(dictionary: ["waveform": waveform]))
-            .featureValue(for: "features")?.multiArrayValue
+        let features = try predict(0, ["waveform": waveform], onPart: onPart).featureValue(for: "features")?.multiArrayValue
         guard let features else { return nil }
         try Self.removeMean(features)
-        return try models[1].prediction(from: MLDictionaryFeatureProvider(dictionary: ["feats": features]))
-            .featureValue(for: "embedding")?.multiArrayValue
+        return try predict(1, ["feats": features], onPart: onPart).featureValue(for: "embedding")?.multiArrayValue
     }
 
     /// CAM++ was trained on filterbanks with each bin's mean over the clip
@@ -123,8 +164,8 @@ final class SpeakerEmbedder {
     }
 }
 
-/// Every speaker model that loaded, run side by side (WeSpeaker on the GPU,
-/// CAM++ on the CPU and the Neural Engine).
+/// Every speaker model that loaded, run side by side (each a filterbank on the
+/// CPU and an embedding network on the Neural Engine).
 final class SpeakerModels: @unchecked Sendable {
     let embedders: [SpeakerEmbedder]
 

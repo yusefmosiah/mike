@@ -283,19 +283,27 @@ enum PhononVoice {
                 scheduleUnload()
             }
             let tts = try await loaded()
-            if !warm {
-                _ = try? await tts.synthesize("Ready.")
-                warm = true
-            }
+            await speakFirstUtterance(tts)
         }
 
         /// Has the loaded instance speak once if it has not, off a start's
         /// critical path. Calls are serialised by Phonon, so a real clause
         /// waits at most for this one.
         func warmUp() async {
-            guard !warm, let tts = phonon else { return }
+            guard let tts = phonon else { return }
+            await speakFirstUtterance(tts)
+        }
+
+        /// The first utterance, timed (`voice cache: phonon ready in N ms`).
+        private func speakFirstUtterance(_ tts: Phonon) async {
+            guard !warm else { return }
+            let started = ContinuousClock.now
             _ = try? await tts.synthesize("Ready.")
             warm = true
+            let ms = VoiceEngine.milliseconds(since: started)
+            VoiceMode.log.notice("voice cache: phonon first utterance in \(ms, privacy: .public) ms")
+            VoicePreparation.shared.noteLoad(VoiceModelName.phonon.rawValue, ms: ms)
+            VoicePreparation.shared.markReady(VoiceModelName.phonon.rawValue)
         }
 
         /// Whether the loaded instance has already spoken once.
@@ -314,7 +322,11 @@ enum PhononVoice {
             if let phonon { return phonon }
             let directory = PhononModels.defaultDirectory
             guard PhononModels.isInstalled(at: directory) else { throw Failure.notInstalled }
+            let started = ContinuousClock.now
             let created = try await Phonon.load(models: directory, language: .english)
+            let ms = VoiceEngine.milliseconds(since: started)
+            VoiceMode.log.notice("voice cache: phonon loaded in \(ms, privacy: .public) ms")
+            VoicePreparation.shared.noteLoad(VoiceModelName.phonon.rawValue, ms: ms)
             phonon = created
             observe()
             return created
@@ -336,6 +348,7 @@ enum PhononVoice {
             idleTask?.cancel()
             phonon = nil
             warm = false
+            VoicePreparation.shared.markUnloaded([VoiceModelName.phonon.rawValue])
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []
         }
