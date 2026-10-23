@@ -529,25 +529,58 @@ export type SubagentEvent = {
   report_preview?: string;
   /** Tokens and cost the child spent, once it ends. */
   usage?: { input: number; output: number; cost: number };
+  /**
+   * A background subagent: it works on after the answer that started it,
+   * and its reports arrive in the chat as messages of their own.
+   */
+  background?: boolean;
+  /** A background subagent's name in the chat, such as research-1. */
+  name?: string;
 };
 
 /**
  * A message between a turn and a subagent, addressed by their stable
- * addresses (turn/<id> and turn/<id>/<type>-<n>). Today a turn sends one
- * task and receives one report; the other kinds are reserved so steering,
- * follow-ups and streamed findings can be added without a new shape.
+ * addresses (turn/<id> and turn/<id>/<type>-<n>), or, between a chat and
+ * its background subagents, by name ("parent", "research-1"). A delegated
+ * task gets one report; a background subagent also sends and receives
+ * messages, and reports again for each piece of work it is given.
  */
 export type SubagentEnvelope = {
   id: string;
   from: string;
   to: string;
-  kind: "task" | "steer" | "followUp" | "report" | "finding";
+  kind: "task" | "steer" | "followUp" | "report" | "finding" | "message";
   /** Ties a report to the task it answers. */
   correlationId: string;
   body: string;
   artifactRefs: string[];
   /** Milliseconds since the epoch. */
   at: number;
+  /** For one addressed to the chat: whether the chat has received it yet. */
+  delivered?: boolean;
+  /** For a report: how the work it reports on ended. */
+  status?: SubagentEvent["status"];
+};
+
+/**
+ * Where a message in a thread came from when no person wrote it: reports and
+ * messages from the chat's background subagents, delivered while the chat
+ * was idle. The server answers it as it would a prompt. Stored as
+ * `chat_messages.origin`; null for anything a person wrote.
+ */
+export type MessageOrigin = {
+  kind: "agent_messages";
+  messages: Array<{
+    /** The subagent's name in the chat, such as research-1. */
+    from: string;
+    child_id: string;
+    agent_type: string;
+    kind: "report" | "message";
+    /** For a report: how the subagent's work ended. */
+    status?: SubagentEvent["status"];
+    /** What it sent, as the chat shows it. */
+    body: string;
+  }>;
 };
 
 /** GET /chat/:chatId/subagents/:childId: a subagent's record and its work. */
@@ -561,12 +594,16 @@ export type SubagentTranscript = {
   type: string;
   model: string;
   status: SubagentEvent["status"];
+  background?: boolean;
+  name?: string;
   startedAt: number;
   finishedAt: number | null;
   usage: { input: number; output: number; cost: number } | null;
   envelopes: SubagentEnvelope[];
   entries: Array<
     | { kind: "task"; text: string }
+    /** Work or a message given to a background subagent after its task. */
+    | { kind: "message"; text: string }
     | { kind: "assistant"; text: string; toolCalls: Array<{ name: string; input: unknown }> }
     | { kind: "tool_result"; name: string; text: string; isError: boolean }
   >;

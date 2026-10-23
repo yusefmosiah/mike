@@ -95,10 +95,13 @@ import type {
   ReasoningLevel,
   StreamChatParams,
   StreamChatResult,
+  AgentOps,
   SubagentEnvelope,
   SubagentHost,
   SubagentOutcome,
+  SubagentSpec,
   SubagentTranscript,
+  ToolReply,
   TurnIdentity,
   UserApiKeys,
 } from "../types.js";
@@ -195,6 +198,8 @@ type TurnBinding = {
     /** Where the turn's children are recorded and addressed. */
     chatKey: string;
     turnKey: string | null;
+    /** The turn's durable context, kept with a background child so its reports can wake the chat. */
+    wakeContext: JsonValue | null;
     /** Children counted against the per-turn cap, including ones being prepared. */
     started: number;
     /** The last child number given out; addresses use it. */
@@ -202,6 +207,8 @@ type TurnBinding = {
     /** Children running, or being prepared, in this process. */
     running: number;
   };
+  /** A background subagent's own binding: the chat it belongs to and its name there. */
+  agent?: { chatKey: string; name: string };
 };
 
 /**
@@ -293,6 +300,10 @@ export async function resetPiRuntime(next?: RuntimeOverrides): Promise<void> {
   live = undefined;
   overrides = next;
   catalog = undefined;
+  if (current) {
+    for (const agent of liveAgents.values()) retireAgent(agent);
+    for (const waiters of inboxWaiters.values()) for (const wake of [...waiters]) wake();
+  }
   if (current) await (await current.catch(() => undefined))?.harness.close(background);
 }
 
@@ -437,6 +448,10 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
       .filter((conversation) => !bindings.resumable.has(conversation)),
   );
   const cutOff = await stopCutOffAnswers(harness, turnConversations);
+  // The last process's background subagents were among the orphans.
+  await reportCutOffAgents(harness).catch((error: unknown) =>
+    console.error("[pi] failed to report cut-off background subagents", safeError(error)),
+  );
   harness.resume();
   for (const id of orphans) {
     void harness
@@ -568,6 +583,7 @@ function mikeTool(
           search: async (input) => searchHistory(await items(), input),
           read: async (input) => readHistory(await items(), input),
         },
+        ...(agentOpsFor(binding, context.abortSignal) ? { agents: agentOpsFor(binding, context.abortSignal) } : {}),
         ...(subagents
           ? {
               delegate: (input: Record<string, unknown>) =>
@@ -640,6 +656,12 @@ type SubagentRecord = {
   finishedAt: number | null;
   usage: SubagentOutcome["usage"] | null;
   envelopes: SubagentEnvelope[];
+  /** A background subagent (see "Background subagents" below); absent on others. */
+  background?: boolean;
+  /** A background subagent's name in its chat, such as research-1. */
+  name?: string;
+  /** The starting turn's durable context, which the chat is woken with. */
+  wakeContext?: JsonValue | null;
 };
 
 const Subagents = defineDocFamily<SubagentRecord, null>({
@@ -725,6 +747,9 @@ async function delegateFrom(args: {
 }): Promise<{ content: string; isError: boolean }> {
   const { api, context, bindings, delegation, resolve, input } = args;
   const refuse = (content: string) => ({ content, isError: true });
+  if (input.background !== undefined && input.background !== false && !delegation.host.background) {
+    return refuse("Background subagents are not turned on for this person. Delegate without background, and wait for the report.");
+  }
   if (delegation.started >= MAX_SUBAGENTS_PER_TURN) {
     return refuse(`Not run: this turn has already started ${MAX_SUBAGENTS_PER_TURN} subagents. Answer with what you have.`);
   }
@@ -748,6 +773,21 @@ async function delegateFrom(args: {
     // Numbered when it is certain to start, so a refused call leaves no gap.
     const ordinal = ++delegation.ordinal;
     const ref = resolve(spec.model);
+    if (input.background === true && delegation.host.background) {
+      // It outlives this call, and keeps its kernel until it retires.
+      cleanup = undefined;
+      return await startBackgroundAgent({
+        api,
+        context,
+        bindings,
+        delegation,
+        spec,
+        ref,
+        callId: args.callId,
+        ordinal,
+        timeoutMs: delegation.host.background.timeoutMs,
+      });
+    }
 
     let session = "";
     let address = "";
@@ -894,6 +934,616 @@ async function delegateFrom(args: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Background subagents and their messages
+// ---------------------------------------------------------------------------
+//
+// With the person's setting on (SubagentHost.background), code may start a
+// subagent with `background: true`. It is an ownerless conversation: it
+// works on after the turn that started it ends, and stays addressable by its
+// name in the chat (research-1). Each piece of work it is given, its task
+// and then any message, ends in a report to the chat. A message to it is an
+// input to its conversation: read between its steps ("steer"), or after its
+// current work ("followUp"). What it sends the chat (reports, messages) waits
+// in its record until the chat takes it: a running turn through
+// agent_inbox, an idle chat through the surface's sink
+// (setAgentMessageSink), which starts a turn that answers it.
+//
+// Its tools are the starting turn's runner, which lives in this process: a
+// restart ends the subagent, and the next process reports it as cut off.
+
+/** Background subagents one chat may start in all. */
+export const MAX_BACKGROUND_AGENTS_PER_CHAT = 16;
+/** Background subagents one chat may have working at once. */
+export const MAX_WORKING_AGENTS_PER_CHAT = 4;
+/** The longest agent_inbox waits for something to arrive. */
+const MAX_INBOX_WAIT_MS = 10 * 60_000;
+/** The longest message code may send. */
+const MAX_AGENT_MESSAGE_CHARS = 20_000;
+/** A background subagent idle this long retires: its kernel ends, and it takes no more messages. */
+const AGENT_IDLE_RETIRE_MS = 30 * 60_000;
+const AGENT_PREVIEW_CHARS = 300;
+
+/** A chat's background subagents, in the order they were started. */
+const ChatAgents = defineDocFamily<{ children: number[] }, null>({
+  kind: "mike.chat-agents",
+  version: 1,
+  scope: "session",
+  checkpointWhen: () => false,
+  family: true,
+  initial: () => ({ children: [] }),
+});
+
+/**
+ * What outlives the process: the chats with messages from their subagents
+ * waiting, and the background subagents that were working, so the next
+ * process can deliver the first and report the second as cut off.
+ */
+const AgentState = defineDoc<{ waiting: Record<string, true>; working: Record<string, string> }>({
+  kind: "mike.agent-state",
+  version: 1,
+  scope: "session",
+  checkpointWhen: () => false,
+  initial: () => ({ waiting: {}, working: {} }),
+});
+
+type LiveAgent = {
+  id: ConversationId;
+  chatKey: string;
+  name: string;
+  spec: SubagentSpec;
+  host: SubagentHost;
+  callId: string;
+  /** Each piece of work's time limit. */
+  timeoutMs: number;
+  /** Pieces of work (the task, messages) in flight. */
+  working: number;
+  /** Answer entries already reported: work steered into one run shares its answer. */
+  reported: Set<number>;
+  /** Set by stop_agent until the next piece of work. */
+  stopped: boolean;
+  releaseKeys: () => void;
+  /** Ends its kernel. */
+  cleanup?: () => void;
+  /** Retires it once it has been idle AGENT_IDLE_RETIRE_MS. */
+  idleTimer?: ReturnType<typeof setTimeout>;
+};
+
+/** Let a background subagent go: it keeps its record, but takes no more work. */
+function retireAgent(agent: LiveAgent): void {
+  clearTimeout(agent.idleTimer);
+  if (liveAgents.get(agent.id) !== agent) return;
+  liveAgents.delete(agent.id);
+  agent.releaseKeys();
+  agent.cleanup?.();
+  // The open runtime's binding; a closed runtime took its bindings with it.
+  void opening?.then(({ bindings }) => bindings.delete(agent.id)).catch(() => undefined);
+}
+
+/** Background subagents this process runs, by conversation. */
+const liveAgents = new Map<number, LiveAgent>();
+/** Turns waiting in agent_inbox, by chat. */
+const inboxWaiters = new Map<string, Set<() => void>>();
+let agentSink: ((chatKey: string) => void) | undefined;
+
+/**
+ * Tell a surface whenever one of its chats has messages from its subagents
+ * waiting; it delivers them (takeAgentMessagesOnPi) when the chat is idle.
+ */
+export function setAgentMessageSink(sink: ((chatKey: string) => void) | undefined): void {
+  agentSink = sink;
+}
+
+function notifyChat(chatKey: string): void {
+  for (const wake of [...(inboxWaiters.get(chatKey) ?? [])]) wake();
+  try {
+    agentSink?.(chatKey);
+  } catch (error) {
+    console.error("[pi] the agent message sink failed", safeError(error));
+  }
+}
+
+/** Resolve once `chatKey` is notified, after `ms`, or when `signal` aborts. */
+function chatNotified(chatKey: string, ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    const waiters = inboxWaiters.get(chatKey) ?? new Set();
+    inboxWaiters.set(chatKey, waiters);
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      waiters.delete(done);
+      if (!waiters.size) inboxWaiters.delete(chatKey);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+    waiters.add(done);
+  });
+}
+
+const reply = (content: unknown): ToolReply => ({ content: typeof content === "string" ? content : JSON.stringify(content), isError: false });
+const refusal = (content: string): ToolReply => ({ content, isError: true });
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/** The text of an assistant entry. */
+function answerText(entry: EntryRecord | undefined): string {
+  const message = entry?.model?.[0];
+  return message?.role === "assistant"
+    ? message.content.map((part) => (part.type === "text" ? part.text : "")).join("").trim()
+    : "";
+}
+
+/** Start one background subagent from a delegate call, and return at once. */
+async function startBackgroundAgent(args: {
+  api: ToolApi;
+  context: ToolContext;
+  bindings: Bindings;
+  delegation: NonNullable<TurnBinding["subagents"]>;
+  spec: SubagentSpec;
+  ref: ReturnType<MikeModels["resolve"]>;
+  callId: string;
+  ordinal: number;
+  timeoutMs: number;
+}): Promise<ToolReply> {
+  const { api, context, bindings, delegation, spec } = args;
+  const chatKey = delegation.chatKey;
+  const started = (await api.commit(async (tx) => (await tx.doc(ChatAgents, chatKey, null)).children.length, context)) as number;
+  if (started >= MAX_BACKGROUND_AGENTS_PER_CHAT) {
+    spec.cleanup?.();
+    return refusal(`Not run: this chat has started ${MAX_BACKGROUND_AGENTS_PER_CHAT} background subagents, the most it may. Give one of them more work with message_agent instead.`);
+  }
+  const working = [...liveAgents.values()].filter((agent) => agent.chatKey === chatKey && agent.working > 0);
+  if (working.length >= MAX_WORKING_AGENTS_PER_CHAT) {
+    spec.cleanup?.();
+    return refusal(`Not run: ${working.map((agent) => agent.name).join(", ")} are still working, the most this chat may have at once. Wait for a report with agent_inbox(wait_seconds=...).`);
+  }
+
+  let session = "";
+  let name = "";
+  const from = `turn/${delegation.turnKey ?? "unsaved"}`;
+  const childId = await api.commit(async (tx) => {
+    const created = await tx.createConversation({ ownership: { kind: "ownerless" } });
+    await configure(tx, created.id, {
+      model: args.ref,
+      thinkingLevel: thinkingLevel(spec.reasoning, spec.model),
+      instructions: spec.instructions,
+      tools: spec.tools.map((tool) => ({ name: tool }) as ToolRegistration),
+    });
+    session = (await tx.doc(ProviderDoc, created.id)).sessionId;
+    const index = await tx.doc(ChatAgents, chatKey, null);
+    name = `${spec.type.replace(/[^a-z0-9_]+/gi, "-").toLowerCase()}-${index.children.length + 1}`;
+    const record = await tx.doc(Subagents, String(created.id), null);
+    Object.assign(record, {
+      parentConversation: api.conversationId,
+      chatKey,
+      turnKey: delegation.turnKey,
+      callId: args.callId,
+      address: `${from}/${spec.type}-${args.ordinal}`,
+      type: spec.type,
+      model: spec.model,
+      status: "running",
+      startedAt: Date.now(),
+      finishedAt: null,
+      usage: null,
+      background: true,
+      name,
+      wakeContext: delegation.wakeContext,
+      envelopes: [
+        { id: randomUUID(), from: "parent", to: name, kind: "task", correlationId: args.callId, body: spec.task, artifactRefs: [], at: Date.now() },
+      ],
+    } satisfies SubagentRecord);
+    index.children.push(created.id);
+    return created.id;
+  }, context);
+
+  const agent: LiveAgent = {
+    id: childId,
+    chatKey,
+    name,
+    spec,
+    host: delegation.host,
+    callId: args.callId,
+    timeoutMs: args.timeoutMs,
+    working: 0,
+    reported: new Set(),
+    stopped: false,
+    releaseKeys: useRequestKeys(session, spec.apiKeys),
+    cleanup: spec.cleanup,
+  };
+  liveAgents.set(childId, agent);
+  bindings.set(childId, {
+    runTools: spec.runTools,
+    maxRounds: spec.maxRounds,
+    maxOutputTokens: spec.maxOutputTokens,
+    firstEntry: 1 as EntryId,
+    halt: () => {
+      void piRuntime()
+        .then(({ harness }) => harness.conversation(childId, background))
+        .then((conversation) => conversation?.abort(background))
+        .catch(() => undefined);
+    },
+    agent: { chatKey, name },
+  });
+  delegation.host.started?.({
+    callId: args.callId,
+    childId: String(childId),
+    address: `${from}/${spec.type}-${args.ordinal}`,
+    type: spec.type,
+    model: spec.model,
+    task: spec.task,
+    name,
+  });
+  await giveWork(agent, spec.task, `subagent:${args.callId}`, "followUp");
+  return reply(
+    `Started ${name} (${spec.type}, ${spec.model}) in the background. It works on after your answer, and its report arrives in this chat when it finishes. ` +
+      `Collect reports while you work with agent_inbox(), give it more work with message_agent(to="${name}", ...), and see where things stand with list_agents().`,
+  );
+}
+
+/** Give a background subagent a piece of work: its task, or a message. */
+async function giveWork(agent: LiveAgent, content: string, requestId: string, whenBusy: "steer" | "followUp"): Promise<void> {
+  const { harness, bindings } = await piRuntime();
+  const conversation = await harness.conversation(agent.id, background);
+  if (!conversation) throw new Error("The subagent's conversation is missing.");
+  const binding = bindings.get(agent.id);
+  if (agent.working === 0 && binding) {
+    // New work after the last ended: a fresh allowance of rounds and tokens.
+    binding.firstEntry = await nextEntryId(conversation);
+    binding.maxOutputTokens = (await usageOf(conversation, agent.id)).output + agent.spec.maxOutputTokens;
+  }
+  agent.stopped = false;
+  clearTimeout(agent.idleTimer);
+  agent.working += 1;
+  if (agent.working === 1) {
+    await harness.commit(async (tx) => {
+      const record = await tx.doc(Subagents, String(agent.id), null);
+      record.status = "running";
+      record.finishedAt = null;
+      (await tx.doc(AgentState)).working[String(agent.id)] = agent.chatKey;
+    }, background);
+  }
+  try {
+    const submission = await conversation.submit({ type: "input", content, requestId, whenBusy }, background);
+    void followWork(agent, conversation, submission, requestId).catch((error: unknown) =>
+      console.error("[pi] a background subagent's report was lost", safeError(error)),
+    );
+  } catch (error) {
+    agent.working -= 1;
+    throw error;
+  }
+}
+
+/** Wait for one piece of a background subagent's work, then report it to the chat. */
+async function followWork(
+  agent: LiveAgent,
+  conversation: Conversation,
+  submission: Awaited<ReturnType<Conversation["submit"]>>,
+  requestId: string,
+): Promise<void> {
+  const { harness } = await piRuntime();
+  let status: SubagentOutcome["status"] = "done";
+  let report = "";
+  let answer: number | undefined;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void conversation.abort(background).catch(() => undefined);
+  }, agent.timeoutMs);
+  try {
+    let settled = await submission.wait(background);
+    for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const failure = settled.status === "unanswered" && settled.reason === "model_error" ? settled.detail : undefined;
+      if (typeof failure !== "string" || !isRecoverableFailure(failure) || timedOut || agent.stopped) break;
+      console.warn("[pi] background subagent interrupted; trying again", { attempt, of: MAX_ATTEMPTS, ...safeError(new Error(failure)) });
+      await pauseFor(recoveryDelayMs(attempt - 1, failure), undefined);
+      const again = await conversation.submit(
+        { type: "input", content: noteFor({ kind: "retry", error: failure }), requestId: `${requestId}:attempt:${attempt}`, whenBusy: "followUp" },
+        background,
+      );
+      settled = await again.wait(background);
+    }
+    if (settled.status === "done" && settled.type === "input") {
+      answer = settled.answer as number;
+      report = answerText(await conversation.commit((tx) => tx.entry(settled.answer), background));
+    } else {
+      status = timedOut ? "timed_out" : agent.stopped ? "stopped" : "failed";
+    }
+  } catch {
+    status = timedOut ? "timed_out" : agent.stopped ? "stopped" : "failed";
+  } finally {
+    clearTimeout(timer);
+  }
+  agent.working -= 1;
+  const idle = agent.working === 0;
+  if (idle) {
+    agent.idleTimer = setTimeout(() => retireAgent(agent), AGENT_IDLE_RETIRE_MS);
+    agent.idleTimer.unref?.();
+  }
+  // Work steered into a run ends with that run's answer, which is reported once.
+  const repeated = answer !== undefined && agent.reported.has(answer);
+  if (answer !== undefined) agent.reported.add(answer);
+  if (status !== "done") {
+    const partial = await lastAssistantText(harness, agent.id).catch(() => "");
+    const why =
+      status === "timed_out"
+        ? `The subagent ran out of time (${Math.round(agent.timeoutMs / 1000)} s).`
+        : status === "stopped"
+          ? "The subagent was stopped."
+          : "The subagent could not finish.";
+    report = partial ? `${why} Its last words:\n\n${partial}` : why;
+  }
+  const usage = await usageOf(conversation, agent.id);
+  // A stop the chat asked for is recorded but does not wake it.
+  const deliver = !repeated && !agent.stopped;
+  await harness.commit(async (tx) => {
+    const record = await tx.doc(Subagents, String(agent.id), null);
+    const state = await tx.doc(AgentState);
+    record.usage = usage;
+    if (idle) {
+      record.status = status;
+      record.finishedAt = Date.now();
+      delete state.working[String(agent.id)];
+    }
+    if (repeated) return;
+    record.envelopes.push({
+      id: randomUUID(),
+      from: agent.name,
+      to: "parent",
+      kind: "report",
+      correlationId: requestId,
+      body: report,
+      artifactRefs: [],
+      at: Date.now(),
+      delivered: !deliver,
+      status,
+    });
+    if (deliver) state.waiting[agent.chatKey] = true;
+  }, background);
+  if (repeated) return;
+  agent.host.finished?.({ callId: agent.callId, childId: String(agent.id), status, report, usage });
+  if (deliver) notifyChat(agent.chatKey);
+}
+
+/** The records of a chat's background subagents, oldest first. */
+async function chatAgentRecords(chatKey: string): Promise<Array<{ id: number; record: SubagentRecord }>> {
+  const { harness } = await piRuntime();
+  const index = await harness.snapshot(ChatAgents, chatKey, background);
+  const records: Array<{ id: number; record: SubagentRecord }> = [];
+  for (const id of index?.children ?? []) {
+    const record = await harness.snapshot(Subagents, String(id), background);
+    if (record) records.push({ id, record: record as SubagentRecord });
+  }
+  return records;
+}
+
+/** A message, or the reason it cannot be sent, from code's arguments. */
+function messageArgs(input: Record<string, unknown>): { to: string; message: string } | string {
+  const to = typeof input.to === "string" ? input.to.trim() : "";
+  const message = typeof input.message === "string" ? input.message.trim() : "";
+  if (!to) return 'Say who the message is for: a subagent\'s name from list_agents(), or "parent".';
+  if (!message) return "The message is empty.";
+  if (message.length > MAX_AGENT_MESSAGE_CHARS) {
+    return `The message is too long (${message.length} characters; the limit is ${MAX_AGENT_MESSAGE_CHARS}). Write the material to a file and say where it is.`;
+  }
+  return { to, message };
+}
+
+/** Send a message from the chat ("parent") or one of its subagents. */
+async function sendAgentMessage(chatKey: string, from: string, input: Record<string, unknown>): Promise<ToolReply> {
+  const parsed = messageArgs(input);
+  if (typeof parsed === "string") return refusal(parsed);
+  const { to, message } = parsed;
+  if (to === from) return refusal("That is you; send the message to someone else.");
+  const { harness } = await piRuntime();
+  const records = await chatAgentRecords(chatKey);
+  if (to === "parent") {
+    const sender = records.find(({ record }) => record.name === from);
+    if (!sender) return refusal("Only a subagent can message the chat.");
+    await harness.commit(async (tx) => {
+      const record = await tx.doc(Subagents, String(sender.id), null);
+      record.envelopes.push({ id: randomUUID(), from, to: "parent", kind: "message", correlationId: "", body: message, artifactRefs: [], at: Date.now(), delivered: false });
+      (await tx.doc(AgentState)).waiting[chatKey] = true;
+    }, background);
+    notifyChat(chatKey);
+    return reply("Sent to the chat. Keep working on your task.");
+  }
+  const target = records.find(({ record }) => record.name === to);
+  if (!target) {
+    const names = records.map(({ record }) => record.name).filter(Boolean);
+    return refusal(`No subagent named "${to}" in this chat.${names.length ? ` Its subagents: ${names.join(", ")}.` : ""}${from === "parent" ? "" : ' To reach the chat, send to "parent".'}`);
+  }
+  const agent = liveAgents.get(target.id);
+  if (!agent) {
+    return refusal(`${to} has ended (it was idle for ${AGENT_IDLE_RETIRE_MS / 60_000} minutes, or the server restarted) and cannot take messages. Delegate a new background subagent for this work.`);
+  }
+  const interrupt = input.interrupt !== false;
+  await harness.commit(async (tx) => {
+    const record = await tx.doc(Subagents, String(target.id), null);
+    record.envelopes.push({ id: randomUUID(), from, to, kind: "message", correlationId: "", body: message, artifactRefs: [], at: Date.now() });
+  }, background);
+  const busy = agent.working > 0;
+  await giveWork(agent, `<message from="${from}">\n${message}\n</message>`, `message:${randomUUID()}`, interrupt ? "steer" : "followUp");
+  return reply(
+    busy
+      ? `Sent to ${to}. It is working, and reads it ${interrupt ? "before its next step" : "when it finishes its current work"}; what it does about it arrives in its next report.`
+      : `Sent to ${to}, which is working on it now; its reply arrives as a report.`,
+  );
+}
+
+/** The chat's background subagents and where each stands. */
+async function listAgents(chatKey: string): Promise<ToolReply> {
+  const records = await chatAgentRecords(chatKey);
+  return reply({
+    agents: records.map(({ id, record }) => {
+      const live = liveAgents.get(id);
+      const lastReport = [...record.envelopes].reverse().find((envelope) => envelope.kind === "report");
+      return {
+        name: record.name,
+        type: record.type,
+        model: record.model,
+        status: live && live.working > 0 ? "working" : record.status === "running" ? "ended" : record.status,
+        can_message: Boolean(live),
+        task: clip(record.envelopes.find((envelope) => envelope.kind === "task")?.body ?? "", AGENT_PREVIEW_CHARS),
+        ...(lastReport ? { last_report: clip(lastReport.body, AGENT_PREVIEW_CHARS) } : {}),
+        unread: record.envelopes.filter((envelope) => envelope.to === "parent" && envelope.delivered === false).length,
+      };
+    }),
+  });
+}
+
+/** A message from a chat's subagents to the chat. */
+export type AgentMessage = {
+  /** The envelope's id. */
+  id: string;
+  from: string;
+  childId: string;
+  agentType: string;
+  kind: "report" | "message";
+  status?: SubagentOutcome["status"];
+  body: string;
+  at: number;
+  /** The context of the turn that started the subagent. */
+  wakeContext: JsonValue | null;
+};
+
+/** What a chat's subagents sent it that it has not received, oldest first; marked received when `take`. */
+async function agentMessages(chatKey: string, take: boolean, only?: ReadonlySet<string>): Promise<AgentMessage[]> {
+  const { harness } = await piRuntime();
+  const found = await harness.commit(async (tx) => {
+    const messages: AgentMessage[] = [];
+    let left = false;
+    for (const id of (await tx.doc(ChatAgents, chatKey, null)).children) {
+      const record = await tx.doc(Subagents, String(id), null);
+      for (const envelope of record.envelopes) {
+        if (envelope.to !== "parent" || envelope.delivered !== false) continue;
+        if (only && !only.has(envelope.id)) {
+          left = true;
+          continue;
+        }
+        if (take) envelope.delivered = true;
+        messages.push({
+          id: envelope.id,
+          from: envelope.from,
+          childId: String(id),
+          agentType: record.type,
+          kind: envelope.kind === "report" ? "report" : "message",
+          ...(envelope.status && envelope.status !== "running" ? { status: envelope.status } : {}),
+          body: envelope.body,
+          at: envelope.at,
+          wakeContext: record.wakeContext ?? null,
+        });
+      }
+    }
+    if (take && !left) delete (await tx.doc(AgentState)).waiting[chatKey];
+    return JSON.parse(JSON.stringify(messages)) as AgentMessage[];
+  }, background);
+  return found.sort((a, b) => a.at - b.at);
+}
+
+/** What a chat's subagents have sent it and it has not received, oldest first, left unreceived. */
+export function peekAgentMessagesOnPi(chatKey: string): Promise<AgentMessage[]> {
+  return agentMessages(chatKey, false);
+}
+
+/**
+ * Take what a chat's subagents have sent it and it has not received (only
+ * the messages `ids` names, when given), oldest first: each message is
+ * taken once, by one caller.
+ */
+export function takeAgentMessagesOnPi(chatKey: string, ids?: readonly string[]): Promise<AgentMessage[]> {
+  return agentMessages(chatKey, true, ids ? new Set(ids) : undefined);
+}
+
+/** Chats with messages from their subagents waiting: for the next process to deliver. */
+export async function chatsWithAgentMessagesOnPi(): Promise<string[]> {
+  const { harness } = await piRuntime();
+  return Object.keys((await harness.snapshot(AgentState, background))?.waiting ?? {});
+}
+
+/** What the chat's subagents sent it, waiting up to `wait_seconds` for something to arrive. */
+async function agentInbox(chatKey: string, input: Record<string, unknown>, signal: AbortSignal | undefined): Promise<ToolReply> {
+  const waitMs = Math.min(Math.max(Number(input.wait_seconds) || 0, 0) * 1000, MAX_INBOX_WAIT_MS);
+  let messages = await takeAgentMessagesOnPi(chatKey);
+  if (!messages.length && waitMs > 0) {
+    await chatNotified(chatKey, waitMs, signal);
+    messages = await takeAgentMessagesOnPi(chatKey);
+  }
+  const working = [...liveAgents.values()].filter((agent) => agent.chatKey === chatKey && agent.working > 0).map((agent) => agent.name);
+  return reply({
+    messages: messages.map((message) => ({
+      from: message.from,
+      kind: message.kind,
+      ...(message.status ? { status: message.status } : {}),
+      body: message.body,
+    })),
+    still_working: working,
+  });
+}
+
+/** Stop a background subagent's current work; it keeps its history and can be given more. */
+async function stopAgent(chatKey: string, input: Record<string, unknown>): Promise<ToolReply> {
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  const agent = [...liveAgents.values()].find((candidate) => candidate.chatKey === chatKey && candidate.name === name);
+  if (!agent) return refusal(`No working subagent named "${name}" in this chat.`);
+  if (agent.working === 0) return reply(`${name} is not working on anything.`);
+  agent.stopped = true;
+  const { harness } = await piRuntime();
+  await (await harness.conversation(agent.id, background))?.abort(background);
+  return reply(`Stopped ${name}. It keeps what it has done so far; message it to give it more work.`);
+}
+
+/** The agent functions a call may use: a parent turn's, or a background subagent's own. */
+function agentOpsFor(binding: TurnBinding, signal: AbortSignal | undefined): AgentOps | undefined {
+  if (binding.subagents?.host.background) {
+    const chatKey = binding.subagents.chatKey;
+    return {
+      list: () => listAgents(chatKey),
+      send: (input) => sendAgentMessage(chatKey, "parent", input),
+      inbox: (input) => agentInbox(chatKey, input, signal),
+      stop: (input) => stopAgent(chatKey, input),
+    };
+  }
+  if (binding.agent) {
+    const { chatKey, name } = binding.agent;
+    return {
+      list: () => listAgents(chatKey),
+      send: (input) => sendAgentMessage(chatKey, name, input),
+    };
+  }
+  return undefined;
+}
+
+/**
+ * The previous process's background subagents ended with it: each still
+ * marked working gets a report saying so, which wakes its chat.
+ */
+async function reportCutOffAgents(harness: Harness): Promise<void> {
+  const working = Object.entries((await harness.snapshot(AgentState, background))?.working ?? {});
+  if (!working.length) return;
+  await harness.commit(async (tx) => {
+    const state = await tx.doc(AgentState);
+    for (const [id, chatKey] of working) {
+      const record = await tx.doc(Subagents, id, null);
+      record.status = "failed";
+      record.finishedAt = Date.now();
+      record.envelopes.push({
+        id: randomUUID(),
+        from: record.name ?? record.address,
+        to: "parent",
+        kind: "report",
+        correlationId: record.callId,
+        body: "The subagent was stopped by a server restart before it finished, and cannot be resumed. Delegate the work again if it is still needed.",
+        artifactRefs: [],
+        at: Date.now(),
+        delivered: false,
+        status: "failed",
+      });
+      state.waiting[chatKey] = true;
+      delete state.working[id];
+    }
+  }, background);
+}
+
 const TRANSCRIPT_TOOL_RESULT_CHARS = 2_000;
 
 /** A child's record and work, or null when no subagent has this id. */
@@ -912,7 +1562,10 @@ export async function subagentTranscriptOnPi(childId: string): Promise<SubagentT
       const message = entry.model?.[0];
       if (!message) continue;
       if (message.role === "user") {
-        entries.push({ kind: "task", text: userText(message.content) });
+        const text = userText(message.content);
+        // A background subagent's later work arrives as messages to it.
+        const sent = /^<message from="([^"]*)">\n([\s\S]*)\n<\/message>$/.exec(text);
+        entries.push(sent ? { kind: "message", text: `From ${sent[1]}: ${sent[2]}` } : { kind: "task", text });
       } else if (message.role === "assistant") {
         entries.push({
           kind: "assistant",
@@ -940,6 +1593,7 @@ export async function subagentTranscriptOnPi(childId: string): Promise<SubagentT
     type: record.type,
     model: record.model,
     status: record.status,
+    ...(record.background ? { background: true, name: record.name } : {}),
     startedAt: record.startedAt,
     finishedAt: record.finishedAt,
     usage: record.usage,
@@ -1439,7 +2093,17 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
         void conversation.abort(background).catch(() => undefined);
       },
       ...(params.subagents
-        ? { subagents: { host: params.subagents, chatKey, turnKey: params.turn?.assistantMessageId ?? null, started: 0, ordinal: 0, running: 0 } }
+        ? {
+            subagents: {
+              host: params.subagents,
+              chatKey,
+              turnKey: params.turn?.assistantMessageId ?? null,
+              wakeContext: (params.durableTurn?.context as JsonValue | undefined) ?? null,
+              started: 0,
+              ordinal: 0,
+              running: 0,
+            },
+          }
         : {}),
     });
   }

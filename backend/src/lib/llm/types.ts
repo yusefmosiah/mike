@@ -75,6 +75,26 @@ export type NormalizedToolCall = {
         search: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
         read: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
     };
+    /**
+     * The chat's background subagents, as `tools.list_agents`,
+     * `tools.message_agent`, `tools.agent_inbox` and `tools.stop_agent`: set
+     * on a parent turn's calls when it may start background subagents, and
+     * on a background subagent's own calls (which may list and message only).
+     */
+    agents?: AgentOps;
+};
+
+/** A reply the model reads, or a refusal it can act on. */
+export type ToolReply = { content: string; isError: boolean };
+
+/** What code can do with a chat's background subagents (lib/llm/pi/runtime.mts). */
+export type AgentOps = {
+    list: () => Promise<ToolReply>;
+    send: (input: Record<string, unknown>) => Promise<ToolReply>;
+    /** The parent's unread reports and messages; absent for a subagent. */
+    inbox?: (input: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolReply>;
+    /** Stop a background subagent; absent for a subagent. */
+    stop?: (input: Record<string, unknown>) => Promise<ToolReply>;
 };
 
 export type NormalizedToolResult = {
@@ -248,6 +268,13 @@ export type SubagentHost = {
      * belong in the turn context.
      */
     toolDescription: string;
+    /**
+     * Set when the person allows background subagents: children started with
+     * `background: true` keep working after the turn ends, report into the
+     * chat when they finish, and may be messaged. `timeoutMs` bounds each of
+     * a background child's runs.
+     */
+    background?: { timeoutMs: number };
     /** The child's spec, or the refusal the model reads instead. */
     prepare: (input: Record<string, unknown>) => Promise<SubagentSpec | string>;
     started?: (child: {
@@ -257,6 +284,8 @@ export type SubagentHost = {
         type: string;
         model: string;
         task: string;
+        /** Set for a background child: its name in the chat, such as research-1. */
+        name?: string;
     }) => void;
     finished?: (child: SubagentOutcome) => void;
 };
