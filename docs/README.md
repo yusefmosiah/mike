@@ -27,6 +27,8 @@
   redirect URIs, and Slack/Google deployment setup
 - [Scoped memory](memory.md) — app and project Markdown memory, permissions,
   asynchronous learning, deletion, and operations
+- [Deletion and retention policy](deletion-policy.md) — what deleting removes
+  today, the proposed hold-aware policy, and the questions for legal review
 - [CourtListener integration](courtlistener.md) — live US case-law tools and
   optional bulk data
 - [Microsoft Word add-in](../word-addin/README.md) — concise setup and command
