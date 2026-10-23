@@ -17,6 +17,8 @@
     # go-choir docs/reports/node-a-backup-handover-2026-10-20.md). Ciphertext
     # only; loopback rest-server reached through a restricted ssh forward.
     ./choir-backup-target.nix
+    # A scratch VM where Claude Code works on go-choir (owner, 2026-10-21).
+    ./choir-agents.nix
   ];
 
   boot.loader.efi.canTouchEfiVariables = true;

@@ -27,7 +27,8 @@ let
   # ws-owner belongs to the owner (WORKSTATION_USER_IDS); ws-01 and up are the
   # pool the backend hands out, one per account (WORKSTATION_POOL in
   # staging.nix, recorded in workstation_assignments). Memory is not
-  # overcommitted: 6 + 4 x 3 GiB of the host's 31.
+  # overcommitted: 6 + 4 x 3 GiB of the host's 31, and 10 more for the Choir
+  # agents VM (choir-agents.nix).
   workstations = {
     ws-owner = { index = 1; vcpu = 4; mem = 6144; homeMiB = 65536; directEgress = false; };
   } // poolVms;
@@ -210,6 +211,9 @@ in
   imports = [ microvm.nixosModules.host ];
 
   microvm.vms = lib.mapAttrs guest workstations;
+  # Mike's VMs, for the vault and the staging pool: other microVMs on this
+  # host (choir-agents.nix) are not workstations.
+  _module.args.workstationVms = lib.attrNames workstations;
   microvm.autostart = lib.attrNames workstations;
 
   # Each VM's state directory is a btrfs subvolume, so its disk can be

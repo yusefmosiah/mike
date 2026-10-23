@@ -15,7 +15,7 @@
 #
 # GitHub Actions deploys main through `deploy-sha` (.github/workflows/deploy-staging.yml),
 # as the mike-deploy user whose key may run nothing else.
-{ config, lib, pkgs, ... }:
+{ lib, pkgs, workstationVms, ... }:
 
 let
   domain = "choir-ip.com";
@@ -25,7 +25,7 @@ let
   # The private half is the STAGING_DEPLOY_KEY secret in GitHub Actions.
   deployKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMcYQsagy/DP5CBDNQANFALDxb06V5kcu80CjslAvLbZ github-actions mike staging deploy";
   # The VMs handed out one per account: every workstation but the owner's.
-  workstationPool = lib.filter (name: name != "ws-owner") (lib.attrNames config.microvm.vms);
+  workstationPool = lib.filter (name: name != "ws-owner") workstationVms;
 
   stagingTool = pkgs.writeShellApplication {
     name = "mike-staging";
