@@ -663,8 +663,6 @@ type SubagentRecord = {
   name?: string;
   /** The starting turn's durable context, which the chat is woken with. */
   wakeContext?: JsonValue | null;
-  /** Its chat was deleted, and with it what it was asked and sent (deleteChatAgentsOnPi). */
-  deleted?: boolean;
 };
 
 const Subagents = defineDocFamily<SubagentRecord, null>({
@@ -1303,10 +1301,11 @@ async function followWork(
   const usage = await usageOf(conversation, agent.id);
   // A stop the chat asked for is recorded but does not wake it.
   const deliver = !repeated && !agent.stopped;
-  const deleted = await harness.commit(async (tx) => {
+  // Its chat was deleted (deleteChatAgentsOnPi), and its record with it:
+  // nothing more is kept, and nobody waits for a report.
+  const deleted = !(await harness.snapshot(Subagents, String(agent.id), background))?.parentConversation;
+  if (!deleted) await harness.commit(async (tx) => {
     const record = await tx.doc(Subagents, String(agent.id), null);
-    // Its chat is gone: nothing more is kept, and nobody waits for a report.
-    if (record.deleted) return true;
     const state = await tx.doc(AgentState);
     record.usage = usage;
     if (idle) {
@@ -1328,7 +1327,6 @@ async function followWork(
       status,
     });
     if (deliver) state.waiting[agent.chatKey] = true;
-    return false;
   }, background);
   if (deleted) {
     // Deleted by another process, which could not release what this one holds.
@@ -1544,9 +1542,10 @@ async function stopAgent(chatKey: string, input: Record<string, unknown>): Promi
 
 /**
  * A deleted chat's background subagents: stop the ones working, release what
- * they hold, and forget what they were asked and sent. Pi keeps a
- * conversation's own entries, as it keeps the chat's: it cannot delete one
- * that may be live.
+ * they hold, and forget what they were asked and sent. Their records are
+ * retired, which drops every revision of them; a record only blanked would
+ * keep its earlier revisions. Pi keeps a conversation's own entries, as it
+ * keeps the chat's: it cannot delete one that may be live.
  */
 export async function deleteChatAgentsOnPi(chatKeys: readonly string[]): Promise<void> {
   const { harness } = await piRuntime();
@@ -1558,22 +1557,9 @@ export async function deleteChatAgentsOnPi(chatKeys: readonly string[]): Promise
       delete state.waiting[chatKey];
       for (const id of children) {
         delete state.working[String(id)];
-        const record = await tx.doc(Subagents, String(id), null);
-        Object.assign(record, {
-          parentConversation: 0,
-          chatKey: "",
-          turnKey: null,
-          callId: "",
-          address: "",
-          status: "stopped",
-          finishedAt: record.finishedAt ?? Date.now(),
-          envelopes: [],
-          wakeContext: null,
-          deleted: true,
-        } satisfies Partial<SubagentRecord>);
-        delete record.name;
+        await tx.retireDoc(Subagents, String(id));
       }
-      (await tx.doc(ChatAgents, chatKey, null)).children = [];
+      await tx.retireDoc(ChatAgents, chatKey);
     }, background);
     for (const id of children) {
       const agent = liveAgents.get(id);
@@ -1675,7 +1661,7 @@ export async function backgroundAgentStatusesOnPi(
   for (const childId of new Set(childIds)) {
     if (!/^\d+$/.test(childId)) continue;
     const record = await harness.snapshot(Subagents, childId, background);
-    if (!record?.background || record.deleted || record.chatKey !== chatKey) continue;
+    if (!record?.background || record.chatKey !== chatKey) continue;
     const report = [...record.envelopes].reverse().find((envelope) => envelope.kind === "report");
     statuses[childId] = JSON.parse(
       JSON.stringify({ status: record.status, usage: record.usage, report: report?.body ?? null }),
