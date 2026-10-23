@@ -10,6 +10,7 @@ import type {
   SourceDocumentType,
   SourceSubdocument,
 } from "@mike/contracts";
+import type { MessageOrigin } from "@mike/contracts";
 import type {
   AskInputItem as SharedAskInputItem,
   AskInputResponseItem as SharedAskInputResponseItem,
@@ -398,6 +399,12 @@ export interface Message {
   sibling?: MessageSibling;
   /** Who sent a prompt, in a thread more than one person carries. */
   author?: ThreadAuthor;
+  /**
+   * Set when no person wrote this prompt: reports and messages from the
+   * chat's background subagents. `content` is then a model-facing prompt that
+   * is never shown; the transcript renders `origin` instead.
+   */
+  origin?: MessageOrigin;
   /**
    * Sent with `/nr`: added to the thread without asking for a reply. The
    * next message that does ask sees it in the history.

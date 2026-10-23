@@ -65,6 +65,7 @@ interface UserProfile {
     openCodeGoModels: string[];
     darkMode: boolean;
     projectMemoryDefault: boolean;
+    backgroundAgents: boolean;
     apiKeys: ApiKeyState;
 }
 
@@ -107,6 +108,7 @@ interface UserProfileContextType {
     updateOpenCodeGoModels: (models: string[]) => Promise<boolean>;
     updateDarkMode: (enabled: boolean) => Promise<void>;
     updateProjectMemoryDefault: (enabled: boolean) => Promise<void>;
+    updateBackgroundAgents: (enabled: boolean) => Promise<boolean>;
     updateApiKey: (
         provider: ApiKeyProvider,
         value: string | null,
@@ -169,6 +171,7 @@ function toProfile(data: ApiUserProfile): UserProfile {
             profile.lastSelectedReasoningLevel ?? "high",
         mfaOnLogin: profile.mfaOnLogin === true,
         projectMemoryDefault: profile.projectMemoryDefault !== false,
+        backgroundAgents: profile.backgroundAgents === true,
         openRouterModels: Array.isArray(profile.openRouterModels)
             ? profile.openRouterModels
             : [],
@@ -239,6 +242,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 openCodeGoModels: [],
                 darkMode: false,
                 projectMemoryDefault: true,
+                backgroundAgents: false,
                 apiKeys: emptyApiKeys(),
             });
         } finally {
@@ -578,6 +582,24 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         [user],
     );
 
+    const updateBackgroundAgents = useCallback(
+        async (enabled: boolean): Promise<boolean> => {
+            if (!user) return false;
+            try {
+                const updated = await updateUserProfile({
+                    backgroundAgents: enabled,
+                });
+                setProfile((prev) =>
+                    prev ? { ...prev, ...toProfile(updated) } : null,
+                );
+                return true;
+            } catch {
+                return false;
+            }
+        },
+        [user],
+    );
+
     const updateApiKey = useCallback(
         async (
             provider: ApiKeyProvider,
@@ -653,6 +675,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             updateOpenCodeGoModels,
             updateDarkMode,
             updateProjectMemoryDefault,
+            updateBackgroundAgents,
             updateApiKey,
             reloadProfile,
             incrementMessageCredits,
@@ -676,6 +699,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             updateOpenCodeGoModels,
             updateDarkMode,
             updateProjectMemoryDefault,
+            updateBackgroundAgents,
             updateApiKey,
             reloadProfile,
             incrementMessageCredits,

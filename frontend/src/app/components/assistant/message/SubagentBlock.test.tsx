@@ -96,6 +96,51 @@ describe("SubagentBlock", () => {
     });
 });
 
+describe("SubagentBlock in the background", () => {
+    it("names the subagent and says its report will arrive in the chat while it works", () => {
+        render(
+            <SubagentBlock
+                event={{ ...event, status: "running", usage: undefined, background: true, name: "research-1" }}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: /research-1 · Document review subagent/ }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(/In the background · its report will arrive in the chat when it finishes/),
+        ).toBeInTheDocument();
+    });
+
+    it("says it ran in the background once it has ended", () => {
+        render(<SubagentBlock event={{ ...event, background: true, name: "research-1" }} />);
+        expect(screen.getByText("In the background · Done · 1,500 tokens · under $0.01")).toBeInTheDocument();
+    });
+
+    it("shows nothing extra for an ordinary subagent", () => {
+        render(<SubagentBlock event={event} />);
+        expect(screen.queryByText(/In the background/)).not.toBeInTheDocument();
+    });
+
+    it("shows work given to it after its task in the transcript", async () => {
+        const withMessage: SubagentTranscript = {
+            ...transcript,
+            background: true,
+            name: "research-1",
+            entries: [
+                { kind: "task", text: "Find the governing law" },
+                { kind: "assistant", text: "First pass done.", toolCalls: [] },
+                { kind: "message", text: "Now check the exhibits too." },
+                { kind: "assistant", text: "Exhibits agree.", toolCalls: [] },
+            ],
+        };
+        render(<SubagentBlock event={event} onLoadTranscript={async () => withMessage} />);
+        fireEvent.click(toggle());
+        expect(await screen.findByText("Now check the exhibits too.")).toBeInTheDocument();
+        expect(screen.getByText("Message")).toBeInTheDocument();
+        expect(screen.getByText("Exhibits agree.")).toBeInTheDocument();
+    });
+});
+
 describe("delegatedTurnCost", () => {
     const own = { type: "turn_usage" as const, input: 5000, output: 700, cost: 0.0123 };
 
@@ -112,6 +157,14 @@ describe("delegatedTurnCost", () => {
     it("counts a subagent that ended without usage as nothing spent", () => {
         expect(delegatedTurnCost([own, { ...event, usage: undefined }])).toBe(
             "This answer: 5,700 tokens · $0.01. 1 subagent: 0 tokens.",
+        );
+    });
+
+    it("leaves out a background subagent that was still working when the answer ended", () => {
+        const background = { ...event, child_id: "9", background: true, name: "general-1", status: "running" as const, usage: undefined };
+        expect(delegatedTurnCost([own, background])).toBeNull();
+        expect(delegatedTurnCost([own, event, background])).toBe(
+            "This answer: 5,700 tokens · $0.01. 1 subagent: 1,500 tokens · under $0.01.",
         );
     });
 

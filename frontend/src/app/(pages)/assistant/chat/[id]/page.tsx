@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useAssistantChat } from "@/app/hooks/useAssistantChat";
 import { useChatRoute } from "@/app/hooks/useChatRoute";
 import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
+import { useBackgroundAgentRefresh } from "@/app/hooks/useBackgroundAgentRefresh";
+import { useOptionalUserProfile } from "@/app/contexts/UserProfileContext";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { ChatView } from "@/app/components/assistant/ChatView";
@@ -118,6 +120,21 @@ export default function AssistantChatPage() {
             : undefined,
     );
 
+    // With background subagents on, a report can reach this chat while it is
+    // open and idle, and the server answers it on its own: notice that
+    // without a reload.
+    const backgroundAgents =
+        useOptionalUserProfile()?.profile?.backgroundAgents === true;
+    useBackgroundAgentRefresh({
+        chatId: id || null,
+        enabled: backgroundAgents && !!id && !chatLoading,
+        idle: !isResponseLoading,
+        messages,
+        onRefreshed: (detail) => {
+            if (id) setGenerating(id, detail.generating);
+            setMessages(detail.messages);
+        },
+    });
     useEffect(() => {
         setCurrentChatId(id || null);
     }, [id, setCurrentChatId]);

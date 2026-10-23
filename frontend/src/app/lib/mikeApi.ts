@@ -60,6 +60,7 @@ import type {
     TabularReviewDetailOut,
 } from "@/app/components/shared/types";
 import type { VoicePrice } from "@/app/lib/voice/pricing";
+import type { MessageOrigin } from "@mike/contracts";
 
 export { UploadBatchError };
 export { failedUploadMessage };
@@ -838,6 +839,7 @@ export interface UserProfile {
     quickActionsVisible: boolean;
     darkMode: boolean;
     projectMemoryDefault: boolean;
+    backgroundAgents: boolean;
     openRouterModels: string[];
     vercelModels: string[];
     openCodeGoModels: string[];
@@ -952,6 +954,7 @@ export async function updateUserProfile(payload: {
     quickActionsVisible?: boolean;
     darkMode?: boolean;
     projectMemoryDefault?: boolean;
+    backgroundAgents?: boolean;
     openRouterModels?: string[];
     vercelModels?: string[];
     openCodeGoModels?: string[];
@@ -2322,6 +2325,8 @@ interface ServerTranscriptRow {
     files?: MessageFile[] | null;
     workflow?: { id: string; title: string } | null;
     citations?: Citation[] | null;
+    /** Set when no person wrote it: background subagents' reports. */
+    origin?: MessageOrigin | null;
 }
 
 // One mapping for every transcript-shaped response (GET /chat and the branch
@@ -2335,6 +2340,9 @@ function mapServerMessages(messages: ServerTranscriptRow[]): Message[] {
                 content: typeof m.content === "string" ? m.content : "",
                 files: m.files ?? undefined,
                 workflow: m.workflow ?? undefined,
+                ...(m.origin?.kind === "agent_messages"
+                    ? { origin: m.origin }
+                    : {}),
             };
         }
         const events = Array.isArray(m.content) ? m.content : undefined;

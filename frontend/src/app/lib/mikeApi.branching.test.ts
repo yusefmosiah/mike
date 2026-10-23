@@ -143,6 +143,29 @@ describe("branch navigation", () => {
         expect((await getChat("chat-1")).generating).toBeNull();
     });
 
+    it("carries a background subagents' origin onto the message, and nothing else", async () => {
+        const chat = { id: "chat-1", title: "T", is_owner: true, access_role: "owner" };
+        const origin = {
+            kind: "agent_messages",
+            messages: [
+                { from: "research-1", child_id: "7", agent_type: "research", kind: "report", status: "done", body: "Found it." },
+            ],
+        };
+        fetchMock.mockResolvedValue(json({
+            chat,
+            messages: [
+                { id: "u1", role: "user", content: "Question", origin: null },
+                { id: "u2", role: "user", content: "[Background subagents] This message comes from the application", origin, author_user_id: null },
+                { id: "a2", role: "assistant", content: [{ type: "content", text: "Noted." }] },
+            ],
+        }));
+        const detail = await getChat("chat-1");
+        expect(detail.messages[0]).not.toHaveProperty("origin");
+        expect(detail.messages[1].origin).toEqual(origin);
+        expect(detail.messages[1]).not.toHaveProperty("author");
+        expect(detail.messages[2]).not.toHaveProperty("origin");
+    });
+
     it("re-attaches to a turn in a given server incarnation", async () => {
         fetchMock.mockResolvedValue(new Response("", { status: 200 }));
         await streamChatTurn({ chatId: "c", turnId: "t", from: 4, incarnation: "inc-1" });
