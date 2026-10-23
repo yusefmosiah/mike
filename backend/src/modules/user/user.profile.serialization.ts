@@ -54,6 +54,7 @@ export function serializeProfile(
         quickActionsVisible: row.quick_actions_visible !== false,
         darkMode: row.dark_mode === true,
         projectMemoryDefault: row.project_memory_default !== false,
+        backgroundAgents: row.background_agents === true,
         ...Object.fromEntries(
             ROUTER_SLUGS.map((slug) => [
                 ROUTER_PROFILE_FIELDS[slug],

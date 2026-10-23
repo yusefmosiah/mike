@@ -366,6 +366,33 @@ describe("subagent host", () => {
         expect(discardKernel).toHaveBeenCalledWith(key);
     });
 
+    it("with background allowed, gives a background child its messaging functions and rules, and no other child", async () => {
+        const childAgentTools = ["list_agents", "message_agent"].map(schema);
+        const { host, promptSection } = await createSubagentHost(args({ background: true, childAgentTools }).hostArgs);
+        expect(host.background).toEqual({ timeoutMs: expect.any(Number) });
+        expect(promptSection).toContain("background=True");
+
+        const background = (await host.prepare({ type: "document_review", task: "x", background: true })) as SubagentSpec;
+        expect(pythonFunctionNames(background.instructions)).toEqual(["read_document", "list_agents", "message_agent"]);
+        expect(background.instructions).toContain('message_agent(to="parent"');
+        const waited = (await host.prepare({ type: "document_review", task: "x" })) as SubagentSpec;
+        expect(pythonFunctionNames(waited.instructions)).toEqual(["read_document"]);
+
+        // Without the setting, `background` is neither offered nor honoured.
+        const { host: off, promptSection: offSection } = await createSubagentHost(args({ childAgentTools }).hostArgs);
+        expect(off.background).toBeUndefined();
+        expect(offSection).not.toContain("background=True");
+        const ignored = (await off.prepare({ type: "document_review", task: "x", background: true })) as SubagentSpec;
+        expect(pythonFunctionNames(ignored.instructions)).toEqual(["read_document"]);
+    });
+
+    it("names a background child in its event", async () => {
+        const { hostArgs, events } = args({ background: true });
+        const { host } = await createSubagentHost(hostArgs);
+        host.started!({ callId: "c", childId: "9", address: "turn/a1/research-1", type: "research", model: "chat-model", task: "t", name: "research-1" });
+        expect(events[0]).toMatchObject({ background: true, name: "research-1", status: "running" });
+    });
+
     it("records a child's start and finish as one event, streamed both times", async () => {
         const { hostArgs, writes, events } = args();
         const { host } = await createSubagentHost(hostArgs);

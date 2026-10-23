@@ -8,11 +8,13 @@
 import type { Db } from "./lib/db";
 import {
   abandonTurn,
+  chatsWithAgentMessages,
   interruptedTurns,
+  setAgentMessageSink,
   type InterruptedTurn,
 } from "./lib/llm";
 import { safeError } from "./lib/safeError";
-import { resumeInterruptedChatTurn } from "./modules/chat/chat.service";
+import { deliverAgentMessages, resumeInterruptedChatTurn } from "./modules/chat/chat.service";
 import { resumeInterruptedProjectChatTurn } from "./modules/project-chat/projectChat.service";
 import { resumeInterruptedTabularChatTurn } from "./modules/tabular/tabular.service";
 import { resumeInterruptedWordChatTurn } from "./modules/word-chat/wordChat.service";
@@ -64,4 +66,27 @@ export async function resumeInterruptedTurns(
       }
     }),
   );
+}
+
+/**
+ * Hand what background subagents send an idle chat to the chat module, which
+ * starts a turn that answers it: now for what the previous process left
+ * waiting, and from now on as each arrives. Background subagents run only in
+ * chats today.
+ */
+export async function startAgentMessageDelivery(
+  db: Db,
+  deps: {
+    deliver?: (db: Db, chatId: string) => Promise<void>;
+    setSink?: typeof setAgentMessageSink;
+    waiting?: () => Promise<string[]>;
+  } = {},
+): Promise<void> {
+  const deliver = deps.deliver ?? deliverAgentMessages;
+  try {
+    await (deps.setSink ?? setAgentMessageSink)((chatId) => void deliver(db, chatId));
+    for (const chatId of await (deps.waiting ?? chatsWithAgentMessages)()) void deliver(db, chatId);
+  } catch (error) {
+    console.error("[agents] could not start delivering subagent messages", safeError(error));
+  }
 }

@@ -35,6 +35,9 @@ import {
   TOOL_ERROR_MESSAGE,
 } from "./types";
 import {
+  AGENT_TOOL_NAMES,
+  AGENT_TOOLS,
+  CHILD_AGENT_TOOLS,
   HISTORY_TOOLS,
   MEMORY_TOOLS,
   TOOLS,
@@ -528,6 +531,14 @@ export async function runLLMStream(params: {
    */
   includeSubagents?: boolean;
   /**
+   * The person's setting for background subagents (user_profiles
+   * .background_agents): with subagents offered and a durable turn to wake
+   * the chat with, `delegate` takes `background`, and the turn gets the
+   * functions that list, message, collect and stop them. Not for a guest's
+   * turn: the subagent would run on in the host's workstation.
+   */
+  backgroundAgents?: boolean;
+  /**
    * Whose workstation this turn's code runs in. A shared thread's code runs
    * in the VM of the person who started it, so its Python state and files
    * stay in one place whoever sends the message. Defaults to the sender;
@@ -605,6 +616,8 @@ export async function runLLMStream(params: {
   // tool below is a function there. A conversation without a workstation
   // has no tools at all.
   const kernelLauncher = isGuest && !workstation ? null : kernelLauncherFor(workstation);
+  const backgroundAgents =
+    !!params.backgroundAgents && !!params.includeSubagents && !!kernelLauncher && !isGuest && !!params.durableTurn && !!conversationId;
   const memoryEditTarget: MemoryEditTarget | null =
     includeMemory && memoryEdit && (memoryEdit.appWritable || memoryEdit.projectId)
       ? { ...memoryEdit, userId }
@@ -617,7 +630,8 @@ export async function runLLMStream(params: {
     ...(memoryEditTarget ? MEMORY_TOOLS : []),
     // A saved conversation's own history, compacted messages included.
     ...(conversationId ? HISTORY_TOOLS : []),
-    ...(params.includeSubagents && kernelLauncher ? [delegateToolSchema()] : []),
+    ...(params.includeSubagents && kernelLauncher ? [delegateToolSchema(backgroundAgents)] : []),
+    ...(backgroundAgents ? AGENT_TOOLS : []),
     ...workstationTools,
   ];
   const advertisedTools = [
@@ -1231,6 +1245,21 @@ export async function runLLMStream(params: {
           const reply = await (name === "history_search" ? call.history.search(args) : call.history.read(args));
           return reply.isError ? { ok: false, error: reply.content } : { ok: true, content: reply.content };
         }
+        if (AGENT_TOOL_NAMES.has(name)) {
+          const agents = call.agents;
+          const op = !agents
+            ? undefined
+            : name === "list_agents"
+              ? () => agents.list()
+              : name === "message_agent"
+                ? () => agents.send(args)
+                : name === "agent_inbox"
+                  ? agents.inbox && (() => agents.inbox!(args))
+                  : agents.stop && (() => agents.stop!(args));
+          if (!op) return { ok: false, error: "Background subagents are not available here." };
+          const reply = await op();
+          return reply.isError ? { ok: false, error: reply.content } : { ok: true, content: reply.content };
+        }
         if (name === "delegate") {
           if (!call.delegate) return { ok: false, error: "Delegation is not available here." };
           const report = await call.delegate(args);
@@ -1652,6 +1681,7 @@ export async function runLLMStream(params: {
           discardKernel: (key) => kernels.discard(key),
           write,
           events,
+          ...(backgroundAgents ? { background: true, childAgentTools: CHILD_AGENT_TOOLS as OpenAIToolSchema[] } : {}),
         });
       } catch (error) {
         // Delegation is an extra; the turn runs without it.

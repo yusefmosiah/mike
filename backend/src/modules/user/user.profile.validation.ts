@@ -182,6 +182,7 @@ export function validateProfilePayload(body: unknown):
         "quickActionsVisible",
         "darkMode",
         "projectMemoryDefault",
+        "backgroundAgents",
         ...ROUTER_SLUGS.map((slug) => ROUTER_PROFILE_FIELDS[slug]),
     ]);
     const invalidField = Object.keys(raw).find(
@@ -209,6 +210,7 @@ export function validateProfilePayload(body: unknown):
         quick_actions_visible?: boolean;
         dark_mode?: boolean;
         project_memory_default?: boolean;
+        background_agents?: boolean;
         updated_at: string;
     } = { updated_at: new Date().toISOString() };
     const routerModels: Partial<Record<RouterSlug, string[]>> = {};
@@ -388,6 +390,16 @@ export function validateProfilePayload(body: unknown):
             };
         }
         update.project_memory_default = raw.projectMemoryDefault;
+    }
+
+    if ("backgroundAgents" in raw) {
+        if (typeof raw.backgroundAgents !== "boolean") {
+            return {
+                ok: false,
+                detail: "backgroundAgents must be a boolean",
+            };
+        }
+        update.background_agents = raw.backgroundAgents;
     }
 
     return { ok: true, update, routerModels };

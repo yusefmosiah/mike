@@ -431,6 +431,24 @@ describe("user.routes", () => {
             expect(res.body.projectMemoryDefault).toBe(true);
         });
 
+        it("retries without background_agents before the agent-messaging migration, with the setting off", async () => {
+            const preMigrationRow = profileRow({ project_memory_default: false });
+            delete (preMigrationRow as Record<string, unknown>).background_agents;
+            dbState.missingColumns = ["background_agents"];
+            dbState.tables.user_profiles = { data: preMigrationRow, error: null };
+
+            const res = await request(app).get("/user/profile").set(...AUTH);
+
+            expect(res.status).toBe(200);
+            const selects = dbState.selects.user_profiles ?? [];
+            expect(selects).toHaveLength(2);
+            expect(selects[0]).toContain("background_agents");
+            expect(selects[1]).not.toContain("background_agents");
+            expect(selects[1]).toContain("project_memory_default");
+            expect(res.body.projectMemoryDefault).toBe(false);
+            expect(res.body.backgroundAgents).toBe(false);
+        });
+
         it("no longer reads or returns a memory curation model", async () => {
             dbState.tables.user_profiles = {
                 data: profileRow(),
@@ -585,6 +603,34 @@ describe("user.routes", () => {
             expect(dbState.updates.user_profiles).toContainEqual(
                 expect.objectContaining({ project_memory_default: false }),
             );
+        });
+
+        it("persists and returns the background subagents setting", async () => {
+            dbState.tables.user_profiles = {
+                data: profileRow({ background_agents: true }),
+                error: null,
+            };
+
+            const res = await request(app)
+                .patch("/user/profile")
+                .set(...AUTH)
+                .send({ backgroundAgents: true });
+
+            expect(res.status).toBe(200);
+            expect(res.body.backgroundAgents).toBe(true);
+            expect(dbState.updates.user_profiles).toContainEqual(
+                expect.objectContaining({ background_agents: true }),
+            );
+        });
+
+        it("rejects a non-boolean backgroundAgents value", async () => {
+            const res = await request(app)
+                .patch("/user/profile")
+                .set(...AUTH)
+                .send({ backgroundAgents: "on" });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toMatch(/backgroundAgents must be a boolean/);
         });
 
         it("rejects a non-boolean projectMemoryDefault value", async () => {

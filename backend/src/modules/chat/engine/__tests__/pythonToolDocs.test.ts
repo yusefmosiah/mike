@@ -11,6 +11,7 @@ import { READ_MEMORY_TOOL } from "../../../../lib/memory/editTool";
 import { delegateToolSchema } from "../subagents/subagentHost";
 import { COURTLISTENER_TOOLS } from "../tools/courtlistenerTools";
 import {
+  AGENT_TOOLS,
   HISTORY_TOOLS,
   MEMORY_TOOLS,
   PROJECT_EXTRA_TOOLS,
@@ -35,6 +36,7 @@ const ALL_TOOLS: readonly unknown[] = [
   ...VAULT_TOOLS,
   ...COURTLISTENER_TOOLS,
   ...WORD_CLIENT_TOOLS,
+  ...AGENT_TOOLS,
 ];
 const specs = pythonToolSpecs(ALL_TOOLS);
 

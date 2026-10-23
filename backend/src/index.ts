@@ -17,7 +17,7 @@ import { stopDbJobRunner } from "./lib/dbq/runner";
 import { reportError } from "./lib/observability/sentry";
 import { createDb } from "./lib/db";
 import { assistantTurnsInFlight, waitForAssistantTurns } from "./lib/assistantTurnRuns";
-import { resumeInterruptedTurns } from "./turnResumers";
+import { resumeInterruptedTurns, startAgentMessageDelivery } from "./turnResumers";
 import {
   closeHttpServer,
   createShutdown,
@@ -150,6 +150,8 @@ async function main(): Promise<void> {
     // Chat turns the previous process left in flight (a deploy, a crash)
     // continue now, into runs a reloading client attaches to.
     void resumeInterruptedTurns(createDb());
+    // What background subagents sent chats that were idle, then and from now on.
+    void startAgentMessageDelivery(createDb());
   });
 }
 

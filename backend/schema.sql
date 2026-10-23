@@ -61,6 +61,9 @@ create table if not exists public.user_profiles (
   -- Whether projects this user creates start with shared memory enabled. Any
   -- project owner can still turn a given project's memory on or off later.
   project_memory_default boolean not null default true,
+  -- Whether the assistant may start subagents that keep working after its
+  -- answer and report into the chat. Off while the feature is tested.
+  background_agents boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -2286,6 +2289,9 @@ create table if not exists public.chat_messages (
   -- was read aloud, and when. Null for an answer that was not interrupted.
   spoken_text text,
   interrupted_at timestamptz,
+  -- A message no person wrote: reports and messages from the chat's
+  -- background subagents (MessageOrigin in packages/contracts). Null otherwise.
+  origin jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -8344,5 +8350,6 @@ insert into public.schema_migrations (filename) values
   ('20261022_01_memory_file_versions.sql'),
   ('20261022_02_memory_assistant_edits.sql'),
   ('20261022_03_db_jobs_exclude_kinds.sql'),
-  ('20261022_04_drop_memory_curator_model.sql')
+  ('20261022_04_drop_memory_curator_model.sql'),
+  ('20261022_05_agent_messaging.sql')
 on conflict (filename) do nothing;

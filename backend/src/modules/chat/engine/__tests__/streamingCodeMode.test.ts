@@ -207,6 +207,46 @@ describe("code mode", () => {
     expect(Date.now() - started).toBeLessThan(2_900);
   });
 
+  it("gives the chat's background subagents to code only with the person's setting, in a durable turn", async () => {
+    const agents = {
+      list: vi.fn(async () => ({ content: JSON.stringify({ agents: [{ name: "research-1", status: "working" }] }), isError: false })),
+      send: vi.fn(async () => ({ content: "Sent to research-1.", isError: false })),
+      inbox: vi.fn(async () => ({ content: JSON.stringify({ messages: [], still_working: ["research-1"] }), isError: false })),
+      stop: vi.fn(async () => ({ content: 'No working subagent named "x" in this chat.', isError: true })),
+    };
+    const code = [
+      `print((await tools.list_agents())["agents"][0]["name"])`,
+      `print(await tools.message_agent(to="research-1", message="Also clause 14", interrupt=False))`,
+      `print((await tools.agent_inbox(wait_seconds=1))["still_working"])`,
+      `try:`,
+      `    await tools.stop_agent(name="x")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    const durable = { includeSubagents: true, conversationId: "chat-agents", durableTurn: { context: { surface: "chat" } } };
+    let offered: StreamChatCall | undefined;
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      offered = params;
+      results = (await params.runTools?.([{ ...cell(code), agents } as never])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), ...durable, backgroundAgents: true } as never);
+    expect(section(offered!, "tool-index")).toContain("- message_agent(to, message, *, interrupt): ");
+    expect(section(offered!, "tool-index")).toContain("- agent_inbox(*, wait_seconds): ");
+    expect(agents.send).toHaveBeenCalledWith({ to: "research-1", message: "Also clause 14", interrupt: false });
+    expect(agents.inbox).toHaveBeenCalledWith({ wait_seconds: 1 });
+    expect(results[0]!.content).toContain("research-1\nSent to research-1.\n['research-1']");
+    expect(results[0]!.content).toContain('refused: stop_agent: No working subagent named "x" in this chat.');
+
+    // Off, or without a durable turn to wake the chat with: no such functions.
+    await runLLMStream({ ...baseParams(), ...durable } as never);
+    await runLLMStream({ ...baseParams(), ...durable, durableTurn: undefined, backgroundAgents: true } as never);
+    for (const call of streamChatWithTools.mock.calls.slice(1)) {
+      expect(section(call[0], "tool-index")).not.toContain("message_agent(");
+    }
+  });
+
   it("raises a refused delegate as a ToolError the cell can catch", async () => {
     const delegate = vi.fn(async () => ({ content: "Not run: 4 subagents are already running.", isError: true }));
     const code = [

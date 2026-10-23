@@ -65,6 +65,9 @@ export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set([
     // Memory is the person's: a subagent neither reads it fresh nor changes it.
     "read_memory",
     "edit_memory", "history_search", "history_read",
+    // The chat's background subagents: a background child is given the
+    // ones it may use by the host, never by its type.
+    "list_agents", "message_agent", "agent_inbox", "stop_agent",
 ]);
 
 /**

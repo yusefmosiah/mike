@@ -166,6 +166,80 @@ export const HISTORY_TOOLS = [
   },
 ];
 
+const LIST_AGENTS_TOOL = {
+  type: "function",
+  function: {
+    name: "list_agents",
+    description:
+      "List this chat's background subagents: each one's name, type, model, status (working, done, failed, stopped, timed_out, or ended when it can no longer take messages), its task, its last report, and how many of its messages the chat has not read.",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+const MESSAGE_AGENT_TOOL = {
+  type: "function",
+  function: {
+    name: "message_agent",
+    description:
+      'Send a message to a background subagent by its name, or to "parent" (the chat) from a subagent. A subagent that is working reads it before its next step (or, with interrupt=false, once its current work is done); one that has finished takes it as new work. Either way it reports again when done.',
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: 'The subagent\'s name from list_agents, such as research-1, or "parent".' },
+        message: { type: "string", description: "The message, self-contained: the subagent sees nothing else of this conversation." },
+        interrupt: {
+          type: "boolean",
+          description: "Read before the subagent's next step (the default), or false to wait until its current work is done.",
+        },
+      },
+      required: ["to", "message"],
+    },
+  },
+};
+
+/**
+ * The chat's background subagents (lib/llm/pi/runtime.mts), offered when
+ * the person has turned them on: a parent turn's functions. The runtime
+ * answers them itself.
+ */
+export const AGENT_TOOLS = [
+  LIST_AGENTS_TOOL,
+  MESSAGE_AGENT_TOOL,
+  {
+    type: "function",
+    function: {
+      name: "agent_inbox",
+      description:
+        "Collect the reports and messages this chat's background subagents have sent and you have not read, oldest first, and which are still working. With wait_seconds, wait up to that long for something to arrive when nothing has yet. What you do not collect arrives in the chat after your answer.",
+      parameters: {
+        type: "object",
+        properties: {
+          wait_seconds: { type: "integer", description: "Seconds to wait for a report when none is waiting (default 0, at most 600)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "stop_agent",
+      description:
+        "Stop a background subagent's current work. It keeps what it has done, sends no report for the stopped work, and can be given more with message_agent.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "The subagent's name from list_agents." } },
+        required: ["name"],
+      },
+    },
+  },
+];
+
+/** What a background subagent itself may do with its chat: see the others, and message them or the chat. */
+export const CHILD_AGENT_TOOLS = [LIST_AGENTS_TOOL, MESSAGE_AGENT_TOOL];
+
+/** The functions the runtime answers for a chat's background subagents. */
+export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOLS.map((tool) => tool.function.name));
+
 export const WORKFLOW_TOOLS = [
   {
     type: "function",

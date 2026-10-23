@@ -183,6 +183,22 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     group: "Subagents",
     text: "hand a self-contained task to a subagent and get its report. Use for independent pieces of work; gather several to run them at once.",
   },
+  list_agents: {
+    group: "Subagents",
+    text: "this chat's background subagents: names, status, last reports. Use before messaging one, or to see what is still working.",
+  },
+  message_agent: {
+    group: "Subagents",
+    text: "message a background subagent by name (or the chat, from a subagent): redirect its work, or give it more after it finished.",
+  },
+  agent_inbox: {
+    group: "Subagents",
+    text: "collect background subagents' reports, waiting up to wait_seconds. Use when your answer needs them; uncollected reports arrive in the chat later.",
+  },
+  stop_agent: {
+    group: "Subagents",
+    text: "stop a background subagent's current work when it is no longer needed or has gone wrong.",
+  },
 };
 
 /**
