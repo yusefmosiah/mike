@@ -35,6 +35,11 @@ import {
   TOOL_ERROR_MESSAGE,
 } from "./types";
 import {
+  AGENT_TOOL_NAMES,
+  AGENT_TOOLS,
+  CHILD_AGENT_TOOLS,
+  HISTORY_TOOLS,
+  MEMORY_TOOLS,
   TOOLS,
   WORKFLOW_TOOLS,
   VAULT_TOOLS,
@@ -69,6 +74,7 @@ import {
 } from "./tools/documentOps";
 import { verifyCitations } from "./verifyCitations";
 import { buildMemoryTurn } from "../../../lib/memory/prompt";
+import type { MemoryEditTarget } from "../../memory/memory.service";
 import { TURN_CONTEXT_PROMPT, type TurnContextSection } from "../../../lib/llm/turnContext";
 import { assertModelAllowed } from "../../../lib/privateMode";
 import { safeError } from "../../../lib/safeError";
@@ -84,14 +90,17 @@ import {
   kernelLauncherFor,
   kernels,
   MAX_CELL_TIMEOUT_MS,
+  CODE_MODE_GUIDE,
   pythonSessionPromptSection,
-  pythonToolsPromptSection,
+  pythonToolIndex,
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,
   RUN_PYTHON_TOOL,
   type HostReply,
+  type KernelToolSpec,
 } from "../../../lib/codemode";
-import { createSubagentHost } from "./subagents/subagentHost";
+import { createSubagentHost, delegateToolSchema } from "./subagents/subagentHost";
+import { READ_MEMORY_TOOL } from "../../../lib/memory/editTool";
 import { getAutoModeDecisionModel, getAutocompactTokensFor } from "../../user/user.service";
 import {
   AUTO_MODE_SAFE_DEFAULTS,
@@ -124,12 +133,16 @@ export type GuestCodeApproval = {
   request: (summary: string, signal?: AbortSignal) => Promise<"once" | "thread" | "denied" | "expired">;
 };
 
+/** What the model is told in a conversation without a workstation to run tools in. */
+export const NO_TOOLS_PROMPT =
+  "TOOLS:\nYou have no tools in this conversation: it has no workstation for them to run in. Answer from the conversation itself. If the request needs a document, a search or anything else only a tool could reach, say so plainly.";
+
 /** What the model is told when a guest's message runs in the host's workstation. */
 export function guestWorkstationPrompt(hostName: string | null, allowed: boolean): string {
   const host = hostName ?? "the person who started this thread";
   return allowed
     ? `# Workstation\nThis thread's code runs in ${host}'s workstation, and ${host} has allowed this user's messages to use it. Its files and Python state belong to ${host}.`
-    : `# Workstation\nThis thread's code runs in ${host}'s workstation, not this user's. Each run_command asks ${host} for permission first and waits for their answer, so use it only when the request needs it.`;
+    : `# Workstation\nThis thread's code runs in ${host}'s workstation, not this user's. The first run_python in each message asks ${host} for permission and waits for their answer.`;
 }
 const capText = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}\n[... cut at ${max.toLocaleString("en-US")} characters ...]` : text;
@@ -489,6 +502,12 @@ export async function runLLMStream(params: {
   /** Tell the memory policy whether other people can see the persisted turn. */
   memorySharedAudience?: boolean;
   /**
+   * Which memory this conversation may change with edit_memory: app memory
+   * when it is the person's private conversation, and the project's when they
+   * may edit its content. Absent, or nothing writable, offers no tool.
+   */
+  memoryEdit?: Omit<MemoryEditTarget, "userId"> | null;
+  /**
    * If set, generate_docx will attach created docs to this project so
    * they appear in the project sidebar. Leave null for general chats —
    * generated docs still get persisted, but as standalone documents.
@@ -511,6 +530,14 @@ export async function runLLMStream(params: {
    * tasks to subagents (./subagents). Defaults to false.
    */
   includeSubagents?: boolean;
+  /**
+   * The person's setting for background subagents (user_profiles
+   * .background_agents): with subagents offered and a durable turn to wake
+   * the chat with, `delegate` takes `background`, and the turn gets the
+   * functions that list, message, collect and stop them. Not for a guest's
+   * turn: the subagent would run on in the host's workstation.
+   */
+  backgroundAgents?: boolean;
   /**
    * Whose workstation this turn's code runs in. A shared thread's code runs
    * in the VM of the person who started it, so its Python state and files
@@ -554,6 +581,7 @@ export async function runLLMStream(params: {
     includeMemory = false,
     memoryProjectId,
     memorySharedAudience = false,
+    memoryEdit = null,
     nonce,
     conversationId,
   } = params;
@@ -575,20 +603,35 @@ export async function runLLMStream(params: {
   const workstation = !workstationOwner || (isGuest && !guestCode)
     ? null
     : await resolveWorkstation(db, workstationOwner);
-  // A guest the host has not allowed for the whole thread works with the
-  // direct tools; each run_command waits for the host (workstationGate).
+  // A guest the host has not allowed for the whole thread waits for the host
+  // before their first cell in each message (workstationGate).
   let guestAllowed = !isGuest || !!guestCode?.standing;
-  // A guest runs commands in the host's workstation but cannot save its files
+  // A guest runs code in the host's workstation but cannot save its files
   // into Mike, and the host's documents are not re-synced for them.
-  const workstationTools = !workstation
+  const workstationTools = !workstation || isGuest
     ? []
-    : isGuest
-      ? WORKSTATION_TOOLS.filter((tool) => tool.function.name === "run_command")
-      : [...WORKSTATION_TOOLS, ...(vaultEnabled() ? VAULT_TOOLS : [])];
+    : [...WORKSTATION_TOOLS, ...(vaultEnabled() ? VAULT_TOOLS : [])];
+  // Code mode is the only mode: the model works through run_python in a
+  // persistent kernel in the user's workstation (lib/codemode), and every
+  // tool below is a function there. A conversation without a workstation
+  // has no tools at all.
+  const kernelLauncher = isGuest && !workstation ? null : kernelLauncherFor(workstation);
+  const backgroundAgents =
+    !!params.backgroundAgents && !!params.includeSubagents && !!kernelLauncher && !isGuest && !!params.durableTurn && !!conversationId;
+  const memoryEditTarget: MemoryEditTarget | null =
+    includeMemory && memoryEdit && (memoryEdit.appWritable || memoryEdit.projectId)
+      ? { ...memoryEdit, userId }
+      : null;
   const baseTools = [
     ...conversationTools,
     ...researchTools,
     ...WORKFLOW_TOOLS,
+    ...(includeMemory ? [READ_MEMORY_TOOL] : []),
+    ...(memoryEditTarget ? MEMORY_TOOLS : []),
+    // A saved conversation's own history, compacted messages included.
+    ...(conversationId ? HISTORY_TOOLS : []),
+    ...(params.includeSubagents && kernelLauncher ? [delegateToolSchema(backgroundAgents)] : []),
+    ...(backgroundAgents ? AGENT_TOOLS : []),
     ...workstationTools,
   ];
   const advertisedTools = [
@@ -606,16 +649,26 @@ export async function runLLMStream(params: {
   const activeTools = allowDocumentMutation
     ? advertisedTools
     : withoutDocumentMutatingTools(advertisedTools);
-  // Code mode: the model sees run_python alone, and every tool above is a
-  // function in it (lib/codemode). Its calls come back through runTurnTools
-  // and pass every gate a direct call does. Where the user's kernel cannot
-  // start, turns fall back to the direct tools for a minute (see
-  // KernelManager.available).
-  const kernelLauncher = guestAllowed && !(isGuest && !workstation) ? kernelLauncherFor(workstation) : null;
-  const codeMode = !!kernelLauncher && kernels.available(kernelLauncher);
+  // The model sees run_python alone. The calls its code makes come back
+  // through runTurnTools and pass every gate.
+  const codeMode = !!kernelLauncher;
   const pythonSpecs = codeMode ? pythonToolSpecs(activeTools) : [];
   const pythonToolNames = new Set(pythonSpecs.map((spec) => spec.name));
-  const modelTools = codeMode ? [RUN_PYTHON_SCHEMA] : activeTools;
+  const modelTools = codeMode ? [RUN_PYTHON_SCHEMA] : [];
+  // Memory as it is now: for tools.read_memory, and for the summary each
+  // compaction writes, which replaces the thread's first message.
+  const memoryNow = async () =>
+    (
+      await buildMemoryTurn({
+        db,
+        userId,
+        systemPrompt: "",
+        include: true,
+        projectId: memoryProjectId,
+        sharedAudience: memorySharedAudience,
+      })
+    ).message?.content ?? null;
+  const readMemory = async () => (await memoryNow()) ?? "No memory is enabled for this conversation.";
 
   // Extract system prompt; pass remaining turns to the adapter as
   // plain user/assistant messages.
@@ -658,9 +711,11 @@ export async function runLLMStream(params: {
     ...(workflowStore
       ? [{ key: "skills", text: skillsPromptSection(workflowStore, { workstation: !!workstation && !isGuest }) }]
       : []),
-    // Code mode: the guide and the tool index. A turn whose kernel cannot
-    // start falls back to direct tools, and the section is withdrawn.
-    ...(codeMode ? [{ key: "code-mode", text: pythonToolsPromptSection(pythonSpecs) }] : []),
+    // Code mode: the guide, fixed, and the tool index, which changes only
+    // when the tool set does (a connector added, say), so only it is re-sent.
+    ...(codeMode
+      ? [{ key: "code-mode", text: CODE_MODE_GUIDE }, { key: "tool-index", text: pythonToolIndex(pythonSpecs) }]
+      : [{ key: "no-tools", text: NO_TOOLS_PROMPT }]),
     ...(pythonSession ? [{ key: "python-session", text: pythonSession }] : []),
     ...(isGuest && workstation
       ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
@@ -1025,16 +1080,7 @@ export async function runLLMStream(params: {
       return runTurnToolsNow(calls, scope);
     };
     /**
-     * Code mode: runs one `run_python` cell in the conversation's kernel.
-     * Each `await tools.x(...)` the cell makes is an ordinary call in this
-     * turn: same guardrails, same mutation gate, same events, with writes
-     * taking turns. A question for the user (ask_inputs, a connector
-     * approval) ends the cell with UserQuestionPending and then pauses the
-     * turn as a direct call would; the kernel keeps its variables for the
-     * answer in the next message.
-     */
-    /**
-     * A guest's command in the host's workstation: the first one in a turn
+     * A guest's code in the host's workstation: the first cell in a turn
      * waits for the host to allow it, unless the host already allowed this
      * guest for the thread. Returns why it may not run, or null when it may.
      */
@@ -1068,8 +1114,8 @@ export async function runLLMStream(params: {
           }
           const host = guestCode.hostName ?? "The person who started this thread";
           return outcome === "denied"
-            ? `${host} did not allow running this command in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`
-            : `${host} did not answer the request to run this command in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`;
+            ? `${host} did not allow running code in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`
+            : `${host} did not answer the request to run code in their workstation. Do not try again in this message; answer without it, or tell the user to ask them.`;
         }
       : undefined;
     /**
@@ -1119,29 +1165,44 @@ export async function runLLMStream(params: {
         }),
       };
     };
+    /**
+     * Runs one `run_python` cell, in the conversation's kernel or a
+     * subagent's own. Each `await tools.x(...)` the cell makes is an
+     * ordinary call in this turn: same guardrails, same mutation gate, same
+     * events, with writes taking turns. A question for the user (ask_inputs,
+     * a connector approval) ends the cell with UserQuestionPending and then
+     * pauses the turn; the kernel keeps its variables for the answer in the
+     * next message.
+     */
     const runPythonCall = async (
       call: NormalizedToolCall,
       scope: "parent" | "child",
+      /** A subagent's own kernel and functions; the conversation's by default. */
+      child?: { key: string; tools: KernelToolSpec[] },
     ): Promise<string> => {
-      if (!codeMode || !kernelLauncher || scope !== "parent") {
+      if (!kernelLauncher || (scope === "child") !== !!child) {
         return JSON.stringify({ error: `Tool '${RUN_PYTHON_TOOL}' is not available.` });
       }
       const code = typeof call.input.code === "string" ? call.input.code : "";
       if (!code.trim()) return JSON.stringify({ error: "code is empty" });
-      const key = conversationId ?? `turn-${turnKernelId}`;
+      const refusal = workstationGate ? await workstationGate(call.id, code) : null;
+      if (refusal) return `[error]\n${refusal}`;
+      const key = child?.key ?? conversationId ?? `turn-${turnKernelId}`;
+      const specs = child?.tools ?? pythonSpecs;
+      const names = child ? new Set(specs.map((spec) => spec.name)) : pythonToolNames;
       if (call.input.reset === true) kernels.discard(key);
       if (workstation) await snapshotOncePerTurn(turnEditState, workstation.snapshot);
-      // ~/mike and ~/skills, as before a run_command: once per turn, only in
-      // the user's own workstation.
+      // ~/mike and ~/skills: once per turn, only in the user's own
+      // workstation.
       const sync = workstation && !isGuest
         ? await syncWorkspaceOncePerTurn(turnEditState, db, { id: userId, email: userEmail }, workstation)
         : null;
       let session;
       try {
-        session = await kernels.acquire(key, kernelLauncher, pythonSpecs);
+        session = await kernels.acquire(key, kernelLauncher, specs);
       } catch (error) {
         console.error("[code-mode] kernel unavailable", safeError(error));
-        return "[error]\nThe Python workstation is unavailable right now. Tell the user their workstation could not be reached; tools will work directly in the next message.";
+        return "[error]\nThe Python workstation is unavailable right now, so no tool can run. Tell the user their workstation could not be reached and that they can try again in a minute.";
       }
       // The cell's line in the chat: shown as it starts, updated when it ends.
       const cellEvent: CodeCellEvent = {
@@ -1150,21 +1211,60 @@ export async function runLLMStream(params: {
         code: capText(code, MAX_CELL_EVENT_CHARS),
         status: "running",
       };
-      flushText();
-      events.push(cellEvent);
-      write(`data: ${JSON.stringify(cellEvent)}\n\n`);
+      // A subagent's cells are its own work, shown in its transcript.
+      const showCell = scope === "parent";
+      if (showCell) {
+        flushText();
+        events.push(cellEvent);
+        write(`data: ${JSON.stringify(cellEvent)}\n\n`);
+      }
       let seq = 0;
       let stopTurn: unknown = null;
       const onHostRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
         if (stopTurn) return { ok: false, error: "the turn is ending" };
         if (data.type === "documents") return documentsRequest(data);
         const name = typeof data.name === "string" ? data.name : "";
-        if (data.type !== "tool" || !pythonToolNames.has(name)) {
+        if (data.type !== "tool" || !names.has(name)) {
           return { ok: false, error: `No tool named '${name}'.` };
         }
         const args = data.args && typeof data.args === "object" && !Array.isArray(data.args)
           ? (data.args as Record<string, unknown>)
           : {};
+        // Answered by the turn itself, not the dispatcher: memory as it is
+        // now, and a subagent started from this cell's call (the runtime's).
+        if (name === "read_memory") {
+          try {
+            return { ok: true, content: await readMemory() };
+          } catch (error) {
+            console.error("[code-mode] read_memory failed", safeError(error));
+            return { ok: false, error: "memory could not be read" };
+          }
+        }
+        if (name === "history_search" || name === "history_read") {
+          if (!call.history) return { ok: false, error: "This conversation's history is not available here." };
+          const reply = await (name === "history_search" ? call.history.search(args) : call.history.read(args));
+          return reply.isError ? { ok: false, error: reply.content } : { ok: true, content: reply.content };
+        }
+        if (AGENT_TOOL_NAMES.has(name)) {
+          const agents = call.agents;
+          const op = !agents
+            ? undefined
+            : name === "list_agents"
+              ? () => agents.list()
+              : name === "message_agent"
+                ? () => agents.send(args)
+                : name === "agent_inbox"
+                  ? agents.inbox && (() => agents.inbox!(args))
+                  : agents.stop && (() => agents.stop!(args));
+          if (!op) return { ok: false, error: "Background subagents are not available here." };
+          const reply = await op();
+          return reply.isError ? { ok: false, error: reply.content } : { ok: true, content: reply.content };
+        }
+        if (name === "delegate") {
+          if (!call.delegate) return { ok: false, error: "Delegation is not available here." };
+          const report = await call.delegate(args);
+          return report.isError ? { ok: false, error: report.content } : { ok: true, content: report.content };
+        }
         const inner: NormalizedToolCall = { id: `${call.id}.${++seq}`, name, input: args };
         const run = () => runTurnToolsNow([inner], scope);
         try {
@@ -1198,7 +1298,7 @@ export async function runLLMStream(params: {
         timed_out: outcome.timedOut,
         kernel_lost: outcome.kernelLost,
       });
-      if (!outcome.kernelLost) void kernels.afterCell(key, kernelLauncher);
+      if (!outcome.kernelLost && !child) void kernels.afterCell(key, kernelLauncher);
       const content = sync && !sync.ok
         ? `[note] Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date.\n${cellResultContent(outcome)}`
         : cellResultContent(outcome);
@@ -1208,7 +1308,7 @@ export async function runLLMStream(params: {
         tool_calls: outcome.hostRequests,
         duration_ms: outcome.durationMs,
       } satisfies Partial<CodeCellEvent>);
-      write(`data: ${JSON.stringify(cellEvent)}\n\n`);
+      if (showCell) write(`data: ${JSON.stringify(cellEvent)}\n\n`);
       if (stopTurn) throw stopTurn;
       return content;
     };
@@ -1424,6 +1524,7 @@ export async function runLLMStream(params: {
         courtlistenerEvents,
         caseCitationEvents,
         mcpEvents,
+        memoryUpdates = [],
       } = await runToolCalls(
         toolCalls,
         docStore,
@@ -1448,8 +1549,9 @@ export async function runLLMStream(params: {
           model,
           workstation,
           workspaceOwned: !!workstation && !isGuest,
-          workstationGate,
           chatId: conversationId ?? null,
+          // Memory is the person's: a delegated subagent does not change it.
+          memoryEdit: scope === "parent" ? memoryEditTarget : null,
         },
       );
       throwIfAborted(signal);
@@ -1498,6 +1600,9 @@ export async function runLLMStream(params: {
           title: wf.title,
           ...(wf.action ? { action: wf.action, version_number: wf.version_number } : {}),
         });
+      }
+      for (const update of memoryUpdates) {
+        record(update);
       }
       for (const e of docsEdited) {
         record({
@@ -1562,7 +1667,7 @@ export async function runLLMStream(params: {
     };
 
     let delegation: Awaited<ReturnType<typeof createSubagentHost>> | null = null;
-    if (params.includeSubagents) {
+    if (params.includeSubagents && codeMode) {
       try {
         delegation = await createSubagentHost({
           db,
@@ -1571,13 +1676,12 @@ export async function runLLMStream(params: {
           chatModel: selectedModel,
           reasoning: params.reasoning ?? "high",
           docIndex,
-          // Subagents call tools directly, also in code mode.
-          offeredTools: (activeTools as OpenAIToolSchema[]).map(
-            (tool) => tool.function.name,
-          ),
-          runTools: (calls) => runTurnTools(calls, "child"),
+          offeredTools: activeTools as OpenAIToolSchema[],
+          runPython: (call, kernel) => runPythonCall(call, "child", kernel),
+          discardKernel: (key) => kernels.discard(key),
           write,
           events,
+          ...(backgroundAgents ? { background: true, childAgentTools: CHILD_AGENT_TOOLS as OpenAIToolSchema[] } : {}),
         });
       } catch (error) {
         // Delegation is an extra; the turn runs without it.
@@ -1616,19 +1720,7 @@ export async function runLLMStream(params: {
       ...(params.continuesAnswer ? { continuesAnswer: params.continuesAnswer } : {}),
       durableTurn: params.durableTurn,
       memoryMessage: memory.message ?? undefined,
-      readMemory: includeMemory
-        ? async () =>
-            (
-              await buildMemoryTurn({
-                db,
-                userId,
-                systemPrompt: "",
-                include: true,
-                projectId: memoryProjectId,
-                sharedAudience: memorySharedAudience,
-              })
-            ).message?.content ?? "No memory is enabled for this conversation."
-        : undefined,
+      ...(includeMemory ? { memoryAtCompaction: memoryNow } : {}),
       callbacks: {
         onContentDelta: (delta) => {
           iterText += delta;

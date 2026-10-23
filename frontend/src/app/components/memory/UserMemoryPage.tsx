@@ -3,11 +3,13 @@
 import { useCallback, useState } from "react";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { ConfirmPopup } from "@/app/components/popups/ConfirmPopup";
+import { Modal } from "@/app/components/modals/Modal";
 import { SettingsCard } from "@/app/components/settings/SettingsCard";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
 import { MarkdownEditor } from "@/app/components/ui/markdown-editor";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
+import { TextButtonUI } from "@/shared/ui/TextButtonUI";
 import { ToggleSwitchUI } from "@/shared/ui/ToggleSwitchUI";
 import {
   SettingsDescription,
@@ -19,6 +21,7 @@ import {
   memoryActivityLabel,
 } from "@/app/components/memory/MemoryEditorState";
 import { MemoryUpdateFailedPopup } from "@/app/components/memory/MemoryUpdateFailedPopup";
+import { MemoryVersionHistory } from "@/app/components/memory/MemoryVersionHistory";
 import { useMemoryFileController } from "@/app/components/memory/useMemoryFileController";
 import {
   getUserMemory,
@@ -29,6 +32,8 @@ import { userFacingApiError } from "@/app/lib/userFacingError";
 
 type ConfirmAction = "disable";
 
+const USER_MEMORY_REF = { scope: "user" } as const;
+
 export function UserMemoryPage() {
   const [settingsMutation, setSettingsMutation] = useState<
     "enable" | "disable" | null
@@ -36,6 +41,7 @@ export function UserMemoryPage() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
     null,
   );
+  const [historyOpen, setHistoryOpen] = useState(false);
   const loadMemory = useCallback(
     (signal?: AbortSignal) => getUserMemory(signal),
     [],
@@ -225,6 +231,13 @@ export function UserMemoryPage() {
                   {memoryActivityLabel(memory)}
                 </p>
               ) : null}
+              <TextButtonUI
+                size="xs"
+                onClick={() => setHistoryOpen(true)}
+                disabled={editorLocked}
+              >
+                Version history
+              </TextButtonUI>
             </div>
           </div>
 
@@ -252,8 +265,8 @@ export function UserMemoryPage() {
 
       <ConfirmPopup
         open={confirmAction !== null}
-        title="Turn off and delete app-wide memory?"
-        message={`This will delete the existing app-wide memory.md file${dirty ? " and your unsaved draft" : ""}, cancel pending memory updates, and stop future memory updates until you turn app-wide memory on again.`}
+        title="Turn off app-wide memory?"
+        message={`This will clear the app-wide memory.md file${dirty ? " and discard your unsaved draft" : ""}, cancel pending memory updates, and stop future memory updates until you turn app-wide memory on again. Earlier versions stay in the version history until you delete your memory in Privacy & Data.`}
         confirmLabel="Disable"
         confirmVariant="danger"
         confirmStatus={settingsMutation ? "loading" : "idle"}
@@ -262,6 +275,32 @@ export function UserMemoryPage() {
           if (!settingsMutation) setConfirmAction(null);
         }}
       />
+      <Modal
+        open={historyOpen && !!memory?.enabled}
+        onClose={() => setHistoryOpen(false)}
+        breadcrumbs={["Memory", "Version history"]}
+        primaryAction={{
+          label: "Done",
+          type: "button",
+          onClick: () => setHistoryOpen(false),
+        }}
+      >
+        {memory ? (
+          <div className="flex min-h-0 flex-1 flex-col pb-3 pt-1">
+            <MemoryVersionHistory
+              fileRef={USER_MEMORY_REF}
+              current={memory}
+              canRestore
+              restoreBlockedReason={
+                dirty || autosave.inFlight
+                  ? "Your latest edits are still saving. You can restore once they are saved."
+                  : null
+              }
+              onRestored={(current) => syncCurrent(current)}
+            />
+          </div>
+        ) : null}
+      </Modal>
       <MemoryUpdateFailedPopup memory={memory} scopeKey="app" />
     </div>
   );

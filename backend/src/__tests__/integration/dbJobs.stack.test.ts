@@ -68,6 +68,30 @@ maybeDescribe("db_jobs claim SQL", () => {
         expect(again.some((j) => j.id === job.id)).toBe(false);
     });
 
+    // Memory reviews run in the API process and nothing else may take them:
+    // its runner claims only that kind, every other runner all but it.
+    it("claims only a named kind, or every kind but the excluded ones", async () => {
+        const kind = `stack.only-${Date.now()}`;
+        const only = await insertJob({ kind });
+        const other = await insertJob({ dedupe_key: `other-${Date.now()}` });
+        const excluding = await db.rpc("claim_db_jobs", {
+            p_limit: 50,
+            p_stale_seconds: STALE,
+            p_exclude_kinds: [kind],
+        });
+        if (excluding.error) throw new Error(excluding.error.message);
+        const excluded = (excluding.data ?? []) as Record<string, unknown>[];
+        expect(excluded.some((j) => j.id === only.id)).toBe(false);
+        expect(excluded.some((j) => j.id === other.id)).toBe(true);
+        const named = await db.rpc("claim_db_jobs", {
+            p_limit: 50,
+            p_stale_seconds: STALE,
+            p_kind: kind,
+        });
+        if (named.error) throw new Error(named.error.message);
+        expect(((named.data ?? []) as Record<string, unknown>[]).map((j) => j.id)).toEqual([only.id]);
+    });
+
     it("reclaims a stale running job while attempts remain", async () => {
         const job = await insertJob({
             status: "running",

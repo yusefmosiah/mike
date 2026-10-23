@@ -60,6 +60,7 @@ import type {
     TabularReviewDetailOut,
 } from "@/app/components/shared/types";
 import type { VoicePrice } from "@/app/lib/voice/pricing";
+import type { MessageOrigin } from "@mike/contracts";
 
 export { UploadBatchError };
 export { failedUploadMessage };
@@ -574,13 +575,13 @@ export type MemoryStatus = "idle" | "scheduled" | "processing" | "failed";
 export interface MemoryCurrent {
     enabled: boolean;
     content: string;
-    /** Monotonic change token for compare-and-swap; nothing is kept per value. */
+    /** Monotonic change token for compare-and-swap. */
     revision: number;
     hash: string | null;
     updated_at: string | null;
     /** Actor provenance only. The endpoint deliberately does not expose email. */
     updated_by: string | null;
-    source: "manual" | "curator" | "wipe" | "settings" | null;
+    source: "manual" | "curator" | "assistant" | "wipe" | "settings" | null;
     status: MemoryStatus;
     /** Changes whenever scheduling, processing, or failure status changes. */
     status_updated_at?: string;
@@ -654,6 +655,69 @@ export async function setProjectMemoryEnabled(
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ enabled }),
+        },
+    );
+}
+
+/** One saved state of a memory file, without its body. */
+export interface MemoryVersion {
+    id: string;
+    version_number: number;
+    revision: number;
+    source: "manual" | "curator" | "restore" | "assistant" | "settings" | "wipe";
+    /** Why it changed: the curator's summary, or "Restored version N". */
+    change_summary: string | null;
+    updated_by: string | null;
+    updated_by_name: string | null;
+    source_chat_id: string | null;
+    size_bytes: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/** Whose memory file: the caller's own, or a project's. */
+export type MemoryFileRef = { scope: "user" } | { scope: "project"; projectId: string };
+
+function memoryPath(ref: MemoryFileRef): string {
+    return ref.scope === "user"
+        ? "/user/memory"
+        : `/projects/${encodeURIComponent(ref.projectId)}/memory`;
+}
+
+export async function listMemoryVersions(
+    ref: MemoryFileRef,
+    signal?: AbortSignal,
+): Promise<MemoryVersion[]> {
+    const { versions } = await apiRequest<{ versions: MemoryVersion[] }>(
+        `${memoryPath(ref)}/versions`,
+        { signal },
+    );
+    return versions;
+}
+
+export async function getMemoryVersion(
+    ref: MemoryFileRef,
+    versionId: string,
+    signal?: AbortSignal,
+): Promise<MemoryVersion & { content: string }> {
+    return apiRequest<MemoryVersion & { content: string }>(
+        `${memoryPath(ref)}/versions/${encodeURIComponent(versionId)}`,
+        { signal },
+    );
+}
+
+/** Write an earlier version back as the newest one. */
+export async function restoreMemoryVersion(
+    ref: MemoryFileRef,
+    versionId: string,
+    expectedRevision: number,
+): Promise<MemoryCurrent> {
+    return apiRequest<MemoryCurrent>(
+        `${memoryPath(ref)}/versions/${encodeURIComponent(versionId)}/restore`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expected_revision: expectedRevision }),
         },
     );
 }
@@ -768,7 +832,6 @@ export interface UserProfile {
     tier: string;
     titleModel: string | null;
     tabularModel: string | null;
-    memoryCuratorModel: string | null;
     lastSelectedChatModel: string | null;
     lastSelectedReasoningLevel: NonNullable<Message["reasoning"]>;
     mfaOnLogin: boolean;
@@ -776,6 +839,7 @@ export interface UserProfile {
     quickActionsVisible: boolean;
     darkMode: boolean;
     projectMemoryDefault: boolean;
+    backgroundAgents: boolean;
     openRouterModels: string[];
     vercelModels: string[];
     openCodeGoModels: string[];
@@ -884,13 +948,13 @@ export async function updateUserProfile(payload: {
     practiceAreas?: string[];
     titleModel?: string | null;
     tabularModel?: string | null;
-    memoryCuratorModel?: string | null;
     lastSelectedChatModel?: string | null;
     lastSelectedReasoningLevel?: NonNullable<Message["reasoning"]>;
     legalResearchUs?: boolean;
     quickActionsVisible?: boolean;
     darkMode?: boolean;
     projectMemoryDefault?: boolean;
+    backgroundAgents?: boolean;
     openRouterModels?: string[];
     vercelModels?: string[];
     openCodeGoModels?: string[];
@@ -2261,6 +2325,8 @@ interface ServerTranscriptRow {
     files?: MessageFile[] | null;
     workflow?: { id: string; title: string } | null;
     citations?: Citation[] | null;
+    /** Set when no person wrote it: background subagents' reports. */
+    origin?: MessageOrigin | null;
 }
 
 // One mapping for every transcript-shaped response (GET /chat and the branch
@@ -2274,6 +2340,9 @@ function mapServerMessages(messages: ServerTranscriptRow[]): Message[] {
                 content: typeof m.content === "string" ? m.content : "",
                 files: m.files ?? undefined,
                 workflow: m.workflow ?? undefined,
+                ...(m.origin?.kind === "agent_messages"
+                    ? { origin: m.origin }
+                    : {}),
             };
         }
         const events = Array.isArray(m.content) ? m.content : undefined;

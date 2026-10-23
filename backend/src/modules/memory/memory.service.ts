@@ -13,6 +13,8 @@ import {
     enableMemoryFile,
     ensureMemoryFile,
     getMemoryCurrent,
+    getMemoryVersion,
+    listMemoryVersions,
     wipeMemoryFile,
     writeMemoryFile,
     type MemoryFileRow,
@@ -127,13 +129,76 @@ export async function wipeMemory(
     db: Db,
     args: { ctx: MemoryContext; updatedBy: string },
 ) {
+    // Deleting memory deletes its history; turning it off (above) keeps it.
     return wipeMemoryFile({
         db,
         file: args.ctx.file,
         enabled: null,
         updatedBy: args.updatedBy,
         source: "wipe",
+        deleteHistory: true,
     });
 }
 
+/** The file's versions, newest first, each with the display name of whoever wrote it. */
+export async function memoryVersions(db: Db, ctx: MemoryContext) {
+    const versions = await listMemoryVersions(db, ctx.file);
+    const userIds = [
+        ...new Set(versions.flatMap((version) => (version.updated_by ? [version.updated_by] : []))),
+    ];
+    const names = new Map<string, string>();
+    if (userIds.length) {
+        const { data } = await db
+            .from("user_profiles")
+            .select("user_id, display_name")
+            .in("user_id", userIds);
+        for (const profile of (data ?? []) as { user_id: string; display_name: string | null }[]) {
+            const name = profile.display_name?.trim();
+            if (name) names.set(profile.user_id, name);
+        }
+    }
+    return versions.map((version) => ({
+        ...version,
+        updated_by_name: version.updated_by ? (names.get(version.updated_by) ?? null) : null,
+    }));
+}
+
+export async function memoryVersion(db: Db, ctx: MemoryContext, versionId: string) {
+    return getMemoryVersion(db, ctx.file, versionId);
+}
+
+/**
+ * Write an earlier version back as the newest one. Null when the file has no
+ * such version; the write's own errors (a moved revision, memory turned off)
+ * reach the route as for any save.
+ */
+export async function restoreMemoryVersion(
+    db: Db,
+    args: {
+        ctx: MemoryContext;
+        versionId: string;
+        expectedRevision: number;
+        updatedBy: string;
+    },
+) {
+    const version = await getMemoryVersion(db, args.ctx.file, args.versionId);
+    if (!version) return null;
+    return (
+        await writeMemoryFile({
+            db,
+            file: args.ctx.file,
+            content: version.content,
+            expectedRevision: args.expectedRevision,
+            source: "restore",
+            updatedBy: args.updatedBy,
+            changeSummary: `Restored version ${version.version_number}`,
+        })
+    ).current;
+}
+
 export { handleMemoryConsolidation, markMemoryConsolidationFailed } from "./memory.curator";
+export {
+    editMemoryFromConversation,
+    type MemoryEditOutcome,
+    type MemoryEditTarget,
+} from "./memory.assistant";

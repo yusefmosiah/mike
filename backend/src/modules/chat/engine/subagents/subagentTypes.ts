@@ -59,7 +59,16 @@ function positiveInteger(fields: Record<string, string>, key: string): number {
 }
 
 /** Tools no subagent may have, whatever its type file says. */
-export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set(["delegate", "ask_inputs"]);
+export const NEVER_CHILD_TOOLS: ReadonlySet<string> = new Set([
+    "delegate",
+    "ask_inputs",
+    // Memory is the person's: a subagent neither reads it fresh nor changes it.
+    "read_memory",
+    "edit_memory", "history_search", "history_read",
+    // The chat's background subagents: a background child is given the
+    // ones it may use by the host, never by its type.
+    "list_agents", "message_agent", "agent_inbox", "stop_agent",
+]);
 
 /**
  * Parse one type file. `tools: *` gives the child every tool the parent

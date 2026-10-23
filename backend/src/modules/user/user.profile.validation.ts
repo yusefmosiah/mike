@@ -153,7 +153,6 @@ export function validateProfilePayload(body: unknown):
               practice_areas?: string[];
               title_model?: string | null;
               tabular_model?: string | null;
-              memory_curator_model?: string | null;
               last_selected_chat_model?: string | null;
               last_selected_reasoning_level?: string | null;
               legal_research_us?: boolean;
@@ -177,13 +176,13 @@ export function validateProfilePayload(body: unknown):
         "practiceAreas",
         "titleModel",
         "tabularModel",
-        "memoryCuratorModel",
         "lastSelectedChatModel",
         "lastSelectedReasoningLevel",
         "legalResearchUs",
         "quickActionsVisible",
         "darkMode",
         "projectMemoryDefault",
+        "backgroundAgents",
         ...ROUTER_SLUGS.map((slug) => ROUTER_PROFILE_FIELDS[slug]),
     ]);
     const invalidField = Object.keys(raw).find(
@@ -205,13 +204,13 @@ export function validateProfilePayload(body: unknown):
         practice_areas?: string[];
         title_model?: string | null;
         tabular_model?: string | null;
-        memory_curator_model?: string | null;
         last_selected_chat_model?: string | null;
         last_selected_reasoning_level?: string | null;
         legal_research_us?: boolean;
         quick_actions_visible?: boolean;
         dark_mode?: boolean;
         project_memory_default?: boolean;
+        background_agents?: boolean;
         updated_at: string;
     } = { updated_at: new Date().toISOString() };
     const routerModels: Partial<Record<RouterSlug, string[]>> = {};
@@ -279,29 +278,6 @@ export function validateProfilePayload(body: unknown):
                 return { ok: false, detail: "Unsupported titleModel" };
             }
             update.title_model = resolved;
-        }
-    }
-
-    if ("memoryCuratorModel" in raw) {
-        if (
-            raw.memoryCuratorModel === null ||
-            raw.memoryCuratorModel === ""
-        ) {
-            update.memory_curator_model = null;
-        } else if (typeof raw.memoryCuratorModel !== "string") {
-            return {
-                ok: false,
-                detail: "memoryCuratorModel must be a string or null",
-            };
-        } else {
-            const resolved = resolveModel(raw.memoryCuratorModel, "");
-            if (!resolved) {
-                return {
-                    ok: false,
-                    detail: "Unsupported memoryCuratorModel",
-                };
-            }
-            update.memory_curator_model = resolved;
         }
     }
 
@@ -414,6 +390,16 @@ export function validateProfilePayload(body: unknown):
             };
         }
         update.project_memory_default = raw.projectMemoryDefault;
+    }
+
+    if ("backgroundAgents" in raw) {
+        if (typeof raw.backgroundAgents !== "boolean") {
+            return {
+                ok: false,
+                detail: "backgroundAgents must be a boolean",
+            };
+        }
+        update.background_agents = raw.backgroundAgents;
     }
 
     return { ok: true, update, routerModels };

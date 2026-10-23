@@ -42,6 +42,7 @@ vi.mock("../tools/toolDispatcher", () => ({
 }));
 
 import { runLLMStream } from "../streaming";
+import { localKernelDir, pythonToolNames } from "./pythonToolIndex";
 import { PROJECT_EXTRA_TOOLS } from "../tools/toolSchemas";
 
 type RunToolsFn = (
@@ -77,10 +78,7 @@ function baseParams() {
 }
 
 function advertisedToolNames(): string[] {
-  const params = streamChatWithTools.mock.calls[0]?.[0] as {
-    tools: { function: { name: string } }[];
-  };
-  return params.tools.map((tool) => tool.function.name);
+  return pythonToolNames(streamChatWithTools.mock.calls[0]?.[0] as never);
 }
 
 const WRITERS = [
@@ -91,8 +89,11 @@ const WRITERS = [
   "generate_ppt",
 ];
 
+const kernelDir = localKernelDir();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", kernelDir);
   streamChatWithTools.mockResolvedValue({ fullText: "" });
 });
 
@@ -219,6 +220,33 @@ describe("runLLMStream document-mutation gating", () => {
       (call) => call.function.name,
     );
     expect(dispatched).toEqual(["edit_document"]);
+  });
+});
+
+describe("runLLMStream memory editing", () => {
+  const target = {
+    surface: "chat" as const,
+    conversationId: "chat-1",
+    appWritable: true,
+    projectId: null,
+  };
+
+  it("offers edit_memory only when this conversation may change some memory", async () => {
+    await runLLMStream({ ...baseParams(), includeMemory: true, memoryEdit: target });
+    expect(advertisedToolNames()).toContain("edit_memory");
+
+    for (const memoryEdit of [
+      null,
+      { ...target, appWritable: false },
+    ]) {
+      vi.clearAllMocks();
+      await runLLMStream({ ...baseParams(), includeMemory: true, memoryEdit });
+      expect(advertisedToolNames()).not.toContain("edit_memory");
+    }
+
+    vi.clearAllMocks();
+    await runLLMStream({ ...baseParams(), memoryEdit: target });
+    expect(advertisedToolNames()).not.toContain("edit_memory");
   });
 });
 

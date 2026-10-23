@@ -25,6 +25,13 @@ export const DB_JOB_HANDLERS: DbJobHandlers = {
   "citations.verify": handleCitationCheckJob,
   "citations.auto_check": handleAutoCitationCheckJob,
 };
+/**
+ * Kinds that run only in the API process. A memory review forks the chat's
+ * durable conversation, and that store has one owner: the process serving
+ * chat turns. The background worker claims every other kind.
+ */
+export const API_PROCESS_JOB_KIND = "memory.consolidate";
+
 export const DB_JOB_FAILURE_HOOKS: Record<string, DbJobFailureHook> = {
   "conversion.convert": markConversionFailed,
   "extraction.extract": markExtractionJobFailed,

@@ -1,5 +1,8 @@
 import { answerTurnClaimRpc } from "../helpers/turnClaimsMock";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import request from "supertest";
 import type { AssistantEvent, ConnectorApprovalItem } from "@mike/contracts";
 
@@ -705,7 +708,6 @@ describe("POST /chat — streaming endpoint", () => {
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             legal_research_us: false,
             title_model: null,
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: null,
             last_selected_chat_model: "gpt-5.6-luna",
@@ -1018,13 +1020,23 @@ describe("POST /chat — streaming endpoint", () => {
                 kind: "text",
                 question: "Which jurisdiction?",
             };
+            // The model works through run_python, in a local kernel standing
+            // in for the workstation.
+            vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", mkdtempSync(path.join(tmpdir(), "mike-kernel-")));
+            onTestFinished(async () => {
+                vi.unstubAllEnvs();
+                const { kernels } = await import("../../lib/codemode/index.js");
+                await kernels.closeAll();
+            });
             const model = await scriptPiModel("gpt-5.6-terra", (faux) => [
                 ...(malformedFirstCall
-                    ? [faux.call("bad-1", "ask_inputs", { items: "not a list" })]
+                    ? [faux.call("bad-1", "run_python", { code: 'await tools.ask_inputs(items="not a list")' })]
                     : []),
                 // Nothing after the pause: the request count below proves no
                 // model call followed it.
-                faux.call("ask-1", "ask_inputs", { items: [question] }),
+                faux.call("ask-1", "run_python", {
+                    code: `await tools.ask_inputs(items=${JSON.stringify([question])})`,
+                }),
             ]);
             runLLMStream.mockImplementationOnce(realChat.runLLMStream);
             vi.mocked(mockedChat.buildMessages).mockImplementationOnce(
@@ -1297,7 +1309,6 @@ describe("POST /chat — streaming endpoint", () => {
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             legal_research_us: false,
             title_model: null,
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: null,
             last_selected_chat_model: "gpt-5.6-luna",
@@ -2005,7 +2016,6 @@ describe("POST /chat — streaming endpoint", () => {
         const userSettings = await import("../../modules/user/user.settings.js");
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             title_model: "test-model",
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: "test-model",
             last_selected_chat_model: null,
@@ -2419,7 +2429,6 @@ async function seedResolvableModel() {
     vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
         legal_research_us: false,
         title_model: null,
-        memory_curator_model: null,
         last_selected_reasoning_level: null,
         tabular_model: null,
         last_selected_chat_model: "gpt-5.6-luna",

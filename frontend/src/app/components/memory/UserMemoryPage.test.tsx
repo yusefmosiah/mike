@@ -512,12 +512,13 @@ describe("UserMemoryPage", () => {
 
     expect(setUserMemoryEnabled).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Turn off and delete app-wide memory?"),
+      screen.getByText("Turn off app-wide memory?"),
     ).toBeVisible();
     expect(
-      screen.getByText(/delete the existing app-wide memory\.md file/i),
+      screen.getByText(/clear the app-wide memory\.md file/i),
     ).toBeVisible();
-    expect(screen.getByText(/and your unsaved draft/i)).toBeVisible();
+    expect(screen.getByText(/discard your unsaved draft/i)).toBeVisible();
+    expect(screen.getByText(/earlier versions stay in the version history/i)).toBeVisible();
     expect(screen.getByText(/cancel pending memory updates/i)).toBeVisible();
     expect(screen.getByText(/stop future memory updates/i)).toBeVisible();
     expect(editor).toHaveAttribute("readonly");
@@ -553,7 +554,7 @@ describe("UserMemoryPage", () => {
     ).toBeNull();
     expect(screen.queryByText(/No saved memory yet/)).toBeNull();
     // The CAS token is concurrency plumbing; it must never reach the page.
-    expect(screen.queryByText(/Version/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Version \d/)).not.toBeInTheDocument();
   });
 
   it("shows a failed automatic update once and remembers dismissal", async () => {

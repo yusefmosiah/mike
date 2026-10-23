@@ -96,6 +96,7 @@ export {
 // Per-user settings and the API-key store are user-domain data that other
 // modules (chat, project-chat, word-chat, tabular, models, source-documents)
 // read through this facade rather than reaching into the topic files.
+export { backgroundAgentsEnabled } from "./user.backgroundAgents";
 export {
     getUserModelSettings,
     persistLastSelectedChatModel,

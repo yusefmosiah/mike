@@ -15,6 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
+import type { AssistantEvent } from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
@@ -28,6 +29,8 @@ import {
   skillSavedMessage,
 } from "./skillTools";
 
+type MemoryUpdatedEvent = Extract<AssistantEvent, { type: "memory_updated" }>;
+
 /** A skill read, saved or installed in this turn, shown in the chat. */
 type WorkflowAppliedResult = {
   workflow_id: string;
@@ -40,6 +43,7 @@ import {
   planConnectorToolCall,
 } from "./connectorApprovals";
 import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
+import type { MemoryEditTarget } from "../../../memory/memory.service";
 import { parseAskInputs } from "./askInputs";
 import {
   GOOGLE_DRIVE_TOOL_PREFIX,
@@ -255,7 +259,7 @@ export async function runToolCalls(
     userEmail?: string | null;
     /** The turn's model, which check_citations' checker uses by default. */
     model?: string | null;
-    /** The user's workstation VM, resolved once per turn (lib/workstation); run_command needs it. */
+    /** The user's workstation VM, resolved once per turn (lib/workstation); save_to_mike needs it. */
     workstation?: WorkstationTarget | null;
     /**
      * The workstation is this user's own (not a host's, for a guest): their
@@ -263,13 +267,10 @@ export async function runToolCalls(
      * save_to_mike is offered.
      */
     workspaceOwned?: boolean;
-    /**
-     * Runs before a command in someone else's workstation (a guest in a
-     * shared thread): resolves with why it may not run, or null when it may.
-     */
-    workstationGate?: (callId: string, summary: string) => Promise<string | null>;
     /** The conversation, which vault leases are issued for (audit only). */
     chatId?: string | null;
+    /** The memory edit_memory may change here; null refuses every call. */
+    memoryEdit?: MemoryEditTarget | null;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -295,6 +296,7 @@ export async function runToolCalls(
   courtlistenerEvents: CourtlistenerToolEvent[];
   caseCitationEvents: CaseCitationEvent[];
   mcpEvents: McpToolEvent[];
+  memoryUpdates: MemoryUpdatedEvent[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: {
@@ -319,6 +321,7 @@ export async function runToolCalls(
   const courtlistenerEvents: CourtlistenerToolEvent[] = [];
   const caseCitationEvents: CaseCitationEvent[] = [];
   const mcpEvents: McpToolEvent[] = [];
+  const memoryUpdates: MemoryUpdatedEvent[] = [];
   const approvalItems: AskInputItem[] = [];
   const courtState: CourtlistenerTurnState = courtlistenerState ?? {
     casesByClusterId: new Map(),
@@ -907,6 +910,34 @@ export async function runToolCalls(
         tool_call_id: tc.id,
         // Part of the skill, so the skill's own fence: follow, never override.
         content: nonce && wf ? spotlightWorkflow(content, nonce) : content,
+      });
+    } else if (tc.function.name === "edit_memory") {
+      const target = options.memoryEdit ?? null;
+      // Loaded on use: the memory module brings its curator (and the model
+      // client) with it, which no other tool needs.
+      const outcome = target
+        ? await (await import("../../../memory/memory.service.js")).editMemoryFromConversation(db, target, args)
+        : { ok: false as const, error: "Memory cannot be changed from this conversation." };
+      if (outcome.ok && outcome.changed) {
+        const event: MemoryUpdatedEvent = {
+          type: "memory_updated",
+          scope: outcome.scope,
+          project_id: outcome.projectId,
+          version_id: outcome.versionId,
+          version_number: outcome.versionNumber,
+          summary: outcome.summary,
+        };
+        write(`data: ${JSON.stringify(event)}\n\n`);
+        memoryUpdates.push(event);
+      }
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: !outcome.ok
+          ? JSON.stringify({ error: outcome.error })
+          : outcome.changed
+            ? `Memory updated${outcome.versionNumber ? ` (version ${outcome.versionNumber})` : ""}. The person can see the change and undo it.`
+            : "Nothing changed: the memory file already says this.",
       });
     } else if (tc.function.name === "save_skill" || tc.function.name === "install_skill") {
       const installing = tc.function.name === "install_skill";
@@ -1859,53 +1890,6 @@ export async function runToolCalls(
           }),
         });
       }
-    } else if (tc.function.name === "run_command") {
-      const target = options.workstation ?? null;
-      if (!target) {
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: "No workstation is configured for this user." }),
-        });
-      } else {
-        const refusal = options.workstationGate
-          ? await options.workstationGate(tc.id, String(args.command ?? ""))
-          : null;
-        if (refusal) {
-          toolResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: refusal }) });
-          continue;
-        }
-        const timeoutSeconds = typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined;
-        await snapshotOncePerTurn(turnEditState, target.snapshot);
-        const sync = options.workspaceOwned
-          ? await syncWorkspaceOncePerTurn(turnEditState, db, { id: userId, email: options.userEmail }, target)
-          : null;
-        const result = await runInWorkstation(target, {
-          command: String(args.command ?? ""),
-          cwd: typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined,
-          timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
-        });
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(
-            result.ok
-              ? {
-                  exit_code: result.exitCode,
-                  // Output can carry anything the command fetched or read.
-                  stdout: nonce && result.stdout ? spotlight(result.stdout, nonce) : result.stdout,
-                  stderr: nonce && result.stderr ? spotlight(result.stderr, nonce) : result.stderr,
-                  timed_out: result.timedOut,
-                  truncated: result.truncated,
-                  duration_ms: result.durationMs,
-                  ...(sync && !sync.ok
-                    ? { documents_note: "Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date." }
-                    : {}),
-                }
-              : { error: result.error },
-          ),
-        });
-      }
     } else if (tc.function.name === "save_to_mike") {
       const target = options.workstation ?? null;
       if (!target || !options.workspaceOwned) {
@@ -2466,5 +2450,6 @@ export async function runToolCalls(
     courtlistenerEvents,
     caseCitationEvents,
     mcpEvents,
+    memoryUpdates,
   };
 }

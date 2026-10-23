@@ -18,12 +18,17 @@ export default function FeaturesPage() {
     updateApiKey,
     updateLegalResearchUs,
     updateQuickActionsVisible,
+    updateBackgroundAgents,
   } = useUserProfile();
   const [quickActionsError, setQuickActionsError] = useState<string | null>(
     null,
   );
   const [saving, setSaving] = useState(false);
   const [savingQuickActions, setSavingQuickActions] = useState(false);
+  const [backgroundAgentsError, setBackgroundAgentsError] = useState<
+    string | null
+  >(null);
+  const [savingBackgroundAgents, setSavingBackgroundAgents] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [optimisticLegalResearchUs, setOptimisticLegalResearchUs] = useState<
     boolean | null
@@ -40,6 +45,16 @@ export default function FeaturesPage() {
     const ok = await updateQuickActionsVisible(visible);
     setSavingQuickActions(false);
     if (!ok) setQuickActionsError("Could not update. Try again.");
+  };
+
+  const backgroundAgents = profile?.backgroundAgents === true;
+
+  const setBackgroundAgents = async (enabled: boolean) => {
+    setBackgroundAgentsError(null);
+    setSavingBackgroundAgents(true);
+    const ok = await updateBackgroundAgents(enabled);
+    setSavingBackgroundAgents(false);
+    if (!ok) setBackgroundAgentsError("Could not update. Try again.");
   };
 
   const handleCourtListenerChange = async (enabled: boolean) => {
@@ -79,6 +94,30 @@ export default function FeaturesPage() {
               aria-label="Quick actions"
               onCheckedChange={(checked) => {
                 void setQuickActionsVisible(checked);
+              }}
+            />
+          </SettingsRow>
+          <SettingsRow>
+            <div className="min-w-0 space-y-1">
+              <SettingsLabel>Background subagents</SettingsLabel>
+              <SettingsDescription>
+                Let the assistant start subagents that keep working after it
+                answers. Their reports arrive in the chat when they finish,
+                and the assistant replies to them.
+              </SettingsDescription>
+              {backgroundAgentsError && (
+                <p className="text-sm text-red-600" role="alert">
+                  {backgroundAgentsError}
+                </p>
+              )}
+            </div>
+            <ToggleSwitchUI
+              checked={backgroundAgents}
+              disabled={savingBackgroundAgents}
+              aria-busy={savingBackgroundAgents}
+              aria-label="Background subagents"
+              onCheckedChange={(checked) => {
+                void setBackgroundAgents(checked);
               }}
             />
           </SettingsRow>

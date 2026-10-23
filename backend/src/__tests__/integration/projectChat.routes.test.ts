@@ -314,7 +314,6 @@ describe("POST /projects/:projectId/chat", () => {
         vi.mocked(userSettings.getUserModelSettings).mockResolvedValueOnce({
             legal_research_us: false,
             title_model: null,
-            memory_curator_model: null,
             last_selected_reasoning_level: null,
             tabular_model: null,
             last_selected_chat_model: "gpt-5.6-luna",

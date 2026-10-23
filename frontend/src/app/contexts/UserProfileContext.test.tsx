@@ -50,7 +50,6 @@ function apiProfile(darkMode: boolean) {
         tier: "Free",
         titleModel: "gemini-3.1-flash-lite-preview",
         tabularModel: "gemini-3-flash-preview",
-        memoryCuratorModel: null,
         lastSelectedChatModel: null,
         lastSelectedReasoningLevel: "high",
         mfaOnLogin: false,
@@ -261,5 +260,54 @@ describe("UserProfileProvider dark mode", () => {
             reasoningLevel: "low",
         });
         unsubscribe();
+    });
+});
+
+describe("UserProfileProvider background subagents", () => {
+    function BackgroundAgentsControl() {
+        const { profile, updateBackgroundAgents } = useUserProfile();
+        return (
+            <>
+                <span data-testid="bg">
+                    {String(profile?.backgroundAgents)}
+                </span>
+                <button onClick={() => void updateBackgroundAgents(true)}>
+                    Enable
+                </button>
+            </>
+        );
+    }
+
+    it("defaults to off when the API omits the flag", async () => {
+        render(
+            <UserProfileProvider>
+                <BackgroundAgentsControl />
+            </UserProfileProvider>,
+        );
+        await waitFor(() =>
+            expect(screen.getByTestId("bg")).toHaveTextContent("false"),
+        );
+    });
+
+    it("saves the flag and reflects the server's answer", async () => {
+        updateUserProfile.mockResolvedValueOnce({
+            ...apiProfile(true),
+            backgroundAgents: true,
+        });
+        render(
+            <UserProfileProvider>
+                <BackgroundAgentsControl />
+            </UserProfileProvider>,
+        );
+        await waitFor(() =>
+            expect(screen.getByTestId("bg")).toHaveTextContent("false"),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+        await waitFor(() =>
+            expect(screen.getByTestId("bg")).toHaveTextContent("true"),
+        );
+        expect(updateUserProfile).toHaveBeenCalledWith({
+            backgroundAgents: true,
+        });
     });
 });

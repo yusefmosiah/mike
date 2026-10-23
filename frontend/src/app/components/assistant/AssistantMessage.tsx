@@ -44,6 +44,7 @@ import {
     WorkflowAppliedBlock,
     type CourtListenerBlockItem,
 } from "./message/EventBlocks";
+import { MemoryUpdatedBlock } from "./message/MemoryUpdatedBlock";
 import {
     delegatedTurnCost,
     SubagentBlock,
@@ -676,6 +677,15 @@ export function AssistantMessage({
                     event={event}
                     showConnector={showConnector}
                     onLoadTranscript={onLoadSubagentTranscript}
+                />
+            );
+        }
+        if (event.type === "memory_updated") {
+            return (
+                <MemoryUpdatedBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
                 />
             );
         }

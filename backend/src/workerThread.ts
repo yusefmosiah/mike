@@ -10,9 +10,11 @@
 import "./instrument";
 import { parentPort } from "node:worker_threads";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
+import { API_PROCESS_JOB_KIND } from "./jobs/registry";
 import { flushSentry, reportError } from "./lib/observability/sentry";
 
-startAllWorkers();
+// The API process runs its own kinds (memory reviews need its conversation store).
+startAllWorkers({ excludeKinds: [API_PROCESS_JOB_KIND] });
 console.log("[worker-thread] background workers started");
 
 parentPort?.on("message", (message: unknown) => {

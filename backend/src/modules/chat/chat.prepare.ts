@@ -15,7 +15,7 @@
 import { type Db } from "../../lib/db";
 import { resolveRequestTimeZone } from "../../lib/userTime";
 import { attachImages, buildDocContext, buildMessages, buildUserPersonalisationPrompt, refuseImagesForTextModel, devLog, enrichWithPriorEvents, loadUserMessageSentTimes, loadUserMessageAuthors, buildWorkflowStore, appendAskInputsResponseToAssistantMessage, runApprovedConnectorActions, generateSpotlightNonce, type AskInputsResponseRequest, type ChatMessage } from "./engine/index";
-import type { McpToolEvent } from "@mike/contracts";
+import type { McpToolEvent, MessageOrigin } from "@mike/contracts";
 import { getUserModelSettings, resolveUserChatSelection } from "../user/user.service";
 import { checkProjectAccess, projectHasSharedAudience, resolveContentOrgId } from "../../lib/access";
 import { hasDirectContentGrants } from "../../lib/contentAccess";
@@ -144,6 +144,12 @@ type PrepareChatStreamArgs = {
         requestedTimeZone?: unknown;
         /** The turn being admitted: its assistant row's id. */
         turnId: string;
+        /**
+         * The prompt is not the person's: reports and messages from the
+         * chat's background subagents (chat.agentReports.ts). Stored with the
+         * row, which then has no author.
+         */
+        origin?: MessageOrigin;
 };
 
 type PrepareFailure =
@@ -475,8 +481,9 @@ async function prepareAdmittedChatStream(
                     content: lastUser.content,
                     files: lastUser.files ?? null,
                     workflow: lastUser.workflow ?? null,
-                    author_user_id: userId,
+                    author_user_id: args.origin ? null : userId,
                     parent_message_id: parentMessageId,
+                    ...(args.origin ? { origin: args.origin } : {}),
                 });
             if (userMessageError) {
                 return { ok: false, internal: true, error: userMessageError };

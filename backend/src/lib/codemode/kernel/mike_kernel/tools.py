@@ -15,6 +15,7 @@ import asyncio
 import difflib
 import json
 import keyword
+import re
 from typing import Any
 
 from . import repl
@@ -168,6 +169,7 @@ class Tool:
     def __init__(self, spec: dict[str, Any]) -> None:
         self.name: str = spec["name"]
         self.description: str = str(spec.get("description") or "")
+        self.summary: str = str(spec.get("summary") or "") or self.description.strip().split("\n", 1)[0][:160]
         params = spec.get("parameters") if isinstance(spec.get("parameters"), dict) else {}
         props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
         required = [p for p in params.get("required") or [] if p in props]
@@ -253,10 +255,20 @@ class Tool:
         return value
 
 
+_COMMON_WORDS = frozenset({"the", "and", "for", "with", "from", "into", "that", "this", "its", "are", "can"})
+
+
+class _Found(list):
+    """Search results that print one per line."""
+
+    def __repr__(self) -> str:
+        return "\n\n".join(self) if any("\n" in item for item in self) else "\n".join(self) or "(no tools match)"
+
+
 class Tools:
     """Every tool this conversation may call, as ``tools.<name>``.
 
-    ``tools.search("word")`` finds tools by name or description;
+    ``tools.search("words")`` finds tools by what they do, best match first;
     ``help(tools.<name>)`` shows one tool's parameters.
     """
 
@@ -292,17 +304,26 @@ class Tools:
     def __repr__(self) -> str:
         return f"<tools: {', '.join(sorted(self._tools))}>"
 
-    def search(self, query: str = "", limit: int = 20) -> list[str]:
-        """Signatures and one-line summaries of tools whose name or description mentions every word of ``query``."""
-        words = query.lower().split()
-        found = []
-        for name in sorted(self._tools):
+    def search(self, query: str = "", limit: int = 20, detail: str = "stub") -> "_Found":
+        """Tools that match ``query``, best first: words in a tool's name count most, then words in
+        its summary and description. ``detail="full"`` gives each one's whole ``help()`` text."""
+        every = [word for word in re.split(r"[\s_]+", query.lower()) if word]
+        # Words every description has ("a", "the", "of") would rank nothing.
+        words = [word for word in every if len(word) > 2 and word not in _COMMON_WORDS] or every
+        ranked = []
+        for name, tool in self._tools.items():
+            title = name.lower().replace("_", " ")
+            text = f"{tool.summary} {tool.description}".lower()
+            matched = [word for word in words if word in title or word in text]
+            if words and not matched:
+                continue
+            score = sum(3 if word in title else 0 for word in words) + sum(text.count(word) for word in matched)
+            ranked.append((-len(matched), -score, name))
+        found = _Found()
+        for _, _, name in sorted(ranked)[:limit]:
             tool = self._tools[name]
-            haystack = f"{name} {tool.description}".lower()
-            if all(word in haystack for word in words):
-                summary = tool.description.strip().split("\n", 1)[0][:160]
-                found.append(f"{tool.signature()} — {summary}" if summary else tool.signature())
-        return found[:limit]
+            found.append(tool.__doc__ if detail == "full" else f"{tool.signature()} — {tool.summary}" if tool.summary else tool.signature())
+        return found
 
     async def gather(self, *calls: Any, return_exceptions: bool = False) -> list[Any]:
         """Run several tool calls at once: ``a, b = await tools.gather(tools.x(...), tools.y(...))``."""

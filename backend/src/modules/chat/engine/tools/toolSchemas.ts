@@ -1,3 +1,4 @@
+import { EDIT_MEMORY_TOOL } from "../../../../lib/memory/editTool";
 /**
  * The tools that WRITE to stored content rather than read it: they create
  * `documents` rows (and, in a project chat, attach them to the project) or
@@ -108,6 +109,137 @@ export const TABULAR_TOOLS = [
   },
 ];
 
+/**
+ * Edits to the persisted memory.md, offered when this conversation may change
+ * app or project memory (modules/memory/memory.assistant.ts decides which).
+ */
+export const MEMORY_TOOLS = [EDIT_MEMORY_TOOL];
+
+/**
+ * The conversation's own history, compacted messages included
+ * (lib/llm/pi/history.mts), offered in every saved conversation. The turn
+ * answers them itself from its Pi transcript.
+ */
+export const HISTORY_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "history_search",
+      description:
+        "Search this conversation's whole history, including what a compaction summary left out: the person's messages, your answers and tool results. Returns matches newest first, each with its id (like m41), role, date, whether it was compacted, and a snippet around the first hit.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words to find (case-insensitive), or a regular expression with regex=true." },
+          regex: { type: "boolean", description: "Treat query as a regular expression." },
+          roles: {
+            type: "array",
+            items: { type: "string", enum: ["user", "assistant", "tool"] },
+            description: "Only these speakers: user (the person), assistant (you), tool (tool results).",
+          },
+          compacted_only: { type: "boolean", description: "Only messages the current context holds as a summary." },
+          limit: { type: "integer", description: "Matches to return (default 20, at most 100)." },
+          before: { type: "string", description: "Only matches older than this id: the next page of a search." },
+          context_chars: { type: "integer", description: "Characters of snippet on each side of the hit (default 200)." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "history_read",
+      description:
+        "Read one message of this conversation's history in full by its id (from history_search, or a summary's record), from an offset; or the messages from id through another id, in order.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The message's id, like m41." },
+          offset: { type: "integer", description: "Character to start at (default 0)." },
+          limit_chars: { type: "integer", description: "Characters to return (default 8000, at most 40000)." },
+          through: { type: "string", description: "Read every message from id through this id." },
+        },
+        required: ["id"],
+      },
+    },
+  },
+];
+
+const LIST_AGENTS_TOOL = {
+  type: "function",
+  function: {
+    name: "list_agents",
+    description:
+      "List this chat's background subagents: each one's name, type, model, status (working, done, failed, stopped, timed_out, or ended when it can no longer take messages), its task, its last report, and how many of its messages the chat has not read.",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+const MESSAGE_AGENT_TOOL = {
+  type: "function",
+  function: {
+    name: "message_agent",
+    description:
+      'Send a message to a background subagent by its name, or to "parent" (the chat) from a subagent. A subagent that is working reads it before its next step (or, with interrupt=false, once its current work is done); one that has finished takes it as new work. Either way it reports again when done.',
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: 'The subagent\'s name from list_agents, such as research-1, or "parent".' },
+        message: { type: "string", description: "The message, self-contained: the subagent sees nothing else of this conversation." },
+        interrupt: {
+          type: "boolean",
+          description: "Read before the subagent's next step (the default), or false to wait until its current work is done.",
+        },
+      },
+      required: ["to", "message"],
+    },
+  },
+};
+
+/**
+ * The chat's background subagents (lib/llm/pi/runtime.mts), offered when
+ * the person has turned them on: a parent turn's functions. The runtime
+ * answers them itself.
+ */
+export const AGENT_TOOLS = [
+  LIST_AGENTS_TOOL,
+  MESSAGE_AGENT_TOOL,
+  {
+    type: "function",
+    function: {
+      name: "agent_inbox",
+      description:
+        "Collect the reports and messages this chat's background subagents have sent and you have not read, oldest first, and which are still working. With wait_seconds, wait up to that long for something to arrive when nothing has yet. What you do not collect arrives in the chat after your answer.",
+      parameters: {
+        type: "object",
+        properties: {
+          wait_seconds: { type: "integer", description: "Seconds to wait for a report when none is waiting (default 0, at most 600)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "stop_agent",
+      description:
+        "Stop a background subagent's current work. It keeps what it has done, sends no report for the stopped work, and can be given more with message_agent.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "The subagent's name from list_agents." } },
+        required: ["name"],
+      },
+    },
+  },
+];
+
+/** What a background subagent itself may do with its chat: see the others, and message them or the chat. */
+export const CHILD_AGENT_TOOLS = [LIST_AGENTS_TOOL, MESSAGE_AGENT_TOOL];
+
+/** The functions the runtime answers for a chat's background subagents. */
+export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(AGENT_TOOLS.map((tool) => tool.function.name));
+
 export const WORKFLOW_TOOLS = [
   {
     type: "function",
@@ -200,36 +332,10 @@ export const WORKFLOW_TOOLS = [
 
 /**
  * Offered only to users with a workstation VM (lib/workstation, Mission 13):
- * a full Linux userland where commands run as an unprivileged account that
- * holds no secrets.
+ * a full Linux userland where code runs as an unprivileged account that
+ * holds no secrets. Shell commands run from Python, through subprocess.
  */
 export const WORKSTATION_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "run_command",
-      description:
-        "Run a bash command in the user's own workstation: a Linux machine with a persistent home directory (/home/agent), Python 3 (pandas, openpyxl, python-docx, requests), Node.js, git, curl, jq and ripgrep. Use it for analysis, data processing, scripts, working with repositories and files kept there. The user's documents are files under ~/mike, read-only and up to date at the start of each turn: ~/mike/projects/<project>/<folder>/..., ~/mike/library/... and ~/mike/templates/.... The user's skills are under ~/skills/<name>/ (SKILL.md plus any scripts), also read-only. Write results elsewhere (for example ~/mike/out/) and give them back with save_to_mike. Each call is a fresh shell starting in the home directory unless cwd is given; files persist between calls. Returns exit code, stdout and stderr.",
-      parameters: {
-        type: "object",
-        properties: {
-          command: {
-            type: "string",
-            description: "The bash command or script to run.",
-          },
-          cwd: {
-            type: "string",
-            description: "Working directory inside the workstation (default /home/agent).",
-          },
-          timeout_seconds: {
-            type: "number",
-            description: "Time limit in seconds (default 120, at most 1800).",
-          },
-        },
-        required: ["command"],
-      },
-    },
-  },
   {
     type: "function",
     function: {

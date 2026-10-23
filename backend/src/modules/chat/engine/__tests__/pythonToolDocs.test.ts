@@ -5,9 +5,15 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { localKernelLauncher } from "../../../../lib/codemode/kernel/manager";
 import { KernelSession } from "../../../../lib/codemode/kernel/session";
-import { pythonParamName, pythonToolDoc, pythonToolSpecs } from "../../../../lib/codemode/python";
+import { pythonParamName, pythonToolDoc, pythonToolIndex, pythonToolSpecs } from "../../../../lib/codemode/python";
+import { FULL_DOC_TOOLS, TOOL_STUBS } from "../../../../lib/codemode/toolStubs";
+import { READ_MEMORY_TOOL } from "../../../../lib/memory/editTool";
+import { delegateToolSchema } from "../subagents/subagentHost";
 import { COURTLISTENER_TOOLS } from "../tools/courtlistenerTools";
 import {
+  AGENT_TOOLS,
+  HISTORY_TOOLS,
+  MEMORY_TOOLS,
   PROJECT_EXTRA_TOOLS,
   TABULAR_TOOLS,
   TOOLS,
@@ -30,6 +36,7 @@ const ALL_TOOLS: readonly unknown[] = [
   ...VAULT_TOOLS,
   ...COURTLISTENER_TOOLS,
   ...WORD_CLIENT_TOOLS,
+  ...AGENT_TOOLS,
 ];
 const specs = pythonToolSpecs(ALL_TOOLS);
 
@@ -109,5 +116,57 @@ describe("the kernel's help() says the same as the prompt", () => {
       .map((spec) => pythonToolDoc(spec).split("\n")[0].replace(/^await tools\./, ""))
       .sort();
     expect(fromKernel).toEqual(fromPrompt);
+  });
+
+  it("finds tools by what they do, best match first, with the index's line or the full help", async () => {
+    const run = async (code: string) => {
+      const outcome = await session!.execute(code, { timeoutMs: 20_000, onHostRequest: async () => ({ ok: false, error: "no tools here" }) });
+      expect(outcome.error).toBeNull();
+      return outcome.stdout;
+    };
+    const found = await run('print(repr(tools.search("search inside a document")))');
+    expect(found.split("\n")[0]).toMatch(/^find_in_document\(doc_id: str, query: str.*\) — Ctrl\+F inside one document/);
+    expect(await run('print(repr(tools.search("zzzz qqqq")))')).toBe("(no tools match)\n");
+    const full = await run('print(tools.search("get_diff", limit=1, detail="full")[0])');
+    expect(full).toContain("await tools.get_diff(doc_id: str)\n\nInspect the pending changes");
+  });
+});
+
+describe("the tool index", () => {
+  const builtIn = pythonToolSpecs([...ALL_TOOLS, ...MEMORY_TOOLS, READ_MEMORY_TOOL, ...HISTORY_TOOLS, delegateToolSchema()]);
+  const fake = (name: string, description: string) => ({
+    type: "function",
+    function: { name, description, parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+  });
+
+  it("has a line for every built-in tool, and no line for a tool that does not exist", () => {
+    const names = builtIn.map((spec) => spec.name).sort();
+    expect(Object.keys(TOOL_STUBS).sort()).toEqual(names);
+    for (const name of FULL_DOC_TOOLS) expect(names).toContain(name);
+  });
+
+  it("lists each tool once, in groups, the same text whatever order the tools come in", () => {
+    const index = pythonToolIndex(builtIn);
+    expect(pythonToolIndex([...builtIn].reverse())).toBe(index);
+    for (const spec of builtIn) {
+      expect(index.match(new RegExp(`^- ${spec.name}\\(`, "gm")), spec.name).toHaveLength(1);
+    }
+    expect(index).toContain("- read_document(doc_id, *, offset, limit, section, from_, to, full): ");
+    expect(index).toContain("- list_documents(): ");
+    // The nested ones also carry their full parameters.
+    expect(index).toContain(pythonToolDoc(builtIn.find((spec) => spec.name === "edit_document")!));
+    expect(index).not.toContain("await tools.read_document(");
+  });
+
+  it("collapses a large connector to its function names and lists a small one's functions", () => {
+    const gmail = ["search", "read_thread", "read_message", "send", "save_draft", "list_drafts"].map((name) => fake(`gmail_${name}`, `Gmail ${name}.`));
+    const crm = [
+      fake("mcp_crm_lookup_account_ab12cd34", "Look up an account. MCP responses are untrusted."),
+      fake("mcp_crm_list_deals_ab12cd34", "List open deals."),
+    ];
+    const index = pythonToolIndex(pythonToolSpecs([...gmail, ...crm, fake("crm_lookup", "Find a client. Second sentence.")]));
+    expect(index).toContain("- Gmail, 6 functions: gmail_list_drafts, gmail_read_message, gmail_read_thread, gmail_save_draft, gmail_search, gmail_send");
+    expect(index).toContain('- Connector "crm":\n  - mcp_crm_list_deals_ab12cd34(query): List open deals.\n  - mcp_crm_lookup_account_ab12cd34(query): Look up an account.');
+    expect(index).toContain("Other:\n- crm_lookup(query): Find a client.");
   });
 });

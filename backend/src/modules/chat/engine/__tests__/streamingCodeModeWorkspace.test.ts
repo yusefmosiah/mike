@@ -4,8 +4,8 @@ import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Code mode in the user's own workstation: before the turn's first cell,
-// ~/mike and ~/skills are brought up to date, as they are before a
-// run_command (goals/mission-16-documents-in-workstation.md). The kernel here
+// ~/mike and ~/skills are brought up to date
+// (goals/mission-16-documents-in-workstation.md). The kernel here
 // is a local python3 standing in for the VM.
 
 const { streamChatWithTools, syncWorkspaceOncePerTurn } = vi.hoisted(() => ({

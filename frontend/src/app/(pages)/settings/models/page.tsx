@@ -38,10 +38,7 @@ import { SETTINGS_CONTROL_CLASS } from "@/app/components/settings/SettingsTextIn
 import { useOllamaModels } from "@/app/hooks/useOllamaModels";
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 
-type ModelPreferenceField =
-  | "titleModel"
-  | "tabularModel"
-  | "memoryCuratorModel";
+type ModelPreferenceField = "titleModel" | "tabularModel";
 
 export default function ModelPreferencesPage() {
   const { profile, updateModelPreference } = useUserProfile();
@@ -147,35 +144,6 @@ export default function ModelPreferencesPage() {
               isSaved={savedField === "tabularModel"}
               emptyOptionLabel="No default model"
               onChange={(id) => handleModelChange("tabularModel", id)}
-            />
-          </SettingsRow>
-          <SettingsRow layout="stacked">
-            <div className="space-y-1">
-              <SettingsLabel>Memory curation model</SettingsLabel>
-              <SettingsDescription>
-                Used after conversations to identify durable information worth
-                keeping. By default, memory uses the model selected for the
-                chat.
-              </SettingsDescription>
-            </div>
-            <ModelPreferenceDropdown
-              value={canonicalModelId(
-                optimisticValues.memoryCuratorModel ??
-                  profile?.memoryCuratorModel ??
-                  "",
-              )}
-              options={mergeConfiguredModelOptions(configuredModels, [
-                ...SETTINGS_MODELS,
-                ...selectedOpenRouterOptions,
-                ...selectedVercelOptions,
-                ...selectedOpenCodeGoOptions,
-                ...ollamaModels,
-              ])}
-              apiKeys={profile?.apiKeys}
-              isSaving={savingField === "memoryCuratorModel"}
-              isSaved={savedField === "memoryCuratorModel"}
-              emptyOptionLabel="Automatic — use chat model"
-              onChange={(id) => handleModelChange("memoryCuratorModel", id)}
             />
           </SettingsRow>
           <AutoModeDecisionModelRow />

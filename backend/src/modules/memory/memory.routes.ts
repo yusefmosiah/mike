@@ -1,5 +1,5 @@
-// HTTP layer for the memory module: GET/PUT the memory file, PATCH its
-// enabled flag, DELETE (wipe) it — installed once on the user router and once
+// HTTP layer for the memory module: GET/PUT the memory file, list, read and
+// restore its versions, PATCH its enabled flag, DELETE (wipe) it — installed once on the user router and once
 // on the project router with different access requirements. Handlers parse
 // bodies, resolve the memory context through the service, and map the
 // service's typed errors onto status codes.
@@ -18,11 +18,14 @@ import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import {
   currentMemory,
+  memoryVersion,
+  memoryVersions,
   MemoryDisabledError,
   MemoryRevisionConflictError,
   MemoryValidationError,
   resolveProjectMemoryContext,
   resolveUserMemoryContext,
+  restoreMemoryVersion,
   saveMemory,
   setMemoryEnabled,
   wipeMemory,
@@ -71,6 +74,8 @@ function projectContext(required: Capability): ContextResolver {
     return result.context;
   };
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function expectedRevision(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
@@ -148,6 +153,58 @@ function installMemoryRoutes(
         expectedRevision: parsedVersion,
         updatedBy: res.locals.userId as string,
       });
+      res.json(current);
+    } catch (error) {
+      await sendMemoryError(res, error, ctx ?? undefined);
+    }
+  }));
+
+  router.get("/versions", asyncRoute(async (req, res) => {
+    try {
+      const ctx = await readContext(req, res);
+      if (!ctx) return;
+      res.json({ versions: await memoryVersions(createDb(), ctx) });
+    } catch (error) {
+      await sendMemoryError(res, error);
+    }
+  }));
+
+  router.get("/versions/:versionId", asyncRoute(async (req, res) => {
+    try {
+      if (!UUID.test(req.params.versionId ?? "")) {
+        return void res.status(404).json({ detail: "Version not found" });
+      }
+      const ctx = await readContext(req, res);
+      if (!ctx) return;
+      const version = await memoryVersion(createDb(), ctx, req.params.versionId);
+      if (!version) return void res.status(404).json({ detail: "Version not found" });
+      res.json(version);
+    } catch (error) {
+      await sendMemoryError(res, error);
+    }
+  }));
+
+  router.post("/versions/:versionId/restore", asyncRoute(async (req, res) => {
+    let ctx: MemoryContext | null = null;
+    try {
+      const parsedVersion = expectedRevision(req.body?.expected_revision);
+      if (parsedVersion == null) {
+        return void res.status(400).json({
+          detail: "a non-negative integer expected_revision is required",
+        });
+      }
+      if (!UUID.test(req.params.versionId ?? "")) {
+        return void res.status(404).json({ detail: "Version not found" });
+      }
+      ctx = await writeContext(req, res);
+      if (!ctx) return;
+      const current = await restoreMemoryVersion(createDb(), {
+        ctx,
+        versionId: req.params.versionId,
+        expectedRevision: parsedVersion,
+        updatedBy: res.locals.userId as string,
+      });
+      if (!current) return void res.status(404).json({ detail: "Version not found" });
       res.json(current);
     } catch (error) {
       await sendMemoryError(res, error, ctx ?? undefined);

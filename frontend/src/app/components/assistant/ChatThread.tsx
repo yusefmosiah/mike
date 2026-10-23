@@ -20,6 +20,7 @@ import {
 } from "@/app/lib/scrollViewport";
 import { LIQUID_GLASS_TRANSLUCENT_ACTION_CLASS } from "@/app/components/ui/liquid-surface";
 import { UserMessage } from "./UserMessage";
+import { AgentReportMessage } from "./AgentReportMessage";
 import { AssistantMessage } from "./AssistantMessage";
 import { CodeApprovalRequests } from "./CodeApprovalRequests";
 import {
@@ -708,7 +709,11 @@ export function ChatThread({
                     : null;
             const previous = i > 0 ? messages[i - 1] : null;
             const parentUser =
-                msg.role === "assistant" && previous?.role === "user"
+                msg.role === "assistant" &&
+                previous?.role === "user" &&
+                // A report is not a prompt to resend, so its answer is not
+                // regenerated from it.
+                !previous.origin
                     ? previous
                     : null;
             const navigateSibling =
@@ -721,7 +726,12 @@ export function ChatThread({
                     key={msg.id ?? i}
                     ref={i === lastUserIndex ? latestUserMessageRef : null}
                 >
-                    {msg.role === "user" ? (
+                    {msg.role === "user" && msg.origin ? (
+                        <AgentReportMessage
+                            origin={msg.origin}
+                            messageId={msg.id}
+                        />
+                    ) : msg.role === "user" ? (
                         <UserMessage
                             messageId={msg.id}
                             error={msg.error}

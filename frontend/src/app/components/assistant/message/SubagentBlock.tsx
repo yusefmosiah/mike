@@ -12,7 +12,7 @@ export type LoadSubagentTranscript = (
     childId: string,
 ) => Promise<SubagentTranscript>;
 
-const STATUS_TEXT: Record<SubagentEvent["status"], string> = {
+export const SUBAGENT_STATUS_TEXT: Record<SubagentEvent["status"], string> = {
     running: "Working",
     done: "Done",
     failed: "Failed",
@@ -21,7 +21,7 @@ const STATUS_TEXT: Record<SubagentEvent["status"], string> = {
 };
 
 /** "document_review" reads as "Document review". */
-function typeLabel(type: string): string {
+export function subagentTypeLabel(type: string): string {
     const words = type.replace(/_/g, " ").trim();
     return words ? words[0].toUpperCase() + words.slice(1) : "Subagent";
 }
@@ -40,8 +40,11 @@ function usageText(usage: SubagentEvent["usage"]): string | null {
  * own usage is known; answers that delegated nothing show no cost line.
  */
 export function delegatedTurnCost(events: AssistantEvent[] | undefined): string | null {
+    // A background subagent still working when the answer ended spends
+    // after it, in a turn of its own; it is not this answer's cost.
     const children = (events ?? []).filter(
-        (event): event is SubagentEvent => event.type === "subagent",
+        (event): event is SubagentEvent =>
+            event.type === "subagent" && !(event.background && !event.usage),
     );
     const own = (events ?? []).find(
         (event): event is Extract<AssistantEvent, { type: "turn_usage" }> =>
@@ -121,12 +124,16 @@ export function SubagentBlock({
             <EventDisclosureButton
                 open={open}
                 onToggle={() => setOpen((value) => !value)}
-                label={`${typeLabel(event.agent_type)} subagent`}
+                label={`${event.name ? `${event.name} · ` : ""}${subagentTypeLabel(event.agent_type)} subagent`}
                 isStreaming={running}
             />
             <p className="text-xs break-words">{event.model}</p>
             <p className="text-xs">
-                {STATUS_TEXT[event.status]}
+                {event.background
+                    ? running
+                        ? "In the background · its report will arrive in the chat when it finishes"
+                        : `In the background · ${SUBAGENT_STATUS_TEXT[event.status]}`
+                    : SUBAGENT_STATUS_TEXT[event.status]}
                 {usage ? ` · ${usage}` : null}
             </p>
             {open && (
@@ -175,6 +182,16 @@ function SubagentSteps({ transcript }: { transcript: SubagentTranscript }) {
     return (
         <ol className="flex flex-col gap-1.5">
             {steps.map((entry, index) => {
+                if (entry.kind === "message") {
+                    return (
+                        <li key={index} className="flex flex-col gap-0.5">
+                            <EventLabel>Message</EventLabel>
+                            <p className="whitespace-pre-wrap break-words text-gray-700">
+                                {entry.text}
+                            </p>
+                        </li>
+                    );
+                }
                 if (entry.kind === "tool_result") {
                     return (
                         <li key={index}>

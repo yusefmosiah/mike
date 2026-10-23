@@ -67,7 +67,7 @@ const DELETE_DATA_COPY: Record<
   memory: {
     title: "Delete all memory?",
     message:
-      "This permanently deletes your app memory and memories for private projects you created. Project collaborators will also lose those memories. Memory remains enabled and can be rebuilt from future conversations. This action cannot be undone.",
+      "This permanently deletes your app memory and memories for private projects you created, with their version history. Project collaborators will also lose those memories. Memory remains enabled and can be rebuilt from future conversations. This action cannot be undone.",
   },
 };
 
@@ -352,8 +352,8 @@ export default function PrivacyDataPage() {
             <div className="space-y-1">
               <SettingsLabel>Export memory</SettingsLabel>
               <SettingsDescription>
-                Download your app memory and every project memory you can access
-                as Markdown files in a ZIP archive.
+                Download your app memory and every project memory you can access,
+                with their earlier versions, as Markdown files in a ZIP archive.
               </SettingsDescription>
             </div>
             <PillButtonUI
@@ -440,7 +440,7 @@ export default function PrivacyDataPage() {
               <SettingsLabel>Delete all memory</SettingsLabel>
               <SettingsDescription>
                 Permanently delete your app memory and memories for private
-                projects you created.
+                projects you created, with their version history.
               </SettingsDescription>
             </div>
             <PillButtonUI

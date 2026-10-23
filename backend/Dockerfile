@@ -2,7 +2,7 @@
 FROM node:22-slim
 
 # libreoffice-convert shells out to soffice for doc conversion (see src/lib/convert.ts);
-# run_command reaches a workstation VM over ssh (src/lib/workstation).
+# run_python's kernel runs in a workstation VM reached over ssh (src/lib/workstation).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends libreoffice openssh-client \
   && rm -rf /var/lib/apt/lists/*

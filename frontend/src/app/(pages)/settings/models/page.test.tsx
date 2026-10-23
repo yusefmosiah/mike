@@ -19,7 +19,6 @@ vi.mock("@/app/contexts/UserProfileContext", () => ({
             // Legacy id stored before the catalog rename.
             titleModel: "gemini-3.1-flash-lite-preview",
             tabularModel: "gemini-3-flash-preview",
-            memoryCuratorModel: "gpt-5.4-mini",
             openRouterModels: [],
             vercelModels: [],
             openCodeGoModels: [],
@@ -50,20 +49,29 @@ describe("model preferences page legacy ids", () => {
         // Without the LEGACY_MODEL_IDS mapping the stored title value
         // matches no option and the dropdown falls back to "Select a model".
         expect(screen.getByText("Gemini 3.5 Flash-Lite")).toBeInTheDocument();
-        expect(screen.getByText("Memory curation model")).toBeInTheDocument();
-        expect(screen.getByText("GPT-5.4 Mini")).toBeInTheDocument();
         expect(screen.queryByText("Select a model")).not.toBeInTheDocument();
     });
 
-    it("saves a selected memory curation model", async () => {
+    it("has no memory curation model setting", () => {
+        render(<ModelPreferencesPage />);
+
+        // Memory curation runs on the conversation's own model.
+        expect(
+            screen.queryByText("Memory curation model"),
+        ).not.toBeInTheDocument();
+    });
+
+    it("saves a selected tabular review model", async () => {
         const user = userEvent.setup();
         render(<ModelPreferencesPage />);
 
-        await user.click(screen.getByRole("button", { name: "GPT-5.4 Mini" }));
+        await user.click(
+            screen.getByRole("button", { name: "Gemini 3 Flash" }),
+        );
         await user.click(screen.getByText("GPT-5.6 Luna"));
 
         expect(updateModelPreference).toHaveBeenCalledWith(
-            "memoryCuratorModel",
+            "tabularModel",
             "gpt-5.6-luna",
         );
     });

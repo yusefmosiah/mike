@@ -613,3 +613,56 @@ describe("ChatThread scrolling", () => {
         expect(screen.queryByRole("button", { name: "Scroll to bottom" })).toBeNull();
     });
 });
+
+describe("ChatThread background subagent reports", () => {
+    const rawPrompt =
+        "[Background subagents] This message comes from the application, not from the user.";
+    const withReport: Message[] = [
+        ...conversation,
+        {
+            id: "u2",
+            role: "user",
+            content: rawPrompt,
+            origin: {
+                kind: "agent_messages",
+                messages: [
+                    {
+                        from: "research-1",
+                        child_id: "7",
+                        agent_type: "document_review",
+                        kind: "report",
+                        status: "done",
+                        body: "Governed by Delaware law.",
+                    },
+                ],
+            },
+        },
+        {
+            id: "a2",
+            role: "assistant",
+            content: "",
+            events: [{ type: "content", text: "Thanks, noted." }],
+        },
+    ];
+
+    it("shows the report as a card, never as a prompt bubble or its raw text", () => {
+        renderThread({
+            messages: withReport,
+            onEditBranch: vi.fn(),
+            onRegenerate: vi.fn(),
+        });
+        expect(screen.getByText("research-1")).toBeInTheDocument();
+        expect(screen.getByText("Governed by Delaware law.")).toBeInTheDocument();
+        expect(screen.queryByText(rawPrompt)).not.toBeInTheDocument();
+        // Only the person's own prompt is a user bubble.
+        expect(screen.getAllByTestId("user-message")).toHaveLength(1);
+    });
+
+    it("offers no regenerate on the answer to a report, but keeps it on a prompt's", () => {
+        renderThread({
+            messages: withReport,
+            onRegenerate: vi.fn(),
+        });
+        expect(screen.getAllByRole("button", { name: "Regenerate" })).toHaveLength(1);
+    });
+});

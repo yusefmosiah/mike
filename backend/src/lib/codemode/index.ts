@@ -10,10 +10,13 @@ export { KernelManager, kernelKey, localKernelLauncher, sshKernelLauncher, type 
 export { KernelSession, type CellOutcome, type HostReply, type KernelToolSpec } from "./kernel/session";
 export {
   cellResultContent,
+  CODE_MODE_GUIDE,
   DEFAULT_CELL_TIMEOUT_MS,
   MAX_CELL_TIMEOUT_MS,
   NOT_IN_PYTHON,
   pythonSessionPromptSection,
+  pythonToolDoc,
+  pythonToolIndex,
   pythonToolsPromptSection,
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,
@@ -24,15 +27,12 @@ type Env = Record<string, string | undefined>;
 
 /**
  * Where a user's kernels run, given their workstation (resolveWorkstation in
- * lib/workstation), or null when code mode is off for them.
+ * lib/workstation), or null when they have none, and so no tools.
  *
- * Code mode is on for every user with a workstation VM; `CODE_MODE_ENABLED=false`
- * turns it off for the deployment. Without a VM, `CODE_MODE_LOCAL_KERNEL_DIR`
- * runs kernels as local processes for development and tests, never in
- * production.
+ * Without a VM, `CODE_MODE_LOCAL_KERNEL_DIR` runs kernels as local processes
+ * for development and tests, never in production.
  */
 export function kernelLauncherFor(target: WorkstationTarget | null, env: Env = process.env): KernelLauncher | null {
-  if (/^(0|false|no|off)$/i.test(env.CODE_MODE_ENABLED?.trim() ?? "")) return null;
   if (target) return sshKernelLauncher(target);
   const localDir = env.CODE_MODE_LOCAL_KERNEL_DIR?.trim();
   if (localDir && env.NODE_ENV !== "production") return localKernelLauncher(localDir);

@@ -43,7 +43,6 @@ afterEach(() => {
 
 it("keeps a turn alive while a tool works, and goes quiet once it is done", async () => {
   vi.useFakeTimers();
-  vi.stubEnv("CODE_MODE_ENABLED", "false");
   const write = vi.fn();
   const keepAlives = () => write.mock.calls.filter(([chunk]) => String(chunk).startsWith(":")).length;
   let toolDone: Promise<unknown> = Promise.resolve();
@@ -73,7 +72,6 @@ it("keeps a turn alive while a tool works, and goes quiet once it is done", asyn
 });
 
 it("reports a stopped run as a stop, not a failure", async () => {
-  vi.stubEnv("CODE_MODE_ENABLED", "false");
   const controller = new AbortController();
   streamChatWithTools.mockImplementationOnce(async () => {
     controller.abort();

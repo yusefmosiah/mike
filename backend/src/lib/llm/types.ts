@@ -61,6 +61,40 @@ export type NormalizedToolCall = {
     id: string;
     name: string;
     input: Record<string, unknown>;
+    /**
+     * Start a subagent from this call and wait for its report: set on a
+     * parent turn's calls when it may delegate (the code a `run_python` call
+     * runs calls it as `tools.delegate`).
+     */
+    delegate?: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+    /**
+     * The conversation's whole history, compacted messages included, as
+     * `tools.history_search` and `tools.history_read` (lib/llm/pi/history.mts).
+     */
+    history?: {
+        search: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+        read: (input: Record<string, unknown>) => Promise<{ content: string; isError: boolean }>;
+    };
+    /**
+     * The chat's background subagents, as `tools.list_agents`,
+     * `tools.message_agent`, `tools.agent_inbox` and `tools.stop_agent`: set
+     * on a parent turn's calls when it may start background subagents, and
+     * on a background subagent's own calls (which may list and message only).
+     */
+    agents?: AgentOps;
+};
+
+/** A reply the model reads, or a refusal it can act on. */
+export type ToolReply = { content: string; isError: boolean };
+
+/** What code can do with a chat's background subagents (lib/llm/pi/runtime.mts). */
+export type AgentOps = {
+    list: () => Promise<ToolReply>;
+    send: (input: Record<string, unknown>) => Promise<ToolReply>;
+    /** The parent's unread reports and messages; absent for a subagent. */
+    inbox?: (input: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolReply>;
+    /** Stop a background subagent; absent for a subagent. */
+    stop?: (input: Record<string, unknown>) => Promise<ToolReply>;
 };
 
 export type NormalizedToolResult = {
@@ -154,8 +188,6 @@ export type StreamChatParams = {
      * `turn`, which a continuation does not have.
      */
     continuesAnswer?: string;
-    /** Reads the memory this conversation may see, as of now (the memory tool). */
-    readMemory?: () => Promise<string>;
     /**
      * Make this turn survive the process. `context` is the caller's own record
      * of how to drive the turn again (opaque here, JSON only); after a restart
@@ -164,9 +196,9 @@ export type StreamChatParams = {
      */
     durableTurn?: { context: Record<string, unknown>; resume?: boolean };
     /**
-     * Let the model delegate to subagents: offers the `delegate` tool, whose
-     * calls this host checks and reports on. Omitted, there is no delegation
-     * (a child turn never has it: depth 1).
+     * Let the turn delegate to subagents: its tool calls carry `delegate`,
+     * whose children this host checks and reports on. Omitted, there is no
+     * delegation (a child turn never has it: depth 1).
      */
     subagents?: SubagentHost;
     /**
@@ -175,11 +207,18 @@ export type StreamChatParams = {
      * default for the model's window.
      */
     autocompactTokens?: number;
+    /**
+     * The conversation's memory as it is now, fenced as `memoryMessage` is:
+     * a compaction replaces the thread's first message, which carried the
+     * memory the thread started with, so each summary carries a fresh copy.
+     * Null when no memory is enabled.
+     */
+    memoryAtCompaction?: () => Promise<string | null>;
 };
 
 /** The first line of the delegate tool's description; the host appends the model memo. */
 export const DELEGATE_TOOL_SUMMARY =
-    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with the tools its type allows, and cannot talk to the user. Several delegate calls in one response run at the same time, so split independent work into separate calls.";
+    "Hand a self-contained task to a subagent and get its report back. The subagent sees nothing of this conversation except the task and the documents you name, works with the tools its type allows, and cannot talk to the user. Delegate calls run at the same time when you gather them (`await tools.gather(tools.delegate(...), tools.delegate(...))`), so split independent work into separate calls.";
 
 /**
  * A child the `delegate` tool may start: what the parent turn's host decided
@@ -203,6 +242,8 @@ export type SubagentSpec = {
     timeoutMs: number;
     apiKeys?: UserApiKeys;
     runTools: NonNullable<StreamChatParams["runTools"]>;
+    /** Called once the child has finished, however it ended. */
+    cleanup?: () => void;
 };
 
 /** How a child's run ended, as the parent's host is told. */
@@ -222,11 +263,18 @@ export type SubagentOutcome = {
  */
 export type SubagentHost = {
     /**
-     * The delegate tool's description, model-selection memo included. One
-     * registry serves every user, so it must not vary by user: per-user
-     * choices (types, allowed models) belong in the system prompt.
+     * The delegate tool's description, model-selection memo included. It is
+     * the same for every user: per-user choices (types, allowed models)
+     * belong in the turn context.
      */
     toolDescription: string;
+    /**
+     * Set when the person allows background subagents: children started with
+     * `background: true` keep working after the turn ends, report into the
+     * chat when they finish, and may be messaged. `timeoutMs` bounds each of
+     * a background child's runs.
+     */
+    background?: { timeoutMs: number };
     /** The child's spec, or the refusal the model reads instead. */
     prepare: (input: Record<string, unknown>) => Promise<SubagentSpec | string>;
     started?: (child: {
@@ -236,6 +284,8 @@ export type SubagentHost = {
         type: string;
         model: string;
         task: string;
+        /** Set for a background child: its name in the chat, such as research-1. */
+        name?: string;
     }) => void;
     finished?: (child: SubagentOutcome) => void;
 };

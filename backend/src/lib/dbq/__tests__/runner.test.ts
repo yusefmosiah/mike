@@ -328,6 +328,23 @@ describe("runDbJobTick", () => {
         await expect(runDbJobTick(db as never, {})).resolves.toBe(0);
     });
 
+    it("claims within its scope: one kind, or all but some", async () => {
+        const rpc = vi.fn(async () => ({ data: [], error: null }));
+        const db = makeDb({ rpc });
+        await runDbJobTick(db as never, {}, {}, undefined, { kind: "memory.consolidate" });
+        await runDbJobTick(db as never, {}, {}, undefined, { excludeKinds: ["memory.consolidate"] });
+        await runDbJobTick(db as never, {});
+        const calls = (rpc.mock.calls as unknown as [string, Record<string, unknown>][]).map(
+            (call) => call[1],
+        );
+        expect(calls[0]).toMatchObject({ p_kind: "memory.consolidate" });
+        expect(calls[0]).not.toHaveProperty("p_exclude_kinds");
+        expect(calls[1]).toMatchObject({ p_exclude_kinds: ["memory.consolidate"] });
+        expect(calls[1]).not.toHaveProperty("p_kind");
+        expect(calls[2]).not.toHaveProperty("p_kind");
+        expect(calls[2]).not.toHaveProperty("p_exclude_kinds");
+    });
+
     it("processes every claimed job even when one handler rejects unexpectedly", async () => {
         const jobs = [JOB({ id: "a" }), JOB({ id: "b" })];
         const db = makeDb({ rpc: async () => ({ data: jobs, error: null }) });

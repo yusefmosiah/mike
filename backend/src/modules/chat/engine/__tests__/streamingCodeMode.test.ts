@@ -111,37 +111,191 @@ describe("code mode", () => {
     expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
     // The tool index is turn context; the system prompt never mentions it.
     expect(offered.systemPrompt).not.toContain("TOOLS IN PYTHON:");
-    expect(section(offered, "code-mode")).toContain("TOOLS IN PYTHON:");
-    expect(section(offered, "code-mode")).toMatch(/await tools\.read_document\(doc_id: str/);
-    expect(section(offered, "code-mode")).toContain("await tools.list_documents(");
+    expect(section(offered, "code-mode")).toContain("CODE MODE:");
+    expect(section(offered, "tool-index")).toContain("TOOLS IN PYTHON:");
+    expect(section(offered, "tool-index")).toMatch(/^- read_document\(doc_id, \*, .+\): .+Use before answering/m);
+    expect(section(offered, "tool-index")).toContain("- list_documents(): ");
 
-    vi.stubEnv("CODE_MODE_ENABLED", "false");
+    // Without a workstation there is nothing to run code in, so no tools.
+    vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", "");
     await runLLMStream(baseParams() as never);
-    const direct = streamChatWithTools.mock.calls[1][0];
-    expect(direct.tools.map((t) => t.function.name)).not.toContain("run_python");
-    expect(direct.tools.map((t) => t.function.name)).toContain("read_document");
-    expect(section(direct, "code-mode")).toBeUndefined();
-    // Falling back to direct tools does not change the system prompt.
-    expect(direct.systemPrompt).toBe(offered.systemPrompt);
+    const none = streamChatWithTools.mock.calls[1][0];
+    expect(none.tools).toEqual([]);
+    expect(section(none, "code-mode")).toBeUndefined();
+    expect(section(none, "tool-index")).toBeUndefined();
+    expect(section(none, "no-tools")).toContain("You have no tools in this conversation");
+    expect(none.systemPrompt).toBe(offered.systemPrompt);
   });
 
-  it("runs a guest's turn in the host's workstation, with direct tools until the host allows the thread", async () => {
+  it("puts memory and delegation in Python, never beside run_python", async () => {
+    await runLLMStream({
+      ...baseParams(),
+      includeMemory: true,
+      memoryEdit: { surface: "chat", conversationId: "c1", appWritable: true, projectId: null },
+    } as never);
+    const offered = streamChatWithTools.mock.calls[0][0];
+    expect(offered.tools.map((t) => t.function.name)).toEqual(["run_python"]);
+    expect(section(offered, "tool-index")).toContain("- read_memory(): ");
+    expect(section(offered, "tool-index")).toContain("- edit_memory(scope, edits, summary): ");
+  });
+
+  it("answers tools.delegate with the subagent's report, through the call that ran the cell", async () => {
+    const delegate = vi.fn(async (input: Record<string, unknown>) => ({ content: `Report on ${String(input.task)}`, isError: false }));
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      results = (await params.runTools?.([
+        { ...cell(`print(await tools.delegate(type="general", task="the lease"))`), delegate } as never,
+      ])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), includeSubagents: true } as never);
+    expect(delegate).toHaveBeenCalledWith({ type: "general", task: "the lease" });
+    expect(results[0]!.content).toBe("Report on the lease");
+  });
+
+  it("offers a saved chat its history in Python, answered from the call that ran the cell", async () => {
+    await runLLMStream(baseParams() as never);
+    expect(section(streamChatWithTools.mock.calls[0][0], "tool-index")).not.toContain("history_search(");
+
+    const history = {
+      search: vi.fn(async (input: Record<string, unknown>) => ({
+        content: JSON.stringify({ matches: [{ id: "m41", snippet: `found ${String(input.query)}` }], total: 1 }),
+        isError: false,
+      })),
+      read: vi.fn(async () => ({ content: "No message \"m9\" in this conversation.", isError: true })),
+    };
+    const code = [
+      `hits = await tools.history_search(query="escrow agent")`,
+      `print(hits["matches"][0]["id"], hits["matches"][0]["snippet"])`,
+      `try:`,
+      `    await tools.history_read(id="m9")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    let offered: StreamChatCall | undefined;
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      offered = params;
+      results = (await params.runTools?.([{ ...cell(code), history } as never])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), conversationId: "chat-history" } as never);
+    // Its line says when to reach for it, not only what it does.
+    expect(section(offered!, "tool-index")).toMatch(/^- history_search\(query, \*, .+\): .+Use when the person refers back/m);
+    expect(section(offered!, "tool-index")).toContain("- history_read(id, *, ");
+    expect(history.search).toHaveBeenCalledWith({ query: "escrow agent" });
+    expect(results[0]!.content).toContain("m41 found escrow agent");
+    expect(results[0]!.content).toContain('refused: history_read: No message "m9" in this conversation.');
+  });
+
+  it("runs gathered delegates at once, and their wait does not count against the cell's time", async () => {
+    const delegate = vi.fn(async (input: Record<string, unknown>) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      return { content: `Report on ${String(input.task)}`, isError: false };
+    });
+    const code = [
+      `a, b = await tools.gather(tools.delegate(type="general", task="A"), tools.delegate(type="general", task="B"))`,
+      `print(a, "|", b)`,
+    ].join("\n");
+    const started = Date.now();
+    const [result] = await turn([{ ...cell(code), input: { code, timeout_seconds: 1 }, delegate } as never], {
+      includeSubagents: true,
+    });
+    expect(result!.content).toBe("Report on A | Report on B");
+    expect(delegate).toHaveBeenCalledTimes(2);
+    // Both waited 1.5 s together, past the cell's 1 s.
+    expect(Date.now() - started).toBeLessThan(2_900);
+  });
+
+  it("gives the chat's background subagents to code only with the person's setting, in a durable turn", async () => {
+    const agents = {
+      list: vi.fn(async () => ({ content: JSON.stringify({ agents: [{ name: "research-1", status: "working" }] }), isError: false })),
+      send: vi.fn(async () => ({ content: "Sent to research-1.", isError: false })),
+      inbox: vi.fn(async () => ({ content: JSON.stringify({ messages: [], still_working: ["research-1"] }), isError: false })),
+      stop: vi.fn(async () => ({ content: 'No working subagent named "x" in this chat.', isError: true })),
+    };
+    const code = [
+      `print((await tools.list_agents())["agents"][0]["name"])`,
+      `print(await tools.message_agent(to="research-1", message="Also clause 14", interrupt=False))`,
+      `print((await tools.agent_inbox(wait_seconds=1))["still_working"])`,
+      `try:`,
+      `    await tools.stop_agent(name="x")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    const durable = { includeSubagents: true, conversationId: "chat-agents", durableTurn: { context: { surface: "chat" } } };
+    let offered: StreamChatCall | undefined;
+    let results: Awaited<ReturnType<RunToolsFn>> = [];
+    streamChatWithTools.mockImplementationOnce(async (params: StreamChatCall) => {
+      offered = params;
+      results = (await params.runTools?.([{ ...cell(code), agents } as never])) ?? [];
+      return { fullText: "" };
+    });
+    await runLLMStream({ ...baseParams(), ...durable, backgroundAgents: true } as never);
+    expect(section(offered!, "tool-index")).toContain("- message_agent(to, message, *, interrupt): ");
+    expect(section(offered!, "tool-index")).toContain("- agent_inbox(*, wait_seconds): ");
+    expect(agents.send).toHaveBeenCalledWith({ to: "research-1", message: "Also clause 14", interrupt: false });
+    expect(agents.inbox).toHaveBeenCalledWith({ wait_seconds: 1 });
+    expect(results[0]!.content).toContain("research-1\nSent to research-1.\n['research-1']");
+    expect(results[0]!.content).toContain('refused: stop_agent: No working subagent named "x" in this chat.');
+
+    // Off, or without a durable turn to wake the chat with: no such functions.
+    await runLLMStream({ ...baseParams(), ...durable } as never);
+    await runLLMStream({ ...baseParams(), ...durable, durableTurn: undefined, backgroundAgents: true } as never);
+    for (const call of streamChatWithTools.mock.calls.slice(1)) {
+      expect(section(call[0], "tool-index")).not.toContain("message_agent(");
+    }
+  });
+
+  it("raises a refused delegate as a ToolError the cell can catch", async () => {
+    const delegate = vi.fn(async () => ({ content: "Not run: 4 subagents are already running.", isError: true }));
+    const code = [
+      `try:`,
+      `    await tools.delegate(type="general", task="A")`,
+      `except ToolError as e:`,
+      `    print("refused:", e)`,
+    ].join("\n");
+    const [result] = await turn([{ ...cell(code), delegate } as never], { includeSubagents: true });
+    expect(result!.content).toContain("refused: delegate: Not run: 4 subagents are already running.");
+  });
+
+  it("ends a cell waiting on a delegate when the turn is stopped", async () => {
+    const controller = new AbortController();
+    const delegate = vi.fn(() => {
+      setTimeout(() => controller.abort(), 200);
+      return new Promise<{ content: string; isError: boolean }>(() => {});
+    });
+    const started = Date.now();
+    const run = turn([{ ...cell(`await tools.delegate(type="general", task="A")`), delegate } as never], {
+      includeSubagents: true,
+      signal: controller.signal,
+    });
+    await run.catch(() => undefined);
+    expect(delegate).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("runs a guest's turn in the host's workstation, asking the host before the first cell until they allow the thread", async () => {
     vi.stubEnv("WORKSTATION_USER_IDS", "host");
     vi.stubEnv("WORKSTATION_SSH_HOST", "127.0.0.1");
     vi.stubEnv("WORKSTATION_SSH_PORT", "2222");
     vi.stubEnv("WORKSTATION_SSH_IDENTITY_FILE", "/keys/dev");
+    const request = vi.fn(async () => "denied" as const);
     const guest = (standing: boolean | null) => ({
       ...baseParams(),
       userId: "guest",
       workstationUserId: "host",
-      guestCode: standing === null ? null : { hostName: "Pat", standing, request: vi.fn() },
+      guestCode: standing === null ? null : { hostName: "Pat", standing, request },
     });
     const names = (n: number) => streamChatWithTools.mock.calls[n][0].tools.map((t) => t.function.name);
 
-    await runLLMStream(guest(false) as never);
-    expect(names(0)).toContain("run_command");
-    expect(names(0)).not.toContain("run_python");
-    expect(section(streamChatWithTools.mock.calls[0][0], "workstation")).toContain("Each run_command asks Pat for permission first");
+    // Not yet allowed: the host is asked before the cell runs, and a refusal
+    // is the cell's answer.
+    const [refused] = await turn([cell("print('hi')")], guest(false));
+    expect(names(0)).toEqual(["run_python"]);
+    expect(section(streamChatWithTools.mock.calls[0][0], "workstation")).toContain("The first run_python in each message asks Pat for permission");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(refused.content).toMatch(/^\[error\]\nPat did not allow running code/);
 
     await runLLMStream(guest(true) as never);
     expect(names(1)).toEqual(["run_python"]);
@@ -150,8 +304,7 @@ describe("code mode", () => {
 
     // A surface that cannot ask the host gives a guest no workstation at all.
     await runLLMStream(guest(null) as never);
-    expect(names(2)).not.toContain("run_command");
-    expect(names(2)).not.toContain("run_python");
+    expect(names(2)).toEqual([]);
   });
 
   it("routes the cell's tool calls through the dispatcher", async () => {

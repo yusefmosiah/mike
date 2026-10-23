@@ -32,6 +32,9 @@ import { guestCodeApprovalFor } from "./chat.codeApprovals";
 import { prepareChatStream, type PreparedChatStream } from "./chat.prepare";
 import { linkedPrompt, walkActivePath, type TreeRow } from "./chat.tree";
 import { answerProse } from "./chat.spoken";
+import { backgroundAgentsEnabled } from "../user/user.service";
+// A cycle: each calls the other only at run time.
+import { deliverAgentMessages } from "./chat.agentReports";
 import {
     appendAssistantEventsToMessage,
     AssistantStreamError,
@@ -301,6 +304,7 @@ export async function driveChatTurn(
                     : {}),
                 includeMemory: true,
                 includeSubagents: true,
+                backgroundAgents: await backgroundAgentsEnabled(db, userId),
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
                 voice: turnVoice,
@@ -310,6 +314,15 @@ export async function driveChatTurn(
                     ? resolvedProjectId
                     : null,
                 memorySharedAudience,
+                // The same scopes the curator may write for this chat.
+                memoryEdit: {
+                    surface: "chat",
+                    conversationId: chatId,
+                    appWritable: !memorySharedAudience,
+                    projectId: canCurateProjectMemory
+                        ? resolvedProjectId
+                        : null,
+                },
                 nonce,
                 // This route first makes the advertised assistant ID durable.
                 // It emits [DONE] only after the reserved row has been
@@ -620,6 +633,8 @@ export async function driveChatTurn(
     } finally {
         // The thread is free for the next sender, on any replica.
         await prepared.turnClaim?.release();
+        // Background subagents may have reported while it was busy.
+        void deliverAgentMessages(db, chatId);
         if (memoryTurn && !memoryTurnScheduled) {
             try {
                 await releaseMemoryConversationTurn({
@@ -641,7 +656,7 @@ export async function driveChatTurn(
 const RESTART_FAILURE_MESSAGE =
     "This answer was interrupted by a server restart and could not be resumed. Please try again.";
 
-function isResumeContext(value: unknown): value is ChatTurnResumeContext {
+export function isResumeContext(value: unknown): value is ChatTurnResumeContext {
     if (!value || typeof value !== "object") return false;
     const context = value as Record<string, unknown>;
     return (

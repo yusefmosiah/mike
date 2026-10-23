@@ -12,19 +12,30 @@ import {
   streamChatWithToolsOnPi,
   subagentTranscriptOnPi,
 } from "./runtime.mjs";
-import type { OpenAIToolSchema, StreamChatParams, SubagentHost, SubagentSpec } from "../types.js";
+import type { NormalizedToolCall, OpenAIToolSchema, StreamChatParams, SubagentHost, SubagentSpec } from "../types.js";
 
 const MODEL = "opencode-go/test-model";
 const CHILD_MARK = "You are a document reviewer";
 /** Every child task starts with this, which is how the scripted model knows it is a child. */
 const CHILD_TASK = "Find the governing law";
 
+/** A tool the test's children use; registered by being among the parent's tools. */
 const readDocument: OpenAIToolSchema = {
   type: "function",
   function: {
     name: "read_document",
     description: "Read a document",
     parameters: { type: "object", properties: { doc_id: { type: "string" } }, required: ["doc_id"] },
+  },
+};
+
+/** The parent's one tool, standing in for run_python: each task is a `tools.delegate` its code makes. */
+const runCode: OpenAIToolSchema = {
+  type: "function",
+  function: {
+    name: "run_python",
+    description: "Run code",
+    parameters: { type: "object", properties: { tasks: { type: "array", items: { type: "string" } } }, required: ["tasks"] },
   },
 };
 
@@ -41,9 +52,10 @@ let childRequests: Ctx[];
 let parentRequests: Ctx[];
 
 /**
- * The scripted model. As the parent it delegates (as often as the prompt
- * says) and then answers from the reports; as a child it reads one document
- * and reports what it found.
+ * The scripted model. As the parent it runs code that delegates (as often as
+ * the prompt says, gathering several tasks in one cell when it says "in
+ * parallel") and then answers from the reports; as a child it reads one
+ * document and reports what it found.
  */
 function setup() {
   childRequests = [];
@@ -57,9 +69,9 @@ function setup() {
     if (firstUser.startsWith(CHILD_TASK)) {
       childRequests.push(ctx);
       if (last?.role === "user") {
-        // A child told to delegate tries to; it was never offered the tool.
+        // A child told to delegate tries to, from its own code.
         const call = firstUser.includes("(nested)")
-          ? fauxToolCall("delegate", { type: "document_review", task: `${CHILD_TASK} again` })
+          ? fauxToolCall("run_python", { tasks: [`${CHILD_TASK} again`] })
           : fauxToolCall("read_document", { doc_id: "doc-0" });
         return fauxAssistantMessage([call], { stopReason: "toolUse" });
       }
@@ -69,18 +81,16 @@ function setup() {
     const delegations = ctx.messages.filter((m) => m.role === "toolResult").length;
     const together = Number(/in parallel (\d+)/.exec(firstUser)?.[1] ?? "0");
     if (together && delegations === 0) {
-      // One response asking for several children at once.
+      // One cell gathering several children at once.
       return fauxAssistantMessage(
-        Array.from({ length: together }, (_, i) =>
-          fauxToolCall("delegate", { type: "document_review", task: `${CHILD_TASK} (${i + 1})` }),
-        ),
+        [fauxToolCall("run_python", { tasks: Array.from({ length: together }, (_, i) => `${CHILD_TASK} (${i + 1})`) })],
         { stopReason: "toolUse" },
       );
     }
     const wanted = Number(/delegate (\d+)/.exec(firstUser)?.[1] ?? "1");
     if (delegations < wanted) {
       const task = firstUser.includes("nested") ? `${CHILD_TASK} (nested)` : `${CHILD_TASK} (${delegations + 1})`;
-      return fauxAssistantMessage([fauxToolCall("delegate", { type: "document_review", task })], { stopReason: "toolUse" });
+      return fauxAssistantMessage([fauxToolCall("run_python", { tasks: [task] })], { stopReason: "toolUse" });
     }
     const reports = ctx.messages.filter((m) => m.role === "toolResult").map((m) => text(m.content));
     return fauxAssistantMessage([fauxText(`Parent answer. ${reports.at(-1) ?? ""}`)]);
@@ -125,16 +135,26 @@ function host(overrides: Partial<Omit<SubagentHost, "started" | "finished">> = {
   } satisfies SubagentHost;
 }
 
-async function parentTurn(prompt: string, extra: Partial<StreamChatParams> = {}) {
-  const parentRunTools = vi.fn(async (calls: { id: string }[]) =>
-    calls.map((call) => ({ tool_use_id: call.id, content: "parent tool" })),
+/** What the parent's code does with each task: `tools.delegate`, gathered. */
+async function runCodeCalls(calls: NormalizedToolCall[]) {
+  return Promise.all(
+    calls.map(async (call) => {
+      const tasks = (call.input.tasks as string[]) ?? [];
+      if (!call.delegate) return { tool_use_id: call.id, content: "Delegation is not available here." };
+      const reports = await Promise.all(tasks.map((task) => call.delegate!({ type: "document_review", task })));
+      return { tool_use_id: call.id, content: reports.map((report) => report.content).join("\n\n") };
+    }),
   );
+}
+
+async function parentTurn(prompt: string, extra: Partial<StreamChatParams> = {}) {
+  const parentRunTools = vi.fn(runCodeCalls);
   const result = await streamChatWithToolsOnPi({
     conversationId: "chat-1",
     model: MODEL,
     systemPrompt: "You are Mike.",
     messages: [{ role: "user", content: prompt }],
-    tools: [readDocument],
+    tools: [runCode, readDocument],
     turn: { userMessageId: "u1", parentMessageId: null, assistantMessageId: "a1" },
     runTools: parentRunTools,
     ...extra,
@@ -158,8 +178,8 @@ describe("delegate", () => {
 
     expect(result.fullText).toContain("Parent answer.");
     expect(result.fullText).toContain("Delaware");
-    // The child's read went to the child's runner, never the parent's.
-    expect(parentRunTools).not.toHaveBeenCalled();
+    // The parent's code ran once; the child's read went to the child's own runner.
+    expect(parentRunTools).toHaveBeenCalledTimes(1);
     // The child starts from its task alone, none of the parent's conversation.
     const childUsers = childRequests[0].messages.filter((m) => m.role === "user");
     expect(childUsers.map((m) => text(m.content))).toEqual(["Find the governing law (1)"]);
@@ -193,17 +213,21 @@ describe("delegate", () => {
     expect(delegation.started).not.toHaveBeenCalled();
   });
 
-  it("is not offered without a host: a call from memory is answered as unavailable", async () => {
+  it("gives code no way to delegate without a host", async () => {
     const { result } = await parentTurn("Review the NDA");
-    expect(result.fullText).toContain("Tool delegate is not available");
+    expect(result.fullText).toContain("Delegation is not available here.");
     expect(childRequests).toHaveLength(0);
   });
 
   it("never lets a child delegate (depth 1)", async () => {
-    const delegation = host();
+    const delegation = host({
+      prepare: vi.fn(async (input: Record<string, unknown>) =>
+        spec({ task: String(input.task), tools: ["run_python"], runTools: runCodeCalls }),
+      ),
+    });
     const { result } = await parentTurn("Review the NDA, nested", { subagents: delegation });
     expect(delegation.started).toHaveBeenCalledTimes(1);
-    expect(result.fullText).toContain("Tool delegate is not available");
+    expect(result.fullText).toContain("Delegation is not available here.");
   });
 
   it(`starts at most ${MAX_SUBAGENTS_PER_TURN} children in one turn`, async () => {
@@ -247,7 +271,7 @@ describe("delegate", () => {
     expect(delegation.started).toHaveBeenCalledTimes(1);
   });
 
-  it("a turn cut off by a restart while its child works finds the same child again", async () => {
+  it("a turn cut off by a restart while its child works does not start it again", async () => {
     const durableTurn = { context: { surface: "chat" } };
     // The process dies while the child's read runs: it never returns.
     const hung = host({ prepare: vi.fn(async (input) => spec({ task: String(input.task), runTools: () => new Promise(() => undefined) })) });
@@ -256,7 +280,6 @@ describe("delegate", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(hung.started).toHaveBeenCalledTimes(1);
-    const { childId } = hung.started.mock.calls[0][0];
     await new Promise((resolve) => setTimeout(resolve, 100));
     await resetPiRuntime(current); // same storage, new process
 
@@ -266,18 +289,14 @@ describe("delegate", () => {
       subagents: delegation,
       durableTurn: { ...durableTurn, resume: true },
     });
+    // The code that started it had effects, so it is answered as interrupted,
+    // not run again: no second child.
+    expect(delegation.started).not.toHaveBeenCalled();
     expect(result.fullText).toContain("Parent answer.");
-    expect(result.fullText).toContain("Delaware");
-    // The same child, driven again with the new process's tools; its task was not sent twice.
-    expect(delegation.started).toHaveBeenCalledWith(expect.objectContaining({ childId, address: "turn/a1/document_review-1" }));
-    expect(delegation.finished).toHaveBeenCalledWith(expect.objectContaining({ childId, status: "done" }));
-    const transcript = await subagentTranscriptOnPi(childId);
-    expect(transcript!.entries.filter((entry) => entry.kind === "task")).toHaveLength(1);
-    expect(transcript!.envelopes.map((envelope) => envelope.kind)).toEqual(["task", "report"]);
     await finishTurnOnPi("a1");
   });
 
-  it("runs the children one response asks for at the same time", async () => {
+  it("runs the children one cell gathers at the same time", async () => {
     let running = 0;
     let peak = 0;
     const runTools = async (calls: { id: string }[]) => {
@@ -315,11 +334,8 @@ describe("delegate", () => {
     const { result } = await parentTurn(`Review them in parallel ${MAX_CONCURRENT_SUBAGENTS + 2}`, { subagents: delegation });
     expect(delegation.started).toHaveBeenCalledTimes(MAX_CONCURRENT_SUBAGENTS);
     const lastParent = parentRequests.at(-1)!;
-    const refusals = lastParent.messages
-      .filter((m) => m.role === "toolResult")
-      .map((m) => text(m.content))
-      .filter((t) => t.includes("already running"));
-    expect(refusals).toHaveLength(2);
+    const cell = lastParent.messages.filter((m) => m.role === "toolResult").map((m) => text(m.content)).join("\n");
+    expect(cell.match(/already running/g)).toHaveLength(2);
     expect(result.fullText).toContain("Parent answer.");
   });
 

@@ -41,7 +41,8 @@ vi.mock("../../../../lib/memory/files", () => ({
   })),
 }));
 
-vi.mock("../subagents/subagentHost", () => ({
+vi.mock("../subagents/subagentHost", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../subagents/subagentHost")>()),
   createSubagentHost: vi.fn(async (args: { chatModel: string }) => ({
     host: {},
     promptSection: `SUBAGENTS:\nModels a subagent may run on (omit \`model\` to use ${args.chatModel}).`,
@@ -177,12 +178,13 @@ describe("the chat system prompt", () => {
     expect(second.tools.map((t) => t.function.name)).toEqual(["run_python"]);
     expect(second.systemPrompt).toBe(first.systemPrompt);
 
-    // Falling back to direct tools (the kernel cannot start) changes the tool
-    // list, but still not the system prompt.
-    vi.stubEnv("CODE_MODE_ENABLED", "false");
-    const direct = await runTurn(TURN_TWO);
-    expect(direct.tools.map((t) => t.function.name)).not.toContain("run_python");
-    expect(direct.systemPrompt).toBe(first.systemPrompt);
+    // A user with no workstation has no tools at all, and still the same
+    // system prompt.
+    vi.stubEnv("CODE_MODE_LOCAL_KERNEL_DIR", "");
+    const toolless = await runTurn(TURN_TWO);
+    expect(toolless.tools).toEqual([]);
+    expect(section(toolless, "no-tools")).toContain("You have no tools in this conversation");
+    expect(toolless.systemPrompt).toBe(first.systemPrompt);
   });
 
   it("names none of the turn's varying facts", async () => {
@@ -204,6 +206,7 @@ describe("the chat system prompt", () => {
       "memory-audience",
       "skills",
       "code-mode",
+      "tool-index",
       "python-session",
       "subagents",
     ]);
@@ -214,8 +217,9 @@ describe("the chat system prompt", () => {
     expect(section(call, "documents")).toContain("board memo.docx");
     expect(section(call, "memory-audience")).toContain("CURRENT MEMORY AUDIENCE: SHARED");
     expect(section(call, "skills")).toContain("nda-triage");
-    expect(section(call, "code-mode")).toContain("TOOLS IN PYTHON:");
-    expect(section(call, "code-mode")).toContain("await tools.crm_lookup(");
+    expect(section(call, "code-mode")).toContain("CODE MODE:");
+    expect(section(call, "tool-index")).toContain("TOOLS IN PYTHON:");
+    expect(section(call, "tool-index")).toMatch(/^- crm_lookup\(/m);
     expect(section(call, "python-session")).toContain("rates, helper");
     expect(section(call, "subagents")).toContain("gpt-5.4");
     // Memory's own content is the thread's first user message, never turn context.

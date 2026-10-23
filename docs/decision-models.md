@@ -167,13 +167,16 @@ Other aggregation lessons:
 
 ## Code mode (Mission 11)
 
-- **Gate the whole script once.** Its composition is the risk: "read the
+- **Each inner call is gated** through the same dispatcher as a direct call
+  would be. A `run_python` cell itself is not gated.
+- **The cell runs in the workstation VM**, whose only way out is a logging
+  proxy, so code can reach the network without going through `tools.*`.
+  Per-call gating covers the tools, not what the code does around them.
+- **Gating a whole script** is what the layered gate's `run_code` rules do
+  (`facts.ts`, `layered.ts`): its composition is the risk, since "read the
   privileged memo, then post it" is two harmless-looking calls. `redactArgs`
-  reads a `code` argument up to 8,000 characters, not the usual 500.
-- **Also gate each inner call** through the same dispatcher.
-- **The sandbox has no network or filesystem.** Every effect goes through
-  `tools.*`, so per-call gating covers egress. Script-level gating catches
-  intent.
+  reads a `code` argument up to 8,000 characters, not the usual 500. Only the
+  eval's cases exercise those rules today.
 - **Use real traces once code mode exists.** The eval's `run_code` cases are
   hand-written. Add real code-mode traces to a fresh held-out batch and recheck
   the thresholds.

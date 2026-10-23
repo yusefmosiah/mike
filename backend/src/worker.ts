@@ -21,6 +21,7 @@ import "./instrument";
 
 import { enforceDocumentLifecycleMigration } from "./lib/dbq/lifecycleGuard";
 import { startAllWorkers, stopAllWorkers } from "./workerRuntime";
+import { API_PROCESS_JOB_KIND } from "./jobs/registry";
 import { flushSentry, reportError } from "./lib/observability/sentry";
 
 // A worker against an unmigrated database cannot run the cleanup kind at all,
@@ -29,7 +30,8 @@ import { flushSentry, reportError } from "./lib/observability/sentry";
 // worker the database cannot back.
 async function main(): Promise<void> {
   await enforceDocumentLifecycleMigration();
-  startAllWorkers();
+  // The API process runs its own kinds (memory reviews need its conversation store).
+  startAllWorkers({ excludeKinds: [API_PROCESS_JOB_KIND] });
   console.log("Mike worker process running");
 }
 

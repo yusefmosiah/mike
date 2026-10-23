@@ -232,19 +232,14 @@ describe("kernel bundle", () => {
 });
 
 describe("kernel manager", () => {
-  it("marks a launcher down for a while after its kernel fails to start", async () => {
-    let now = 1_000;
-    const manager = new KernelManager({ downMs: 60_000, startTimeoutMs: 2_000, now: () => now });
+  it("fails an acquire whose kernel does not start", async () => {
+    const manager = new KernelManager({ startTimeoutMs: 2_000 });
     const broken: KernelLauncher = {
       id: "broken",
       spawn: () => spawn("false", [], { stdio: ["pipe", "pipe", "pipe"] }),
       snapshotPath: (key) => path.join(workDir, `${key}.dill`),
     };
-    expect(manager.available(broken)).toBe(true);
     await expect(manager.acquire("conv", broken, [])).rejects.toThrow(/did not start/);
-    expect(manager.available(broken)).toBe(false);
-    now += 60_001;
-    expect(manager.available(broken)).toBe(true);
   });
 
   it("stops idle kernels", async () => {
@@ -272,7 +267,7 @@ describe("python tool docs", () => {
           },
         },
       },
-      { type: "function", function: { name: "run_command", parameters: {} } },
+      { type: "function", function: { name: "run_python", parameters: {} } },
     ]);
     const [read] = pythonToolSpecs([
       {
