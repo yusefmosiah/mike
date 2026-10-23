@@ -88,6 +88,23 @@ launch and needs no server endpoint or download UI.
   literal product name).
 
 ## First step: a spike that gates the rest
+- **Spike result (2026-10-21, on this Mac, Core ML):** use upstream
+  `FluidInference/FluidAudio` (0.17.7, 503b4bd1), **not** the
+  `altic-dev/FluidAudio` fork (main @ 7d44355). The fork's long-audio path is
+  broken: on a 31 min LibriSpeech stream it emitted 3,671 words against 4,634
+  reference — **22.4% WER with twelve whole spans of 10–39 s silently dropped**,
+  while the same weights through upstream's chunking returned **2.05% WER and
+  zero dropped spans**. On isolated ≤15 s clips the fork is clean (1.51% WER),
+  so the defect is confined to its `ChunkProcessor` / `AsrChunkTokenMerger`
+  stitching — precisely the path a >30 s dictation crosses. The model itself is
+  good: 1.51% isolated WER vs Parakeet 0.6B v3's 1.92%, and its output carries
+  punctuation and capitals.
+- Upstream loads the Core ML repo unchanged **if** the joint file is presented
+  as `JointDecisionv3.mlmodelc` (the repo ships `JointDecision.mlmodelc`; a
+  symlink or a copy at bundle time satisfies it). `AsrModels.loadLocal(from:
+  dir, version: .v3)` + `AsrManager.transcribe(url, decoderState:)` works.
+- Reproduced with the two CLIs in `/tmp/asr-lab` (`fluidcli` = fork,
+  `fluidcli-upstream` = upstream) and `~/.cache/parakeet-bench/stream-200.wav`.
 
 Before the full build, confirm on this Mac (simulator; Core ML runs on the
 CPU there, which is fine for correctness):
