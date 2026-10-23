@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { attachDocumentToReview } from "../../modules/tabular/tabular.service";
+import { attachDocumentToReview, updateTabularReview } from "../../modules/tabular/tabular.service";
 import { stackAuth, stackConfigured, stackDb } from "./stackDb";
 
 // The upload worker adds a document dropped into a review to that review
@@ -15,6 +15,7 @@ maybeDescribe("adding an uploaded document to its review", () => {
     let ownerEmail = "";
     const reviewId = crypto.randomUUID();
     const documentIds = Array.from({ length: 3 }, () => crypto.randomUUID());
+    const addedByHand = crypto.randomUUID();
 
     beforeAll(async () => {
         ownerEmail = `attach-${Date.now()}@test.local`;
@@ -26,7 +27,7 @@ maybeDescribe("adding an uploaded document to its review", () => {
         if (owner.error || !owner.data.user) throw owner.error ?? new Error("Could not create the owner");
         ownerId = owner.data.user.id;
         const documents = await db.from("documents").insert(
-            documentIds.map((id) => ({ id, user_id: ownerId, status: "ready" })),
+            [...documentIds, addedByHand].map((id) => ({ id, user_id: ownerId, status: "ready" })),
         );
         if (documents.error) throw documents.error;
         const review = await db.from("tabular_reviews").insert({
@@ -41,7 +42,7 @@ maybeDescribe("adding an uploaded document to its review", () => {
 
     afterAll(async () => {
         await db.from("tabular_reviews").delete().eq("id", reviewId);
-        await db.from("documents").delete().in("id", documentIds);
+        await db.from("documents").delete().in("id", [...documentIds, addedByHand]);
         if (ownerId) await stackAuth().admin.deleteUser(ownerId);
     });
 
@@ -78,6 +79,21 @@ maybeDescribe("adding an uploaded document to its review", () => {
         expect(status.get(documentIds[0]!)).toBe("done");
         expect(status.get(documentIds[1]!)).toBe("pending");
         expect(status.get(documentIds[2]!)).toBe("pending");
+    });
+
+    it("keeps the results when the person adds a document by hand", async () => {
+        const updated = await updateTabularReview(db, {
+            reviewId,
+            userId: ownerId,
+            userEmail: ownerEmail,
+            body: { document_ids: [...(await reviewDocuments()), addedByHand] },
+        });
+        expect(updated.ok).toBe(true);
+        const { data: cells } = await db.from("tabular_cells").select("document_id, status").eq("review_id", reviewId);
+        const status = new Map((cells ?? []).map((cell: { document_id: string; status: string }) => [cell.document_id, cell.status]));
+        expect(status.get(documentIds[0]!)).toBe("done");
+        expect(status.get(addedByHand)).toBe("pending");
+        expect(cells).toHaveLength(4);
     });
 
     it("adds nothing for someone who cannot change the review", async () => {

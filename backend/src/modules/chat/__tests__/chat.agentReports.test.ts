@@ -111,6 +111,13 @@ describe("deliverAgentMessages", () => {
         expect(llm.takeAgentMessages).not.toHaveBeenCalled();
     });
 
+    it("keeps messages when the turn could not be prepared for a reason that may pass", async () => {
+        prepareChatStream.mockResolvedValue({ ok: false, status: 500, detail: "Failed to save message" });
+        await deliverAgentMessages(db, "chat-1");
+        expect(llm.takeAgentMessages).not.toHaveBeenCalled();
+        expect(driveChatTurn).not.toHaveBeenCalled();
+    });
+
     it("lets messages go when the chat can no longer be answered", async () => {
         prepareChatStream.mockResolvedValue({ ok: false, status: 404, detail: "Chat not found" });
         await deliverAgentMessages(db, "chat-1");

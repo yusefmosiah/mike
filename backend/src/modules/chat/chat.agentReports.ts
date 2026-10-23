@@ -122,13 +122,14 @@ async function deliverOnce(db: Db, chatId: string): Promise<boolean> {
         origin: originOf(waiting),
     });
     if (!prep.ok) {
-        // Busy: the turn holding the chat delivers when it ends. Anything else
-        // (the chat deleted, access gone) will not get better: let them go.
-        if ("status" in prep && prep.status === 409) return false;
         if ("internal" in prep) {
             console.error("[chat/agents] could not prepare a turn for subagent messages", safeError(prep.error));
             return false;
         }
+        // Busy: the turn holding the chat delivers when it ends. A failure
+        // that may pass leaves them waiting for the next try too.
+        if (prep.status === 409 || prep.status === 429 || prep.status >= 500) return false;
+        // The chat deleted, access gone: that will not get better. Let them go.
         await takeAgentMessages(chatId, waiting.map((message) => message.id));
         return false;
     }

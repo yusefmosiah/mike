@@ -68,7 +68,6 @@ import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
 import { useIsDesktop } from "@/app/hooks/useIsDesktop";
 import { useChatBranchActions } from "@/app/components/assistant/useChatBranchActions";
 import { useThreadGenerating } from "@/app/hooks/useThreadGenerating";
-import { useBackgroundAgentRefresh } from "@/app/hooks/useBackgroundAgentRefresh";
 import { ChatThread } from "@/app/components/assistant/ChatThread";
 import { AssistantWorkflowModal } from "@/app/components/assistant/AssistantWorkflowModal";
 import { ChatAccessModal } from "@/app/components/assistant/ChatAccessModal";
@@ -468,20 +467,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         chatId: activeChatId || null,
         localTurnActive: isResponseLoading,
         onFinished: (detail) => setMessages(detail.messages),
-    });
-    // With background subagents on, a report can reach this chat while it is
-    // open and idle, and the server answers it on its own: notice that
-    // without a reload.
-    useBackgroundAgentRefresh({
-        chatId: activeChatId || null,
-        enabled:
-            profile?.backgroundAgents === true && !!activeChatId && chatLoaded,
-        idle: !isResponseLoading,
-        messages,
-        onRefreshed: (detail) => {
-            if (activeChatId) setGenerating(activeChatId, detail.generating);
-            setMessages(detail.messages);
-        },
     });
     const { editPrompt, replaceVoicePrompt, regenerate, branchIntoNewThread, navigateSibling } =
         useChatBranchActions({

@@ -311,6 +311,30 @@ async function replaceRows(
     );
 }
 
+/**
+ * Add rows, with pending cells, for the review's documents that have none
+ * (per-document grouping). The rows already there keep their results.
+ */
+async function addMissingRows(
+    db: Db,
+    reviewId: string,
+    userId: string,
+    documentIds: string[],
+    columns: Column[],
+): Promise<void> {
+    const { data: rows, error } = await db
+        .from("tabular_review_rows")
+        .select("document_id, sort_index")
+        .eq("review_id", reviewId);
+    if (error) throw new Error(error.message);
+    const existing = (rows ?? []) as { document_id: string | null; sort_index: number }[];
+    const shown = new Set(existing.map((row) => row.document_id));
+    const missing = documentIds.filter((id) => !shown.has(id));
+    if (!missing.length) return;
+    const next = existing.reduce((max, row) => Math.max(max, row.sort_index + 1), 0);
+    await createRowsForReview(db, reviewId, userId, missing, columns, "document", next);
+}
+
 export async function syncCellsForReviewRows(
     db: Db,
     reviewId: string,
@@ -1013,9 +1037,22 @@ export async function updateTabularReview(
         Array.isArray(body.document_ids) ||
         body.document_grouping != null ||
         projectIdUpdateProvided;
+    // Documents only added, each its own row: add theirs and keep the results
+    // the review has. Anything else reshapes the rows and builds them again.
+    const before = Array.isArray(existingReview.document_ids) ? (existingReview.document_ids as string[]) : [];
+    const after = (updatedReview.document_ids ?? []) as string[];
+    const onlyAdded =
+        Array.isArray(body.document_ids) &&
+        body.document_grouping == null &&
+        !projectIdUpdateProvided &&
+        normalizeGrouping(updatedReview.document_grouping) === "document" &&
+        before.every((id) => after.includes(id));
     try {
         const activeColumns = (updatedReview.columns_config ?? []) as Column[];
-        if (rowShapeChanged) {
+        if (onlyAdded) {
+            await oneRebuildAtATime(reviewId, () => addMissingRows(db, reviewId, userId, after, activeColumns));
+            if (Array.isArray(body.columns_config)) await syncCellsForReviewRows(db, reviewId, activeColumns);
+        } else if (rowShapeChanged) {
             await rebuildRowsForReview(
                 db,
                 reviewId,
@@ -1090,7 +1127,8 @@ export async function attachDocumentToReview(
         const access = await ensureReviewAccess(review, args.userId, args.userEmail, db);
         if (!access.ok || !can(access.projectRole, "content.edit")) return false;
         const current = Array.isArray(review.document_ids) ? (review.document_ids as string[]) : [];
-        if (current.includes(args.documentId)) return true;
+        // A retried job: the document is listed, but its row may not have been made.
+        if (current.includes(args.documentId)) return addRowsForAttach(db, args, false);
         const documentIds = [...current, args.documentId];
         // Only over the list read above: a concurrent change to it (another
         // upload, the person's own edit) makes this a no-op, and the loop
@@ -1107,40 +1145,40 @@ export async function attachDocumentToReview(
             .maybeSingle();
         if (updateError) throw new Error(updateError.message);
         if (!updated) continue;
-        // From the review as stored when this turn comes: another upload may
-        // have added a document since, and the last to run must show every one.
-        return oneRebuildAtATime(args.reviewId, async () => {
-            const { data: latest, error: latestError } = await db
-                .from("tabular_reviews")
-                .select("document_ids, columns_config, document_grouping")
-                .eq("id", args.reviewId)
-                .maybeSingle();
-            if (latestError) throw new Error(latestError.message);
-            if (!latest) return false;
-            const documentIds = (latest.document_ids ?? []) as string[];
-            const columns = (latest.columns_config ?? []) as Column[];
-            const grouping = normalizeGrouping(latest.document_grouping);
-            // A new document may join an existing folder's row: build them again.
-            if (grouping === "folder") {
-                await replaceRows(db, args.reviewId, args.userId, documentIds, columns, grouping);
-                return true;
-            }
-            // Otherwise add rows for the documents without one, and keep the
-            // results the review already has.
-            const { data: rows, error: rowsError } = await db
-                .from("tabular_review_rows")
-                .select("document_id, sort_index")
-                .eq("review_id", args.reviewId);
-            if (rowsError) throw new Error(rowsError.message);
-            const existing = (rows ?? []) as { document_id: string | null; sort_index: number }[];
-            const shown = new Set(existing.map((row) => row.document_id));
-            const missing = documentIds.filter((id) => !shown.has(id));
-            const next = existing.reduce((max, row) => Math.max(max, row.sort_index + 1), 0);
-            await createRowsForReview(db, args.reviewId, args.userId, missing, columns, grouping, next);
-            return true;
-        });
+        return addRowsForAttach(db, args, true);
     }
     throw new Error("The review kept changing while a document was added to it.");
+}
+
+/**
+ * The rows for a review's documents, from the review as stored when this turn
+ * comes: another upload may have added a document since, and the last to run
+ * must show every one. Folder rows are built again only for a new document,
+ * which may join an existing folder's row.
+ */
+function addRowsForAttach(
+    db: Db,
+    args: { reviewId: string; userId: string },
+    added: boolean,
+): Promise<boolean> {
+    return oneRebuildAtATime(args.reviewId, async () => {
+        const { data: latest, error } = await db
+            .from("tabular_reviews")
+            .select("document_ids, columns_config, document_grouping")
+            .eq("id", args.reviewId)
+            .maybeSingle();
+        if (error) throw new Error(error.message);
+        if (!latest) return false;
+        const documentIds = (latest.document_ids ?? []) as string[];
+        const columns = (latest.columns_config ?? []) as Column[];
+        const grouping = normalizeGrouping(latest.document_grouping);
+        if (grouping === "folder") {
+            if (added) await replaceRows(db, args.reviewId, args.userId, documentIds, columns, grouping);
+            return true;
+        }
+        await addMissingRows(db, args.reviewId, args.userId, documentIds, columns);
+        return true;
+    });
 }
 
 export async function deleteTabularReview(

@@ -57,7 +57,7 @@ carry its own name.
   search the web through pluggable providers. Web pages it cites open as a
   saved reader copy, with the quote highlighted.
 - **Background subagents** *(experimental; off by default, under Settings →
-  Features)*:
+  Features; in chats outside projects for now)*:
   - A subagent can keep working after the assistant has answered. Its report
     arrives in the chat when it finishes, and the assistant replies to it,
     even if you have closed the app.
