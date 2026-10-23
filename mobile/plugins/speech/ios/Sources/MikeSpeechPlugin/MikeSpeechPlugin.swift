@@ -31,6 +31,7 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceInstall", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "voicePrewarm", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceStart", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceStop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "voiceSpeak", returnType: CAPPluginReturnPromise),
@@ -308,6 +309,17 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("The voice models could not be downloaded.", "failed")
             }
         }
+    }
+
+    /// Loads the voice models ahead of `voiceStart` and resolves at once (the
+    /// load carries on at low priority). Optional `config` is the one
+    /// `voiceStart` will get.
+    @objc func voicePrewarm(_ call: CAPPluginCall) {
+        let config = VoiceConfig(call.options["config"] as? [String: Any])
+        Task.detached(priority: .utility) {
+            await VoiceMode.prewarm(speaker: config.speakerModel != nil)
+        }
+        call.resolve()
     }
 
     /// Loads and warms every model, asks for the microphone if needed, and

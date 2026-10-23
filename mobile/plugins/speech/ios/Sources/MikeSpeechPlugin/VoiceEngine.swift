@@ -73,6 +73,25 @@ enum VoiceMode {
             speakerLearned: SpeakerStore.load().learned)
     }
 
+    /// Loads and warms the models ahead of a start (the person has used voice
+    /// mode before), at low priority, so the tap finds them ready. Does nothing
+    /// if they are missing, the device cannot run them, or voice mode is on.
+    /// Failures are left for the start to report.
+    static func prewarm(speaker: Bool) async {
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        guard #available(iOS 18.0, *), canRunHere, await status().available else { return }
+        guard await !VoiceEngine.shared.isRunning, let fluid = FluidSpeechMini.modelDirectory() else { return }
+        let started = ContinuousClock.now
+        async let listening = VoiceModelCache.shared.listening(speaker: speaker)
+        async let fluidLoaded: Void = FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluid)
+        async let phononLoaded: Void = PhononVoice.Runtime.shared.prepare()
+        _ = try? await listening
+        await fluidLoaded
+        try? await phononLoaded
+        log.info("voice prewarm: done in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms")
+        #endif
+    }
+
     /// Downloads and prepares every missing model. `progress` gets 0...1 over
     /// the bytes still to fetch. A second call while one runs joins it.
     static func install(progress: @escaping @Sendable (Double) -> Void) async throws {
@@ -84,6 +103,9 @@ enum VoiceMode {
     /// voice mode runs.
     static func remove() async {
         await Installer.shared.cancel()
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        if #available(iOS 18.0, *) { await VoiceModelCache.shared.release() }
+        #endif
         VoiceModels.removeAll()
         SpeakerStore.remove()
     }
@@ -410,7 +432,7 @@ actor VoiceEngine {
 
     // MARK: - Lifetime
 
-    /// Loads and warms every model, takes the microphone and starts listening.
+    /// Loads and warms every model (or finds them already loaded), takes the microphone and starts listening.
     func start(config: VoiceConfig, voice: String?, emit: @escaping Emit) async throws {
         let ticket = Self.startGate.current
         func stillWanted() throws {
@@ -440,55 +462,33 @@ actor VoiceEngine {
         var speakerKinds: [SpeakerModelKind] = []
         do {
             let units = MLComputeUnits.cpuAndNeuralEngine
-            let vadConfiguration = MLModelConfiguration()
-            vadConfiguration.computeUnits = units
-            let vadModel = try MLModel(
-                contentsOf: VoiceModels.vad.directory.appendingPathComponent(VoiceModels.vadFile), configuration: vadConfiguration)
-            let vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: vadModel)
-            _ = try await vad.processStreamingChunk([Float](repeating: 0, count: VadManager.chunkSize), state: .initial())
-            VoiceMode.log.info("voice start: vad at \(Self.milliseconds(since: started), privacy: .public) ms")
+            // Every model loads at once, and is kept for the next start
+            // (VoiceModelCache, Fluid Speech Mini's and Phonon's runtimes). The
+            // load is the slow part: Core ML specialises each model when it is
+            // loaded, so a start that finds them loaded takes a moment.
+            async let listening = VoiceModelCache.shared.listening(speaker: config.speakerModel != nil)
+            async let fluidLoaded: Void = FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
+            async let phononLoaded: Void = PhononVoice.Runtime.shared.prepare()
+            let loaded = try await listening
+            await fluidLoaded
+            try await phononLoaded
+            VoiceMode.log.info("voice start: models loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
-            // The streaming encoder fails the Neural Engine compiler on device
-            // (ANECCompile FAILED) and the fallback can stall; run it on the GPU.
-            let eou = try await EouStream.load(directory: VoiceModels.eou.directory, computeUnits: .cpuAndGPU)
-            VoiceMode.log.info("voice start: eou loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
-            try stillWanted()
-            try eou.warmUp()
-            VoiceMode.log.info("voice start: eou warm at \(Self.milliseconds(since: started), privacy: .public) ms")
-            // Without Smart Turn the turn still ends, at maxSilenceMs.
-            let smartTurn = try? SmartTurn.Model(directory: VoiceModels.smartTurn.directory, computeUnits: units)
-            _ = try? smartTurn?.probability(of: [])
-            VoiceMode.log.info("voice start: smart turn at \(Self.milliseconds(since: started), privacy: .public) ms")
-            try stillWanted()
-            // Without it every voice is taken as the person's, as before.
-            // Both speaker models load whichever decides, so both keep
-            // learning and both scores are logged; one that fails is left out.
-            var embedders: [SpeakerEmbedder] = []
-            if config.speakerModel != nil {
-                for kind in SpeakerModelKind.allCases {
-                    do {
-                        let embedder = try SpeakerEmbedder(kind: kind, directory: VoiceModels.speakerModel(kind).directory)
-                        _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600))
-                        embedders.append(embedder)
-                    } catch {
-                        VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) failed to load")
-                    }
-                }
-            }
-            let speakerModels = embedders.isEmpty ? nil : SpeakerModels(embedders)
-            VoiceMode.log.info("voice start: speaker at \(Self.milliseconds(since: started), privacy: .public) ms")
-            try stillWanted()
-            await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
+            // Fresh per run: the threshold is the run's, and the state is the stream's.
+            let vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: loaded.vadModel)
+            let eou = try EouStream(models: loaded.eou)
+            let smartTurn = loaded.smartTurn
+            let speakerModels = loaded.speaker
             _ = try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)
-            VoiceMode.log.info("voice start: fluid mini at \(Self.milliseconds(since: started), privacy: .public) ms")
             heldFluid = true
-            try stillWanted()
             tts = try await PhononVoice.Runtime.shared.beginVoice(voice: voice)
-            VoiceMode.log.info("voice start: phonon loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
             heldPhonon = true
-            // Phonon conditions on its voice on the first utterance; do it now.
-            _ = try? await tts.synthesize("Ready.")
-            VoiceMode.log.info("voice start: phonon warm at \(Self.milliseconds(since: started), privacy: .public) ms")
+            // Phonon conditions on its voice on the first utterance; done once per load.
+            if await !PhononVoice.Runtime.shared.isWarm {
+                _ = try? await tts.synthesize("Ready.")
+                await PhononVoice.Runtime.shared.markWarm()
+            }
+            VoiceMode.log.info("voice start: phonon ready at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: speakerModels, config: config)
             speakerKinds = speakerModels?.kinds ?? []
@@ -916,7 +916,7 @@ actor VoiceEngine {
         send(.metrics(turnId: turnId, stages: metrics.stages))
     }
 
-    private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
+    static func milliseconds(since start: ContinuousClock.Instant) -> Double {
         let elapsed = ContinuousClock.now - start
         return Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1e15
     }

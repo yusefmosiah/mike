@@ -19,11 +19,13 @@ import {
     VOICE_UNAVAILABLE_MESSAGE,
     VoiceEngineError,
     endedMessage,
+    markVoiceUsed,
     onVoiceEvent,
     voiceCancelAnswer,
     voiceChatSupported,
     voiceEndAnswer,
     voiceInstall,
+    voicePrewarm,
     voiceSpeak,
     voiceStart,
     voiceStatus,
@@ -60,6 +62,8 @@ export function activityOf(state: VoiceEngineState): VoiceActivity {
 
 /** Without a sign of the answer this long after sending, the send failed. */
 export const SEND_TIMEOUT_MS = 4000;
+/** How long after the chat opens the voice models start loading in the background. */
+export const PREWARM_DELAY_MS = 2000;
 
 /**
  * How long the next turn waits for what was heard of the last answer to be
@@ -228,6 +232,13 @@ export function useVoiceChat({
     config,
 }: UseVoiceChatOptions): UseVoiceChatResult {
     const supported = useSyncExternalStore(subscribeNever, voiceChatSupported, () => false);
+    // Someone who has used voice mode before has its models loaded in the
+    // background shortly after the app opens, so the next start is quick.
+    useEffect(() => {
+        if (!supported) return;
+        const timer = window.setTimeout(() => voicePrewarm({ ...speakerModelConfig() }), PREWARM_DELAY_MS);
+        return () => window.clearTimeout(timer);
+    }, [supported]);
     const [phase, setPhaseState] = useState<VoicePhase>("off");
     const [engineState, setEngineState] = useState<VoiceEngineState>("listening");
     const [partial, setPartial] = useState("");
@@ -496,6 +507,7 @@ export function useVoiceChat({
             if (sessionRef.current !== session) return;
             unsubscribeRef.current = onVoiceEvent(handleEvent);
             const chosen = loadVoicePreferences().speech.voice;
+            markVoiceUsed();
             try {
                 await voiceStart({
                     config: { ...speakerModelConfig(), ...latest.current.config },

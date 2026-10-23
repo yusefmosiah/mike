@@ -65,15 +65,35 @@ final class EouStream {
     /// How many times `<EOU>` re-armed the model (metrics).
     private(set) var rearmCount = 0
 
-    /// Loads the 320 ms models from `directory` (the `320ms` folder).
-    static func load(directory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) async throws -> EouStream {
+    /// The loaded Core ML models and vocabulary. Stateless, so one set serves
+    /// any number of streams one after another (VoiceModelCache keeps it).
+    struct Models: @unchecked Sendable {
+        let encoder: MLModel
+        let decoder: MLModel
+        let joint: MLModel
+        let tokenizer: Tokenizer
+    }
+
+    /// Loads the 320 ms models from `directory` (the `320ms` folder). The three
+    /// models load side by side.
+    static func loadModels(directory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) async throws -> Models {
         let configuration = MLModelConfiguration()
         configuration.computeUnits = computeUnits
-        let encoder = try await MLModel.load(contentsOf: directory.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: configuration)
-        let decoder = try await MLModel.load(contentsOf: directory.appendingPathComponent("decoder.mlmodelc"), configuration: configuration)
-        let joint = try await MLModel.load(contentsOf: directory.appendingPathComponent("joint_decision.mlmodelc"), configuration: configuration)
+        async let encoder = MLModel.load(contentsOf: directory.appendingPathComponent("streaming_encoder.mlmodelc"), configuration: configuration)
+        async let decoder = MLModel.load(contentsOf: directory.appendingPathComponent("decoder.mlmodelc"), configuration: configuration)
+        async let joint = MLModel.load(contentsOf: directory.appendingPathComponent("joint_decision.mlmodelc"), configuration: configuration)
         let tokenizer = try Tokenizer(vocabPath: directory.appendingPathComponent("vocab.json"))
-        return try EouStream(encoder: encoder, decoder: decoder, joint: joint, tokenizer: tokenizer)
+        return try await Models(encoder: encoder, decoder: decoder, joint: joint, tokenizer: tokenizer)
+    }
+
+    /// Loads the 320 ms models from `directory` (the `320ms` folder).
+    static func load(directory: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) async throws -> EouStream {
+        try EouStream(models: await loadModels(directory: directory, computeUnits: computeUnits))
+    }
+
+    /// A stream with fresh state over already loaded models.
+    convenience init(models: Models) throws {
+        try self.init(encoder: models.encoder, decoder: models.decoder, joint: models.joint, tokenizer: models.tokenizer)
     }
 
     private init(encoder: MLModel, decoder: MLModel, joint: MLModel, tokenizer: Tokenizer) throws {

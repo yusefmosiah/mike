@@ -253,6 +253,41 @@ export async function voiceStart(options: { config: Partial<VoiceConfig>; voice?
     }
 }
 
+const USED_KEY = "mike.voice.used";
+let prewarmed = false;
+
+/**
+ * Remembers that the person has started voice mode on this phone, so the app
+ * loads its models ahead of the next start (see `voicePrewarm`).
+ */
+export function markVoiceUsed(): void {
+    try {
+        window.localStorage.setItem(USED_KEY, "1");
+    } catch {
+        // Storage can be blocked; the models then load at the tap, as before.
+    }
+}
+
+/**
+ * Asks the phone to load and warm voice mode's models in the background, so
+ * the tap finds them ready: loading them takes tens of seconds, and the
+ * phone keeps them for later starts. Once per app run, and only for someone
+ * who has used voice mode before (the models take memory). Never rejects;
+ * app builds without `voicePrewarm` ignore it.
+ */
+export function voicePrewarm(config: Partial<VoiceConfig> = {}): void {
+    if (prewarmed || !hasMethod("voicePrewarm")) return;
+    try {
+        if (window.localStorage.getItem(USED_KEY) !== "1") return;
+    } catch {
+        return;
+    }
+    prewarmed = true;
+    void call("voicePrewarm", { config }).catch(() => {
+        prewarmed = false;
+    });
+}
+
 /** Releases the audio and ends any answer being spoken. Never rejects. */
 export async function voiceStop(): Promise<void> {
     await call("voiceStop").catch(() => undefined);

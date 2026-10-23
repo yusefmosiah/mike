@@ -149,6 +149,8 @@ enum PhononVoice {
         private var installTask: Task<Void, Error>?
         private var progress = 0.0
         private var compiling = false
+        /// Whether the loaded instance has spoken once (it conditions on its voice then).
+        private var warm = false
         private var observers: [NSObjectProtocol] = []
 
         func status() -> Status {
@@ -268,6 +270,30 @@ enum PhononVoice {
             return tts
         }
 
+        /// Loads the model and has it speak once, ahead of voice mode: the first
+        /// utterance conditions it on its voice, which takes a while. Holds
+        /// nothing; the model is kept like any other load. Does nothing while
+        /// voice mode holds the voice (it is warm then).
+        func prepare() async throws {
+            guard voiceHolds == 0 || phonon == nil else { return }
+            idleTask?.cancel()
+            running += 1
+            defer {
+                running -= 1
+                scheduleUnload()
+            }
+            let tts = try await loaded()
+            if !warm {
+                _ = try? await tts.synthesize("Ready.")
+                warm = true
+            }
+        }
+
+        /// Whether the loaded instance has already spoken once.
+        var isWarm: Bool { warm && phonon != nil }
+
+        func markWarm() { warm = true }
+
         func endVoice() {
             guard voiceHolds > 0 else { return }
             voiceHolds -= 1
@@ -300,6 +326,7 @@ enum PhononVoice {
             guard force || running == 0 else { return }
             idleTask?.cancel()
             phonon = nil
+            warm = false
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []
         }
