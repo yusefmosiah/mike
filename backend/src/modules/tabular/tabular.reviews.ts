@@ -27,7 +27,7 @@ import {
 } from "../../lib/resourcePeople";
 import { attachActiveVersionPaths } from "../../lib/documentVersions";
 import { TABULAR_MODEL_REQUIRED_DETAIL } from "../../lib/modelSelection";
-import { failure, internalFailure } from "../../lib/serviceResult";
+import { failure, internalFailure, type ServiceResult } from "../../lib/serviceResult";
 import {
     buildTabularReviewIdsOverviewRpcArgs,
     buildTabularReviewsOverviewRpcArgs,
@@ -1001,6 +1001,87 @@ export async function updateTabularReview(
     }
 
     return { ok: true, data: updatedReview as Record<string, unknown> };
+}
+
+/**
+ * Whether this person may add documents to a review, and where the review
+ * lives: what an upload into the review checks before its session opens. A
+ * review the person cannot see is "not found", one they can see but not
+ * change is refused.
+ */
+export async function reviewUploadAccess(
+    db: Db,
+    args: { reviewId: string; userId: string; userEmail: string | undefined },
+): Promise<ServiceResult<{ projectId: string | null }>> {
+    const { data: review, error } = await db
+        .from("tabular_reviews")
+        .select("id, user_id, project_id, org_id")
+        .eq("id", args.reviewId)
+        .maybeSingle();
+    if (error) return internalFailure(error);
+    if (!review) return failure("not_found", "Review not found");
+    const access = await ensureReviewAccess(review, args.userId, args.userEmail, db);
+    if (!access.ok) return failure("not_found", "Review not found");
+    if (!can(access.projectRole, "content.edit")) {
+        return failure("forbidden", "Only a review editor can add documents");
+    }
+    return { ok: true, data: { projectId: (review.project_id as string | null) ?? null } };
+}
+
+/** Attempts at adding a document before giving up on a review that keeps changing. */
+const ATTACH_ATTEMPTS = 5;
+
+/**
+ * Add one uploaded document to a review: the last step of an upload into the
+ * review, run by the upload worker, so it happens even when the person closed
+ * the app while the file was processed. Adding a document already there does
+ * nothing, so a retried job is safe. The person's access is checked again:
+ * it may have changed since the upload began. False when the review is gone
+ * or no longer theirs to change.
+ */
+export async function attachDocumentToReview(
+    db: Db,
+    args: { reviewId: string; documentId: string; userId: string; userEmail: string | undefined },
+): Promise<boolean> {
+    for (let attempt = 1; attempt <= ATTACH_ATTEMPTS; attempt += 1) {
+        const { data: review, error } = await db
+            .from("tabular_reviews")
+            .select("id, user_id, project_id, org_id, document_ids, columns_config, document_grouping")
+            .eq("id", args.reviewId)
+            .maybeSingle();
+        if (error) throw new Error(error.message);
+        if (!review) return false;
+        const access = await ensureReviewAccess(review, args.userId, args.userEmail, db);
+        if (!access.ok || !can(access.projectRole, "content.edit")) return false;
+        const current = Array.isArray(review.document_ids) ? (review.document_ids as string[]) : [];
+        if (current.includes(args.documentId)) return true;
+        const documentIds = [...current, args.documentId];
+        // Only over the list read above: a concurrent change to it (another
+        // upload, the person's own edit) makes this a no-op, and the loop
+        // reads again rather than overwriting it.
+        const unchanged = db
+            .from("tabular_reviews")
+            .update({ document_ids: documentIds, updated_at: new Date().toISOString() })
+            .eq("id", args.reviewId);
+        const { data: updated, error: updateError } = await (review.document_ids == null
+            ? unchanged.is("document_ids", null)
+            : unchanged.eq("document_ids", JSON.stringify(review.document_ids))
+        )
+            .select("id")
+            .maybeSingle();
+        if (updateError) throw new Error(updateError.message);
+        if (!updated) continue;
+        await rebuildRowsForReview(
+            db,
+            args.reviewId,
+            args.userId,
+            documentIds,
+            (review.columns_config ?? []) as Column[],
+            normalizeGrouping(review.document_grouping),
+        );
+        return true;
+    }
+    throw new Error("The review kept changing while a document was added to it.");
 }
 
 export async function deleteTabularReview(

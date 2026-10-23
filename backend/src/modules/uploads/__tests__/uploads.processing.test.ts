@@ -27,7 +27,12 @@ const mocks = vi.hoisted(() => ({
   enqueueStorageCleanup: vi.fn(),
   requestDocumentCleanupDelivery: vi.fn(),
   reportError: vi.fn((_error: unknown, _context?: unknown) => null),
+  sealStagedFiles: vi.fn(async (_db: unknown, _session: unknown) => true),
+  attachDocumentToReview: vi.fn(async (_db: unknown, _args: unknown) => true),
 }));
+
+vi.mock("../uploads.sessions", () => ({ sealStagedFiles: mocks.sealStagedFiles }));
+vi.mock("../../tabular/tabular.service", () => ({ attachDocumentToReview: mocks.attachDocumentToReview }));
 
 vi.mock("../../../lib/observability/sentry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/observability/sentry")>()),
@@ -313,6 +318,29 @@ describe("upload processing", () => {
       filename: "contract.pdf",
       active_version_number: 1,
     });
+  });
+
+  it("adds a document uploaded into a review to that review, and keeps the upload if that fails", async () => {
+    const document = { id: baseFile.resource_id, user_id: baseSession.user_id, folder_id: null, library_folder_id: null };
+    const session = {
+      ...baseSession,
+      destination: { scope: "standalone", tabular_review_id: "55555555-5555-4555-8555-555555555555" },
+    };
+
+    await processUploadFile(fakeDb({ documents: [{ data: document, error: null }] }) as never, session, baseFile);
+    expect(mocks.attachDocumentToReview).toHaveBeenCalledWith(expect.anything(), {
+      reviewId: "55555555-5555-4555-8555-555555555555",
+      documentId: baseFile.resource_id,
+      userId: baseSession.user_id,
+      userEmail: baseSession.user_email,
+    });
+
+    mocks.attachDocumentToReview.mockRejectedValueOnce(new Error("database unavailable"));
+    const result = await processUploadFile(fakeDb({ documents: [{ data: document, error: null }] }) as never, session, baseFile);
+    expect(result).toMatchObject({ id: baseFile.resource_id, active_version_number: 1 });
+
+    await processUploadFile(fakeDb({ documents: [{ data: document, error: null }] }) as never, baseSession, baseFile);
+    expect(mocks.attachDocumentToReview).toHaveBeenCalledTimes(2);
   });
 
   it("stores an image cleaned of its metadata, never a copy of the original", async () => {
@@ -1026,6 +1054,29 @@ describe("upload processing", () => {
       consoleWarn.mockRestore();
       consoleLog.mockRestore();
     }
+  });
+
+  it("seals what an abandoned session uploaded before expiring it, and keeps one it could not settle", async () => {
+    mocks.sealStagedFiles.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const db = scriptedDb([
+      { data: [{ id: "session-done" }, { id: "session-unreachable" }], error: null },
+      { error: null },
+    ]);
+
+    await cleanupUploadSessions(db as never);
+
+    expect(mocks.sealStagedFiles.mock.calls.map(([, session]) => (session as { id: string }).id)).toEqual([
+      "session-done",
+      "session-unreachable",
+    ]);
+    // One expiry, for the session that was settled.
+    const expired = db.calls.filter(
+      (call) =>
+        call.table === "upload_sessions" &&
+        call.operation === "update" &&
+        (call.payload as { status?: string }).status === "expired",
+    );
+    expect(expired).toHaveLength(1);
   });
 
   it("expires stale sessions, removes temporary objects, and deletes retained rows", async () => {

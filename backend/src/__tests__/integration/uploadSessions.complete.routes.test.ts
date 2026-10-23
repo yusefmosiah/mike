@@ -125,7 +125,10 @@ vi.mock("../../lib/storage", () => ({
   headFile: mocks.headFile,
 }));
 
+import { createDb } from "../../lib/db";
 import { uploadSessionsRouter } from "../../modules/uploads/uploads.routes";
+import { sealStagedFiles } from "../../modules/uploads/uploads.sessions";
+import type { UploadSessionRow } from "../../modules/uploads/uploads.shared";
 
 const app = express();
 app.use(express.json());
@@ -556,5 +559,49 @@ describe("upload session completion", () => {
 
     expect(response.status).toBe(204);
     expect(mocks.session).toMatchObject({ status: "cancelled" });
+  });
+
+  describe("when the app never confirmed an upload", () => {
+    const seal = () => sealStagedFiles(createDb(), mocks.session as unknown as UploadSessionRow);
+
+    it("seals and queues a file whose bytes arrived, as its completion would have", async () => {
+      mocks.headFile
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ size: 4, etag: "staged-etag", contentType: "application/pdf" })
+        .mockResolvedValueOnce({ size: 4, etag: "sealed-etag", contentType: "application/pdf" });
+
+      expect(await seal()).toBe(true);
+      expect(mocks.copyFile).toHaveBeenCalledWith("staging-key", "sealed-key");
+      expect(mocks.rpc).toHaveBeenCalledWith("queue_upload_session_file_processing", {
+        target_session_id: "22222222-2222-4222-8222-222222222222",
+        target_user_id: "11111111-1111-4111-8111-111111111111",
+        target_file_id: "33333333-3333-4333-8333-333333333333",
+      });
+      expect(mocks.files[0]).toMatchObject({ status: "uploaded", observed_size_bytes: 4 });
+    });
+
+    it("leaves a file whose bytes never arrived to expire with the session", async () => {
+      mocks.headFile.mockResolvedValue(null);
+
+      expect(await seal()).toBe(true);
+      expect(mocks.copyFile).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalledWith("queue_upload_session_file_processing", expect.anything());
+      expect(mocks.files[0]).toMatchObject({ status: "pending_upload" });
+    });
+
+    it("keeps the session for the next sweep when storage cannot be reached", async () => {
+      mocks.headFile.mockRejectedValue(new StorageOperationError("head"));
+
+      expect(await seal()).toBe(false);
+      expect(mocks.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it("keeps the session while another request is still sealing a file", async () => {
+      mocks.files[0]!.status = "verifying";
+      mocks.files[0]!.updated_at = new Date().toISOString();
+
+      expect(await seal()).toBe(false);
+      expect(mocks.headFile).not.toHaveBeenCalled();
+    });
   });
 });

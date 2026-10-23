@@ -2977,9 +2977,17 @@ export async function uploadReviewDocument(
         columnsConfig?: { index: number; name: string; prompt: string }[];
     },
 ): Promise<Document> {
-    const uploaded = options?.projectId
-        ? await uploadProjectDocument(options.projectId, file)
-        : await uploadStandaloneDocument(file);
+    // The upload names the review, so the server adds the document to it once
+    // processed, even if the app is closed before this call returns.
+    const uploaded = firstUploadResult(
+        await uploadFilesWithSession<Document>({
+            purpose: "document_create",
+            destination: options?.projectId
+                ? { scope: "project", project_id: options.projectId, tabular_review_id: reviewId }
+                : { scope: "standalone", tabular_review_id: reviewId },
+            files: [{ file }],
+        }),
+    );
 
     await updateTabularReview(reviewId, {
         columns_config: options?.columnsConfig,
