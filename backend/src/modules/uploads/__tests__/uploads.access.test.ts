@@ -8,6 +8,9 @@ const accessMocks = vi.hoisted(() => ({
 
 vi.mock("../../../lib/access", () => accessMocks);
 
+const reviewMocks = vi.hoisted(() => ({ reviewUploadAccess: vi.fn() }));
+vi.mock("../../tabular/tabular.service", () => reviewMocks);
+
 import { validateDestinationAccess } from "../uploads.access";
 
 function dbWith(rows: Record<string, unknown>) {
@@ -72,6 +75,40 @@ describe("upload destination authorization", () => {
       dbWith({}) as never,
     );
     expect(rejection(outcome).status).toBe(404);
+  });
+
+  describe("an upload into a tabular review", () => {
+    const REVIEW = "66666666-6666-4666-8666-666666666666";
+    const upload = (destination: Record<string, unknown>) =>
+      validateDestinationAccess(
+        { purpose: "document_create", destination, expected_total_bytes: 4, files: [file] } as never,
+        "11111111-1111-4111-8111-111111111111",
+        "user@example.com",
+        dbWith({}) as never,
+      );
+
+    it("is allowed into a standalone review the person may change", async () => {
+      reviewMocks.reviewUploadAccess.mockResolvedValue({ ok: true, data: { projectId: null } });
+      expect(await upload({ scope: "standalone", tabular_review_id: REVIEW })).toEqual({ ok: true });
+      expect(reviewMocks.reviewUploadAccess).toHaveBeenCalledWith(expect.anything(), {
+        reviewId: REVIEW,
+        userId: "11111111-1111-4111-8111-111111111111",
+        userEmail: "user@example.com",
+      });
+    });
+
+    it("is refused for a review the person may only view, and hidden for one they cannot see", async () => {
+      reviewMocks.reviewUploadAccess.mockResolvedValueOnce({ ok: false, kind: "forbidden", detail: "Only a review editor can add documents" });
+      expect(rejection(await upload({ scope: "standalone", tabular_review_id: REVIEW })).status).toBe(403);
+      reviewMocks.reviewUploadAccess.mockResolvedValueOnce({ ok: false, kind: "not_found", detail: "Review not found" });
+      expect(rejection(await upload({ scope: "standalone", tabular_review_id: REVIEW })).status).toBe(404);
+    });
+
+    it("is refused when the review lives somewhere other than the documents", async () => {
+      reviewMocks.reviewUploadAccess.mockResolvedValue({ ok: true, data: { projectId: "77777777-7777-4777-8777-777777777777" } });
+      expect(rejection(await upload({ scope: "standalone", tabular_review_id: REVIEW })).status).toBe(400);
+      expect(accessMocks.checkProjectAccess).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects a document the user cannot edit", async () => {

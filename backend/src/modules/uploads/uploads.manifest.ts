@@ -43,13 +43,19 @@ const clientFileSchema = z
   })
   .strict();
 
+// An upload into a tabular review names it, so the worker adds each new
+// document to the review once it exists, whether or not the person who
+// dropped the files still has the app open.
+const tabularReviewId = z.string().uuid().optional();
+
 const documentDestinationSchema = z.discriminatedUnion("scope", [
-  z.object({ scope: z.literal("standalone") }).strict(),
+  z.object({ scope: z.literal("standalone"), tabular_review_id: tabularReviewId }).strict(),
   z
     .object({
       scope: z.literal("project"),
       project_id: z.string().uuid(),
       folder_id: z.string().uuid().nullable().optional(),
+      tabular_review_id: tabularReviewId,
     })
     .strict(),
   z

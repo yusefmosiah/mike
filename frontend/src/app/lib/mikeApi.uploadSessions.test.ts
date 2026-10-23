@@ -869,7 +869,7 @@ describe("direct upload sessions", () => {
     });
 
     it("adds a session-uploaded document to a tabular review", async () => {
-        installSuccessfulSessionServer();
+        const server = installSuccessfulSessionServer();
         const uploaded = await uploadReviewDocument(
             "review-1",
             new File(["pdf"], "contract.pdf", { type: "application/pdf" }),
@@ -883,6 +883,12 @@ describe("direct upload sessions", () => {
         );
 
         expect(uploaded).toEqual({ id: "result-contract.pdf" });
+        // The server adds it to the review itself, should the app close first.
+        expect(server.manifests[0].destination).toEqual({
+            scope: "project",
+            project_id: "project-1",
+            tabular_review_id: "review-1",
+        });
         const patchCall = fetchMock.mock.calls.find(
             ([url, init]) =>
                 String(url) === `${API_URL}/tabular-review/review-1` &&
@@ -896,7 +902,7 @@ describe("direct upload sessions", () => {
     });
 
     it("adds a standalone session upload to a new tabular review", async () => {
-        installSuccessfulSessionServer();
+        const server = installSuccessfulSessionServer();
 
         const uploaded = await uploadReviewDocument(
             "review-1",
@@ -906,6 +912,10 @@ describe("direct upload sessions", () => {
         );
 
         expect(uploaded).toEqual({ id: "result-standalone.pdf" });
+        expect(server.manifests[0].destination).toEqual({
+            scope: "standalone",
+            tabular_review_id: "review-1",
+        });
         const patchCall = fetchMock.mock.calls.find(
             ([url, init]) =>
                 String(url) === `${API_URL}/tabular-review/review-1` &&

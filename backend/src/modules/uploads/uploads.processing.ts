@@ -2,6 +2,8 @@ import {
   createDocumentVersion,
   updateDocumentVersion,
 } from "../documents/documents.service";
+import { attachDocumentToReview } from "../tabular/tabular.service";
+import { safeError } from "../../lib/safeError";
 // Background processing for sealed upload-session files.
 //
 // The upload protocol has two halves: the HTTP control plane in
@@ -48,6 +50,8 @@ import {
 } from "../../lib/storage";
 import { createDb, type Db } from "../../lib/db";
 import { UPLOAD_VERIFICATION_LEASE_SECONDS } from "./uploads.manifest";
+import { sealStagedFiles } from "./uploads.sessions";
+import type { UploadSessionRow as SessionRow } from "./uploads.shared";
 
 type UploadSessionRow = {
   id: string;
@@ -524,6 +528,9 @@ async function processCreatedDocument(
     documentId,
   });
 
+  const reviewId = destination.tabular_review_id as string | undefined;
+  if (reviewId) await attachToReview(db, session, reviewId, documentId);
+
   return {
     ...document,
     filename: file.filename,
@@ -538,6 +545,28 @@ async function processCreatedDocument(
     page_count: pageCount,
     active_version_number: 1,
   };
+}
+
+/**
+ * Add a document uploaded into a tabular review to that review. The document
+ * exists by now, so a failure here does not fail the upload (a retried job
+ * would only redo the document): the person still finds the document where
+ * they uploaded it, and can add it to the review by hand.
+ */
+async function attachToReview(db: Db, session: UploadSessionRow, reviewId: string, documentId: string) {
+  try {
+    const attached = await attachDocumentToReview(db, {
+      reviewId,
+      documentId,
+      userId: session.user_id,
+      userEmail: session.user_email ?? undefined,
+    });
+    if (!attached) {
+      console.warn("[upload-worker] review gone or no longer editable; document not added", { sessionId: session.id });
+    }
+  } catch (error) {
+    console.error("[upload-worker] adding a document to its review failed", { sessionId: session.id, ...safeError(error) });
+  }
 }
 
 async function processNewDocumentVersion(
@@ -1069,19 +1098,39 @@ export async function processUploadJob(
   await refreshUploadSessionStatus(db, typedSession.id);
 }
 
+/** Sessions past their deadline that one sweep seals and expires. */
+const EXPIRING_SESSIONS_PER_SWEEP = 50;
+
 export async function cleanupUploadSessions(db: Db): Promise<void> {
   const now = new Date();
   const nowIso = now.toISOString();
-  const { error: expireError } = await db
+  // A session past its deadline may hold files whose bytes arrived although
+  // the app never confirmed them (it was closed mid-upload). Those are sealed
+  // and queued first; only what is still missing expires with the session.
+  // Sealing a file slides the deadline forward, and queueing every file
+  // moves the session on to processing, so either keeps it from expiring.
+  const { data: expiring, error: expiringError } = await db
     .from("upload_sessions")
-    .update({
-      status: "expired",
-      error_code: "session_expired",
-      updated_at: nowIso,
-    })
+    .select("*")
     .eq("status", "pending_upload")
-    .lt("expires_at", nowIso);
-  if (expireError) throw expireError;
+    .lt("expires_at", nowIso)
+    .order("expires_at", { ascending: true })
+    .limit(EXPIRING_SESSIONS_PER_SWEEP);
+  if (expiringError) throw expiringError;
+  for (const session of (expiring ?? []) as SessionRow[]) {
+    if (!(await sealStagedFiles(db, session))) continue;
+    const { error: expireError } = await db
+      .from("upload_sessions")
+      .update({
+        status: "expired",
+        error_code: "session_expired",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", session.id)
+      .eq("status", "pending_upload")
+      .lt("expires_at", nowIso);
+    if (expireError) throw expireError;
+  }
 
   const verificationCutoff = new Date(
     now.getTime() - UPLOAD_VERIFICATION_LEASE_SECONDS * 1000,

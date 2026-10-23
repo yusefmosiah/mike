@@ -27,6 +27,7 @@ import {
   StorageOperationError,
 } from "../../lib/storage";
 import type { Db } from "../../lib/db";
+import { safeError } from "../../lib/safeError";
 import {
   uploadSessionExpiresAt,
   UPLOAD_URL_TTL_SECONDS,
@@ -342,6 +343,36 @@ async function completeSessionFile(
   await extendSessionExpiry(db, session.id);
   await refreshSessionStatus(db, session.id);
   return "resolved";
+}
+
+/**
+ * Before cleanup expires a session nobody finished: seal and queue each file
+ * whose bytes reached storage but whose `complete` call never arrived (the
+ * app was closed or killed between the two), exactly as that call would
+ * have. False when the session must not expire yet: storage could not be
+ * reached, or another request is still sealing one of its files. The next
+ * sweep tries again, rather than deleting bytes that may be whole.
+ */
+export async function sealStagedFiles(
+  db: Db,
+  session: UploadSessionRow,
+): Promise<boolean> {
+  try {
+    const files = await loadSessionFiles(db, session.id);
+    let settled = true;
+    for (const file of files) {
+      if (file.status !== "pending_upload" && file.status !== "verifying") continue;
+      const result = await completeSessionFile(db, session, file, session.user_id, false);
+      if (result === "in_progress") settled = false;
+    }
+    return settled;
+  } catch (error) {
+    console.error("[upload-sessions] sealing an abandoned session failed", {
+      sessionId: session.id,
+      ...safeError(error),
+    });
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

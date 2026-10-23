@@ -42,6 +42,13 @@ describe("parseUploadSessionRequest", () => {
     expect(parseUploadSessionRequest(request, USER_ID, SESSION_ID).destination).toMatchObject({ expected_content_sha256: "a".repeat(64) });
     expect(() => parseUploadSessionRequest({ ...request, destination: { ...request.destination, expected_content_sha256: "bad" } }, USER_ID, SESSION_ID)).toThrow(UploadSessionValidationError);
   });
+  it("accepts a review to add new documents to, only where reviews hold them", () => {
+    const review = { tabular_review_id: SESSION_ID };
+    expect(parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "standalone", ...review } }, USER_ID, SESSION_ID).destination).toMatchObject(review);
+    expect(parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "project", project_id: USER_ID, ...review } }, USER_ID, SESSION_ID).destination).toMatchObject(review);
+    expect(() => parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "library", library_kind: "file", ...review } }, USER_ID, SESSION_ID)).toThrow(UploadSessionValidationError);
+    expect(() => parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "standalone", tabular_review_id: "not-a-uuid" } }, USER_ID, SESSION_ID)).toThrow(UploadSessionValidationError);
+  });
   it("accepts exactly 50 files and derives server-owned storage metadata", () => {
     const result = parseUploadSessionRequest(
       documentRequest(MAX_UPLOAD_SESSION_FILES),

@@ -6,6 +6,7 @@
 // only here.
 
 export {
+    attachDocumentToReview,
     createRowsForReview,
     createTabularReview,
     deleteTabularReview,
@@ -17,6 +18,7 @@ export {
     listTabularReviews,
     normalizeGrouping,
     rebuildRowsForReview,
+    reviewUploadAccess,
     revokeTabularReviewAccess,
     syncCellsForReviewRows,
     updateTabularReview,

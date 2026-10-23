@@ -17,6 +17,7 @@ import {
   ensureDocAccess,
 } from "../../lib/access";
 import type { Db } from "../../lib/db";
+import { reviewUploadAccess } from "../tabular/tabular.service";
 import type { ParsedUploadSessionRequest } from "./uploads.manifest";
 import {
   failure,
@@ -40,6 +41,23 @@ export async function validateDestinationAccess(
   const destination = manifest.destination as Record<string, unknown>;
 
   if (manifest.purpose === "document_create") {
+    const reviewId = destination.tabular_review_id as string | undefined;
+    if (reviewId) {
+      // The review must take documents from this person, and live where the
+      // documents will: a project review takes that project's documents, a
+      // standalone review standalone ones.
+      const review = await reviewUploadAccess(db, { reviewId, userId, userEmail });
+      if (!review.ok) {
+        if (review.kind === "error") return internalFailure(review.error);
+        return review.kind === "forbidden"
+          ? failure(403, { detail: review.detail })
+          : failure(404, { detail: "Review not found" });
+      }
+      const projectId = destination.scope === "project" ? (destination.project_id as string) : null;
+      if (review.data.projectId !== projectId) {
+        return failure(400, { detail: "The review is not in this upload's project" });
+      }
+    }
     if (destination.scope === "standalone") return { ok: true };
     if (destination.scope === "workflow") {
       const workflowId = destination.workflow_id as string;
