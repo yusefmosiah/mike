@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { displayCornerRadius, updateDisplayEdge, watchDisplayEdge } from "./displayEdge";
+import { composerControlsDrop, displayCornerRadius, updateDisplayEdge, watchDisplayEdge } from "./displayEdge";
 
 let inset = 34;
 
@@ -19,6 +19,7 @@ afterEach(() => {
     vi.unstubAllGlobals();
     delete document.documentElement.dataset.displayEdge;
     document.documentElement.style.removeProperty("--display-corner-radius");
+    document.documentElement.style.removeProperty("--chat-controls-drop");
 });
 
 const root = () => document.documentElement;
@@ -32,11 +33,32 @@ describe("displayCornerRadius", () => {
     });
 });
 
+describe("composerControlsDrop", () => {
+    it("drops the controls until the send button is 12px from the composer's curved corner", () => {
+        // A 62pt display corner: the composer's corner is 56. The button's
+        // centre comes 28 from the curve's centre, 17 across and 22 down, so
+        // its bottom sits about 18 above the composer's instead of 23.
+        expect(composerControlsDrop(62)).toBe(5);
+        expect(composerControlsDrop(55)).toBe(8.5);
+        expect(composerControlsDrop(53.33)).toBe(9);
+    });
+
+    it("stops 12px above the bottom where the corner is too small to matter", () => {
+        expect(composerControlsDrop(47.33)).toBe(11);
+        expect(composerControlsDrop(39)).toBe(11);
+    });
+
+    it("never raises the controls", () => {
+        expect(composerControlsDrop(200)).toBe(0);
+    });
+});
+
 describe("updateDisplayEdge", () => {
     it("marks the iPhone app running edge to edge, with its corner radius", () => {
         updateDisplayEdge();
         expect(root().dataset.displayEdge).toBe("");
         expect(root().style.getPropertyValue("--display-corner-radius")).toBe("55px");
+        expect(root().style.getPropertyValue("--chat-controls-drop")).toBe("8.5px");
         expect(document.body.children).toHaveLength(0);
     });
 
@@ -59,6 +81,7 @@ describe("updateDisplayEdge", () => {
         updateDisplayEdge();
         expect(root().dataset.displayEdge).toBeUndefined();
         expect(root().style.getPropertyValue("--display-corner-radius")).toBe("");
+        expect(root().style.getPropertyValue("--chat-controls-drop")).toBe("");
     });
 
     it("stays marked once marked, whatever the inset reads later", () => {

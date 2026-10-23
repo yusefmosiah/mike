@@ -8,8 +8,9 @@
  * keyboard starts to move (MIKE_KEYBOARD_EVENTS). With it the page
  *
  * - marks the document root `data-keyboard="open"` and sets
- *   `--keyboard-overlap`, so the composer can be shaded under the keyboard's
- *   edge (globals.css); and
+ *   `--keyboard-overlap` and `--keyboard-duration`, so the composer can be
+ *   shaded under the keyboard's edge and its controls rise clear of it in
+ *   the keyboard's time (globals.css); and
  * - moves the chat composer with the keyboard. The web view takes its new
  *   size at once, which would make the composer jump while the keyboard
  *   slides; instead the composer starts where it was and glides into place
@@ -75,6 +76,7 @@ export function watchNativeKeyboard(): () => void {
         if (detail.open) root.dataset.keyboard = "open";
         else delete root.dataset.keyboard;
         root.style.setProperty("--keyboard-overlap", `${detail.open ? detail.overlap : 0}px`);
+        root.style.setProperty("--keyboard-duration", `${detail.duration}ms`);
         const now = performance.now();
         keyboard = { at: now, duration: detail.duration };
         if (move && now - move.at > PAIRING_MS) move = null;
@@ -99,5 +101,6 @@ export function watchNativeKeyboard(): () => void {
         window.removeEventListener("resize", onResize);
         delete root.dataset.keyboard;
         root.style.removeProperty("--keyboard-overlap");
+        root.style.removeProperty("--keyboard-duration");
     };
 }

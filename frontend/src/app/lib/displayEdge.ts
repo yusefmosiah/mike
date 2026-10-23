@@ -29,6 +29,37 @@ export function displayCornerRadius(width: number, height: number): number {
     return CORNER_RADIUS_BY_SCREEN[key] ?? DEFAULT_CORNER_RADIUS;
 }
 
+// The composer's geometry, edge to edge (globals.css).
+/** Its distance from the edges of the screen (--chat-composer-gap). */
+const COMPOSER_GAP = 6;
+/** The send button's distance from the composer's right and bottom edges while the keyboard is up. */
+const CONTROLS_INSET = 23;
+/** Half the round send button's width. */
+const SEND_BUTTON_RADIUS = 16;
+/** How close the send button comes to the composer's curved corner at rest. */
+const CORNER_CLEARANCE = 12;
+
+/**
+ * How far the composer's controls drop at rest, below where they sit while
+ * the keyboard is up (the keyboard covers the composer's bottom band, so
+ * there they sit above it). At rest the send button moves down until it is
+ * CORNER_CLEARANCE from the composer's bottom-right curve, which is
+ * concentric with the display's corner.
+ *
+ * The curve's centre is `inner` from the composer's right and bottom edges,
+ * less the button's radius. The button's centre stays `CONTROLS_INSET` in
+ * from the right, and comes `inner - CORNER_CLEARANCE` from the curve's
+ * centre.
+ */
+export function composerControlsDrop(cornerRadius: number): number {
+    const inner = cornerRadius - COMPOSER_GAP - SEND_BUTTON_RADIUS;
+    const across = Math.max(0, inner - CONTROLS_INSET);
+    const reach = inner - CORNER_CLEARANCE;
+    const below = Math.sqrt(Math.max(0, reach * reach - across * across));
+    const bottomInset = Math.max(CORNER_CLEARANCE, inner - below);
+    return Math.max(0, Math.round((CONTROLS_INSET - bottomInset) * 2) / 2);
+}
+
 type CapacitorGlobal = { getPlatform?: () => string };
 
 function inIosApp(): boolean {
@@ -58,14 +89,14 @@ export function updateDisplayEdge(): void {
     const root = document.documentElement;
     const marked = root.dataset.displayEdge !== undefined;
     if (inIosApp() && (marked || bottomInset() > 0)) {
+        const radius = displayCornerRadius(window.screen.width, window.screen.height);
         root.dataset.displayEdge = "";
-        root.style.setProperty(
-            "--display-corner-radius",
-            `${displayCornerRadius(window.screen.width, window.screen.height)}px`,
-        );
+        root.style.setProperty("--display-corner-radius", `${radius}px`);
+        root.style.setProperty("--chat-controls-drop", `${composerControlsDrop(radius)}px`);
     } else {
         delete root.dataset.displayEdge;
         root.style.removeProperty("--display-corner-radius");
+        root.style.removeProperty("--chat-controls-drop");
     }
 }
 

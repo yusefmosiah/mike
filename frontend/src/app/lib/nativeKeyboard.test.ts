@@ -33,12 +33,14 @@ describe("the iPhone app's keyboard", () => {
         keyboard(true);
         expect(document.documentElement.dataset.keyboard).toBe("open");
         expect(document.documentElement.style.getPropertyValue("--keyboard-overlap")).toBe("24px");
+        expect(document.documentElement.style.getPropertyValue("--keyboard-duration")).toBe("300ms");
         keyboard(false);
         expect(document.documentElement.dataset.keyboard).toBeUndefined();
         expect(document.documentElement.style.getPropertyValue("--keyboard-overlap")).toBe("0px");
         window.dispatchEvent(new CustomEvent("mikekeyboard"));
         stop();
         expect(document.documentElement.style.getPropertyValue("--keyboard-overlap")).toBe("");
+        expect(document.documentElement.style.getPropertyValue("--keyboard-duration")).toBe("");
     });
 
     it("glides the composer from where it was, in the keyboard's remaining time", () => {
