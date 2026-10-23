@@ -63,6 +63,9 @@ maybeDescribe("adding an uploaded document to its review", () => {
     it("keeps both of two documents added at the same moment", async () => {
         expect(await Promise.all([attach(documentIds[1]!), attach(documentIds[2]!)])).toEqual([true, true]);
         expect((await reviewDocuments()).sort()).toEqual([...documentIds].sort());
+        // One row for each, with its cells: neither rebuild undid the other's.
+        const { data: rows } = await db.from("tabular_review_rows").select("document_id").eq("review_id", reviewId);
+        expect((rows ?? []).map((row: { document_id: string }) => row.document_id).sort()).toEqual([...documentIds].sort());
     });
 
     it("adds nothing for someone who cannot change the review", async () => {

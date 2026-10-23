@@ -252,7 +252,40 @@ export async function createRowsForReview(
     }
 }
 
+/** Each review's row rebuild in progress in this process, which the next waits for. */
+const rowRebuilds = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `rebuild` once every earlier rebuild of this review's rows in this
+ * process has ended. A rebuild deletes the review's rows and creates them
+ * again; two at once would add cells to rows the other deleted. (Uploads into
+ * one review are attached by one process's upload workers.)
+ */
+function oneRebuildAtATime<T>(reviewId: string, rebuild: () => Promise<T>): Promise<T> {
+    const previous = rowRebuilds.get(reviewId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(rebuild);
+    const settled = next.catch(() => undefined);
+    rowRebuilds.set(reviewId, settled);
+    void settled.then(() => {
+        if (rowRebuilds.get(reviewId) === settled) rowRebuilds.delete(reviewId);
+    });
+    return next;
+}
+
 export async function rebuildRowsForReview(
+    db: Db,
+    reviewId: string,
+    userId: string,
+    documentIds: string[],
+    columns: Column[],
+    grouping: DocumentGrouping,
+): Promise<void> {
+    await oneRebuildAtATime(reviewId, () =>
+        replaceRows(db, reviewId, userId, documentIds, columns, grouping),
+    );
+}
+
+async function replaceRows(
     db: Db,
     reviewId: string,
     userId: string,
@@ -1071,15 +1104,27 @@ export async function attachDocumentToReview(
             .maybeSingle();
         if (updateError) throw new Error(updateError.message);
         if (!updated) continue;
-        await rebuildRowsForReview(
-            db,
-            args.reviewId,
-            args.userId,
-            documentIds,
-            (review.columns_config ?? []) as Column[],
-            normalizeGrouping(review.document_grouping),
-        );
-        return true;
+        // From the review as stored when this rebuild's turn comes: another
+        // upload may have added a document since, and the last rebuild to run
+        // must show every one.
+        return oneRebuildAtATime(args.reviewId, async () => {
+            const { data: latest, error: latestError } = await db
+                .from("tabular_reviews")
+                .select("document_ids, columns_config, document_grouping")
+                .eq("id", args.reviewId)
+                .maybeSingle();
+            if (latestError) throw new Error(latestError.message);
+            if (!latest) return false;
+            await replaceRows(
+                db,
+                args.reviewId,
+                args.userId,
+                (latest.document_ids ?? []) as string[],
+                (latest.columns_config ?? []) as Column[],
+                normalizeGrouping(latest.document_grouping),
+            );
+            return true;
+        });
     }
     throw new Error("The review kept changing while a document was added to it.");
 }
