@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Message } from "@/app/components/shared/types";
+import { useScreenWakeLock } from "@/app/hooks/useScreenWakeLock";
 import { recordSpokenAnswer } from "@/app/lib/mikeApi";
 import { isPhononVoice } from "@/app/lib/voice/browserModels.spec";
 import { ClauseCutter, type Clause } from "@/app/lib/voice/clauses";
@@ -250,6 +251,8 @@ export function useVoiceChat({
     const [queued, setQueued] = useState(0);
 
     const [announcement, setAnnouncement] = useState("");
+    // Keep the phone awake from the tap, the models loading included.
+    useScreenWakeLock(phase !== "off");
     const phaseRef = useRef<VoicePhase>("off");
     const setPhase = useCallback((next: VoicePhase) => {
         if (next === "on" && phaseRef.current !== "on") setAnnouncement("Voice mode on");

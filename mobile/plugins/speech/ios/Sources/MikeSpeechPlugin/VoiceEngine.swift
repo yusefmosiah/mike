@@ -522,6 +522,7 @@ actor VoiceEngine {
         }
 
         running = true
+        ScreenAwake.set("voice mode", true)
         graphEpoch = 0
         micDrops = drops
         self.emit = emit
@@ -561,6 +562,7 @@ actor VoiceEngine {
         // behind this stop can run while it awaits (actor reentrancy), and
         // must find nothing of this run left to touch, its emit included.
         running = false
+        ScreenAwake.set("voice mode", false)
         generation += 1
         listenTask?.cancel()
         monitorTask?.cancel()

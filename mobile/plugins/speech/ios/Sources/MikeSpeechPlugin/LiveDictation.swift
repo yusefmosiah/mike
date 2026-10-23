@@ -313,7 +313,9 @@ final class MicrophoneSource: LiveAudioSource, @unchecked Sendable {
 actor LiveDictation {
     static let shared = LiveDictation()
 
-    private var session: LiveDictationSession?
+    private var session: LiveDictationSession? {
+        didSet { ScreenAwake.set("live dictation", session != nil) }
+    }
     /// The text of a dictation that ended on its own (an interruption), until
     /// the web app collects it with `stop`.
     private var endedText: String?

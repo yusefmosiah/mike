@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useScreenWakeLock } from "@/app/hooks/useScreenWakeLock";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
     BrowserRecognitionError,
@@ -125,6 +126,8 @@ export function useDictation({
     const busyRef = useRef(false);
     const disabledRef = useRef(disabled);
     disabledRef.current = disabled;
+    // Keep the phone awake while it listens.
+    useScreenWakeLock(recording);
 
     const clearTimer = useCallback(() => {
         if (timerRef.current !== null) {
