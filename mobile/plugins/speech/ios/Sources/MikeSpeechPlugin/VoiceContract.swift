@@ -17,6 +17,13 @@ struct VoiceConfig: Equatable, Sendable {
     var smartTurnThreshold: Float = 0.6
     /// The turn ends after this much silence whatever the models say.
     var maxSilenceMs: Int = 3000
+    /// While Smart Turn is missing (still loading at a progressive start, or
+    /// it failed to load) nothing else can say "done", so silence alone ends
+    /// the turn, after this long: past a thinking pause (Smart Turn's own
+    /// re-check is 750 ms) yet well short of `maxSilenceMs`, which would make
+    /// every answer wait three seconds. Capped by `maxSilenceMs`. Not on the
+    /// wire: it applies only to those first seconds.
+    var fallbackSilenceMs: Int = 1500
     /// Speech resumed within this long after a turn was sent continues it:
     /// the two are transcribed together and sent as one turn that replaces
     /// the earlier one (`continues`). 0 turns it off.

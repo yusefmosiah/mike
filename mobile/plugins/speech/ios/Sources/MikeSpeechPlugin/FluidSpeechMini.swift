@@ -87,6 +87,8 @@ enum FluidSpeechMini {
         private var manager: AsrManager?
         /// The loaded Core ML models behind `manager`, handed to live dictation.
         private var models: AsrModels?
+        /// Whether the loaded model has made its first prediction.
+        private var warm = false
         private var running = 0
         private var idleTask: Task<Void, Never>?
         private var observers: [NSObjectProtocol] = []
@@ -117,7 +119,7 @@ enum FluidSpeechMini {
         /// specialises a model for the Neural Engine on its first prediction,
         /// not when it is loaded, and that first prediction is the slow part.
         func prepare(modelDirectory: URL) async {
-            guard manager == nil else { return }
+            guard !warm else { return }
             idleTask?.cancel()
             running += 1
             defer {
@@ -128,6 +130,7 @@ enum FluidSpeechMini {
             guard let manager = try? loaded(modelDirectory) else { return }
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
             _ = try? await manager.transcribe([Float](repeating: 0, count: 16_000), decoderState: &state)
+            warm = true
         }
 
         /// The warm models for a live dictation, which keeps them loaded until
@@ -207,6 +210,7 @@ enum FluidSpeechMini {
             idleTask?.cancel()
             manager = nil
             models = nil
+            warm = false
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []
         }

@@ -42,6 +42,12 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "voiceMicrophoneModes", returnType: CAPPluginReturnPromise)
     ]
 
+    /// Runs once when the app launches: loads voice mode's models in the
+    /// background for someone who has used it before (see `VoiceMode.prewarmAtLaunch`).
+    public override func load() {
+        VoiceMode.prewarmAtLaunch()
+    }
+
     /// About half an hour of the web view's AAC recording.
     static let maxAudioBytes = 25 * 1024 * 1024
     /// One read-aloud call; the web app sends a response in chunks.
@@ -313,7 +319,9 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Loads the voice models ahead of `voiceStart` and resolves at once (the
     /// load carries on at low priority). Optional `config` is the one
-    /// `voiceStart` will get.
+    /// `voiceStart` will get. The app also does this by itself at launch, so
+    /// this is usually a duplicate the model cache absorbs; it stays for the
+    /// person's first-ever use and older builds.
     @objc func voicePrewarm(_ call: CAPPluginCall) {
         let config = VoiceConfig(call.options["config"] as? [String: Any])
         Task.detached(priority: .utility) {

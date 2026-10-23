@@ -71,3 +71,42 @@ enum UtteranceBounds {
         return lower..<max(lower, upper)
     }
 }
+
+/// Whether loading the voice models ahead of a tap is polite right now. It
+/// takes a few seconds of the CPU, GPU and Neural Engine and several hundred
+/// MB, so it is skipped when the phone is saving power or running hot.
+enum PrewarmGate {
+    static func allows(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) -> Bool {
+        !lowPowerMode && thermalState != .serious && thermalState != .critical
+    }
+
+    static var allowsNow: Bool {
+        allows(lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled, thermalState: ProcessInfo.processInfo.thermalState)
+    }
+
+    /// How long after launch the app-launch prewarm waits, so the web view's
+    /// first load has the phone to itself.
+    static let launchDelay: Duration = .seconds(3)
+}
+
+/// Whether the person has started voice mode on this phone, kept natively so
+/// the launch prewarm does not wait for the web app to say so.
+enum VoiceUsage {
+    static let usedKey = "mike.voice.used"
+    static let speakerKey = "mike.voice.usedWithSpeaker"
+
+    static func hasBeenUsed(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: usedKey)
+    }
+
+    /// Whether the last start wanted the speaker models (true before any start).
+    static func wantsSpeaker(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: speakerKey) as? Bool ?? true
+    }
+
+    /// Called when a start gets as far as listening.
+    static func markUsed(speaker: Bool, _ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: usedKey)
+        defaults.set(speaker, forKey: speakerKey)
+    }
+}

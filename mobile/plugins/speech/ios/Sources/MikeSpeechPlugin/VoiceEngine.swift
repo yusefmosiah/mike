@@ -2,6 +2,7 @@ import AVFoundation
 import CoreML
 import Foundation
 import os
+import UIKit
 #if canImport(FluidAudio)
 import FluidAudio
 #endif
@@ -73,22 +74,57 @@ enum VoiceMode {
             speakerLearned: SpeakerStore.load().learned)
     }
 
-    /// Loads and warms the models ahead of a start (the person has used voice
-    /// mode before), at low priority, so the tap finds them ready. Does nothing
-    /// if they are missing, the device cannot run them, or voice mode is on.
-    /// Failures are left for the start to report.
+    /// Loads and warms the models ahead of a start, at low priority, so the tap
+    /// finds them ready: the minimum a start waits for first (VAD, Fluid Speech
+    /// Mini, Phonon), then Smart Turn, the speaker models and the heavy EOU
+    /// encoder last. Does nothing if they are missing, the device cannot run
+    /// them, the phone is in Low Power Mode or hot (checked again between
+    /// steps), or voice mode is on. Failures are left for the start to report.
     static func prewarm(speaker: Bool) async {
         #if canImport(FluidAudio) && canImport(PhononTTS)
-        guard #available(iOS 18.0, *), canRunHere, await status().available else { return }
+        guard #available(iOS 18.0, *), canRunHere, PrewarmGate.allowsNow, await status().available else { return }
         guard await !VoiceEngine.shared.isRunning, let fluid = FluidSpeechMini.modelDirectory() else { return }
         let started = ContinuousClock.now
-        async let listening = VoiceModelCache.shared.listening(speaker: speaker)
+        async let vad: Void = VoiceModelCache.shared.load(.vad)
         async let fluidLoaded: Void = FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluid)
         async let phononLoaded: Void = PhononVoice.Runtime.shared.prepare()
-        _ = try? await listening
+        await vad
         await fluidLoaded
         try? await phononLoaded
-        log.info("voice prewarm: done in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms")
+        for model in [VoiceModelCache.Model.smartTurn, .speaker, .eou] {
+            if model == .speaker, !speaker { continue }
+            guard PrewarmGate.allowsNow, !Task.isCancelled, await !VoiceEngine.shared.isRunning else {
+                log.notice("voice prewarm: stopped before \(model.rawValue, privacy: .public)")
+                return
+            }
+            await VoiceModelCache.shared.load(model)
+        }
+        log.notice("voice prewarm: done in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms")
+        #endif
+    }
+
+    #if canImport(FluidAudio) && canImport(PhononTTS)
+    private static let launchPrewarm = StartGate()
+    #endif
+
+    /// Called when the plugin loads at app launch: once per run, if the person
+    /// has used voice mode before and the models are installed, loads them in
+    /// the background a few seconds later (after the web view's first load)
+    /// and only while the app is in the foreground (the GPU is off limits in
+    /// the background).
+    static func prewarmAtLaunch() {
+        #if canImport(FluidAudio) && canImport(PhononTTS)
+        let first = launchPrewarm.current == 0
+        launchPrewarm.bump()
+        guard first, canRunHere, VoiceUsage.hasBeenUsed(), PrewarmGate.allowsNow else { return }
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(for: PrewarmGate.launchDelay)
+            guard await MainActor.run(body: { UIApplication.shared.applicationState == .active }) else {
+                log.notice("voice prewarm: skipped, app not in the foreground")
+                return
+            }
+            await prewarm(speaker: VoiceUsage.wantsSpeaker())
+        }
         #endif
     }
 
@@ -210,15 +246,78 @@ enum VoiceMode {
 
 #if canImport(FluidAudio) && canImport(PhononTTS)
 
+/// A model that finished loading after the run began (nil: it failed).
+enum LateModel: @unchecked Sendable {
+    case eou(EouStream.Models?)
+    case smartTurn(SmartTurn.Model?)
+    case speaker(SpeakerModels?)
+}
+
+/// Where the models a run started without arrive. The loading tasks put them
+/// here; the listening loop takes them between microphone buffers.
+final class LateModels: @unchecked Sendable {
+    private let lock = NSLock()
+    private var arrived: [LateModel] = []
+    /// When the start began, for the log.
+    let started: ContinuousClock.Instant
+
+    /// Models still loading, in the order the log names them.
+    private var outstanding: [String]
+
+    init(started: ContinuousClock.Instant, expecting names: [String]) {
+        self.started = started
+        outstanding = names
+    }
+
+    func deliver(_ model: LateModel, name: String) {
+        lock.lock()
+        arrived.append(model)
+        outstanding.removeAll { $0 == name }
+        lock.unlock()
+    }
+
+    /// Names of the models that have not finished loading.
+    var pending: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return outstanding
+    }
+
+    var hasArrivals: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !arrived.isEmpty
+    }
+
+    /// What has arrived, oldest first. The EOU stream starts fresh at the
+    /// moment it attaches, so it is held back (`eouAllowed` false) while the
+    /// person is mid-turn.
+    func take(eouAllowed: Bool) -> [LateModel] {
+        lock.lock()
+        defer { lock.unlock() }
+        var taken: [LateModel] = []
+        var held: [LateModel] = []
+        for model in arrived {
+            if case .eou = model, !eouAllowed { held.append(model) } else { taken.append(model) }
+        }
+        arrived = held
+        return taken
+    }
+}
+
 /// The microphone side of a run: VAD, EOU, Smart Turn and the recent audio.
-/// Owned by the listening loop alone (one task), so it needs no locking.
+/// Owned by the listening loop alone (one task), so it needs no locking. The
+/// EOU, Smart Turn and speaker models may be absent at first and are attached
+/// between buffers as they load.
 @available(iOS 18.0, *)
 final class ListeningPipeline: @unchecked Sendable {
-    let eou: EouStream
+    private(set) var eou: EouStream?
+    /// Where the EOU stream's own sample count starts in the run's (it attaches late).
+    private var eouOrigin = 0
     private let vad: VadManager
     private var vadState: VadStreamState
-    private let smartTurn: SmartTurn.Model?
-    private let speaker: SpeakerModels?
+    private(set) var smartTurn: SmartTurn.Model?
+    private(set) var speaker: SpeakerModels?
     private var ring: SampleRing
     private var vadPending: [Float] = []
     private var vadStart = 0
@@ -230,15 +329,22 @@ final class ListeningPipeline: @unchecked Sendable {
     private var peakSpeech: Float = 0
     private var lastReportMs = 0
 
-    init(vad: VadManager, eou: EouStream, smartTurn: SmartTurn.Model?, speaker: SpeakerModels?, config: VoiceConfig) {
+    init(vad: VadManager, config: VoiceConfig) {
         self.vad = vad
-        self.eou = eou
-        self.smartTurn = smartTurn
-        self.speaker = speaker
         vadState = VadStreamState.initial()
         // The longest turn, plus room for the padding and an 8 s Smart Turn window.
         ring = SampleRing(capacity: (config.maxTurnMs + 10_000) * 16)
     }
+
+    /// Starts the end-of-utterance stream from the next buffer on.
+    func attach(eou stream: EouStream) {
+        eou = stream
+        eouOrigin = total
+    }
+
+    func attach(smartTurn model: SmartTurn.Model) { smartTurn = model }
+
+    func attach(speaker models: SpeakerModels?) { speaker = models }
 
     /// One microphone buffer in, the policy's inputs out (VAD frames, EOU
     /// words and candidates, then the clock).
@@ -259,10 +365,12 @@ final class ListeningPipeline: @unchecked Sendable {
             inputs.append(.vad(probability: result.probability, startMs: startMs, endMs: vadStart / 16))
             peakSpeech = max(peakSpeech, result.probability)
         }
-        for output in try eou.feed(samples) {
-            switch output {
-            case let .partial(text): inputs.append(.partial(text: text))
-            case let .endOfUtterance(sample): inputs.append(.eou(atMs: sample / 16))
+        if let eou {
+            for output in try eou.feed(samples) {
+                switch output {
+                case let .partial(text): inputs.append(.partial(text: text))
+                case let .endOfUtterance(sample): inputs.append(.eou(atMs: (eouOrigin + sample) / 16))
+                }
             }
         }
         inputs.append(.tick(nowMs: total / 16))
@@ -389,6 +497,9 @@ actor VoiceEngine {
     private var fluidDirectory: URL?
     private var input: AsyncStream<[Float]>.Continuation?
     private var listenTask: Task<Void, Never>?
+    /// Waits for the models the run started without, and the warm-ups after the start.
+    private var lateTask: Task<Void, Never>?
+    private var warmTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
     private var synthTask: Task<Void, Never>?
     private var synthToken: Int?
@@ -457,42 +568,33 @@ actor VoiceEngine {
         let started = ContinuousClock.now
         var heldFluid = false
         var heldPhonon = false
-        let pipeline: ListeningPipeline
+        let vad: VadManager
         let tts: Phonon
-        var speakerKinds: [SpeakerModelKind] = []
+        let wantsSpeaker = config.speakerModel != nil
+        let late = LateModels(started: started, expecting: ["eou", "smart turn"] + (wantsSpeaker ? ["speaker"] : []))
+        let lateTask = Self.loadLate(into: late, speaker: wantsSpeaker)
         do {
             let units = MLComputeUnits.cpuAndNeuralEngine
-            // Every model loads at once, and is kept for the next start
-            // (VoiceModelCache, Fluid Speech Mini's and Phonon's runtimes). The
-            // load is the slow part: Core ML specialises each model when it is
-            // loaded, so a start that finds them loaded takes a moment.
-            async let listening = VoiceModelCache.shared.listening(speaker: config.speakerModel != nil)
-            async let fluidLoaded: Void = FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
-            async let phononLoaded: Void = PhononVoice.Runtime.shared.prepare()
-            let loaded = try await listening
-            await fluidLoaded
-            try await phononLoaded
-            VoiceMode.log.info("voice start: models loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
+            // Progressive start: wait only for what listening cannot begin
+            // without, the VAD, Fluid Speech Mini and the Phonon voice, loaded
+            // side by side. The EOU, Smart Turn and speaker models are loading
+            // meanwhile (VoiceModelCache) and attach to the running listener
+            // as they finish; until then a turn ends on silence alone.
+            async let vadLoad = Self.attempt { Held(try await VoiceModelCache.shared.vad()) }
+            async let fluidLoad = Self.attempt { Held(try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)) }
+            async let phononLoad = Self.attempt { Held(try await PhononVoice.Runtime.shared.beginVoice(voice: voice)) }
+            let (vadResult, fluidResult, phononResult) = await (vadLoad, fluidLoad, phononLoad)
+            heldFluid = (try? fluidResult.get()) != nil
+            heldPhonon = (try? phononResult.get()) != nil
+            let vadModel = try vadResult.get().value
+            _ = try fluidResult.get()
+            tts = try phononResult.get().value
+            VoiceMode.log.notice("voice start: vad, speech recogniser and voice loaded at \(Self.milliseconds(since: started), privacy: .public) ms")
             try stillWanted()
             // Fresh per run: the threshold is the run's, and the state is the stream's.
-            let vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: loaded.vadModel)
-            let eou = try EouStream(models: loaded.eou)
-            let smartTurn = loaded.smartTurn
-            let speakerModels = loaded.speaker
-            _ = try await FluidSpeechMini.Runtime.shared.beginLive(modelDirectory: fluidDirectory)
-            heldFluid = true
-            tts = try await PhononVoice.Runtime.shared.beginVoice(voice: voice)
-            heldPhonon = true
-            // Phonon conditions on its voice on the first utterance; done once per load.
-            if await !PhononVoice.Runtime.shared.isWarm {
-                _ = try? await tts.synthesize("Ready.")
-                await PhononVoice.Runtime.shared.markWarm()
-            }
-            VoiceMode.log.info("voice start: phonon ready at \(Self.milliseconds(since: started), privacy: .public) ms")
-            try stillWanted()
-            pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: speakerModels, config: config)
-            speakerKinds = speakerModels?.kinds ?? []
+            vad = VadManager(config: VadConfig(defaultThreshold: config.vadThreshold, computeUnits: units), vadModel: vadModel)
         } catch {
+            lateTask.cancel()
             if heldFluid { await FluidSpeechMini.Runtime.shared.endLive() }
             if heldPhonon { await PhononVoice.Runtime.shared.endVoice() }
             if (error as? OnDeviceSpeech.Failure) != .cancelled {
@@ -500,6 +602,7 @@ actor VoiceEngine {
             }
             throw error as? OnDeviceSpeech.Failure ?? OnDeviceSpeech.Failure.failed
         }
+        let pipeline = ListeningPipeline(vad: vad, config: config)
 
         generation += 1
         let current = generation
@@ -515,6 +618,7 @@ actor VoiceEngine {
                 },
                 notify: { notice in Task { await VoiceEngine.shared.handle(notice, generation: current) } })
         } catch {
+            lateTask.cancel()
             continuation.finish()
             await FluidSpeechMini.Runtime.shared.endLive()
             await PhononVoice.Runtime.shared.endVoice()
@@ -534,24 +638,35 @@ actor VoiceEngine {
         policy.echoCancelled = audio.echoCancelled
         self.config = config
         speaker = SpeakerStore.load()
-        self.speakerKinds = speakerKinds
-        policy.checksSpeaker = checksSpeaker
-        let speakerState = config.speakerModel == nil ? "off" : (checksSpeaker ? "on" : (speaker.learned ? "unavailable" : "learning"))
-        VoiceMode.log.info("voice start: speaker check \(speakerState, privacy: .public), decided by \(config.speakerModel?.rawValue ?? "nothing", privacy: .public), models \(speakerKinds.map(\.rawValue).joined(separator: "+"), privacy: .public)")
+        speakerKinds = []
+        // No EOU model, no Smart Turn, no speaker check until they attach.
+        policy.smartTurnAvailable = false
+        policy.checksSpeaker = false
+        self.lateTask = lateTask
         queue = ClauseQueue()
         pendingActions = []
         metrics = nil
-        listenTask = Task.detached(priority: .userInitiated) { [self] in
-            await self.listen(stream, pipeline: pipeline, generation: current)
-        }
         monitorTask = Task { [self] in
             while !Task.isCancelled {
                 self.monitor(generation: current)
                 try? await Task.sleep(for: .milliseconds(10))
             }
         }
-        VoiceMode.log.info("voice start: ready in \(Self.milliseconds(since: started), privacy: .public) ms")
+        // Whatever finished loading during the start (all of it, on a later start) joins now.
+        attachArrivals(late, to: pipeline, generation: current)
+        let pending = late.pending.map { "\($0) pending" }
+        VoiceMode.log.notice("voice start: listening in \(Self.milliseconds(since: started), privacy: .public) ms (\(pending.isEmpty ? "all models attached" : pending.joined(separator: ", "), privacy: .public))")
+        VoiceUsage.markUsed(speaker: wantsSpeaker)
+        listenTask = Task.detached(priority: .userInitiated) { [self] in
+            await self.listen(stream, pipeline: pipeline, late: late, generation: current)
+        }
         emit(.state(.listening))
+        warmTask = Task.detached(priority: .utility) { [fluidDirectory] in
+            // First-prediction warm-ups, off the start's path: the first turn
+            // is still seconds away. Both serialise behind real work.
+            await FluidSpeechMini.Runtime.shared.prepare(modelDirectory: fluidDirectory)
+            await PhononVoice.Runtime.shared.warmUp()
+        }
     }
 
     /// Ends any answer, releases the microphone and the models, and sends
@@ -566,6 +681,12 @@ actor VoiceEngine {
         generation += 1
         listenTask?.cancel()
         monitorTask?.cancel()
+        // The loads themselves go on in the cache for the next start; nothing
+        // of this run is left to receive them.
+        lateTask?.cancel()
+        warmTask?.cancel()
+        lateTask = nil
+        warmTask = nil
         listenTask = nil
         monitorTask = nil
         let turnId = queue.turnId
@@ -608,13 +729,87 @@ actor VoiceEngine {
         }
     }
 
+    // MARK: - Late models
+
+    private struct Held<T>: @unchecked Sendable {
+        let value: T
+        init(_ value: T) { self.value = value }
+    }
+
+    private static func attempt<T>(_ work: () async throws -> T) async -> Result<T, Error> {
+        do { return .success(try await work()) } catch { return .failure(error) }
+    }
+
+    /// Waits for each model the start did not, all at once, handing each to `late`
+    /// as it finishes. A model that fails is delivered as nil.
+    private static func loadLate(into late: LateModels, speaker wantsSpeaker: Bool) -> Task<Void, Never> {
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    let models = try? await VoiceModelCache.shared.eou()
+                    late.deliver(.eou(models), name: "eou")
+                }
+                group.addTask {
+                    late.deliver(.smartTurn(await VoiceModelCache.shared.smartTurn()), name: "smart turn")
+                }
+                if wantsSpeaker {
+                    group.addTask {
+                        late.deliver(.speaker(await VoiceModelCache.shared.speaker()), name: "speaker")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Attaches what has loaded since the last buffer. Called on the listening
+    /// loop's turn (between buffers), so no model changes under a running chunk;
+    /// the EOU stream waits for a gap between turns. A run that has been stopped
+    /// or replaced (`generation`) takes nothing.
+    private func attachArrivals(_ late: LateModels, to pipeline: ListeningPipeline, generation: Int) {
+        guard generation == self.generation, running else { return }
+        let ms = { Int(Self.milliseconds(since: late.started)) }
+        let silenceMs = min(config.maxSilenceMs, config.fallbackSilenceMs)
+        let decider = config.speakerModel?.rawValue ?? "nothing"
+        for model in late.take(eouAllowed: policy.isBetweenTurns) {
+            switch model {
+            case let .eou(models):
+                if let models, let stream = try? EouStream(models: models) {
+                    pipeline.attach(eou: stream)
+                    VoiceMode.log.notice("voice start: eou attached at \(ms(), privacy: .public) ms")
+                } else {
+                    VoiceMode.log.error("voice start: eou unavailable, turns end on silence and there are no live words")
+                }
+            case let .smartTurn(model):
+                if let model {
+                    pipeline.attach(smartTurn: model)
+                    policy.smartTurnAvailable = true
+                    VoiceMode.log.notice("voice start: smart turn attached at \(ms(), privacy: .public) ms")
+                } else {
+                    VoiceMode.log.error("voice start: smart turn unavailable, turns end after \(silenceMs, privacy: .public) ms of silence")
+                }
+            case let .speaker(models):
+                pipeline.attach(speaker: models)
+                speakerKinds = models?.kinds ?? []
+                policy.checksSpeaker = checksSpeaker
+                let kinds = speakerKinds.map(\.rawValue).joined(separator: "+")
+                let state = checksSpeaker ? "on" : (speaker.learned ? "unavailable" : "learning")
+                if models != nil {
+                    VoiceMode.log.notice("voice start: speaker models attached at \(ms(), privacy: .public) ms, speaker check \(state, privacy: .public), decided by \(decider, privacy: .public), models \(kinds, privacy: .public)")
+                } else {
+                    VoiceMode.log.error("voice start: speaker models unavailable, every voice is taken as the person's")
+                }
+            }
+        }
+    }
+
     // MARK: - Listening
 
     /// The listening loop, off the actor: the models run here and only the
     /// policy's bookkeeping hops onto the actor.
-    nonisolated private func listen(_ stream: AsyncStream<[Float]>, pipeline: ListeningPipeline, generation: Int) async {
+    nonisolated private func listen(_ stream: AsyncStream<[Float]>, pipeline: ListeningPipeline, late: LateModels, generation: Int) async {
         for await samples in stream {
             if Task.isCancelled { break }
+            if late.hasArrivals { await attachArrivals(late, to: pipeline, generation: generation) }
             let inputs: [TurnPolicy.Input]
             do {
                 inputs = try await pipeline.process(samples)
@@ -627,7 +822,7 @@ actor VoiceEngine {
             while !actions.isEmpty {
                 switch actions.removeFirst() {
                 case .clearText:
-                    pipeline.eou.clearText()
+                    pipeline.eou?.clearText()
                 case let .runSmartTurn(requestId, fromMs, toMs):
                     let started = ContinuousClock.now
                     let probability = pipeline.smartTurnProbability(fromMs: fromMs, toMs: toMs)

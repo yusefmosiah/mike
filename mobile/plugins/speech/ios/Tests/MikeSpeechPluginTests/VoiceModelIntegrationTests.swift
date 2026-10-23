@@ -202,7 +202,9 @@ final class VoiceModelIntegrationTests: XCTestCase {
         try eou.warmUp()
         let smartTurn = try SmartTurn.Model(directory: root.appendingPathComponent("smart-turn"), computeUnits: .cpuOnly)
         let config = VoiceConfig.defaults
-        let pipeline = ListeningPipeline(vad: vad, eou: eou, smartTurn: smartTurn, speaker: nil, config: config)
+        let pipeline = ListeningPipeline(vad: vad, config: config)
+        pipeline.attach(eou: eou)
+        pipeline.attach(smartTurn: smartTurn)
         var policy = TurnPolicy(config: config)
 
         let samples = try clip()
@@ -226,7 +228,7 @@ final class VoiceModelIntegrationTests: XCTestCase {
                     pending += policy.handle(.smartTurn(requestId: id, probability: pipeline.smartTurnProbability(fromMs: from, toMs: to)))
                 case let .commit(commit):
                     commits.append(commit)
-                    pipeline.eou.clearText()
+                    pipeline.eou?.clearText()
                     let text = try await FluidSpeechMini.Runtime.shared.transcribe(samples: pipeline.utterance(commit), modelDirectory: fluid)
                     texts.append(text)
                     pending += policy.handle(text.isEmpty ? .turnDiscarded : .turnCommitted(turnId: "t\(commits.count)"))

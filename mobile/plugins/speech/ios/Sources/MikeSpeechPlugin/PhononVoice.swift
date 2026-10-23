@@ -289,6 +289,15 @@ enum PhononVoice {
             }
         }
 
+        /// Has the loaded instance speak once if it has not, off a start's
+        /// critical path. Calls are serialised by Phonon, so a real clause
+        /// waits at most for this one.
+        func warmUp() async {
+            guard !warm, let tts = phonon else { return }
+            _ = try? await tts.synthesize("Ready.")
+            warm = true
+        }
+
         /// Whether the loaded instance has already spoken once.
         var isWarm: Bool { warm && phonon != nil }
 

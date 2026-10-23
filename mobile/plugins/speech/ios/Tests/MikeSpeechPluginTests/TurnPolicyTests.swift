@@ -717,4 +717,72 @@ final class TurnPolicyTests: XCTestCase {
         XCTAssertEqual(out.first, .bargeIn(turnId: "t1"))
         XCTAssertTrue(Self.speakerChecks(out).isEmpty)
     }
+
+    // MARK: - Models still loading (progressive start)
+
+    func testWithoutSmartTurnNoPauseCheckOpensAndSilenceAloneEndsTheTurnEarly() {
+        var trace = Trace()
+        trace.policy.smartTurnAvailable = false
+        trace.speech(2)  // speech to 512 ms, with no EOU words at all
+        let pause = trace.silence(3)  // 768 ms of silence, past pauseMs
+        XCTAssertTrue(Trace.smartTurnRequests(pause).isEmpty)
+        XCTAssertFalse(Trace.states(pause).contains(.confirmingEnd))
+        XCTAssertTrue(Trace.commits(trace.tick(until: 512 + 1499)).isEmpty)
+        let end = Trace.commits(trace.tick(until: 512 + 1500))
+        XCTAssertEqual(end, [TurnPolicy.Commit(startMs: 0, endMs: 512, decidedAtMs: 2012, reason: .maxSilence)])
+    }
+
+    func testTheFallbackSilenceNeverExceedsMaxSilence() {
+        var config = VoiceConfig.defaults
+        config.maxSilenceMs = 1000
+        var trace = Trace(config)
+        trace.policy.smartTurnAvailable = false
+        trace.speech(2)
+        trace.silence(1)
+        let end = Commit(trace.tick(until: 512 + 1000))
+        XCTAssertEqual(end?.decidedAtMs, 1512)
+    }
+
+    func testSmartTurnArrivingMidSilenceTakesOverFromTheFallback() {
+        var trace = Trace()
+        trace.policy.smartTurnAvailable = false
+        trace.speech(2)
+        XCTAssertTrue(Trace.smartTurnRequests(trace.silence(3)).isEmpty)
+        trace.policy.smartTurnAvailable = true
+        let requests = Trace.smartTurnRequests(trace.silence(1))
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.from, 0)
+        let decided = Trace.commits(trace.feed(.smartTurn(requestId: requests[0].id, probability: 0.9)))
+        XCTAssertEqual(decided.first?.reason, .smartTurn)
+        XCTAssertEqual(decided.first?.endMs, 512)
+    }
+
+    func testSmartTurnArrivingBeforeTheFallbackLimitStillEndsOnTime() {
+        var trace = Trace()
+        trace.policy.smartTurnAvailable = false
+        trace.speech(2)
+        trace.silence(2)
+        trace.policy.smartTurnAvailable = true
+        // Back on the normal path: no commit at the fallback limit unless Smart Turn says so.
+        let out = trace.tick(until: 512 + 1500)
+        XCTAssertTrue(Trace.commits(out).isEmpty)
+        XCTAssertEqual(Trace.smartTurnRequests(out).count, 1)
+    }
+
+    func testTheEouStreamMayStartOnlyBetweenTurns() {
+        var trace = Trace()
+        XCTAssertTrue(trace.policy.isBetweenTurns)
+        trace.speech(1)
+        XCTAssertFalse(trace.policy.isBetweenTurns, "mid-speech")
+        trace.silence(1)
+        XCTAssertFalse(trace.policy.isBetweenTurns, "inside the person's turn, in a pause")
+        let request = Trace.smartTurnRequests(trace.silence(1)).first
+        trace.feed(.smartTurn(requestId: request?.id ?? 0, probability: 0.9))
+        trace.feed(.turnCommitted(turnId: "t1"))
+        XCTAssertTrue(trace.policy.isBetweenTurns, "while the answer is awaited")
+    }
+}
+
+private func Commit(_ decisions: [TurnPolicy.Decision]) -> TurnPolicy.Commit? {
+    decisions.compactMap { if case let .commit(commit) = $0 { return commit } else { return nil } }.first
 }

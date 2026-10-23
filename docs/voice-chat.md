@@ -403,6 +403,60 @@ are well inside real time, but Instruments decides. Fallbacks:
 - VAD and Smart Turn on the CPU (already cheap there);
 - Phonon on the CPU (first audio about 55 ms).
 
+### Start-up and loading
+
+Loading is the slow part of a start: Core ML specialises each model for its
+compute units when it is loaded (the EOU encoder and WeSpeaker run on the
+GPU, where the work is not kept between loads), about a minute in all on a
+first load. Three things hide it:
+
+- **Models are kept.** `VoiceModelCache` loads each listening model once per
+  app run and keeps it across starts; Fluid Speech Mini and Phonon keep their
+  own runtimes. They unload after 5 idle minutes (Fluid Speech Mini, Phonon)
+  or on a memory warning while voice mode is off, so the 700 MB above is
+  resident for those windows after a use.
+- **A progressive start.** A start waits only for the VAD, Fluid Speech Mini
+  and the Phonon voice, then listens. The EOU stream, Smart Turn and the
+  speaker models keep loading and attach to the running listener between
+  microphone buffers (the EOU stream only between turns, because it starts
+  fresh at the moment it attaches). Until then a turn ends on silence alone,
+  after `fallbackSilenceMs` (1.5 s, capped by `maxSilenceMs`; the 3 s default
+  would make every answer wait), there are no live words and no barge-in by
+  words, and every voice is taken as the person's. A model that fails to load
+  keeps that fallback for the run. The first-prediction warm-ups of Fluid
+  Speech Mini and Phonon ("Ready.") run after listening has begun.
+- **A prewarm at launch.** When the app launches (the plugin's `load()`), a
+  phone where the person has used voice mode before loads the models in the
+  background at utility priority, about 3 s later so the web view's first load
+  is not competed with: the minimum set first, then Smart Turn, the speaker
+  models and the EOU encoder last. It is skipped in Low Power Mode, at thermal
+  state serious or critical (checked again between steps), when the models are
+  not installed, and while the app is not in the foreground. "Used before" is
+  a native flag (`UserDefaults`, set at the first start that reaches
+  listening). The web app's `voicePrewarm` still works and is a duplicate the
+  cache absorbs.
+
+#### Seeing the timings
+
+The plugin logs through `os.Logger` (subsystem `MikeSpeech`, category
+`voice`). The lines that matter for start-up are at the default (`notice`)
+level, so they appear without extra settings; per-buffer diagnostics stay at
+`info`, which Console hides unless asked and does not keep. Numbers and stage
+names are public, never text or audio.
+
+1. Connect the iPhone, open Console.app, select the phone in the sidebar and
+   press Start (Console shows nothing until streaming starts).
+2. Search `subsystem:MikeSpeech` (or `voice cache`, `voice start`,
+   `voice prewarm`). For `info` lines too, use Action > Include Info Messages.
+3. Launch the app (or tap voice mode) after streaming has started; lines from
+   before it started are not replayed.
+
+The lines: `voice cache: <model> ready in N ms` (each load, once per app run),
+`voice start: vad, speech recogniser and voice loaded at N ms`,
+`voice start: listening in N ms (eou pending, smart turn pending, speaker
+pending)`, then `voice start: <model> attached at N ms` for each late arrival,
+and `voice prewarm: done in N ms`.
+
 ### Lifetime
 
 Voice mode runs in the foreground with the screen awake. Locked-screen

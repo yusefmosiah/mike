@@ -104,6 +104,11 @@ struct TurnPolicy {
     /// first checked against it, so a TV or another person cannot cut the
     /// answer off.
     var checksSpeaker = false
+    /// Set by the engine: false while Smart Turn is not loaded (a progressive
+    /// start) or failed to load. Nothing then confirms a pause, so the turn
+    /// ends on silence alone after `fallbackSilenceMs`. Set true when the
+    /// model arrives, even in the middle of a silence.
+    var smartTurnAvailable = true
     /// After speech is found to be another voice, the next check waits this long.
     static let speakerRecheckMs = 1000
     /// After Smart Turn says "not done", it is asked again after this much more silence.
@@ -164,6 +169,15 @@ struct TurnPolicy {
 
     init(config: VoiceConfig = .defaults) {
         self.config = config
+    }
+
+    /// Whether the EOU stream may be started now: not inside the person's
+    /// turn or a speech run, where it would begin with half a sentence.
+    var isBetweenTurns: Bool { phase != .userTurn && !inSpeech }
+
+    /// Silence that ends the turn without a model's word.
+    private var silenceLimitMs: Int {
+        smartTurnAvailable ? config.maxSilenceMs : min(config.maxSilenceMs, config.fallbackSilenceMs)
     }
 
     private var silenceThreshold: Float { max(0.01, config.vadThreshold - 0.15) }
@@ -332,7 +346,7 @@ struct TurnPolicy {
     }
 
     private mutating func openEndCheck(_ out: inout [Decision]) {
-        guard phase == .userTurn, !endCheckOpen, !inSpeech, nowMs >= nextEndCheckMs, let start = utteranceStartMs else { return }
+        guard phase == .userTurn, smartTurnAvailable, !endCheckOpen, !inSpeech, nowMs >= nextEndCheckMs, let start = utteranceStartMs else { return }
         endCheckOpen = true
         eouPending = false
         nextRequestId += 1
@@ -380,7 +394,7 @@ struct TurnPolicy {
             if nowMs - start >= config.maxTurnMs {
                 commit(.maxTurn, endMs: inSpeech ? nowMs : (silenceStartMs ?? nowMs), &out)
             } else if !inSpeech, let silence = silenceStartMs {
-                if nowMs - silence >= config.maxSilenceMs {
+                if nowMs - silence >= silenceLimitMs {
                     commit(.maxSilence, endMs: silence, &out)
                 } else if nowMs - silence >= config.pauseMs {
                     openEndCheck(&out)

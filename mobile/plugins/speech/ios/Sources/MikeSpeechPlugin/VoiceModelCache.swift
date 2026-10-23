@@ -19,42 +19,57 @@ import FluidAudio
 /// state (streams and VAD state are made fresh for each run), so one set
 /// serves each run in turn.
 ///
-/// Each model loads on its own task, all at once; a load that fails is
-/// forgotten so the next start tries again, and one still running when a start
-/// is cancelled carries on for the next. `prewarm` starts them ahead of the
-/// tap. They are dropped on a memory warning while voice mode is off, and when
+/// Each model loads on its own task; a load that fails is forgotten so the
+/// next start tries again, and one still running when a start is cancelled
+/// carries on for the next. A start waits for the VAD only and takes the other
+/// models as they finish (see `VoiceEngine.start`); `VoiceMode.prewarm` loads
+/// them ahead of the tap, cheapest first. They are dropped on a memory warning while voice mode is off, and when
 /// the models are removed.
 @available(iOS 18.0, *)
 actor VoiceModelCache {
     static let shared = VoiceModelCache()
 
-    /// Everything a listening run needs from the cache.
-    struct Listening: @unchecked Sendable {
-        let vadModel: MLModel
-        let eou: EouStream.Models
-        let smartTurn: SmartTurn.Model?
-        let speaker: SpeakerModels?
+    /// The listening models, by when a start needs them. A start waits only
+    /// for the VAD; the rest attach to the running listener as they arrive.
+    enum Model: String, CaseIterable, Sendable {
+        case vad, smartTurn, speaker, eou
     }
 
     private var tasks: [String: Any] = [:]
     private var observer: NSObjectProtocol?
 
-    /// The listening models, loading what is not loaded yet in parallel.
-    /// `speaker`: whether the speaker models are wanted.
-    func listening(speaker wantsSpeaker: Bool) async throws -> Listening {
+    /// The VAD, loading it if needed. Throws if it cannot load.
+    func vad() async throws -> MLModel {
         observeMemory()
-        async let vad = value("vad") { try await Self.loadVad() }
-        async let eou = value("eou") { try await Self.loadEou() }
-        async let smartTurn = value("smart-turn") { Box(try? await Self.loadSmartTurn()) }
-        async let speaker = speakerModels(wanted: wantsSpeaker)
-        let vadModel = try await vad
-        let eouModels = try await eou
-        return Listening(vadModel: vadModel, eou: eouModels, smartTurn: try await smartTurn.value, speaker: try await speaker.value)
+        return try await value("vad") { try await Self.loadVad() }
     }
 
-    private func speakerModels(wanted: Bool) async throws -> Box<SpeakerModels?> {
-        guard wanted else { return Box(nil) }
-        return try await value("speaker") { Box(await Self.loadSpeaker()) }
+    /// The streaming end-of-utterance models (the slowest: a 213 MB encoder on the GPU).
+    func eou() async throws -> EouStream.Models {
+        observeMemory()
+        return try await value("eou") { try await Self.loadEou() }
+    }
+
+    /// Smart Turn, or nil if it cannot load.
+    func smartTurn() async -> SmartTurn.Model? {
+        observeMemory()
+        return (try? await value("smart-turn") { Box(try? await Self.loadSmartTurn()) })?.value
+    }
+
+    /// Both speaker models, or nil if none can load.
+    func speaker() async -> SpeakerModels? {
+        observeMemory()
+        return (try? await value("speaker") { Box(await Self.loadSpeaker()) })?.value
+    }
+
+    /// Loads one model ahead of a start, keeping it; failures are left for the start.
+    func load(_ model: Model) async {
+        switch model {
+        case .vad: _ = try? await vad()
+        case .smartTurn: _ = await smartTurn()
+        case .speaker: _ = await speaker()
+        case .eou: _ = try? await eou()
+        }
     }
 
     /// Drops every model; a running voice mode keeps the copies it holds.
@@ -62,7 +77,7 @@ actor VoiceModelCache {
         tasks = [:]
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
-        VoiceMode.log.info("voice cache: released")
+        VoiceMode.log.notice("voice cache: released")
     }
 
     // MARK: - Loading
@@ -94,7 +109,7 @@ actor VoiceModelCache {
 
     private static func timed<T>(_ name: String, _ work: () async throws -> T) async rethrows -> T {
         let started = ContinuousClock.now
-        defer { VoiceMode.log.info("voice cache: \(name, privacy: .public) ready in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms") }
+        defer { VoiceMode.log.notice("voice cache: \(name, privacy: .public) ready in \(VoiceEngine.milliseconds(since: started), privacy: .public) ms") }
         return try await work()
     }
 
