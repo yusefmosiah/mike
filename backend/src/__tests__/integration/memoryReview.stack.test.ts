@@ -8,6 +8,7 @@ import { beginMemoryConversationTurn, scheduleMemoryConsolidation } from "../../
 import { kernels } from "../../lib/codemode";
 import type { Db } from "../../lib/db";
 import type { DbJob } from "../../lib/dbq/types";
+import { handleMemoryConsolidation } from "../../modules/memory/memory.service";
 
 // The model side of the review is mocked: what is under test is the job
 // around it (fences, cutoff, results, the reviewed cursor) on real Postgres.
@@ -36,7 +37,6 @@ vi.mock("../../lib/workstation", async (importOriginal) => ({
   resolveWorkstation: async () => null,
 }));
 
-const { handleMemoryConsolidation } = await import("../../modules/memory/memory.service");
 
 // Gated: runs only against a real Postgres + GoTrue (npm run test:stack).
 const maybeDescribe = stackConfigured ? describe : describe.skip;

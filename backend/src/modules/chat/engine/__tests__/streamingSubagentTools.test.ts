@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 // writes, and approvals.
 
 type Call = { id: string; name: string; input: Record<string, unknown> };
-type Spec = { name: string; description: string; parameters: unknown };
+type Spec = KernelToolSpec;
 type ChildPython = (call: Call, kernel: { key: string; tools: Spec[] }) => Promise<string>;
 
 const mocks = vi.hoisted(() => ({
@@ -32,7 +32,7 @@ vi.mock("../subagents/subagentHost", async (importOriginal) => ({
   }),
 }));
 
-import { kernels, pythonToolSpecs } from "../../../../lib/codemode";
+import { kernels, pythonToolSpecs, type KernelToolSpec } from "../../../../lib/codemode";
 import { runLLMStream } from "../streaming";
 import { TOOLS } from "../tools/toolSchemas";
 import { localKernelDir } from "./pythonToolIndex";

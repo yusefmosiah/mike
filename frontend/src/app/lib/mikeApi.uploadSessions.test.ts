@@ -8,7 +8,7 @@ import {
     uploadFilesWithSession,
     uploadLibraryDocument,
     uploadLibraryDocuments,
-    uploadProjectDocuments,
+    uploadProjectDocument,
     uploadReviewDocument,
     uploadStandaloneDocument,
     uploadStandaloneDocuments,
@@ -787,9 +787,13 @@ describe("direct upload sessions", () => {
             type: "application/pdf",
         });
 
-        await uploadProjectDocuments("11111111-1111-4111-8111-111111111111", [
-            { file, folderId: "22222222-2222-4222-8222-222222222222" },
-        ]);
+        await expect(
+            uploadProjectDocument(
+                "11111111-1111-4111-8111-111111111111",
+                file,
+                "22222222-2222-4222-8222-222222222222",
+            ),
+        ).resolves.toEqual({ id: "result-contract.pdf" });
 
         expect(server.manifests[0]).toMatchObject({
             purpose: "document_create",
