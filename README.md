@@ -29,7 +29,9 @@ carry its own name.
 - **Every model call runs on [Pi Durable](docs/backend-architecture.md) and
   pi-ai.** Turns are stored in Postgres:
   - An answer interrupted by a restart continues where it stopped.
-  - Long threads compact their own context.
+  - Long threads compact their own context. The summary names the messages
+    it covers by id, and the assistant can search and read the full history
+    (`history_search`, `history_read`), including what the summary left out.
   - A conversation is a tree: edit a prompt, regenerate an answer, move
     between versions, or branch into a new thread.
 - **Models come from several lanes** (see
@@ -47,9 +49,22 @@ carry its own name.
   wrote it, and `/nr` adds a note without asking for a reply.
 - **Skills** use the standard `SKILL.md` format. Import them from GitHub or a
   zip, save one from a chat, and restore earlier versions.
+- **Memory you can see and correct.** The assistant edits memory from a chat
+  when you ask it to remember, correct or forget something, and says what it
+  changed. A quiet chat is reviewed for anything worth keeping. Every version
+  of a memory file is kept and can be viewed.
 - **Subagents and web search.** The assistant can hand work to subagents and
   search the web through pluggable providers. Web pages it cites open as a
   saved reader copy, with the quote highlighted.
+- **Background subagents** *(experimental; off by default, under Settings →
+  Features)*:
+  - A subagent can keep working after the assistant has answered. Its report
+    arrives in the chat when it finishes, and the assistant replies to it,
+    even if you have closed the app.
+  - The assistant can message a subagent to redirect it or give it more work,
+    collect reports while it works, and stop one. Subagents can message the
+    chat and each other.
+  - A restart ends them; the chat is told which were cut off.
 
 ### Documents
 
@@ -64,7 +79,11 @@ carry its own name.
   are read into one block model. Scanned PDFs are read with local OCR.
 - **Images and plain text.** Images reach the model only if it can see them.
   They are cleaned once, with metadata stripped and size capped. Text,
-  Markdown and CSV files upload as themselves and have their own viewers.
+  Markdown and CSV files upload as themselves and have their own viewers. A
+  very long paste into the composer is attached as a text document.
+- **Uploads finish without you.** Once a file has reached storage, it is
+  processed and added to its project or tabular review even if you close the
+  app before the upload confirms.
 - **Citation checking.** The assistant checks the citations in documents it
   drafts or edits. It finds each source, keeps a snapshot, matches the quote,
   and asks a second model whether the source supports the claim (see
@@ -83,8 +102,10 @@ carry its own name.
     new documents or versions.
 - **Code mode.** The assistant works in Python, in the account's workstation.
   Its one tool runs a code cell, the cell calls the assistant's other tools
-  as functions, and variables persist between cells. An account without a
-  workstation has no tools: the assistant answers from the conversation.
+  as functions, and variables persist between cells. Each function has a
+  one-line entry in an index saying when to use it; its full documentation
+  is a lookup away. An account without a workstation has no tools: the
+  assistant answers from the conversation.
 - **A secrets [vault](docs/vault.md)** lets the assistant use a credential
   without the model, the VM or the backend ever holding it.
 
