@@ -472,6 +472,12 @@ export async function runLLMStream(params: {
    */
   autoMode?: boolean;
   /**
+   * What Auto Mode judges tool calls against, when the turn's prompt is not
+   * the person's (chat.prepare.ts autoModeIntentFor). Defaults to the last
+   * user message.
+   */
+  autoModeIntent?: string;
+  /**
    * A hands-free voice turn: the answer is read aloud as it streams. Adds the
    * voice section (prompts.ts) as turn context, never to the system prompt,
    * which stays fixed for the chat. Defaults to false.
@@ -929,7 +935,7 @@ export async function runLLMStream(params: {
   // call is judged against, and the tool names already attempted — allowed or
   // denied — so a refused call cannot be laundered through a second,
   // differently-named one.
-  const autoModeIntent = autoMode ? lastUserIntent(apiMessages) : "";
+  const autoModeIntent = autoMode ? (params.autoModeIntent ?? lastUserIntent(apiMessages)) : "";
   const priorToolNames: string[] = [];
   // The user's chosen judge for Auto Mode tool calls, read once per turn;
   // null keeps the on-route classifier.

@@ -66,6 +66,9 @@ export type PreparedChatStream = {
     // content.edit standing as writing; the route is what gates a caller, the
     // stream is what enforces the guardrails.
     autoMode: boolean;
+    // What Auto Mode judges the turn's tool calls against when its prompt is
+    // not the person's (autoModeIntentFor); unset, the stream reads the prompt.
+    autoModeIntent?: string;
     // A hands-free voice turn (the answer is read aloud), forwarded to
     // runLLMStream, which adds the voice section as turn context.
     voice: boolean;
@@ -104,6 +107,21 @@ export type PreparedChatStream = {
     /** Whose workstation runs this thread's code: the person who started it. */
     workstationUserId: string | null;
 };
+
+/** How a prompt from background subagents begins (chat.agentReports.ts). */
+export const AGENT_MESSAGES_MARK = "[Background subagents]";
+
+/**
+ * What Auto Mode judges a turn's tool calls against when the turn answers
+ * background subagents: the person's own last words, never the subagents'
+ * text, which may carry whatever they read. Undefined for a person's prompt,
+ * which the stream reads as usual; empty when the person has written nothing.
+ */
+export function autoModeIntentFor(messages: readonly ChatMessage[]): string | undefined {
+    const prompts = messages.filter((message) => message.role === "user").map((message) => message.content ?? "");
+    if (!prompts.at(-1)?.startsWith(AGENT_MESSAGES_MARK)) return undefined;
+    return [...prompts].reverse().find((prompt) => !prompt.startsWith(AGENT_MESSAGES_MARK)) ?? "";
+}
 
 type PrepareChatStreamArgs = {
         userId: string;
@@ -605,6 +623,7 @@ async function prepareAdmittedChatStream(
                 completedTurnPersisted,
                 approvalEvents,
                 autoMode: args.autoMode === true,
+                ...(args.autoMode ? { autoModeIntent: autoModeIntentFor(messages) } : {}),
                 voice: args.voice === true,
                 ...(replay.parentHeard !== undefined
                     ? { parentHeard: replay.parentHeard }

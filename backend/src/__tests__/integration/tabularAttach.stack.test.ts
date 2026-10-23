@@ -60,12 +60,24 @@ maybeDescribe("adding an uploaded document to its review", () => {
         expect((rows ?? []).map((row: { document_id: string }) => row.document_id)).toEqual([documentIds[0]]);
     });
 
-    it("keeps both of two documents added at the same moment", async () => {
+    it("keeps both of two documents added at the same moment, and the results already there", async () => {
+        const done = await db
+            .from("tabular_cells")
+            .update({ status: "done", content: "Acme and Beta" })
+            .eq("review_id", reviewId)
+            .eq("document_id", documentIds[0]!);
+        if (done.error) throw done.error;
         expect(await Promise.all([attach(documentIds[1]!), attach(documentIds[2]!)])).toEqual([true, true]);
         expect((await reviewDocuments()).sort()).toEqual([...documentIds].sort());
         // One row for each, with its cells: neither rebuild undid the other's.
         const { data: rows } = await db.from("tabular_review_rows").select("document_id").eq("review_id", reviewId);
         expect((rows ?? []).map((row: { document_id: string }) => row.document_id).sort()).toEqual([...documentIds].sort());
+        // Adding documents keeps the first one's finished cell, and the new ones wait for theirs.
+        const { data: cells } = await db.from("tabular_cells").select("document_id, status").eq("review_id", reviewId);
+        const status = new Map((cells ?? []).map((cell: { document_id: string; status: string }) => [cell.document_id, cell.status]));
+        expect(status.get(documentIds[0]!)).toBe("done");
+        expect(status.get(documentIds[1]!)).toBe("pending");
+        expect(status.get(documentIds[2]!)).toBe("pending");
     });
 
     it("adds nothing for someone who cannot change the review", async () => {

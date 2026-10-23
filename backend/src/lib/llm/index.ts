@@ -242,6 +242,12 @@ export async function takeAgentMessages(chatKey: string, ids?: readonly string[]
     return takeAgentMessagesOnPi(chatKey, ids);
 }
 
+/** Report the previous process's background subagents, cut off by its end, to their chats. */
+export async function reportCutOffAgents(): Promise<void> {
+    const { reportCutOffAgentsOnPi } = await import("./pi/runtime.mjs");
+    return reportCutOffAgentsOnPi();
+}
+
 /** Chats with messages from their background subagents waiting. */
 export async function chatsWithAgentMessages(): Promise<string[]> {
     const { chatsWithAgentMessagesOnPi } = await import("./pi/runtime.mjs");

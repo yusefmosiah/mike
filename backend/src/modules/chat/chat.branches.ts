@@ -255,7 +255,7 @@ export async function forkChat(
 
     const { data: full, error: loadError } = await db
         .from("chat_messages")
-        .select("id, role, content, files, workflow, citations, author_user_id, created_at")
+        .select("id, role, content, files, workflow, citations, author_user_id, origin, created_at")
         .eq("chat_id", args.chatId)
         .in("id", path.map((row) => row.id));
     if (loadError) return { ok: false, kind: "error", error: loadError };
@@ -285,6 +285,8 @@ export async function forkChat(
             workflow: source.workflow ?? row.workflow,
             citations: source.citations ?? null,
             author_user_id: source.author_user_id ?? null,
+            // A prompt from background subagents stays theirs in the branch.
+            origin: source.origin ?? null,
             parent_message_id: index === 0 ? null : newIds.get(path[index - 1].id),
             created_at: row.created_at,
         };

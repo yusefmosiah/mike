@@ -122,6 +122,8 @@ export async function createRowsForReview(
     documentIds: string[],
     columns: Column[],
     grouping: DocumentGrouping,
+    /** Where the new rows start: after a review's existing rows when adding to them. */
+    firstSortIndex = 0,
 ): Promise<void> {
     const docs = await fetchSourceDocuments(db, documentIds);
     const folderPaths = await getFolderPathMaps(db, userId, docs);
@@ -205,14 +207,14 @@ export async function createRowsForReview(
     const { data, error } = await db
         .from("tabular_review_rows")
         .insert(
-            inputs.map((input, sort_index) => ({
+            inputs.map((input, index) => ({
                 review_id: reviewId,
                 label: input.label,
                 row_type: input.row_type,
                 folder_id: input.folder_id,
                 library_folder_id: input.library_folder_id,
                 document_id: input.document_id,
-                sort_index,
+                sort_index: firstSortIndex + index,
             })),
         )
         .select("*");
@@ -221,7 +223,7 @@ export async function createRowsForReview(
         (a, b) => a.sort_index - b.sort_index,
     );
     const sources = rows.flatMap((row) =>
-        (inputs[row.sort_index]?.sourceIds ?? []).map(
+        (inputs[row.sort_index - firstSortIndex]?.sourceIds ?? []).map(
             (document_id, sort_index) => ({
                 row_id: row.id,
                 document_id,
@@ -258,8 +260,9 @@ const rowRebuilds = new Map<string, Promise<unknown>>();
 /**
  * Run `rebuild` once every earlier rebuild of this review's rows in this
  * process has ended. A rebuild deletes the review's rows and creates them
- * again; two at once would add cells to rows the other deleted. (Uploads into
- * one review are attached by one process's upload workers.)
+ * again, and an upload's attach adds the rows missing; two at once would add
+ * cells to rows the other deleted, or the same row twice. (Uploads into one
+ * review are attached by one process's upload workers.)
  */
 function oneRebuildAtATime<T>(reviewId: string, rebuild: () => Promise<T>): Promise<T> {
     const previous = rowRebuilds.get(reviewId) ?? Promise.resolve();
@@ -1104,9 +1107,8 @@ export async function attachDocumentToReview(
             .maybeSingle();
         if (updateError) throw new Error(updateError.message);
         if (!updated) continue;
-        // From the review as stored when this rebuild's turn comes: another
-        // upload may have added a document since, and the last rebuild to run
-        // must show every one.
+        // From the review as stored when this turn comes: another upload may
+        // have added a document since, and the last to run must show every one.
         return oneRebuildAtATime(args.reviewId, async () => {
             const { data: latest, error: latestError } = await db
                 .from("tabular_reviews")
@@ -1115,14 +1117,26 @@ export async function attachDocumentToReview(
                 .maybeSingle();
             if (latestError) throw new Error(latestError.message);
             if (!latest) return false;
-            await replaceRows(
-                db,
-                args.reviewId,
-                args.userId,
-                (latest.document_ids ?? []) as string[],
-                (latest.columns_config ?? []) as Column[],
-                normalizeGrouping(latest.document_grouping),
-            );
+            const documentIds = (latest.document_ids ?? []) as string[];
+            const columns = (latest.columns_config ?? []) as Column[];
+            const grouping = normalizeGrouping(latest.document_grouping);
+            // A new document may join an existing folder's row: build them again.
+            if (grouping === "folder") {
+                await replaceRows(db, args.reviewId, args.userId, documentIds, columns, grouping);
+                return true;
+            }
+            // Otherwise add rows for the documents without one, and keep the
+            // results the review already has.
+            const { data: rows, error: rowsError } = await db
+                .from("tabular_review_rows")
+                .select("document_id, sort_index")
+                .eq("review_id", args.reviewId);
+            if (rowsError) throw new Error(rowsError.message);
+            const existing = (rows ?? []) as { document_id: string | null; sort_index: number }[];
+            const shown = new Set(existing.map((row) => row.document_id));
+            const missing = documentIds.filter((id) => !shown.has(id));
+            const next = existing.reduce((max, row) => Math.max(max, row.sort_index + 1), 0);
+            await createRowsForReview(db, args.reviewId, args.userId, missing, columns, grouping, next);
             return true;
         });
     }

@@ -10,6 +10,7 @@ import {
   abandonTurn,
   chatsWithAgentMessages,
   interruptedTurns,
+  reportCutOffAgents,
   setAgentMessageSink,
   type InterruptedTurn,
 } from "./lib/llm";
@@ -80,10 +81,12 @@ export async function startAgentMessageDelivery(
     deliver?: (db: Db, chatId: string) => Promise<void>;
     setSink?: typeof setAgentMessageSink;
     waiting?: () => Promise<string[]>;
+    reportCutOff?: () => Promise<void>;
   } = {},
 ): Promise<void> {
   const deliver = deps.deliver ?? deliverAgentMessages;
   try {
+    await (deps.reportCutOff ?? reportCutOffAgents)();
     await (deps.setSink ?? setAgentMessageSink)((chatId) => void deliver(db, chatId));
     for (const chatId of await (deps.waiting ?? chatsWithAgentMessages)()) void deliver(db, chatId);
   } catch (error) {

@@ -147,6 +147,27 @@ maybeDescribe("chat branching against Postgres", () => {
         expect(fromPrompt).toMatchObject({ ok: false, kind: "validation" });
     });
 
+    it("keeps a prompt from background subagents theirs in the branch", async () => {
+        const { chatId, ids } = await seedChat();
+        const origin = { kind: "agent_messages", messages: [{ from: "research-1", child_id: "4", agent_type: "research", kind: "report", status: "done", body: "It is." }] };
+        const { error } = await db.from("chat_messages").update({ origin, author_user_id: null }).eq("id", ids.u2);
+        if (error) throw error;
+        const forked = await forkChat(db, { chatId, userId, userEmail, projectId: null, atMessageId: ids.a2 });
+        if (!forked.ok) throw new Error(`fork failed: ${JSON.stringify(forked)}`);
+        chats.push(forked.chatId);
+
+        const { data } = await db
+            .from("chat_messages")
+            .select("role, author_user_id, origin")
+            .eq("chat_id", forked.chatId)
+            .eq("role", "user")
+            .order("created_at", { ascending: true });
+        expect(data).toEqual([
+            { role: "user", author_user_id: userId, origin: null },
+            { role: "user", author_user_id: null, origin },
+        ]);
+    });
+
     it("numbers a chat's branches in one sequence, branches of branches included", async () => {
         const { chatId, ids } = await seedChat();
         const fork = async (from: string, at: string) => {

@@ -442,16 +442,17 @@ async function openRuntime(storage?: Storage): Promise<Runtime> {
   };
   // Work no recorded turn will drive again (a local Word chat's turn, or one
   // started without a durable context) would otherwise run on for no one.
+  // Background subagents are left to reportCutOffAgentsOnPi: this may be a
+  // worker opening the runtime while the chat server runs them.
+  const agentsWorking = new Set(
+    Object.keys((await harness.snapshot(AgentState, background))?.working ?? {}).map(Number),
+  );
   const orphans = new Set(
     (await harness.inspect(background)).tasks
       .map((task) => task.record.conversationId as number)
-      .filter((conversation) => !bindings.resumable.has(conversation)),
+      .filter((conversation) => !bindings.resumable.has(conversation) && !agentsWorking.has(conversation)),
   );
   const cutOff = await stopCutOffAnswers(harness, turnConversations);
-  // The last process's background subagents were among the orphans.
-  await reportCutOffAgents(harness).catch((error: unknown) =>
-    console.error("[pi] failed to report cut-off background subagents", safeError(error)),
-  );
   harness.resume();
   for (const id of orphans) {
     void harness
@@ -960,6 +961,11 @@ export const MAX_WORKING_AGENTS_PER_CHAT = 4;
 const MAX_INBOX_WAIT_MS = 10 * 60_000;
 /** The longest message code may send. */
 const MAX_AGENT_MESSAGE_CHARS = 20_000;
+/** The longest report the chat receives; a longer one is cut, as a message cannot be sent. */
+const MAX_AGENT_REPORT_CHARS = 40_000;
+/** Messages one subagent may have waiting unread by the chat, and send it in all. */
+const MAX_UNREAD_TO_CHAT = 5;
+const MAX_MESSAGES_TO_CHAT = 30;
 /** A background subagent idle this long retires: its kernel ends, and it takes no more messages. */
 const AGENT_IDLE_RETIRE_MS = 30 * 60_000;
 const AGENT_PREVIEW_CHARS = 300;
@@ -1173,7 +1179,13 @@ async function startBackgroundAgent(args: {
     task: spec.task,
     name,
   });
-  await giveWork(agent, spec.task, `subagent:${args.callId}`, "followUp");
+  try {
+    await giveWork(agent, spec.task, `subagent:${args.callId}`, "followUp");
+  } catch (error) {
+    // It never started: release its keys and workstation now.
+    retireAgent(agent);
+    throw error;
+  }
   return reply(
     `Started ${name} (${spec.type}, ${spec.model}) in the background. It works on after your answer, and its report arrives in this chat when it finishes. ` +
       `Collect reports while you work with agent_inbox(), give it more work with message_agent(to="${name}", ...), and see where things stand with list_agents().`,
@@ -1209,6 +1221,20 @@ async function giveWork(agent: LiveAgent, content: string, requestId: string, wh
     );
   } catch (error) {
     agent.working -= 1;
+    if (agent.working === 0) {
+      // Nothing will report work that never started: it is not under way,
+      // and no restart should say it was cut off.
+      await harness
+        .commit(async (tx) => {
+          const record = await tx.doc(Subagents, String(agent.id), null);
+          record.status = "failed";
+          record.finishedAt = Date.now();
+          delete (await tx.doc(AgentState)).working[String(agent.id)];
+        }, background)
+        .catch((failure: unknown) => console.error("[pi] failed to record a subagent's failed start", safeError(failure)));
+      agent.idleTimer = setTimeout(() => retireAgent(agent), AGENT_IDLE_RETIRE_MS);
+      agent.idleTimer.unref?.();
+    }
     throw error;
   }
 }
@@ -1291,7 +1317,7 @@ async function followWork(
       to: "parent",
       kind: "report",
       correlationId: requestId,
-      body: report,
+      body: clip(report, MAX_AGENT_REPORT_CHARS),
       artifactRefs: [],
       at: Date.now(),
       delivered: !deliver,
@@ -1339,6 +1365,15 @@ async function sendAgentMessage(chatKey: string, from: string, input: Record<str
   if (to === "parent") {
     const sender = records.find(({ record }) => record.name === from);
     if (!sender) return refusal("Only a subagent can message the chat.");
+    // Each message the chat has not read can start a turn of its own: a
+    // subagent may not flood it.
+    const sent = sender.record.envelopes.filter((envelope) => envelope.to === "parent" && envelope.kind === "message");
+    if (sent.length >= MAX_MESSAGES_TO_CHAT) {
+      return refusal(`You have sent the chat ${MAX_MESSAGES_TO_CHAT} messages, the most one subagent may. Put the rest in your report.`);
+    }
+    if (sent.filter((envelope) => envelope.delivered === false).length >= MAX_UNREAD_TO_CHAT) {
+      return refusal(`The chat has not read your last ${MAX_UNREAD_TO_CHAT} messages yet. Keep working, and put what you have in your report.`);
+    }
     await harness.commit(async (tx) => {
       const record = await tx.doc(Subagents, String(sender.id), null);
       record.envelopes.push({ id: randomUUID(), from, to: "parent", kind: "message", correlationId: "", body: message, artifactRefs: [], at: Date.now(), delivered: false });
@@ -1515,10 +1550,16 @@ function agentOpsFor(binding: TurnBinding, signal: AbortSignal | undefined): Age
 
 /**
  * The previous process's background subagents ended with it: each still
- * marked working gets a report saying so, which wakes its chat.
+ * marked working gets a report saying so, which wakes its chat. Only the
+ * process serving chats calls this, once as it starts (turnResumers.ts): a
+ * worker opening the runtime, or this process opening it again after a lost
+ * connection, must not end the ones it runs.
  */
-async function reportCutOffAgents(harness: Harness): Promise<void> {
-  const working = Object.entries((await harness.snapshot(AgentState, background))?.working ?? {});
+export async function reportCutOffAgentsOnPi(): Promise<void> {
+  const { harness } = await piRuntime();
+  const working = Object.entries((await harness.snapshot(AgentState, background))?.working ?? {}).filter(
+    ([id]) => !liveAgents.has(Number(id)),
+  );
   if (!working.length) return;
   await harness.commit(async (tx) => {
     const state = await tx.doc(AgentState);
@@ -1542,6 +1583,13 @@ async function reportCutOffAgents(harness: Harness): Promise<void> {
       delete state.working[id];
     }
   }, background);
+  // Their runs went on with no one to drive them.
+  for (const [id] of working) {
+    await harness
+      .conversation(Number(id) as ConversationId, background)
+      .then((conversation) => conversation?.abort(background))
+      .catch((error: unknown) => console.error("[pi] failed to stop a cut-off subagent", safeError(error)));
+  }
 }
 
 const TRANSCRIPT_TOOL_RESULT_CHARS = 2_000;

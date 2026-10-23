@@ -72,14 +72,18 @@ describe("resumeInterruptedTurns", () => {
 describe("startAgentMessageDelivery", () => {
   it("delivers what chats were left waiting, and from then on what arrives", async () => {
     const deliver = vi.fn(async () => undefined);
+    const reportCutOff = vi.fn(async () => undefined);
     let sink: ((chatKey: string) => void) | undefined;
     await startAgentMessageDelivery(db, {
       deliver,
+      reportCutOff,
       setSink: async (next) => {
         sink = next;
       },
       waiting: async () => ["chat-1", "chat-2"],
     });
+    // The previous process's cut-off subagents are reported first, so they are delivered too.
+    expect(reportCutOff).toHaveBeenCalledOnce();
     expect(deliver.mock.calls).toEqual([
       [db, "chat-1"],
       [db, "chat-2"],

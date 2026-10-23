@@ -179,7 +179,11 @@ Runs live in process memory. A finished run is retained for
 terminal frames, and a run that outlives `MAX_RUN_LIFETIME_MS` (30 min) is
 stopped as a safety net. A resume therefore has to reach the replica that is
 generating: run one replica, or route by session, until the buffer is moved
-to shared storage. `lib/assistantSse.ts` (`openAssistantSse`) survives only
+to shared storage. Background subagents (`lib/llm/pi/runtime.mts`) assume
+the same: a live one is held by the process that started it, and opening the
+Pi runtime reports every subagent still marked working as cut off by a
+restart, so a second process opening it would end the first one's.
+`lib/assistantSse.ts` (`openAssistantSse`) survives only
 for the one case that cannot be a run: a tabular review chat whose
 preparation produced no chat id, so there is no key to register under and
 nothing that could ever attach.

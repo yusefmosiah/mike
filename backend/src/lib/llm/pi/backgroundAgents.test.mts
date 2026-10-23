@@ -6,6 +6,7 @@ import { createMikeModels } from "./providers.mjs";
 import {
   MAX_WORKING_AGENTS_PER_CHAT,
   chatsWithAgentMessagesOnPi,
+  reportCutOffAgentsOnPi,
   resetPiRuntime,
   setAgentMessageSink,
   streamChatWithToolsOnPi,
@@ -277,6 +278,16 @@ describe("background subagents", () => {
     const messages = await takeAgentMessagesOnPi("chat-1");
     expect(messages.map((message) => message.kind)).toEqual(["report", "message"]);
     expect(messages[1]).toMatchObject({ from: "document_review-1", body: "Found it early." });
+
+    // It may not flood the chat: five unread at most.
+    for (let n = 0; n < 5; n += 1) {
+      expect((await child.agents!.send({ to: "parent", message: `Note ${n}` })).content).toContain("Sent to the chat");
+    }
+    const refused = await child.agents!.send({ to: "parent", message: "One more" });
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain("has not read your last 5 messages");
+    expect(await takeAgentMessagesOnPi("chat-1")).toHaveLength(5);
+    expect((await child.agents!.send({ to: "parent", message: "Read now?" })).content).toContain("Sent to the chat");
   });
 
   it("stops one on request without waking the chat", async () => {
@@ -295,8 +306,14 @@ describe("background subagents", () => {
     const delegation = host({ runTools: () => new Promise(() => undefined) });
     await parentTurn(startBackground, delegation);
     await until(() => childRequests.length === 1, "the child's first step");
+    // One this process runs is not cut off.
+    await reportCutOffAgentsOnPi();
+    expect(await chatsWithAgentMessagesOnPi()).toEqual([]);
     await resetPiRuntime(current); // same storage, new process
 
+    // Opening the runtime (a worker does) reports nothing; the starting server does.
+    expect(await chatsWithAgentMessagesOnPi()).toEqual([]);
+    await reportCutOffAgentsOnPi();
     expect(await chatsWithAgentMessagesOnPi()).toEqual(["chat-1"]);
     const [report] = await takeAgentMessagesOnPi("chat-1");
     expect(report).toMatchObject({ kind: "report", status: "failed", body: expect.stringContaining("server restart") });
