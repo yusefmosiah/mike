@@ -478,6 +478,11 @@ export async function runLLMStream(params: {
    */
   autoModeIntent?: string;
   /**
+   * A turn answering background subagents: the work the assistant gave them,
+   * which Auto Mode weighs as context beside the person's words.
+   */
+  autoModeDelegatedWork?: string;
+  /**
    * A hands-free voice turn: the answer is read aloud as it streams. Adds the
    * voice section (prompts.ts) as turn context, never to the system prompt,
    * which stays fixed for the chat. Defaults to false.
@@ -1441,6 +1446,7 @@ export async function runLLMStream(params: {
           verdict = await classifyToolCall({
             decisionModel: autoModeDecisionModel,
             userIntent: autoModeIntent,
+            ...(params.autoModeDelegatedWork ? { delegatedWork: params.autoModeDelegatedWork } : {}),
             toolName: call.name,
             toolArgs: call.input,
             history,

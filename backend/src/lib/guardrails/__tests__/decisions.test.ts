@@ -191,6 +191,25 @@ describe("classifyToolCall with a decision model", () => {
     expect(body.state.arguments).toEqual({ query: "login invalid hunter2", keywords: ["login"] });
   });
 
+  it("gives the gate the work the assistant delegated beside the user's request", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-test");
+    const fetchMock = vi.fn(async () => decisionsReply(benign()));
+    vi.stubGlobal("fetch", fetchMock);
+    await classifyToolCall({
+      userIntent: "Research the lease",
+      delegatedWork: "research-1 (research): Find when the lease ends.",
+      toolName: "web_search",
+      toolArgs: { query: "lease renewal clause" },
+      decisionModel: "openrouter-decisions/typesafe/jev-1.13",
+    });
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.state).toMatchObject({
+      user_request: "Research the lease",
+      delegated_work: "research-1 (research): Find when the lease ends.",
+    });
+    expect(JSON.stringify(body.questions)).toContain("delegated_work");
+  });
+
   it("never reaches the decision model for Tier 1 reads", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

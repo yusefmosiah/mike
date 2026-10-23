@@ -34,6 +34,26 @@ export function agentMessagesPrompt(messages: readonly AgentMessage[]): string {
     ].join("\n\n");
 }
 
+/** Per subagent, the most of what the assistant asked of it Auto Mode reads. */
+const DELEGATED_WORK_CHARS = 600;
+
+/**
+ * What the assistant asked of the subagents whose messages a turn answers:
+ * Auto Mode weighs it beside the person's words (chat.prepare.ts
+ * autoModeIntentFor), as the assistant's, never as theirs.
+ */
+export function delegatedWorkFor(messages: readonly AgentMessage[]): string {
+    const bySubagent = new Map<string, AgentMessage>();
+    for (const message of messages) bySubagent.set(message.childId, message);
+    return [...bySubagent.values()]
+        .map((message) => {
+            const asked = message.instructions.join("\n\nThen: ");
+            const clipped = asked.length > DELEGATED_WORK_CHARS ? `${asked.slice(0, DELEGATED_WORK_CHARS)}…` : asked;
+            return `${message.from} (${message.agentType}): ${clipped}`;
+        })
+        .join("\n\n");
+}
+
 function originOf(messages: readonly AgentMessage[]): MessageOrigin {
     return {
         kind: "agent_messages",
@@ -136,10 +156,13 @@ async function deliverOnce(db: Db, chatId: string): Promise<boolean> {
     // The prompt row holds them now.
     await takeAgentMessages(chatId, waiting.map((message) => message.id));
 
+    const delegatedWork = delegatedWorkFor(waiting);
     const context: ChatTurnResumeContext = {
         ...started,
         voice: false,
         turnUserMessageId: prep.prepared.turnUserMessageId!,
+        // This turn's, never the starting turn's (one that answered subagents too).
+        delegatedWork: delegatedWork || undefined,
     };
     const outcome = await driveChatTurn(db, {
         prepared: prep.prepared,

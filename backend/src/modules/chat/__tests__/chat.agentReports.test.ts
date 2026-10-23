@@ -27,7 +27,7 @@ vi.mock("../chat.turn", async (importOriginal) => ({
     driveChatTurn,
 }));
 
-import { agentMessagesPrompt, deliverAgentMessages } from "../chat.agentReports";
+import { agentMessagesPrompt, delegatedWorkFor, deliverAgentMessages } from "../chat.agentReports";
 import { autoModeIntentFor } from "../chat.prepare";
 
 const started = {
@@ -54,6 +54,7 @@ const report = {
     status: "done" as const,
     body: "The lease ends in 2031.",
     at: 1,
+    instructions: ["Find when the lease ends."],
     wakeContext: started,
 };
 
@@ -91,7 +92,13 @@ describe("deliverAgentMessages", () => {
             db,
             expect.objectContaining({
                 assistantMessageId: args.turnId,
-                durableContext: { ...started, voice: false, turnUserMessageId: "u2" },
+                // What the assistant asked of the subagent goes with the turn, for Auto Mode.
+                durableContext: {
+                    ...started,
+                    voice: false,
+                    turnUserMessageId: "u2",
+                    delegatedWork: "research-1 (research): Find when the lease ends.",
+                },
             }),
         );
     });
@@ -181,5 +188,17 @@ describe("autoModeIntentFor", () => {
         expect(autoModeIntentFor([delivery])).toBe("");
         // A person's own prompt is read by the stream as usual.
         expect(autoModeIntentFor([person])).toBeUndefined();
+    });
+});
+
+describe("delegatedWorkFor", () => {
+    it("names what the assistant asked of each subagent once, its later work after its task", () => {
+        const later = { ...report, id: "env-2", instructions: ["Find when the lease ends.", "Check the renewal clause too."] };
+        const other = { ...report, id: "env-3", from: "general-1", childId: "43", agentType: "general", instructions: ["x".repeat(700)] };
+        const work = delegatedWorkFor([report, later, other]);
+        expect(work).toBe(
+            "research-1 (research): Find when the lease ends.\n\nThen: Check the renewal clause too.\n\n" +
+                `general-1 (general): ${"x".repeat(600)}…`,
+        );
     });
 });

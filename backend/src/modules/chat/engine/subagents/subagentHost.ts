@@ -31,7 +31,7 @@ import {
 } from "./subagentTypes";
 
 const MAX_TASK_CHARS = 8_000;
-const REPORT_PREVIEW_CHARS = 280;
+export const REPORT_PREVIEW_CHARS = 280;
 
 /** The rules every child runs under, after its type's own instructions. */
 const CHILD_RULES = `RULES:

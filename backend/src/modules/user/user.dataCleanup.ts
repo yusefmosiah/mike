@@ -6,6 +6,8 @@ import { NonRetryableJobError } from "../../lib/dbq/runner";
 import { removeGrantsForEmail } from "../../lib/projectAccess";
 import { removeContentGrantsForEmail } from "../../lib/contentAccess";
 import { chunkArray } from "../../lib/arrays";
+import { deleteChatAgents } from "../../lib/llm";
+import { safeError } from "../../lib/safeError";
 import { ORG_CONTENT_TABLES } from "../../lib/orgs";
 
 const DELETE_BATCH_SIZE = 500;
@@ -764,7 +766,33 @@ export async function deleteUserOrganizations(
     }
 }
 
+/**
+ * The ids of the chats that `column` matches, read before they are deleted
+ * (directly or by a project's cascade) so their background subagents can go
+ * with them. Best effort: the deletion goes ahead regardless.
+ */
+async function chatIdsFor(db: Db, column: "user_id" | "project_id", values: string[]): Promise<string[]> {
+    const ids: string[] = [];
+    for (const batch of chunkArray(uniqueStrings(values), DELETE_BATCH_SIZE)) {
+        const { data, error } = await db.from("chats").select("id").in(column, batch);
+        if (error) {
+            console.error("[cleanup] could not list chats to stop their subagents", safeError(error));
+            continue;
+        }
+        ids.push(...((data ?? []) as { id: string }[]).map((row) => row.id));
+    }
+    return ids;
+}
+
+/** Stop and forget deleted chats' background subagents; never fails the deletion. */
+async function forgetChatAgents(chatIds: string[]): Promise<void> {
+    await deleteChatAgents(chatIds).catch((error: unknown) =>
+        console.error("[cleanup] failed to delete chats' subagents", safeError(error)),
+    );
+}
+
 export async function deleteAllUserChats(db: Db, userId: string) {
+    const chatIds = await chatIdsFor(db, "user_id", [userId]);
     // Conversation BEFORE DELETE triggers fence in-flight curator promotion
     // in the same transaction, including Word chats removed by document
     // cascades. No pre-enumeration is needed, so new children cannot slip
@@ -778,6 +806,7 @@ export async function deleteAllUserChats(db: Db, userId: string) {
     await throwIfError(assistantChats.error, "Failed to delete assistant chats");
     await throwIfError(tabularChats.error, "Failed to delete tabular chats");
     await throwIfError(wordDocuments.error, "Failed to delete Word chats");
+    await forgetChatAgents(chatIds);
 }
 
 export async function deleteAllUserTabularReviews(db: Db, userId: string) {
@@ -809,9 +838,11 @@ export async function deleteProjectsByIds(db: Db, projectIds: string[]) {
     const ownedProjectIds = uniqueStrings(projectIds);
     if (ownedProjectIds.length === 0) return 0;
     const keys = await captureInlineDocumentCleanup(db, { projectIds: ownedProjectIds });
+    const chatIds = await chatIdsFor(db, "project_id", ownedProjectIds);
     // Parent DELETE owns the relational cascades and all durable cleanup.
     await deleteByIds(db, "projects", ownedProjectIds);
     await completeInlineDocumentCleanup(db, keys);
+    await forgetChatAgents(chatIds);
 
     return ownedProjectIds.length;
 }
@@ -933,6 +964,7 @@ export async function deleteUserAccountData(
 
     await deleteByIds(db, "documents", documentIds);
 
+    const chatIds = await chatIdsFor(db, "user_id", [userId]);
     const deletions = [
         db.from("tabular_review_chats").delete().eq("user_id", userId),
         db.from("tabular_reviews").delete().eq("user_id", userId),
@@ -965,6 +997,7 @@ export async function deleteUserAccountData(
     for (const result of results) {
         await throwIfError(result.error, "Failed to delete account data");
     }
+    await forgetChatAgents(chatIds);
 
     const { error: workflowsError } = await db
         .from("workflows")

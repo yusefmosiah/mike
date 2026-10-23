@@ -72,6 +72,11 @@ export type ChatTurnResumeContext = {
     voice?: boolean;
     timeZone: string | null;
     turnUserMessageId: string;
+    /**
+     * A turn answering background subagents: the work the assistant gave
+     * them, which Auto Mode weighs beside the person's words.
+     */
+    delegatedWork?: string;
 };
 
 export type DriveChatTurnArgs = {
@@ -309,6 +314,9 @@ export async function driveChatTurn(
                 connectorApprovals: true,
                 autoMode: turnAutoMode,
                 ...(autoModeIntent !== undefined ? { autoModeIntent } : {}),
+                ...(args.durableContext?.delegatedWork
+                    ? { autoModeDelegatedWork: args.durableContext.delegatedWork }
+                    : {}),
                 voice: turnVoice,
                 workstationUserId,
                 guestCode,

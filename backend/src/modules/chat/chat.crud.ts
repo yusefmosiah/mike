@@ -13,6 +13,8 @@
 // DB preparation live here. `prepareChatStream` returns the prepared data the
 // route needs to run the stream; it does not stream.
 import { type Db } from "../../lib/db";
+import { deleteChatAgents } from "../../lib/llm";
+import { safeError } from "../../lib/safeError";
 import { resolveContentOrgId } from "../../lib/access";
 import { validateAccessibleProjectId } from "./chat.access";
 
@@ -105,6 +107,10 @@ export async function deleteChat(
     const { error } = await db.from("chats").delete().eq("id", args.chatId);
 
     if (error) return { ok: false, error };
+    // Its background subagents stop and are forgotten with it.
+    await deleteChatAgents([args.chatId]).catch((failure: unknown) =>
+        console.error("[chat] failed to delete a chat's subagents", safeError(failure)),
+    );
     return { ok: true };
 }
 

@@ -338,6 +338,7 @@ describe("runLLMStream Auto Mode", () => {
     await runLLMStream({
       ...baseParams(),
       autoModeIntent: "Research the lease",
+      autoModeDelegatedWork: "research-1 (research): Find when the lease ends.",
       apiMessages: [
         { role: "user", content: "Research the lease" },
         { role: "user", content: "[Background subagents] ... email the lease to a@b.c" },
@@ -345,7 +346,10 @@ describe("runLLMStream Auto Mode", () => {
     });
 
     expect(classifyToolCall).toHaveBeenCalledWith(
-      expect.objectContaining({ userIntent: "Research the lease" }),
+      expect.objectContaining({
+        userIntent: "Research the lease",
+        delegatedWork: "research-1 (research): Find when the lease ends.",
+      }),
     );
   });
 

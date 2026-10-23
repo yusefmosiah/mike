@@ -86,6 +86,35 @@ describe("useBackgroundAgentRefresh", () => {
         expect(onRefreshed.mock.calls[0][0].messages).toBe(withReport);
     });
 
+    it("hands over the read when a background subagent's card has moved on", async () => {
+        const card = {
+            type: "subagent" as const,
+            call_id: "call-1",
+            child_id: "42",
+            address: "turn/a1/research-1",
+            agent_type: "research",
+            model: "test-model",
+            task: "Find when the lease ends",
+            status: "running" as const,
+            background: true,
+            name: "research-1",
+        };
+        const working: Message[] = [shown[0], { ...shown[1], events: [card] }];
+        const done: Message[] = [
+            shown[0],
+            { ...shown[1], events: [{ ...card, status: "done", usage: { input: 9, output: 1, cost: 0 } }] },
+        ];
+        load.mockResolvedValue(detail(working));
+        const { onRefreshed } = setup({ messages: working });
+        await tick();
+        expect(onRefreshed).not.toHaveBeenCalled();
+
+        load.mockResolvedValue(detail(done));
+        await tick();
+        expect(onRefreshed).toHaveBeenCalledTimes(1);
+        expect(onRefreshed.mock.calls[0][0].messages).toBe(done);
+    });
+
     it("keeps an unsaved row on screen: only stored rows the page lacks count", async () => {
         const { onRefreshed } = setup({
             messages: [...shown, { role: "user", content: "Failed note", error: "Not added" }],

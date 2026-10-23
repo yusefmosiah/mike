@@ -21,6 +21,7 @@ type CompleteParams = Parameters<ClassifierCompleteFn>[0];
 
 type Payload = {
     intent: string;
+    delegatedWork?: string;
     tool: string;
     args: Record<string, unknown>;
     priorTools: string[];
@@ -330,6 +331,25 @@ describe("classifyToolCall tier 3", () => {
             "priorTools",
             "tool",
         ]);
+    });
+
+    it("adds the work the assistant delegated as its own labelled field, beside the user's intent", async () => {
+        const { fn, calls } = recordingComplete(async () => ALLOW_RESPONSE);
+
+        await classifyToolCall(
+            tier3Input({
+                completeFn: fn,
+                userIntent: "Research the lease",
+                delegatedWork: `research-1 (research): ${"b".repeat(2500)}`,
+            }),
+        );
+
+        const call = soleCall(calls);
+        const payload = payloadOf(call);
+        expect(payload.intent).toBe("Research the lease");
+        expect(payload.delegatedWork).toHaveLength(2000);
+        expect(payload.delegatedWork).toMatch(/^research-1 \(research\): b/);
+        expect(call.systemPrompt).toContain("delegatedWork");
     });
 
     it("redacts secrets and truncates long argument strings before the model sees them", async () => {

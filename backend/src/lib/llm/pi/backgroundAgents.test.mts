@@ -5,7 +5,9 @@ import { MemoryStorage } from "@earendil-works/pi-durable";
 import { createMikeModels } from "./providers.mjs";
 import {
   MAX_WORKING_AGENTS_PER_CHAT,
+  backgroundAgentStatusesOnPi,
   chatsWithAgentMessagesOnPi,
+  deleteChatAgentsOnPi,
   reportCutOffAgentsOnPi,
   resetPiRuntime,
   setAgentMessageSink,
@@ -213,6 +215,13 @@ describe("background subagents", () => {
     await until(() => woken.length === 2, "the second report");
     const [report] = await takeAgentMessagesOnPi("chat-1");
     expect(report).toMatchObject({ kind: "report", status: "done", body: expect.stringContaining("Which clause?") });
+    // Its card reads where it stands now: done, with its latest report; another chat's reads nothing.
+    expect(await backgroundAgentStatusesOnPi("chat-1", [report.childId])).toEqual({
+      [report.childId]: { status: "done", usage: expect.objectContaining({ output: expect.any(Number) }), report: report.body },
+    });
+    expect(await backgroundAgentStatusesOnPi("chat-2", [report.childId])).toEqual({});
+    // What the chat's assistant asked of it, for Auto Mode: its task, then the work sent since.
+    expect(report.instructions).toEqual(["Find the governing law in the NDA", "Which clause?"]);
 
     const transcript = await subagentTranscriptOnPi(report.childId);
     expect(transcript!.entries.map((entry) => entry.kind)).toEqual(["task", "assistant", "tool_result", "assistant", "message", "assistant"]);
@@ -300,6 +309,28 @@ describe("background subagents", () => {
     expect(delegation.finished).toHaveBeenCalledWith(expect.objectContaining({ status: "stopped" }));
     expect(woken).toEqual([]);
     expect(await takeAgentMessagesOnPi("chat-1")).toEqual([]);
+  });
+
+  it("stops and forgets a deleted chat's subagents, which report nothing after", async () => {
+    const cleanup = vi.fn();
+    const delegation = host({ runTools: () => new Promise(() => undefined), cleanup });
+    await parentTurn(startBackground, delegation);
+    await until(() => childRequests.length === 1, "the child's first step");
+    const childId = delegation.started.mock.calls[0][0].childId as string;
+
+    await deleteChatAgentsOnPi(["chat-1"]);
+    // Its workstation is released at once.
+    expect(cleanup).toHaveBeenCalledOnce();
+    // Nothing of what it was asked or did is kept, and the chat is not woken.
+    expect(await subagentTranscriptOnPi(childId)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(woken).toEqual([]);
+    expect(await chatsWithAgentMessagesOnPi()).toEqual([]);
+    const listed = await parentTurn((call) => call.agents!.list().then((reply) => reply.content), host());
+    expect(listed).toContain('{"agents":[]}');
+    // A restart has nothing to report for it.
+    await reportCutOffAgentsOnPi();
+    expect(await chatsWithAgentMessagesOnPi()).toEqual([]);
   });
 
   it("reports one cut off by a restart to its chat", async () => {

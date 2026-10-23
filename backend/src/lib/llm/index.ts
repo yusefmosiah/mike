@@ -212,6 +212,8 @@ export type AgentMessage = {
     status?: SubagentOutcome["status"];
     body: string;
     at: number;
+    /** What the chat's assistant asked of the subagent: its task, then any work it sent it since. */
+    instructions: string[];
     /** The context of the turn that started the subagent. */
     wakeContext: unknown;
 };
@@ -240,6 +242,32 @@ export async function peekAgentMessages(chatKey: string): Promise<AgentMessage[]
 export async function takeAgentMessages(chatKey: string, ids?: readonly string[]): Promise<AgentMessage[]> {
     const { takeAgentMessagesOnPi } = await import("./pi/runtime.mjs");
     return takeAgentMessagesOnPi(chatKey, ids);
+}
+
+/** Where a background subagent stands now: its status, its spend, and its latest report. */
+export type BackgroundAgentStatus = {
+    status: SubagentOutcome["status"] | "running";
+    usage: SubagentOutcome["usage"] | null;
+    report: string | null;
+};
+
+/** Where each of a chat's background subagents named in `childIds` stands now. */
+export async function backgroundAgentStatuses(
+    chatKey: string,
+    childIds: readonly string[],
+): Promise<Record<string, BackgroundAgentStatus>> {
+    const { backgroundAgentStatusesOnPi } = await import("./pi/runtime.mjs");
+    return backgroundAgentStatusesOnPi(chatKey, childIds);
+}
+
+/**
+ * Stop and forget the background subagents of chats being deleted: call it
+ * with the chats' ids when deleting them, cascades included.
+ */
+export async function deleteChatAgents(chatKeys: readonly string[]): Promise<void> {
+    if (!chatKeys.length) return;
+    const { deleteChatAgentsOnPi } = await import("./pi/runtime.mjs");
+    return deleteChatAgentsOnPi(chatKeys);
 }
 
 /** Report the previous process's background subagents, cut off by its end, to their chats. */

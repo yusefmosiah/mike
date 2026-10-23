@@ -20,6 +20,9 @@ vi.mock("../storage", () => {
 const vault = vi.hoisted(() => ({ enabled: vi.fn(() => false), purge: vi.fn() }));
 vi.mock("../vault/client", () => ({ vaultEnabled: vault.enabled, purgeVaultUser: vault.purge }));
 
+const llm = vi.hoisted(() => ({ deleteChatAgents: vi.fn(async (_chatIds: readonly string[]) => {}) }));
+vi.mock("../llm", async (importOriginal) => ({ ...(await importOriginal<typeof import("../llm")>()), ...llm }));
+
 import { deleteFile, listFiles } from "../storage";
 import {
     deleteAllUserChats,
@@ -321,6 +324,8 @@ describe("deleteAllUserChats", () => {
         });
         await deleteAllUserChats(db, "u1");
         expect(ids(tables.chats)).toEqual(["c2"]);
+        // The deleted chats' background subagents go with them.
+        expect(llm.deleteChatAgents).toHaveBeenCalledWith(["c1"]);
         expect(ids(tables.tabular_review_chats)).toEqual(["tc2"]);
         expect(ids(tables.word_documents)).toEqual(["wd2"]);
     });
@@ -465,6 +470,8 @@ describe("deleteUserProjects", () => {
         await expect(deleteUserProjects(db, "u1")).resolves.toBe(2);
 
         expect(ids(tables.projects)).toEqual(["p-other"]);
+        // So do those of the chats the projects took with them.
+        expect(llm.deleteChatAgents).toHaveBeenCalledWith(["c1"]);
         expect(ids(tables.documents)).toEqual(["d-loose", "d-other"]);
         expect(ids(tables.chats)).toEqual(["c-other"]);
         expect(ids(tables.chat_messages)).toEqual(["m-other"]);
@@ -682,6 +689,7 @@ describe("deleteUserAccountData", () => {
         );
 
         await deleteUserAccountData(db, "u1", " U1@Example.COM ");
+        expect(llm.deleteChatAgents.mock.calls.flatMap(([chatIds]) => chatIds)).toContain("c1");
 
         // Owned docs and guest docs inside owned projects are gone.
         expect(ids(tables.documents)).toEqual(["d-other"]);

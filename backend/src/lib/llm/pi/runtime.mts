@@ -663,6 +663,8 @@ type SubagentRecord = {
   name?: string;
   /** The starting turn's durable context, which the chat is woken with. */
   wakeContext?: JsonValue | null;
+  /** Its chat was deleted, and with it what it was asked and sent (deleteChatAgentsOnPi). */
+  deleted?: boolean;
 };
 
 const Subagents = defineDocFamily<SubagentRecord, null>({
@@ -1301,8 +1303,10 @@ async function followWork(
   const usage = await usageOf(conversation, agent.id);
   // A stop the chat asked for is recorded but does not wake it.
   const deliver = !repeated && !agent.stopped;
-  await harness.commit(async (tx) => {
+  const deleted = await harness.commit(async (tx) => {
     const record = await tx.doc(Subagents, String(agent.id), null);
+    // Its chat is gone: nothing more is kept, and nobody waits for a report.
+    if (record.deleted) return true;
     const state = await tx.doc(AgentState);
     record.usage = usage;
     if (idle) {
@@ -1324,7 +1328,13 @@ async function followWork(
       status,
     });
     if (deliver) state.waiting[agent.chatKey] = true;
+    return false;
   }, background);
+  if (deleted) {
+    // Deleted by another process, which could not release what this one holds.
+    retireAgent(agent);
+    return;
+  }
   if (repeated) return;
   agent.host.finished?.({ callId: agent.callId, childId: String(agent.id), status, report, usage });
   if (deliver) notifyChat(agent.chatKey);
@@ -1437,6 +1447,8 @@ export type AgentMessage = {
   status?: SubagentOutcome["status"];
   body: string;
   at: number;
+  /** What the chat's assistant asked of the subagent: its task, then any work it sent it since. */
+  instructions: string[];
   /** The context of the turn that started the subagent. */
   wakeContext: JsonValue | null;
 };
@@ -1465,6 +1477,9 @@ async function agentMessages(chatKey: string, take: boolean, only?: ReadonlySet<
           ...(envelope.status && envelope.status !== "running" ? { status: envelope.status } : {}),
           body: envelope.body,
           at: envelope.at,
+          instructions: record.envelopes
+            .filter((sent) => sent.from === "parent" && sent.to !== "parent")
+            .map((sent) => sent.body),
           wakeContext: record.wakeContext ?? null,
         });
       }
@@ -1525,6 +1540,55 @@ async function stopAgent(chatKey: string, input: Record<string, unknown>): Promi
   const { harness } = await piRuntime();
   await (await harness.conversation(agent.id, background))?.abort(background);
   return reply(`Stopped ${name}. It keeps what it has done so far; message it to give it more work.`);
+}
+
+/**
+ * A deleted chat's background subagents: stop the ones working, release what
+ * they hold, and forget what they were asked and sent. Pi keeps a
+ * conversation's own entries, as it keeps the chat's: it cannot delete one
+ * that may be live.
+ */
+export async function deleteChatAgentsOnPi(chatKeys: readonly string[]): Promise<void> {
+  const { harness } = await piRuntime();
+  for (const chatKey of chatKeys) {
+    const children = (await harness.snapshot(ChatAgents, chatKey, background))?.children ?? [];
+    if (!children.length) continue;
+    await harness.commit(async (tx) => {
+      const state = await tx.doc(AgentState);
+      delete state.waiting[chatKey];
+      for (const id of children) {
+        delete state.working[String(id)];
+        const record = await tx.doc(Subagents, String(id), null);
+        Object.assign(record, {
+          parentConversation: 0,
+          chatKey: "",
+          turnKey: null,
+          callId: "",
+          address: "",
+          status: "stopped",
+          finishedAt: record.finishedAt ?? Date.now(),
+          envelopes: [],
+          wakeContext: null,
+          deleted: true,
+        } satisfies Partial<SubagentRecord>);
+        delete record.name;
+      }
+      (await tx.doc(ChatAgents, chatKey, null)).children = [];
+    }, background);
+    for (const id of children) {
+      const agent = liveAgents.get(id);
+      if (agent) {
+        agent.stopped = true;
+        retireAgent(agent);
+      }
+      // Through storage, so it stops whichever process runs it.
+      await harness
+        .conversation(id as ConversationId, background)
+        .then((conversation) => conversation?.abort(background))
+        .catch((error: unknown) => console.error("[pi] failed to stop a deleted chat's subagent", safeError(error)));
+    }
+    for (const wake of [...(inboxWaiters.get(chatKey) ?? [])]) wake();
+  }
 }
 
 /** The agent functions a call may use: a parent turn's, or a background subagent's own. */
@@ -1593,6 +1657,32 @@ export async function reportCutOffAgentsOnPi(): Promise<void> {
 }
 
 const TRANSCRIPT_TOOL_RESULT_CHARS = 2_000;
+
+/** Where a background subagent stands now: its status, its spend, and its latest report. */
+export type BackgroundAgentStatus = {
+  status: SubagentRecord["status"];
+  usage: SubagentOutcome["usage"] | null;
+  report: string | null;
+};
+
+/** Where each of a chat's background subagents named in `childIds` stands now. */
+export async function backgroundAgentStatusesOnPi(
+  chatKey: string,
+  childIds: readonly string[],
+): Promise<Record<string, BackgroundAgentStatus>> {
+  const { harness } = await piRuntime();
+  const statuses: Record<string, BackgroundAgentStatus> = {};
+  for (const childId of new Set(childIds)) {
+    if (!/^\d+$/.test(childId)) continue;
+    const record = await harness.snapshot(Subagents, childId, background);
+    if (!record?.background || record.deleted || record.chatKey !== chatKey) continue;
+    const report = [...record.envelopes].reverse().find((envelope) => envelope.kind === "report");
+    statuses[childId] = JSON.parse(
+      JSON.stringify({ status: record.status, usage: record.usage, report: report?.body ?? null }),
+    ) as BackgroundAgentStatus;
+  }
+  return statuses;
+}
 
 /** A child's record and work, or null when no subagent has this id. */
 export async function subagentTranscriptOnPi(childId: string): Promise<SubagentTranscript | null> {

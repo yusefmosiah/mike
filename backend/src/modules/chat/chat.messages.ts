@@ -14,6 +14,7 @@
 // route needs to run the stream; it does not stream.
 import { type Db } from "../../lib/db";
 import { withoutEmptyAssistantReservations } from "./engine/index";
+import { withBackgroundAgentStatus } from "./chat.agentStatus";
 import {
     buildSiblingsIndex,
     latestMessageId,
@@ -178,7 +179,7 @@ export async function getChatMessages(
 
     const visible = withoutEmptyAssistantReservations(path);
     return {
-        messages: await hydrateEditStatuses(visible, db),
+        messages: await withBackgroundAgentStatus(chatId, await hydrateEditStatuses(visible, db)),
         siblings: buildSiblingsIndex(
             rows,
             visible.map((message) => message.id),

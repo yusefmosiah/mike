@@ -16,6 +16,32 @@ function hasNewRows(stored: Message[], shown: Message[]): boolean {
   return stored.some((message) => !!message.id && !shownIds.has(message.id));
 }
 
+/** Each background subagent's card on a transcript: where it stands, by child. */
+function backgroundCards(messages: Message[]): Map<string, string> {
+  const cards = new Map<string, string>();
+  for (const message of messages) {
+    for (const event of message.events ?? []) {
+      if (event.type !== "subagent" || !event.background) continue;
+      cards.set(event.child_id, JSON.stringify([event.status, event.usage ?? null, event.report_preview ?? null]));
+    }
+  }
+  return cards;
+}
+
+/**
+ * Whether the server holds what happened in the chat on its own: a row the
+ * page lacks (a report and its answer), or a background subagent that has
+ * moved on since its card was shown (finished, stopped, working again).
+ */
+function hasNews(stored: Message[], shown: Message[]): boolean {
+  if (hasNewRows(stored, shown)) return true;
+  const now = backgroundCards(stored);
+  for (const [childId, card] of backgroundCards(shown)) {
+    if (now.has(childId) && now.get(childId) !== card) return true;
+  }
+  return false;
+}
+
 /**
  * Notices, without a reload, what the server did in an open chat on its own.
  *
@@ -25,8 +51,10 @@ function hasNewRows(stored: Message[], shown: Message[]): boolean {
  * the server reports as active). This hook makes the same read while the
  * chat is open: when the tab becomes visible or the window regains focus, and
  * every `intervalMs` while the tab stays visible. `onRefreshed` receives the
- * read when the server holds rows the page lacks (the report); the live run is
- * already attached by then, so the page lays it over the transcript it sets.
+ * read when the server holds rows the page lacks (the report), or when a
+ * background subagent's card has moved on (`GET /chat/:id` shows each where it
+ * stands now); the live run is already attached by then, so the page lays it
+ * over the transcript it sets.
  *
  * It does nothing, and holds no timer, while disabled, hidden or streaming.
  */
@@ -71,7 +99,7 @@ export function useBackgroundAgentRefresh({
         // An answer may have started streaming from this page meanwhile; its
         // transcript is then the stream's.
         if (cancelled || !stillIdle.current) return;
-        if (hasNewRows(detail.messages, shown.current)) {
+        if (hasNews(detail.messages, shown.current)) {
           refreshed.current(detail);
         }
       } catch {

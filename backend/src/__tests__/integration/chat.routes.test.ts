@@ -409,13 +409,14 @@ vi.mock("../../modules/user/user.settings", () => ({
 
 // generate-title calls completeText; stub it so the success-path tests don't
 // reach a real LLM. Everything else in lib/llm stays real.
-const subagents = vi.hoisted(() => ({ transcript: vi.fn() }));
+const subagents = vi.hoisted(() => ({ transcript: vi.fn(), deleteChatAgents: vi.fn(async (_chatIds: readonly string[]) => {}) }));
 vi.mock("../../lib/llm", async (importOriginal) => {
     const actual = await importOriginal<typeof import("../../lib/llm")>();
     return {
         ...actual,
         completeText: vi.fn(async () => "Generated Title"),
         subagentTranscript: subagents.transcript,
+        deleteChatAgents: subagents.deleteChatAgents,
         modelSeesImages: vi.fn(async () => true),
     };
 });
@@ -3131,6 +3132,8 @@ describe("chat grants, deletion and roster", () => {
         expect(chatWrites("delete")[0]?.filters).toEqual([
             { column: "id", value: "chat-1" },
         ]);
+        // Its background subagents stop and are forgotten with it.
+        expect(subagents.deleteChatAgents).toHaveBeenCalledWith(["chat-1"]);
     });
 
     it("403s an org member deleting a colleague's chat", async () => {
