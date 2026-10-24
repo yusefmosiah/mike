@@ -265,6 +265,10 @@ first token and 50 to 230 tokens a second for about 300 tokens. Its catalog
 also lists decision and embedding models, which are not chat models; do not
 declare them.
 
+Staging's copy of these two entries is in `infra/node-a/staging/models.json`;
+`scripts/staging-env.sh push OPENGATEWAY_API_KEY` and then `push-models` put
+them on staging (see "Staging keys and models" in `docs/deployment.md`).
+
 ## Context window and output limit
 
 Declare `contextWindow` and `maxOutputTokens` for every model. Mike compacts

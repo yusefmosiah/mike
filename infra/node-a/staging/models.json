@@ -1,0 +1,60 @@
+{
+  "models": [
+    {
+      "id": "opengateway/deepseek-v4.1-flash-ultrafast",
+      "label": "DeepSeek V4.1 Flash Ultrafast",
+      "group": "OpenGateway",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://apis.opengateway.ai/v1",
+      "apiModel": "deepseek/deepseek-v4.1-flash-ultrafast",
+      "apiKeyEnv": "OPENGATEWAY_API_KEY",
+      "supportsVision": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 384000,
+      "reasoning": {
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      },
+      "cost": {
+        "input": 0.3,
+        "cacheRead": 0.006,
+        "output": 1.2
+      }
+    },
+    {
+      "id": "opengateway/glm-5.3-flash-ultrafast",
+      "label": "GLM 5.3 Flash Ultrafast",
+      "group": "OpenGateway",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://apis.opengateway.ai/v1",
+      "apiModel": "z-ai/glm-5.3-flash-ultrafast",
+      "apiKeyEnv": "OPENGATEWAY_API_KEY",
+      "supportsVision": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "reasoning": {
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      },
+      "cost": {
+        "input": 0.15,
+        "cacheRead": 0.03,
+        "output": 0.5
+      }
+    }
+  ]
+}

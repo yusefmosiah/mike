@@ -693,3 +693,28 @@ Signup is open without email confirmation (`GOTRUE_DISABLE_SIGNUP=false`,
 `GOTRUE_MAILER_AUTOCONFIRM=true` in `/var/lib/mike-staging/secrets.env`):
 staging has no outgoing mail (Mailpit catches it). Change either key there and
 run `mike-staging compose up -d auth` to apply it.
+
+### Staging keys and models
+
+The backend's model and search keys, and `MIKE_MODEL_CONFIG_JSON`, live in
+`/var/lib/mike-staging/backend.env` on node-a. Deploys never touch that file.
+Change it with `scripts/staging-env.sh` from your machine. It connects as
+`node-a` from `~/.ssh/config` (root), takes values from your `backend/.env`,
+and never prints them:
+
+```bash
+scripts/staging-env.sh status                        # key names: same, differs, staging only, local only
+scripts/staging-env.sh push OPENGATEWAY_API_KEY      # copy named keys from backend/.env
+scripts/staging-env.sh pull-models                   # staging's model list -> infra/node-a/staging/models.json
+scripts/staging-env.sh push-models                   # models.json -> staging, merged by id
+scripts/staging-env.sh push-models --exact           # staging's list becomes exactly models.json
+```
+
+`infra/node-a/staging/models.json` is the reviewed model list. It names keys
+with `apiKeyEnv` and must not hold an inline `apiKey`. Before each write the
+script copies `backend.env` to `/var/lib/mike-staging/env-backups/` (the last
+20 are kept). It then replaces the file in one move and restarts only the
+backend with `mike-staging reload-env`. If nothing changed, it restarts
+nothing. A host built before `reload-env` existed runs `mike-staging deploy`
+instead. Both wait for `mike-staging health`. If staging does not come back
+healthy, the script prints the command that restores the backup.

@@ -11,7 +11,7 @@
 #   /var/lib/mike-staging/backend.env  model and search keys, copied in by the operator
 #   /var/lib/mike-staging/workstation.env  the owner's workstation VM, written by owner-link
 #   /var/lib/mike-staging/backups/<time>/  daily: postgres.dump (restore-checked) and storage.tar.zst
-#   mike-staging deploy | deploy-sha <sha> | up | down | ps | logs [svc] | owner-link <email> | api <email> <METHOD> <path> [curl args] | backup | health
+#   mike-staging deploy | deploy-sha <sha> | reload-env | up | down | ps | logs [svc] | owner-link <email> | api <email> <METHOD> <path> [curl args] | backup | health
 #
 # GitHub Actions deploys main through `deploy-sha` (.github/workflows/deploy-staging.yml),
 # as the mike-deploy user whose key may run nothing else.
@@ -185,6 +185,13 @@ let
             fi
             exit 1
           fi ;;
+        reload-env)
+          # After backend.env changes (scripts/staging-env.sh): rebuild src/.env
+          # and restart the backend with it, nothing else.
+          exec 9>${root}/deploy.lock
+          if ! flock -w 600 9; then echo "reload-env: a deploy still holds the lock" >&2; exit 1; fi
+          write_backend_env
+          compose up -d --no-deps --force-recreate backend ;;
         up) compose up -d ;;
         down) compose down ;;
         ps) compose ps ;;
@@ -275,7 +282,7 @@ let
             exit 1
           fi
           echo "healthy" ;;
-        *) echo "usage: mike-staging deploy|deploy-sha <sha>|up|down|ps|logs [svc]|compose ...|owner-link <email>|api <email> <METHOD> <path> [curl args]|backup|health" >&2; exit 2 ;;
+        *) echo "usage: mike-staging deploy|deploy-sha <sha>|reload-env|up|down|ps|logs [svc]|compose ...|owner-link <email>|api <email> <METHOD> <path> [curl args]|backup|health" >&2; exit 2 ;;
       esac
     '';
   };
