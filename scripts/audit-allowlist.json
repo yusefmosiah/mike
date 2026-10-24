@@ -10,5 +10,9 @@
     {
         "ghsa": "GHSA-vfj7-8cjw-p6xm",
         "reason": "braces <=3.0.3 stack-exhaustion DoS through deeply nested brace patterns; published 2026-09-18 and no patched release exists (3.0.3 is the latest braces). Present only in devDependencies: frontend through @ladle/react -> globby -> fast-glob -> micromatch, and word-addin through webpack-dev-server -> http-proxy-middleware -> micromatch (`npm ls braces --omit=dev` is empty in every workspace). Those callers expand glob and proxy-path patterns written in this repo's own config, never user or document input, and neither tool ships in a production image. REMOVE WHEN: braces publishes a patched release (or micromatch drops braces) and these chains resolve it; reassess if braces gains a production caller."
+    },
+    {
+        "ghsa": "GHSA-xcx6-jx8p-x3h5",
+        "reason": "@azure/msal-node <7.1.0 can disclose auth_code-flow parameters to an attacker-controlled endpoint; published 2026-10-24. Present only in word-addin devDependencies through office-addin-debugging -> office-addin-dev-settings -> @microsoft/m365agentstoolkit-cli, which pins @azure/msal-node ^6.0.1 (and @azure/identity ^6.0.0), so the 7.1.0 fix is a major version that chain does not accept (`npm ls @azure/msal-node --omit=dev` is empty). This repo never runs that CLI's Microsoft 365 sign-in: npm start sideloads the add-in into desktop Word, and the production add-in image contains only the static bundle and server.mjs. REMOVE WHEN: m365agentstoolkit-cli (or office-addin-debugging) accepts @azure/msal-node >=7.1.0; reassess if this repo starts using the toolkit's sign-in."
     }
 ]
