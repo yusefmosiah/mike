@@ -112,7 +112,47 @@ Both should be shown as "observed" rather than "recorded", so the precision is h
 6. Subagent roll-up.
 7. Workstation file and network observation.
 
+Then, for subagents:
+
+8. Build child runs with the same step tree, and put `run_summary` and `sources` on `SubagentEvent`.
+9. Replace `SubagentSteps` and the background report view with the shared timeline component.
+10. Retire `report_preview` and the special path that copies edits, new documents and connector calls into the parent timeline.
+
+Step 8 can land with steps 1 to 4, since child tool calls already pass through the same `runTurnTools` chokepoint.
+
 Steps 1 to 4 need no model call and send no data anywhere new.
+
+### Subagents use the same system
+
+Owner direction (2026-10-25): delegated and background subagents report through the same summary and source system as the main turn. There should be one system, not two.
+
+**Today they are separate.**
+
+- `delegate` emits a `SubagentEvent` on the parent timeline: task, status, model, usage, and `report_preview`, the first characters of the child's report (`subagentHost.ts`, `chat.agentStatus.ts`).
+- The child's own steps are hidden from the parent (`showCell` is false for scope `"child"`). They load from the child transcript only when the block is opened (`SubagentBlock.tsx`, `SubagentSteps`).
+- Only edits, new documents, workflows and connector calls cross into the parent's timeline, as a special case (`docs/backend-architecture.md`).
+- Background subagents report as separate chat messages (`AgentReportMessage.tsx`), with no step view at all.
+
+**How they become one system.**
+
+- **A subagent is a step whose children are a run.** The step tree is recursive: run, then group, then step. A `subagent` step contains the child's own run tree, built by the same code. The child's steps get summaries and sources exactly as the parent's do. Their call ids are scoped by the child's existing address (`turn/<id>/<type>-<n>`).
+- **The subagent step's summary is the child's run summary.** It replaces `report_preview` and comes from the same recursive summarisation. While the child works, the parent's line shows the child's current step summary, not just "running". The child's report stays what it is: its answer, with its own citations.
+- **Sources roll up.** The subagent step's sources are the union of the child's sources, and the parent run's source list includes them. The special case for edits, new documents, workflows and connector calls goes away: those are sources with `access: created` or `edited`, and they roll up like any other.
+- **Storage stays where it is.** The child transcript stays in its own conversation. The parent's `SubagentEvent` gains the child's `run_summary` and its deduplicated `sources`, so the parent timeline renders without loading the child. Opening the block loads the child's step tree.
+- **Background subagents are the same.** Each piece of work a background subagent reports is a run of its own. Its report message shows the same run line ("research-1, completed in 12 steps; read 4 documents and 9 web pages") and opens to the same step tree.
+- **One component.** One step-timeline component in `frontend/src/shared/ui/` renders the parent turn, a subagent block, a background report and the Word add-in. It replaces `SubagentSteps` and the separate report view.
+- **One summariser per conversation.** Child steps are summarised by the summariser paired with the conversation's provider, not the child's model. The parent's provider already receives the child's report, so this adds no new place the data goes. A conversation then has one summariser, one prompt and one eval.
+- **Depth.** No subagent type may list `delegate`, so today the tree is at most a parent run containing child runs. The types stay recursive anyway, so allowing deeper delegation later needs no new format.
+
+The contract becomes one recursive `StepNode`. It has:
+
+- an `id`, `call_id` and `address`;
+- a `kind`: `reasoning`, `code_cell`, `tool`, `subagent`, `group` or `run`;
+- an optional `summary`, with its level and the steps it covers;
+- `sources`, as ids of `SourceRef`s;
+- optional `children`.
+
+`SubagentEvent` and background reports carry a `StepNode` of kind `run`.
 
 ### Shapes to try
 
