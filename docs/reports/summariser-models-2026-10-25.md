@@ -12,6 +12,26 @@ Scope (per owner): Anthropic, OpenAI and any model that hides or only summarises
 4. **Phala already has a good trust-boundary fit:** `qwen/qwen-2.5-7b-instruct` ($0.10/$0.20, Phala-operated), `phala/gemma-4-26b-a4b-uncensored` ($0.15/$0.70, cache $0.05, Phala-operated, already wired on staging) and `phala/qwen3.8-27b-uncensored` ($0.30/$1.50, wired on staging). A model of 3B or under is not in Phala's catalog (smallest is a 4B decision model, Kev 4B, which outputs decisions rather than text).
 5. **Recommendation:** default the summariser to the smallest allowed model on the same lane as the chat. Today: DeepSeek V4.1 Flash on OpenCode Go (off-peak $0.15/$0.60) for Go chats; `phala/gemma-4-26b-a4b-uncensored` for Phala chats (add Qwen 2.5 7B to the Phala declarations for a cheaper, plainer option). Later local: a 4B-class model first, bake-off with a sub-3B (section 6). Make the model a deployment/org setting.
 
+## Owner decisions (2026-10-25)
+
+These replace the matching parts of the recommendation in section 9.
+
+| Chat provider | Summariser |
+| --- | --- |
+| Phala | Gemma 4 26B-A4B (`phala/gemma-4-26b-a4b-uncensored`) |
+| River | Nemotron 3.5 Super |
+| OpenCode Go | DeepSeek V4.1 Flash |
+| Local | A model of about 1.5 to 3B, on the same box as the chat |
+
+- **Pair with the chat's provider.** The summariser runs on the provider that serves the chat, so a summary never adds a trust boundary.
+- **No Muse Spark.** The owner does not want to send data to Meta. Muse Spark is not a summariser candidate, on Go or anywhere else.
+- **Local shares the chat's box.** The summariser runs on the same machine as the chat model, in whatever memory and compute the chat leaves free. That rules out the 26B-A4B option from section 4 for local use, even on a Spark. The target is a model of about 1.5 to 3B. Liquid AI is preferred, because its tiny models are strong, with Qwen or Gemma as alternatives. The bake-off in section 6 changes accordingly:
+  - candidates: LFM2.5-2.6B and LFM2.5-1.2B-Instruct (check for a newer small Liquid release first), Qwen3.5-2B (non-thinking), Gemma 4 E2B;
+  - measure each with the chat model loaded and generating at the same time, because that contention is the real constraint;
+  - expect the extractive fallback to be used more often at 1.5B than at 3B.
+
+  Question 7 in section 10 (the LFM licence) now blocks the preferred option.
+
 ## 1. Mike's providers and models today
 
 Source: `backend/src/lib/llm/types.ts` (`Provider`), `models.ts`, `modelSelection.ts`, `registry.ts`, `docs/configured-models.md`, `docs/model-costs.md`, `goals/STATUS.md`, `privateMode.ts`.
@@ -232,7 +252,7 @@ Reading: the owner's 1.3-2x guess for B is right on Phala pricing (1.2-1.7x here
 - A per-model `summariser` capability in `MIKE_MODEL_CONFIG_JSON` (marks "non-reasoning or thinking can be disabled") so the resolver never picks a model like GLM-5.3-Flash whose thinking leaks. Reuse the existing `reasoning.canDisable` flag as the test: choose models with `canDisable: true` or no reasoning at all.
 - Settings: `contextBudgetTokens` (default 2,500), `maxStepTokens`, `minStepWords`, `timeoutMs` (about 4 s).
 
-**Now (current stack):** OpenCode Go `deepseek-v4.1-flash` (measured 0.9-1.4 s total, good output, covered by the flash allowance). Do not use `glm-5.3-flash` unless thinking can be turned off. Muse Spark: untested.
+**Now (current stack):** OpenCode Go `deepseek-v4.1-flash` (measured 0.9-1.4 s total, good output, covered by the flash allowance). Do not use `glm-5.3-flash` unless thinking can be turned off. Muse Spark: excluded by the owner (no data to Meta).
 
 **On Phala:** `phala/gemma-4-26b-a4b-uncensored` (already wired and attested, $0.00041 per summary) as the default; declare `qwen/qwen-2.5-7b-instruct` ($0.00026) as a cheaper alternative and evaluate it; `phala/qwen3.8-27b-uncensored` as the quality step-up. The gateway carries the same ACI verification as the chat, so there is no extra provider.
 
