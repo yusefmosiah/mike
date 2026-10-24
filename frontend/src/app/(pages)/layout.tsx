@@ -132,7 +132,10 @@ export default function MikeLayout({
         [mobileActionsContainer],
     );
 
-    const sidebarValue = useMemo(() => ({ setSidebarOpen }), [setSidebarOpen]);
+    const sidebarValue = useMemo(
+        () => ({ setSidebarOpen, isSidebarOpen }),
+        [setSidebarOpen, isSidebarOpen],
+    );
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {

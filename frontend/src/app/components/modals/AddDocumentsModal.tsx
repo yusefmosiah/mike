@@ -15,6 +15,7 @@ import type { Document, Folder } from "../shared/types";
 import { FileDirectory } from "../shared/FileDirectory";
 import type { DirectoryTab } from "../shared/useDirectoryData";
 import { Modal } from "./Modal";
+import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import {
     ATTACHMENTS,
     SUPPORTED_ATTACHMENT_ACCEPT,
@@ -51,6 +52,12 @@ interface Props {
      * finished documents never reach the selection.
      */
     uploadStateId?: string;
+    /**
+     * Render in place, filling the parent, instead of in a modal: the
+     * directory with Upload and Confirm in a footer beneath it. `breadcrumb`
+     * and `keepMounted` are unused; `onClose` still runs after Confirm.
+     */
+    inline?: boolean;
 }
 
 const DIRECTORY_PAGE_SIZE = 40;
@@ -69,6 +76,7 @@ export function AddDocumentsModal({
     tabs,
     disabledDocumentIds,
     uploadStateId,
+    inline = false,
 }: Props) {
     const uploadSurfaceId =
         uploadStateId ??
@@ -377,28 +385,17 @@ export function AddDocumentsModal({
         }));
     }
 
-    return (
-        <Modal
-            open={open}
-            onClose={onClose}
-            keepMounted={keepMounted}
-            breadcrumbs={breadcrumb}
-            secondaryAction={{
-                label: uploading ? "Uploading…" : "Upload",
-                icon: uploading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                    <Upload className="h-3.5 w-3.5" />
-                ),
-                onClick: () => fileInputRef.current?.click(),
-                disabled: uploading,
-            }}
-            primaryAction={{
-                label: uploading ? "Saving…" : "Confirm",
-                onClick: handleConfirm,
-                disabled: selectedDocuments.length === 0 || uploading,
-            }}
-        >
+    const uploadLabel = uploading ? "Uploading…" : "Upload";
+    const confirmLabel = uploading ? "Saving…" : "Confirm";
+    const confirmDisabled = selectedDocuments.length === 0 || uploading;
+    const uploadIcon = uploading ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+    ) : (
+        <Upload className="h-3.5 w-3.5" />
+    );
+
+    const content = (
+        <>
             <input
                 ref={fileInputRef}
                 type="file"
@@ -462,6 +459,55 @@ export function AddDocumentsModal({
                     }
                 />
             </div>
+        </>
+    );
+
+    if (inline) {
+        return (
+            <div className="flex h-full min-h-0 flex-col px-3 pt-3">
+                <div className="flex min-h-0 flex-1 flex-col">{content}</div>
+                <div className="flex flex-wrap items-center justify-end gap-2 py-3">
+                    <PillButtonUI
+                        tone="blue"
+                        size="normal"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                    >
+                        {uploadIcon}
+                        {uploadLabel}
+                    </PillButtonUI>
+                    <PillButtonUI
+                        tone="black"
+                        size="normal"
+                        onClick={handleConfirm}
+                        disabled={confirmDisabled}
+                    >
+                        {confirmLabel}
+                    </PillButtonUI>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <Modal
+            open={open}
+            onClose={onClose}
+            keepMounted={keepMounted}
+            breadcrumbs={breadcrumb}
+            secondaryAction={{
+                label: uploadLabel,
+                icon: uploadIcon,
+                onClick: () => fileInputRef.current?.click(),
+                disabled: uploading,
+            }}
+            primaryAction={{
+                label: confirmLabel,
+                onClick: handleConfirm,
+                disabled: confirmDisabled,
+            }}
+        >
+            {content}
         </Modal>
     );
 }

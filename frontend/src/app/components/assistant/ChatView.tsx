@@ -51,6 +51,8 @@ import {
     panelDocumentType,
 } from "../shared/types";
 import { useSidebar } from "@/app/contexts/SidebarContext";
+import { watchHorizontalSwipe } from "@/app/lib/horizontalSwipe";
+import { chatPanelDocuments } from "@/app/lib/chatPanelDocuments";
 import { useChatHistoryContext } from "@/app/contexts/ChatHistoryContext";
 import { usePageChrome } from "@/app/contexts/PageChromeContext";
 import { invalidateDocxBytes } from "@/app/hooks/useFetchDocxBytes";
@@ -197,6 +199,30 @@ interface Props {
 const ASSISTANT_PANEL_TRANSITION_MS = 500;
 const MOBILE_BREAKPOINT_PX = 768;
 
+/** The panel document a download card, copy or chat file stands for. */
+function panelDocumentForOpen(args: {
+    documentId: string;
+    filename: string;
+    versionId: string | null;
+    versionNumber: number | null;
+    fileType?: string | null;
+}): PanelDocument {
+    return {
+        document_id: args.documentId,
+        title: args.filename,
+        type: args.fileType
+            ? resolveDocumentViewType({
+                  filename: args.filename,
+                  fileType: args.fileType,
+              })
+            : panelDocumentType(args.filename),
+        metadata: [],
+        quotes: [],
+        version_id: args.versionId,
+        version_number: args.versionNumber,
+    };
+}
+
 function isSmallScreen() {
     return (
         typeof window !== "undefined" &&
@@ -245,6 +271,17 @@ export function ChatView({
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const [panelMounted, setPanelMounted] = useState(false);
     const [panelVisible, setPanelVisible] = useState(false);
+    const [panelLoading, setPanelLoading] = useState(false);
+    const [rootElement, setRootElement] = useState<HTMLElement | null>(null);
+    const [panelElement, setPanelElement] = useState<HTMLElement | null>(null);
+    const panelElementRef = useRef<HTMLElement | null>(null);
+    const panelOpenerRef = useRef<HTMLElement | null>(null);
+    const panelVisibleRef = useRef(false);
+    panelVisibleRef.current = panelVisible;
+    const attachPanelElement = useCallback((node: HTMLElement | null) => {
+        panelElementRef.current = node;
+        setPanelElement(node);
+    }, []);
     const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [openDocumentsModalOpen, setOpenDocumentsModalOpen] = useState(false);
@@ -281,7 +318,9 @@ export function ChatView({
     const [reloadingEditIds, setReloadingEditIds] = useState<Set<string>>(
         () => new Set(),
     );
-    const { setSidebarOpen } = useSidebar();
+    const { setSidebarOpen, isSidebarOpen = false } = useSidebar();
+    const isSidebarOpenRef = useRef(isSidebarOpen);
+    isSidebarOpenRef.current = isSidebarOpen;
     const { mobileActionsContainer } = usePageChrome();
     const {
         chats,
@@ -308,6 +347,10 @@ export function ChatView({
         activeTab?.kind === "citation" ? activeTab.citation : null;
 
     const showPanel = useCallback(() => {
+        if (!panelVisibleRef.current) {
+            const active = document.activeElement;
+            panelOpenerRef.current = active instanceof HTMLElement ? active : null;
+        }
         if (panelCloseTimerRef.current !== null) {
             window.clearTimeout(panelCloseTimerRef.current);
             panelCloseTimerRef.current = null;
@@ -364,6 +407,115 @@ export function ChatView({
         [restoreSidebarAfterPanelClose],
     );
 
+    /**
+     * Opens the panel on the chat's own documents: every document the
+     * assistant created or edited that is not already a tab, the most recent
+     * selected. A chat with none leaves the panel on the document picker.
+     */
+    const panelOpenRequestRef = useRef(0);
+    const tabsRef = useRef(tabs);
+    tabsRef.current = tabs;
+    const openPanel = useCallback(async () => {
+        showPanel();
+        const request = ++panelOpenRequestRef.current;
+        const open = new Set(tabsRef.current.map((tab) => tab.id));
+        const missing = chatPanelDocuments(messages).filter(
+            (entry) => !open.has(entry.documentId),
+        );
+        if (missing.length === 0) return;
+        setPanelLoading(true);
+        const resolved = await Promise.all(
+            missing.map(async (entry) => {
+                try {
+                    const result = await resolvePanelDocumentVersionResult(
+                        panelDocumentForOpen({
+                            documentId: entry.documentId,
+                            filename: entry.filename,
+                            versionId: entry.versionId,
+                            versionNumber: entry.versionNumber,
+                        }),
+                    );
+                    return result.status === "resolved" ? result.document : null;
+                } catch {
+                    return null;
+                }
+            }),
+        );
+        if (request !== panelOpenRequestRef.current) return;
+        setPanelLoading(false);
+        const documents = resolved.filter(
+            (document): document is PanelDocument => document !== null,
+        );
+        if (documents.length === 0) return;
+        setTabs((prev) =>
+            documents.reduce<AssistantSidePanelTab[]>(
+                (next, document) =>
+                    next.some((tab) => tab.id === assistantSidePanelTabId(document))
+                        ? next
+                        : upsertAssistantSidePanelTab(next, {
+                              kind: "document",
+                              id: assistantSidePanelTabId(document),
+                              document,
+                          }),
+                prev,
+            ),
+        );
+        setActiveTabId(
+            (current) =>
+                current ?? assistantSidePanelTabId(documents[documents.length - 1]),
+        );
+    }, [messages, showPanel]);
+
+    /** Puts the panel away but keeps its tabs, as a swipe right does. */
+    const dismissPanel = useCallback(
+        () => hidePanel(() => unmountPanel()),
+        [hidePanel, unmountPanel],
+    );
+
+    // On a phone, a swipe left opens the panel and a swipe right puts it
+    // away: the mirror of the sidebar's swipes. The sidebar keeps a left
+    // swipe while it is open (it closes), and the panel's own surface is
+    // fenced off from the page's right swipe (`data-swipe-scope`).
+    useEffect(() => {
+        if (!rootElement || panelMounted) return;
+        return watchHorizontalSwipe(rootElement, {
+            direction: "left",
+            enabled: () => isSmallScreen() && !isSidebarOpenRef.current,
+            onSwipe: () => void openPanel(),
+        });
+    }, [rootElement, panelMounted, openPanel]);
+    useEffect(() => {
+        if (!panelElement || !panelVisible) return;
+        return watchHorizontalSwipe(panelElement, {
+            direction: "right",
+            scope: "document-panel",
+            enabled: isSmallScreen,
+            onSwipe: dismissPanel,
+        });
+    }, [panelElement, panelVisible, dismissPanel]);
+
+    // Focus follows the panel: into it when it opens (unless the person has
+    // already moved on to something else), back to where it was when it closes.
+    useEffect(() => {
+        const panel = panelElementRef.current;
+        if (!panelVisible || !panel) return;
+        const active = document.activeElement;
+        const opener = panelOpenerRef.current;
+        if (!active || active === document.body || active === opener) {
+            panel.focus({ preventScroll: true });
+        }
+        return () => {
+            panelOpenerRef.current = null;
+            const current = document.activeElement;
+            if (
+                opener?.isConnected &&
+                (!current || current === document.body || panel.contains(current))
+            ) {
+                opener.focus({ preventScroll: true });
+            }
+        };
+    }, [panelVisible]);
+
     const closeAllTabs = useCallback(() => {
         hidePanel(() =>
             unmountPanel(() => {
@@ -375,8 +527,7 @@ export function ChatView({
 
     const closeTab = useCallback(
         (id: string) => {
-            // Closing the last tab leaves the panel open on its "Open Documents"
-            // placeholder; only the panel's own close control dismisses it.
+            // Closing the last tab leaves the panel open on its document picker; only the panel's own close control dismisses it.
             setTabs((prev) => {
                 const next = prev.filter((t) => t.id !== id);
                 if (activeTabId === id) {
@@ -711,20 +862,9 @@ export function ChatView({
             // pill asks, and it was answered with a bare `return`: a card
             // whose document was deleted, or never shared, did nothing at all
             // when clicked. Same resolution, same words.
-            const resolution = await resolvePanelDocumentVersionResult({
-                document_id: args.documentId,
-                title: args.filename,
-                type: args.fileType
-                    ? resolveDocumentViewType({
-                          filename: args.filename,
-                          fileType: args.fileType,
-                      })
-                    : panelDocumentType(args.filename),
-                metadata: [],
-                quotes: [],
-                version_id: args.versionId,
-                version_number: args.versionNumber,
-            });
+            const resolution = await resolvePanelDocumentVersionResult(
+                panelDocumentForOpen(args),
+            );
             if (resolution.status !== "resolved") {
                 reportUnresolvedDocument(resolution.status);
                 return;
@@ -1048,7 +1188,7 @@ export function ChatView({
                     {
                         label: "Open side panel",
                         icon: PanelRight,
-                        onSelect: showPanel,
+                        onSelect: () => void openPanel(),
                     },
                     {
                         label: "Edit quick actions",
@@ -1091,7 +1231,7 @@ export function ChatView({
         accessResolved && (canSend === undefined || canSend === true);
 
     return (
-        <div className="h-full w-full flex relative">
+        <div ref={setRootElement} className="h-full w-full flex relative">
             {/* Chat column */}
             <div className="flex min-w-0 flex-col h-full flex-1 relative">
                 {renderHeaderActionSlots()}
@@ -1253,7 +1393,10 @@ export function ChatView({
 
             {panelMounted && (
                 <div
-                    className={`fixed inset-0 z-40 flex justify-center p-3 max-md:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
+                    ref={attachPanelElement}
+                    tabIndex={-1}
+                    data-swipe-scope="document-panel"
+                    className={`fixed inset-0 z-40 flex justify-center outline-none p-3 max-md:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
                 >
                     <AssistantSidePanel
                         tabs={tabs}
@@ -1319,6 +1462,19 @@ export function ChatView({
                         onCloseAnnotation={handleCloseAnnotation}
                         onScrollChange={handleScrollChange}
                         onOpenDocuments={() => setOpenDocumentsModalOpen(true)}
+                        loading={panelLoading}
+                        picker={
+                            <AddDocumentsModal
+                                inline
+                                open
+                                onClose={() => {}}
+                                onSelect={(documents) =>
+                                    documents.forEach(handleAttachedDocumentClick)
+                                }
+                                breadcrumb={["Assistant", "Open Documents"]}
+                                uploadStateId="assistant-side-panel-inline"
+                            />
+                        }
                     />
                 </div>
             )}

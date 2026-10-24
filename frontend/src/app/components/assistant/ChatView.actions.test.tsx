@@ -770,30 +770,31 @@ describe("ChatView side panel and quick actions menu", () => {
         },
     );
 
-    it("opens a blank side panel whose Open Documents picker opens documents", async () => {
+    it("opens the side panel straight to the document picker", async () => {
         renderView(vi.fn(), [], null, vi.fn());
 
         openActions();
         fireEvent.click(
             await screen.findByRole("menuitem", { name: "Open side panel" }),
         );
+        // No "Open documents" button to press first: the picker is the panel.
+        expect(
+            screen.queryByRole("button", { name: "Open Documents" }),
+        ).not.toBeInTheDocument();
         fireEvent.click(
-            await screen.findByRole("button", { name: "Open Documents" }),
-        );
-        fireEvent.click(
-            screen.getByRole("button", { name: "Pick Budget.xlsx" }),
+            await screen.findByRole("button", { name: "Pick Budget.xlsx" }),
         );
 
         const viewer = await screen.findByTestId("spreadsheet-viewer");
         expect(viewer).toHaveAttribute("data-document-id", "excel-1");
-        // The placeholder gives way; only the tab bar's + keeps the name.
+        // The picker gives way; only the tab bar's + keeps the name.
         expect(screen.queryByText("Open Documents")).not.toBeInTheDocument();
         expect(
             screen.queryByRole("button", { name: "Pick Budget.xlsx" }),
         ).not.toBeInTheDocument();
     });
 
-    it("keeps the panel open on its placeholder when the last tab closes", async () => {
+    it("keeps the panel open on the picker when the last tab closes", async () => {
         renderView();
 
         fireEvent.click(
@@ -805,7 +806,7 @@ describe("ChatView side panel and quick actions menu", () => {
         );
 
         expect(
-            await screen.findByRole("button", { name: "Open Documents" }),
+            await screen.findByRole("button", { name: "Pick Budget.xlsx" }),
         ).toBeInTheDocument();
         expect(
             screen.queryByTestId("spreadsheet-viewer"),

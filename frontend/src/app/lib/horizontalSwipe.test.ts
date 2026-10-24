@@ -113,4 +113,22 @@ describe("watchHorizontalSwipe", () => {
         swipe(window, [[20, 300], [140, 300]]);
         expect(onSwipe).toHaveBeenCalledTimes(1);
     });
+
+    it("leaves a scoped surface to the watcher that names it", () => {
+        const target = page();
+        const panel = document.createElement("div");
+        panel.setAttribute("data-swipe-scope", "panel");
+        const inside = document.createElement("span");
+        panel.appendChild(inside);
+        target.appendChild(panel);
+        const page_ = vi.fn();
+        const owner = vi.fn();
+        watchHorizontalSwipe(target, { direction: "right", onSwipe: page_ });
+        watchHorizontalSwipe(panel, { direction: "right", onSwipe: owner, scope: "panel" });
+
+        swipe(inside, [[20, 300], [140, 300]]);
+
+        expect(page_).not.toHaveBeenCalled();
+        expect(owner).toHaveBeenCalledTimes(1);
+    });
 });

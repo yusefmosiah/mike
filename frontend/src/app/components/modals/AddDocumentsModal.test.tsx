@@ -22,11 +22,19 @@ vi.mock("../shared/FileDirectory", () => ({
     FileDirectory: ({
         documents,
         uploadingFilenames,
+        onChange,
     }: {
         documents: Array<{ filename: string }>;
         uploadingFilenames: string[];
+        onChange: (documents: unknown[]) => void;
     }) => (
         <div>
+            <button
+                type="button"
+                onClick={() => onChange([{ id: "pick-1", filename: "picked.pdf", project_id: null }])}
+            >
+                pick
+            </button>
             <div data-testid="loaded-files">
                 {documents.map((document) => document.filename).join(",")}
             </div>
@@ -255,5 +263,37 @@ describe("AddDocumentsModal upload progress", () => {
         expect(screen.getByTestId("loading-files")).toHaveTextContent(
             "renamed.pdf",
         );
+    });
+});
+
+describe("AddDocumentsModal inline", () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it("fills its parent with the directory and a footer, and confirms in place", () => {
+        const onSelect = vi.fn();
+        const onClose = vi.fn();
+        render(
+            <AddDocumentsModal
+                inline
+                open
+                onClose={onClose}
+                onSelect={onSelect}
+                breadcrumb={["Assistant", "Open Documents"]}
+                uploadStateId="inline-test"
+            />,
+        );
+
+        const confirm = screen.getByRole("button", { name: "Confirm" });
+        expect(confirm).toBeDisabled();
+        expect(screen.getByRole("button", { name: /Upload/ })).toBeEnabled();
+
+        fireEvent.click(screen.getByRole("button", { name: "pick" }));
+        fireEvent.click(confirm);
+
+        expect(onSelect).toHaveBeenCalledWith(
+            [expect.objectContaining({ id: "pick-1" })],
+            undefined,
+        );
+        expect(onClose).toHaveBeenCalled();
     });
 });
