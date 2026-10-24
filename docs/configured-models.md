@@ -203,6 +203,68 @@ Do not declare River's original `deepseek-ai/DeepSeek-V4.1-Flash` (the id
 move to the 1017 release. A deployment that still declares the old id gets a
 startup warning, and the old entry is left out of the pickers.
 
+OpenGateway (https://opengateway.ai/models) serves "ultrafast" DeepSeek V4.1
+Flash and GLM-5.3-Flash at `https://apis.opengateway.ai/v1`. It is a
+third-party host with no attestation, so it suits experiments rather than
+client work:
+
+```json
+{
+  "models": [
+    {
+      "id": "opengateway/deepseek-v4.1-flash-ultrafast",
+      "label": "DeepSeek V4.1 Flash Ultrafast",
+      "group": "OpenGateway",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://apis.opengateway.ai/v1",
+      "apiModel": "deepseek/deepseek-v4.1-flash-ultrafast",
+      "apiKeyEnv": "OPENGATEWAY_API_KEY",
+      "supportsVision": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 384000,
+      "reasoning": {
+        "efforts": ["low", "high", "max"],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      },
+      "cost": { "input": 0.3, "cacheRead": 0.006, "output": 1.2 }
+    },
+    {
+      "id": "opengateway/glm-5.3-flash-ultrafast",
+      "label": "GLM 5.3 Flash Ultrafast",
+      "group": "OpenGateway",
+      "provider": "openai-compatible",
+      "location": "cloud",
+      "baseUrl": "https://apis.opengateway.ai/v1",
+      "apiModel": "z-ai/glm-5.3-flash-ultrafast",
+      "apiKeyEnv": "OPENGATEWAY_API_KEY",
+      "supportsVision": true,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "reasoning": {
+        "efforts": ["low", "high", "max"],
+        "default": "high",
+        "canDisable": true,
+        "offValue": "none"
+      },
+      "cost": { "input": 0.15, "cacheRead": 0.03, "output": 0.5 }
+    }
+  ]
+}
+```
+
+The ids, window and list prices come from `GET /v1/models` on 2026-10-25;
+the costs above are list prices, before OpenGateway's time-limited
+discounts (90% and 50% for DeepSeek, 70% and 30% for GLM, which the same
+endpoint reports with an expiry). The API accepts `reasoning_effort` `low`,
+`medium`, `high`, `max` and `none`. With `none`, both models answered with
+no reasoning text in a quick test from one connection: 1.2 to 4.3 s to the
+first token and 50 to 230 tokens a second for about 300 tokens. Its catalog
+also lists decision and embedding models, which are not chat models; do not
+declare them.
+
 ## Context window and output limit
 
 Declare `contextWindow` and `maxOutputTokens` for every model. Mike compacts
