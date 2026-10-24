@@ -21,6 +21,26 @@ This section replaces the length rule in section 4 and widens the run line. The 
 - **Length follows the content.** A summary does not have to be one line. It can be two words ("Read contract"), two lines, or a paragraph, depending on how much the step did. The 6-14 word rule in section 4 no longer applies. The prompt should ask for the shortest summary that keeps what matters, with a ceiling rather than a target.
 - **Summaries can themselves be summarised.** Thirty-nine one-line step summaries under "Completed in 39 steps" is too much to read. Long runs need recursive summarisation: steps roll up into groups, and groups roll up into one summary for the whole run.
 
+### The purpose: supervision, and sources come first
+
+Summaries are an oversight tool. They exist so the person can see and supervise what the assistant is doing. That makes the **data sources** as important as the generated text, and in one way more important: a summary is the model's account of a step, while a source is a record of it.
+
+- **Every level shows its sources.** Each step shows what it touched: the documents and versions it read or searched, the search query, the web pages, the cases, the connector and tool, and the files it created or edited. A group or run summary shows the union of its steps' sources. "Completed in 39 steps" sits beside "read 6 documents, 3 web pages, 4 cases", and each entry opens the source itself.
+- **Sources are recorded, never generated.** They come from the events the engine already emits, not from the summariser, so they stay correct even when a summary is wrong. That makes them the check on the summary's faithfulness. A summary that mentions a source the step never touched is a detectable error. The eval and the faithfulness gate should test for it.
+- **What the timeline already records:**
+  - `doc_read` and `doc_find` (file, document id, version, query and match count);
+  - `doc_created`, `doc_edited` and `doc_replicated`;
+  - the CourtListener events and `case_citation`;
+  - `mcp_tool_call` (connector and tool);
+  - `tools.<name>` calls made inside a code cell, which appear as their own events.
+- **Gaps:**
+  - `web_search` emits only a "Searching the web..." label, with no query or result URLs on the timeline;
+  - a code cell carries only a count of its tool calls (`tool_calls`), not which sources they were;
+  - subagent steps are not on the parent timeline.
+
+  Each needs a recorded event before its sources can be shown.
+- **The contract change grows a little.** Each summary node (step, group, run) carries `sources`: references to the events it covers, deduplicated upward. The UI can then render source chips or a source list at any level without parsing text.
+
 ### Shapes to try
 
 These are options for the UX work, not decisions.
@@ -34,7 +54,7 @@ These are options for the UX work, not decisions.
 - **Recursion is cheap.** Under design A (`docs/reports/summariser-models-2026-10-25.md`), each call already sees the run's earlier summaries. A phase or run summary is one more call over summaries, not over raw text: a few hundred input tokens.
 - **The contract needs a hierarchy.** It needs a level on each summary (`step`, `group` or `run`), a parent id, and the range of steps each summary covers. Then the UI can choose any of the shapes above without another backend change.
 - **Faithfulness compounds.** A summary of summaries can drift from what happened. Keep every level traceable to the steps it covers, one click away, and include multi-level cases in the eval set.
-- **Phase 1 is unchanged.** A `summary` argument on `run_python` plus an extractive fallback is still the right first step. Only its length guidance loosens.
+- **Phase 1 grows to include sources.** A `summary` argument on `run_python` plus an extractive fallback is still the right first step, with looser length guidance. Phase 1 should also show each step's recorded sources, and add the missing `web_search` event (query and result URLs). Neither needs a model call or new egress.
 
 ### Open UX questions
 
