@@ -21,6 +21,9 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
   cover and backup exclusion (below), and the keyboard: no form bar
   (previous, next, Done) above it, and dragging the page closes it. A
   tap on the page closes it too (frontend `hooks/useBlurOnOutsideTap.ts`).
+  The web view also bounces vertically (`MIKE_BOUNCE`): Capacitor turns
+  `UIScrollView.bounces` off, which would stop a chat thread, which scrolls
+  the page on a phone, from rubber-banding past its end like Safari does.
   On iOS 17 and later the app, not WebKit, makes room for the keyboard: the
   web view ends just below the keyboard's top edge, so the page's viewport is
   the space above it plus a 24pt band the keyboard slides over. That band is

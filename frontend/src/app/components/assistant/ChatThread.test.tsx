@@ -308,6 +308,8 @@ describe("ChatThread layout", () => {
         scrollHeight = 1000;
         resize(220);
         expect(content.style.paddingBottom).toContain("236px");
+        // Never less than the composer's measured height plus the gap.
+        expect(content.style.paddingBottom).toContain("224px");
         expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: "auto" });
 
         // Shrinking back restores the resting padding and scrolls nothing.

@@ -19,6 +19,9 @@
 //   - SceneDelegate: dragging the page closes the keyboard. With the form
 //     bar gone this and a tap on the page (frontend
 //     hooks/useBlurOnOutsideTap.ts) are how the keyboard closes.
+//   - SceneDelegate: the web view bounces at the ends of the page (MIKE_BOUNCE).
+//     Capacitor turns UIScrollView.bounces off; a chat thread scrolls the
+//     page on a phone and should rubber-band past its end like any iOS list.
 //   - SceneDelegate: on iOS 17 and later the web view ends at the keyboard's
 //     top edge and WebKit is not told about the keyboard, so the page's
 //     viewport is just the space above it (MIKE_KEYBOARD_LAYOUT).
@@ -194,6 +197,18 @@ class MikeBridgeViewController: CAPBridgeViewController {
     }
 }
 `,
+);
+// MIKE_BOUNCE: Capacitor sets scrollView.bounces = false; turn it back on.
+patch("SceneDelegate.swift", "MIKE_BOUNCE", (source) =>
+  source.replace(
+    "        webView?.scrollView.keyboardDismissMode = .onDrag\n",
+    `        webView?.scrollView.keyboardDismissMode = .onDrag
+        // MIKE_BOUNCE: rubber-band past the ends of the page (vertical only).
+        webView?.scrollView.bounces = true
+        webView?.scrollView.alwaysBounceVertical = true
+        webView?.scrollView.alwaysBounceHorizontal = false
+`,
+  ),
 );
 patch("SceneDelegate.swift", "MIKE_KEYBOARD_LAYOUT", (source) =>
   source

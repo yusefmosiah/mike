@@ -166,6 +166,8 @@ const CHAT_MESSAGE_TOP_PADDING = 76;
 const FOLLOW_STREAM_THRESHOLD_PX = 24;
 const SCROLL_BUTTON_INPUT_GAP = 16;
 const CHAT_INPUT_BOTTOM_OFFSET = 12;
+/** Air between the end of the thread and the composer's top edge. */
+const COMPOSER_CLEARANCE_PX = 4;
 
 const SHIMMER_CLASS =
     "theme-shimmer bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded";
@@ -844,7 +846,11 @@ export function ChatThread({
                     style={{
                         paddingTop: layout.paddingTop,
                         // The composer's gap from the bottom of the screen.
-                        paddingBottom: `calc(${DEFAULT_ASSISTANT_BOTTOM_PADDING + composerGrowth}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px)`,
+                        // The end of the thread rests just above the composer
+                        // (also after a rubber-band bounce on a phone): never
+                        // less than the composer's measured height, so a
+                        // composer taller than its default cannot cover it.
+                        paddingBottom: `max(calc(${DEFAULT_ASSISTANT_BOTTOM_PADDING + composerGrowth}px + var(--chat-composer-gap) - ${CHAT_INPUT_BOTTOM_OFFSET}px), calc(${inputHeight + COMPOSER_CLEARANCE_PX}px + var(--chat-composer-gap)))`,
                     }}
                 >
                     {showEmptyState ? (
