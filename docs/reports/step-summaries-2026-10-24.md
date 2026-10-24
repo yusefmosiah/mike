@@ -14,6 +14,35 @@ Date: 2026-10-24. Read-only research; no code changed.
 - Show the summary by default; raw text becomes the second disclosure level, always stored and reachable for audit, and labelled as generated.
 - Cost on the documented flash prices: about $0.00025 per summarised step and about $0.005 for a 15-step answer. Negligible next to the main model.
 
+## Owner direction (2026-10-25)
+
+This section replaces the length rule in section 4 and widens the run line. The UX is not settled yet.
+
+- **Length follows the content.** A summary does not have to be one line. It can be two words ("Read contract"), two lines, or a paragraph, depending on how much the step did. The 6-14 word rule in section 4 no longer applies. The prompt should ask for the shortest summary that keeps what matters, with a ceiling rather than a target.
+- **Summaries can themselves be summarised.** Thirty-nine one-line step summaries under "Completed in 39 steps" is too much to read. Long runs need recursive summarisation: steps roll up into groups, and groups roll up into one summary for the whole run.
+
+### Shapes to try
+
+These are options for the UX work, not decisions.
+
+1. **Run summary, then steps.** The collapsed run shows one summary of the whole run. Opening it shows the step summaries, and opening a step shows the raw text. This is the current plan with a longer, variable-length run line.
+2. **Run, then phases, then steps.** Consecutive steps that serve one purpose ("Searched case law", "Drafted the indemnity clause") fold into a phase with its own summary. That gives four levels for long runs: run, phase, step, raw. Short runs skip the phase level. Phases can be cut at a fixed size (say every 5 to 8 steps) or where the topic changes. The summariser can mark topic changes, because it already sees the earlier summaries.
+3. **Rolling run summary.** While the run works, one summary of everything so far is rewritten every few steps, instead of a growing list. Earlier states are kept in the detail view. This suits mobile and voice best, and reads worst for audit.
+
+### What this changes in the design
+
+- **Recursion is cheap.** Under design A (`docs/reports/summariser-models-2026-10-25.md`), each call already sees the run's earlier summaries. A phase or run summary is one more call over summaries, not over raw text: a few hundred input tokens.
+- **The contract needs a hierarchy.** It needs a level on each summary (`step`, `group` or `run`), a parent id, and the range of steps each summary covers. Then the UI can choose any of the shapes above without another backend change.
+- **Faithfulness compounds.** A summary of summaries can drift from what happened. Keep every level traceable to the steps it covers, one click away, and include multi-level cases in the eval set.
+- **Phase 1 is unchanged.** A `summary` argument on `run_python` plus an extractive fallback is still the right first step. Only its length guidance loosens.
+
+### Open UX questions
+
+1. At what run length does the group level appear? A fixed number of steps, or only when topics change?
+2. Should the collapsed run line keep "Completed in N steps" beside the summary, or should the summary replace it?
+3. While running, should the run show the current step or the rolling summary?
+4. On a phone, how much of a paragraph-length summary shows before it truncates? The AGENTS.md content-fitting rules say summaries should wrap rather than be cut, so this needs a design.
+
 ## 1. Current implementation
 
 **Frontend**
@@ -94,7 +123,7 @@ Date: 2026-10-24. Read-only research; no code changed.
 ## 4. UX best practices
 
 These are design judgements from the sources above and the repo's design rules; I did not find citable UX studies.
-- **Length and tense.** One sentence, 6-14 words, verb first, no "I" or "Let me". Present participle while running ("Fetching the comment tree from the HN API"), past tense when done ("Fetched 350 comments"). For reasoning, state what was concluded, not that the assistant "thought". The run line reads "Working: <current step>" then "Completed in N steps", with a one-line outcome.
+- **Length and tense.** (Length superseded by the owner direction above: it follows the content.) One sentence, 6-14 words, verb first, no "I" or "Let me". Present participle while running ("Fetching the comment tree from the HN API"), past tense when done ("Fetched 350 comments"). For reasoning, state what was concluded, not that the assistant "thought". The run line reads "Working: <current step>" then "Completed in N steps", with a one-line outcome.
 - **Levels.** Run line, then step summaries (visible whenever the run is open), then raw reasoning or code and result. Keep the remembered open state, but apply it to the raw level only. Keep auto-minimise on answer start and the user's toggle winning.
 - **Not ready yet.** Code cell: model summary, else extractive line, else "Running code". Reasoning: "Thinking" with elapsed time, replacing the rotating filler phrases, which imply activity that is not information. Reserve one line of height so a late summary does not shift layout. Fade in, no typing animation.
 - **Accessibility.** Do not make the growing timeline `aria-live`. Use one visually-hidden `role="status"` (polite) node that announces the current step summary no more than every few seconds, and completion once. Disclosure buttons keep `aria-expanded` and their accessible name includes the summary. On mobile, let summaries wrap (AGENTS.md content-fitting rules) and test a long unbroken URL.
