@@ -88,7 +88,7 @@ final class VoiceModelsTests: XCTestCase {
         XCTAssertFalse(VoiceModels.speaker.files.contains { $0.path.hasPrefix("wespeaker_v2") }, "the replaced model is not downloaded")
         XCTAssertEqual(SpeakerEmbedder.files(.wespeaker).map(\.name), ["FBank.mlmodelc", "Embedding.mlmodelc"])
         XCTAssertEqual(SpeakerEmbedder.files(.wespeaker).map(\.units), [.cpuOnly, .cpuAndNeuralEngine])
-        XCTAssertEqual(SpeakerEmbedder.files(.campplus).map(\.units), [.cpuOnly, .cpuAndNeuralEngine], "CAM++ already runs on the Neural Engine")
+        XCTAssertEqual(SpeakerEmbedder.files(.campplus).map(\.units), [.cpuOnly, .cpuOnly], "CAM++ stays off the Neural Engine: its compile does not finish")
         for kind in SpeakerModelKind.allCases {
             XCTAssertEqual(SpeakerEmbedder.parts(kind).count, SpeakerEmbedder.files(kind).count)
         }

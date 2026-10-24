@@ -135,6 +135,24 @@ final class SpeakerProfileTests: XCTestCase {
         XCTAssertEqual(profile.centroid(.campplus)?.count, 192)
     }
 
+    func testASecondModelJoiningMidEnrolmentDoesNotBreakLearning() {
+        var voices = Voices(seed: 9)
+        let person = voices.voice()
+        let both = SpeakerRule(decider: .both)
+        var profile = SpeakerProfile()
+        // Two turns heard before CAM++ had loaded, then one with both models.
+        for _ in 0..<2 { _ = profile.learn(voices.turn(person).filter { $0.key == .wespeaker }, audioMs: 2000, rule: both) }
+        XCTAssertFalse(profile.learned)
+        XCTAssertTrue(profile.learn(voices.turn(person), audioMs: 2000, rule: both))
+        XCTAssertTrue(profile.learned)
+        XCTAssertEqual(profile.centroid(.wespeaker)?.count, 256)
+        XCTAssertEqual(profile.centroid(.campplus)?.count, 192)
+        // Checked with WeSpeaker alone (CAM++ not yet loaded) or both, the person matches.
+        let heard = voices.turn(person, noise: 0.3)
+        XCTAssertEqual(profile.check(heard.filter { $0.key == .wespeaker }, audioMs: 2000, rule: both).outcome, .match)
+        XCTAssertEqual(profile.check(heard, audioMs: 2000, rule: both).outcome, .match)
+    }
+
     func testCosineAndNormalisationRejectUnusableVectors() {
         let zero = [Float](repeating: 0, count: 256)
         var unit = zero

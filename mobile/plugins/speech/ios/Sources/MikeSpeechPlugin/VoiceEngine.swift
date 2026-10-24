@@ -280,7 +280,8 @@ enum VoiceMode {
 enum LateModel: @unchecked Sendable {
     case eou(EouStream.Models?)
     case smartTurn(SmartTurn.Model?)
-    case speaker(SpeakerModels?)
+    /// One speaker model (nil: it failed); the kinds arrive separately.
+    case speaker(SpeakerModelKind, SpeakerEmbedder?)
 }
 
 /// Where the models a run started without arrive. The loading tasks put them
@@ -543,6 +544,8 @@ actor VoiceEngine {
     /// The person's voice (loaded at start, saved as it is learned).
     private var speaker = SpeakerProfile()
     private var speakerKinds: [SpeakerModelKind] = []
+    /// The speaker models attached to this run so far.
+    private var speakerEmbedders: [SpeakerEmbedder] = []
 
     /// Whether speech is checked against the person's voice.
     private var checksSpeaker: Bool {
@@ -600,7 +603,9 @@ actor VoiceEngine {
         let vad: VadManager
         let tts: Phonon
         let wantsSpeaker = config.speakerModel != nil
-        let late = LateModels(started: started, expecting: ["eou", "smart turn"] + (wantsSpeaker ? ["speaker"] : []))
+        let late = LateModels(
+            started: started,
+            expecting: ["eou", "smart turn"] + (wantsSpeaker ? SpeakerModelKind.allCases.map { "speaker \($0.rawValue)" } : []))
         // Open from here until the late models have loaded (or the start fails).
         let preparation = VoicePreparation.shared.begin(wantsSpeaker: wantsSpeaker)
         do {
@@ -673,6 +678,7 @@ actor VoiceEngine {
         SpeakerStore.discardOutdated()
         speaker = SpeakerStore.load()
         speakerKinds = []
+        speakerEmbedders = []
         // No EOU model, no Smart Turn, no speaker check until they attach.
         policy.smartTurnAvailable = false
         policy.checksSpeaker = false
@@ -787,8 +793,11 @@ actor VoiceEngine {
                 late.deliver(.smartTurn(await VoiceModelCache.shared.smartTurn()), name: "smart turn")
             }
             if wantsSpeaker {
-                group.addTask {
-                    late.deliver(.speaker(await VoiceModelCache.shared.speaker()), name: "speaker")
+                // Each kind is delivered when it is ready, not when both are.
+                for kind in SpeakerModelKind.allCases {
+                    group.addTask {
+                        late.deliver(.speaker(kind, await VoiceModelCache.shared.speaker(kind)), name: "speaker \(kind.rawValue)")
+                    }
                 }
             }
         }
@@ -820,17 +829,28 @@ actor VoiceEngine {
                 } else {
                     VoiceMode.log.error("voice start: smart turn unavailable, turns end after \(silenceMs, privacy: .public) ms of silence")
                 }
-            case let .speaker(models):
+            case let .speaker(kind, embedder):
+                guard let embedder else {
+                    VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) unavailable\(self.speakerEmbedders.isEmpty ? ", every voice is taken as the person's until another loads" : "")")
+                    continue
+                }
+                // The check runs with the models that have arrived so far: the
+                // profile keeps one voice per model kind and scores only the
+                // kinds both sides have, so a model joining later adds to it
+                // (a missing kind falls back to the others, SpeakerProfile.check).
+                speakerEmbedders.removeAll { $0.kind == kind }
+                speakerEmbedders.append(embedder)
+                // Kind order, whichever arrived first.
+                speakerEmbedders.sort {
+                    (SpeakerModelKind.allCases.firstIndex(of: $0.kind) ?? 0) < (SpeakerModelKind.allCases.firstIndex(of: $1.kind) ?? 0)
+                }
+                let models = SpeakerModels(speakerEmbedders)
                 pipeline.attach(speaker: models)
-                speakerKinds = models?.kinds ?? []
+                speakerKinds = models.kinds
                 policy.checksSpeaker = checksSpeaker
                 let kinds = speakerKinds.map(\.rawValue).joined(separator: "+")
                 let state = checksSpeaker ? "on" : (speaker.learned ? "unavailable" : "learning")
-                if models != nil {
-                    VoiceMode.log.notice("voice start: speaker models attached at \(ms(), privacy: .public) ms, speaker check \(state, privacy: .public), decided by \(decider, privacy: .public), models \(kinds, privacy: .public)")
-                } else {
-                    VoiceMode.log.error("voice start: speaker models unavailable, every voice is taken as the person's")
-                }
+                VoiceMode.log.notice("voice start: speaker \(kind.rawValue, privacy: .public) attached at \(ms(), privacy: .public) ms, speaker check \(state, privacy: .public), decided by \(decider, privacy: .public), models \(kinds, privacy: .public)")
             }
         }
     }

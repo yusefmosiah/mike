@@ -279,7 +279,14 @@ voice and checks speech against it (`SpeakerProfile.swift`,
   - CAM++, FunASR's model trained on Mandarin speech (Apache 2.0 on
     ModelScope; the conversion points to FunASR's model licence, which allows
     use with attribution), Fluid Inference's Core ML conversion (about 17 MB:
-    a filterbank on the CPU, the model on the Neural Engine): 192 numbers.
+    a filterbank and the model, both on the CPU): 192 numbers. The model is
+    not run on the Neural Engine: its compile in `ANECompilerService` did not
+    finish in minutes, on a phone (95 s and counting) and on a Mac (two runs
+    killed at 300 s; the stuck compile then blocked every other Neural
+    Engine compile on that Mac), and `.all` hangs the same way because the
+    system picks the Neural Engine. On the GPU it loaded in 2 to 4 s but took
+    0.2 to 0.7 s a prediction. On the CPU (Mac, 4 s of speech) it loads in
+    about 3 s and predicts in about 10 to 40 ms.
 
   Two stretches of one voice score high on cosine similarity. Each takes
   about 100 ms on an M-series Mac. Settings ("Check voices with") picks which
@@ -429,9 +436,20 @@ WeSpeaker with CAM++ 75 s; the next launch: 70 ms, 70 ms, 1.1 s, and the whole
 start about 5 s). The EOU encoder is the one model on the GPU, where the work
 is not kept between loads. Four things hide the cost:
 
-- **Models are kept.** `VoiceModelCache` loads each listening model once per
-  app run and keeps it across starts; Fluid Speech Mini and Phonon keep their
-  own runtimes. They unload after 5 idle minutes (Fluid Speech Mini, Phonon)
+- **Models are kept, and loaded once.** `VoiceModelCache` loads each listening
+  model once per app run and keeps it across starts; Fluid Speech Mini and
+  Phonon keep their own runtimes. Each model has one load in flight at a
+  time (`SingleFlight` in the cache, the runtimes' own load task for Phonon),
+  so the launch prewarm, a start and the web app's `voicePrewarm` asking at
+  once share it: a second caller awaits the first load instead of loading
+  the model again (an earlier build loaded Phonon twice in parallel on the
+  first start). The speaker models load as two independent models, WeSpeaker
+  and CAM++, and the speaker check attaches with the first and takes the
+  second when it arrives (the profile keeps one voice per model kind, scores
+  the kinds both sides have, and adds a kind that joins later; see "Other
+  voices"). A late optional model (Smart Turn, speaker, EOU) still loading
+  after 60 s logs `voice cache: <model> still loading after 60 s`; the load
+  is not cancelled and nothing waits on it. They unload after 5 idle minutes (Fluid Speech Mini, Phonon)
   or on a memory warning while voice mode is off, so the 700 MB above is
   resident for those windows after a use.
 - **A progressive start.** A start waits only for the VAD, Fluid Speech Mini
@@ -475,6 +493,20 @@ is not kept between loads. Four things hide the cost:
   "Preparing voice mode for first use…"; in Settings, where the models are
   installed, "Preparing on this iPhone…" shows until it is done.
 
+#### Reading the timings
+
+- **The first-ever load after an install is a one-time compile.** Core ML
+  compiles and specialises each model for this phone the first time it
+  loads after an install, an app update or an iOS update, and the system
+  keeps the result. Tens of seconds for Phonon, Fluid Speech Mini and the
+  EOU encoder is expected once, and the next start is a few seconds.
+- **A run attached to Xcode is slower.** Timings from a build run from Xcode
+  include Metal API validation (GPU work, the EOU encoder among it, runs
+  slower with validation on), the debugger and the debug configuration. Turn
+  off Metal API Validation in the scheme (or run the app from the home
+  screen, with Console.app streaming) before comparing numbers; treat
+  the Xcode-attached ones as an upper bound.
+
 #### Seeing the timings
 
 The plugin logs through `os.Logger` (subsystem `MikeSpeech`, category
@@ -496,18 +528,20 @@ names are public, never text or audio.
 The lines, all `notice` level:
 
 - `voice cache: <model> ready in N ms` for `vad`, `smart turn`, `eou`,
-  `speaker` (both speaker models together), `fluid mini` (load plus first
+  `speaker wespeaker` and `speaker campplus` (each on its own), `fluid mini` (load plus first
   prediction) and, as `voice cache: phonon loaded in N ms` then
   `voice cache: phonon first utterance in N ms`, the voice. Each is once per
   app run. Finer: `voice cache: fluid mini loaded in N ms`, and for the
   speaker models each part, `voice cache: speaker wespeaker fbank loaded in
   N ms` / `... first prediction in N ms` (also `embedding`; CAM++ is
-  `preprocessor` and `campplus`). The first prediction is where the Neural
+  `preprocessor` and `campplus`, both on the CPU). The first prediction is where the Neural
   Engine compile happens.
 - `voice start: vad, speech recogniser and voice loaded at N ms`,
   `voice start: listening in N ms (eou pending, smart turn pending, speaker
-  pending)`, then `voice start: <model> attached at N ms` for each late
-  arrival.
+  pending)` (the speaker models are named `speaker wespeaker` and `speaker
+  campplus`), then `voice start: <model> attached at N ms` for each late
+  arrival, and `voice start: speaker <kind> attached at N ms, speaker check
+  on|learning|unavailable, ... models <kinds>` as each speaker model joins.
 - `voice prewarm: started`, `voice prewarm: done in N ms`, or `stopped`/
   `skipped` with the reason.
 - `voice prepare: preparing true, first time true, ready ...` on each change

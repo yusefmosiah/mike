@@ -110,3 +110,52 @@ enum VoiceUsage {
         defaults.set(speaker, forKey: speakerKey)
     }
 }
+
+/// Runs each keyed piece of work once at a time: a caller that asks while the
+/// work is running awaits that run's result instead of starting another, and a
+/// finished result is kept for the callers after it. A run that throws is
+/// forgotten, so the next caller tries again. The voice models load through
+/// it (`VoiceModelCache`, Phonon), so the launch prewarm, a start and the web
+/// app's `voicePrewarm` asking at once load each model once.
+actor SingleFlight {
+    private var tasks: [String: Any] = [:]
+
+    /// The result of `work`, run once for `key` and shared by every caller.
+    func value<T: Sendable>(_ key: String, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        let task: Task<T, Error>
+        if let existing = tasks[key] as? Task<T, Error> {
+            task = existing
+        } else {
+            task = Task { try await work() }
+            tasks[key] = task
+        }
+        do {
+            return try await task.value
+        } catch {
+            if (tasks[key] as? Task<T, Error>) == task { tasks[key] = nil }
+            throw error
+        }
+    }
+
+    /// Forgets every result and run; callers already waiting still get theirs.
+    func forgetAll() { tasks = [:] }
+}
+
+/// Logs, once, a load that is taking long. It never cancels the load (Core ML
+/// cannot be cancelled and a slow compile is kept by the system when it ends);
+/// nothing waits on the log.
+enum LoadWatchdog {
+    static let defaultAfter: Duration = .seconds(60)
+
+    /// Runs `work`; if it has not finished after `after`, calls `onSlow` with
+    /// the seconds waited.
+    static func run<T>(after: Duration = defaultAfter, onSlow: @escaping @Sendable (Int) -> Void,
+                       _ work: () async throws -> T) async rethrows -> T {
+        let watchdog = Task {
+            try? await Task.sleep(for: after)
+            if !Task.isCancelled { onSlow(Int(after.components.seconds)) }
+        }
+        defer { watchdog.cancel() }
+        return try await work()
+    }
+}

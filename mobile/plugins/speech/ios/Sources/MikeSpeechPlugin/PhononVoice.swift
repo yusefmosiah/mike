@@ -151,6 +151,11 @@ enum PhononVoice {
         private var compiling = false
         /// Whether the loaded instance has spoken once (it conditions on its voice then).
         private var warm = false
+        /// The load in flight, so a second caller (the launch prewarm and a
+        /// start, say) awaits it instead of loading the model again.
+        private var loading: Task<Phonon, Error>?
+        /// The first utterance in flight, shared the same way.
+        private var warming: Task<Void, Never>?
         private var observers: [NSObjectProtocol] = []
 
         func status() -> Status {
@@ -297,9 +302,22 @@ enum PhononVoice {
         /// The first utterance, timed (`voice cache: phonon ready in N ms`).
         private func speakFirstUtterance(_ tts: Phonon) async {
             guard !warm else { return }
-            let started = ContinuousClock.now
-            _ = try? await tts.synthesize("Ready.")
+            if let warming {
+                await warming.value
+                return
+            }
+            let task = Task<Void, Never> {
+                let started = ContinuousClock.now
+                _ = try? await tts.synthesize("Ready.")
+                self.finishedWarming(started: started)
+            }
+            warming = task
+            await task.value
+        }
+
+        private func finishedWarming(started: ContinuousClock.Instant) {
             warm = true
+            warming = nil
             let ms = VoiceEngine.milliseconds(since: started)
             VoiceMode.log.notice("voice cache: phonon first utterance in \(ms, privacy: .public) ms")
             VoicePreparation.shared.noteLoad(VoiceModelName.phonon.rawValue, ms: ms)
@@ -322,14 +340,27 @@ enum PhononVoice {
             if let phonon { return phonon }
             let directory = PhononModels.defaultDirectory
             guard PhononModels.isInstalled(at: directory) else { throw Failure.notInstalled }
-            let started = ContinuousClock.now
-            let created = try await Phonon.load(models: directory, language: .english)
-            let ms = VoiceEngine.milliseconds(since: started)
-            VoiceMode.log.notice("voice cache: phonon loaded in \(ms, privacy: .public) ms")
-            VoicePreparation.shared.noteLoad(VoiceModelName.phonon.rawValue, ms: ms)
-            phonon = created
-            observe()
-            return created
+            if let loading { return try await loading.value }
+            let task = Task<Phonon, Error> {
+                let started = ContinuousClock.now
+                let created = try await Phonon.load(models: directory, language: .english)
+                let ms = VoiceEngine.milliseconds(since: started)
+                VoiceMode.log.notice("voice cache: phonon loaded in \(ms, privacy: .public) ms")
+                VoicePreparation.shared.noteLoad(VoiceModelName.phonon.rawValue, ms: ms)
+                return created
+            }
+            loading = task
+            do {
+                let created = try await task.value
+                // The first caller back stores it; the others find it stored.
+                if phonon == nil { phonon = created }
+                loading = nil
+                observe()
+                return phonon ?? created
+            } catch {
+                loading = nil
+                throw error
+            }
         }
 
         private func scheduleUnload() {
@@ -348,6 +379,7 @@ enum PhononVoice {
             idleTask?.cancel()
             phonon = nil
             warm = false
+            warming = nil
             VoicePreparation.shared.markUnloaded([VoiceModelName.phonon.rawValue])
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers = []

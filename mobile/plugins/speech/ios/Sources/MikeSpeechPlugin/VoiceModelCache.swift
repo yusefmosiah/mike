@@ -46,7 +46,8 @@ actor VoiceModelCache {
         }
     }
 
-    private var tasks: [String: Any] = [:]
+    /// One in-flight (or finished) load per model, shared by every caller.
+    private var loads = SingleFlight()
     private var observer: NSObjectProtocol?
 
     /// The VAD, loading it if needed. Throws if it cannot load.
@@ -67,10 +68,20 @@ actor VoiceModelCache {
         return (try? await value("smart-turn") { Box(try? await Self.loadSmartTurn()) })?.value
     }
 
-    /// Both speaker models, or nil if none can load.
-    func speaker() async -> SpeakerModels? {
+    /// One speaker model, or nil if it cannot load. The two kinds load (and
+    /// finish) independently, so a start attaches the speaker check with the
+    /// first and adds the other when it arrives.
+    func speaker(_ kind: SpeakerModelKind) async -> SpeakerEmbedder? {
         observeMemory()
-        return (try? await value("speaker") { Box(await Self.loadSpeaker()) })?.value
+        return (try? await value("speaker-\(kind.rawValue)") { Box(await Self.loadSpeaker(kind)) })?.value
+    }
+
+    /// Every speaker model, or nil if none can load (both load at once).
+    func speaker() async -> SpeakerModels? {
+        async let wespeaker = speaker(.wespeaker)
+        async let campplus = speaker(.campplus)
+        let loaded = await [wespeaker, campplus].compactMap { $0 }
+        return loaded.isEmpty ? nil : SpeakerModels(loaded)
     }
 
     /// Loads one model ahead of a start, keeping it; failures are left for the start.
@@ -85,7 +96,8 @@ actor VoiceModelCache {
 
     /// Drops every model; a running voice mode keeps the copies it holds.
     func release() {
-        tasks = [:]
+        loads = SingleFlight()
+        Self.speakerOutcomes.reset()
         VoicePreparation.shared.markUnloaded(Model.allCases.map(\.readyName))
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
@@ -101,20 +113,7 @@ actor VoiceModelCache {
 
     /// The memoised result of `work`, run once for `key` and shared by every caller.
     private func value<T: Sendable>(_ key: String, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
-        let task: Task<T, Error>
-        if let existing = tasks[key] as? Task<T, Error> {
-            task = existing
-        } else {
-            task = Task { try await work() }
-            tasks[key] = task
-        }
-        do {
-            return try await task.value
-        } catch {
-            // A failed load is forgotten so the next start retries it.
-            if (tasks[key] as? Task<T, Error>) == task { tasks[key] = nil }
-            throw error
-        }
+        try await loads.value(key, work)
     }
 
     private static let units = MLComputeUnits.cpuAndNeuralEngine
@@ -124,7 +123,10 @@ actor VoiceModelCache {
     /// whether the result is a usable model.
     private static func timed<T>(_ model: Model, _ name: String, ok: (T) -> Bool = { _ in true }, _ work: () async throws -> T) async rethrows -> T {
         let started = ContinuousClock.now
-        let result = try await work()
+        // A slow compile is only logged, never cancelled or waited for.
+        let result = try await LoadWatchdog.run(onSlow: { seconds in
+            VoiceMode.log.notice("voice cache: \(name, privacy: .public) still loading after \(seconds, privacy: .public) s")
+        }, work)
         let ms = VoiceEngine.milliseconds(since: started)
         VoiceMode.log.notice("voice cache: \(name, privacy: .public) ready in \(ms, privacy: .public) ms")
         VoicePreparation.shared.noteLoad(model.readyName, ms: ms)
@@ -163,39 +165,52 @@ actor VoiceModelCache {
         }
     }
 
-    /// Both speaker models, side by side; one that fails is left out, and nil
-    /// if none loads (every voice is then taken as the person's).
-    private static func loadSpeaker() async -> SpeakerModels? {
-        await timed(.speaker, "speaker", ok: { $0 != nil }) {
-            let embedders = await withTaskGroup(of: SpeakerEmbedder?.self) { group in
-                for kind in SpeakerModelKind.allCases {
-                    group.addTask {
-                        do {
-                            // Each part's own load and first prediction (where the
-                            // Neural Engine compile happens) is logged separately.
-                            let embedder = try SpeakerEmbedder(
-                                kind: kind, directory: VoiceModels.speakerModel(kind).directory,
-                                onPart: { part, ms in
-                                    VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) loaded in \(ms, privacy: .public) ms")
-                                })
-                            _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600), onPart: { part, ms in
-                                VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) first prediction in \(ms, privacy: .public) ms")
-                            })
-                            return embedder
-                        } catch {
-                            VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) failed to load")
-                            return nil
-                        }
-                    }
-                }
-                var loaded: [SpeakerEmbedder] = []
-                for await embedder in group { if let embedder { loaded.append(embedder) } }
-                return loaded
-            }
-            // Kind order, as before, whichever finished first.
-            let ordered = SpeakerModelKind.allCases.compactMap { kind in embedders.first { $0.kind == kind } }
-            return ordered.isEmpty ? nil : SpeakerModels(ordered)
+    /// Which speaker kinds have finished loading and whether each worked. The
+    /// "speaker" model counts as ready once every kind has finished and at
+    /// least one loaded.
+    final class SpeakerOutcomes: @unchecked Sendable {
+        private let lock = NSLock()
+        private var outcomes: [SpeakerModelKind: Bool] = [:]
+
+        /// Records `kind`; true when this completes the set with a usable model.
+        func note(_ kind: SpeakerModelKind, loaded: Bool) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            outcomes[kind] = loaded
+            return outcomes.count == SpeakerModelKind.allCases.count && outcomes.values.contains(true)
         }
+
+        func reset() {
+            lock.lock()
+            outcomes = [:]
+            lock.unlock()
+        }
+    }
+
+    static let speakerOutcomes = SpeakerOutcomes()
+
+    /// One speaker model; nil if it fails (the other still serves).
+    private static func loadSpeaker(_ kind: SpeakerModelKind) async -> SpeakerEmbedder? {
+        let embedder: SpeakerEmbedder? = await timed(.speaker, "speaker \(kind.rawValue)", ok: { _ in false }) {
+            do {
+                // Each part's own load and first prediction (where the
+                // Neural Engine compile happens) is logged separately.
+                let embedder = try SpeakerEmbedder(
+                    kind: kind, directory: VoiceModels.speakerModel(kind).directory,
+                    onPart: { part, ms in
+                        VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) loaded in \(ms, privacy: .public) ms")
+                    })
+                _ = try embedder.embedding(of: [Float](repeating: 0, count: 1600), onPart: { part, ms in
+                    VoiceMode.log.notice("voice cache: speaker \(kind.rawValue, privacy: .public) \(part, privacy: .public) first prediction in \(ms, privacy: .public) ms")
+                })
+                return embedder
+            } catch {
+                VoiceMode.log.error("voice start: speaker model \(kind.rawValue, privacy: .public) failed to load")
+                return nil
+            }
+        }
+        if speakerOutcomes.note(kind, loaded: embedder != nil) { VoicePreparation.shared.markReady(Model.speaker.readyName) }
+        return embedder
     }
 
     private func observeMemory() {

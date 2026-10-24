@@ -13,9 +13,14 @@ import Foundation
 ///   The earlier single-model conversion ran on the GPU, took over a minute to
 ///   specialise on a first load and is not comparable with this one (the
 ///   speaker profile's version covers that).
-/// - CAM++ (FunASR, Fluid Inference's conversion) is a filterbank model on
-///   the CPU, then the embedding model on the Neural Engine; it needs at least
-///   0.66 s, so shorter speech is repeated to a second.
+/// - CAM++ (FunASR, Fluid Inference's conversion) is a filterbank model, then
+///   the embedding model, both on the CPU; it needs at least 0.66 s, so
+///   shorter speech is repeated to a second. The embedding model is not run on
+///   the Neural Engine: its compile (ANECompilerService) did not finish in
+///   minutes, on a phone and on a Mac, and with `.all` the system picks the
+///   Neural Engine and hangs the same way. On the GPU it loads but takes
+///   0.2–0.7 s a prediction. On the CPU it loads in about 3 s and predicts
+///   in about 10–40 ms on 4 s of speech (a Mac; the phone's CPU is slower).
 final class SpeakerEmbedder {
     static let windowSamples = 160_000
     static let wespeakerFrames = 589
@@ -28,7 +33,7 @@ final class SpeakerEmbedder {
     static func files(_ kind: SpeakerModelKind) -> [(name: String, units: MLComputeUnits)] {
         switch kind {
         case .wespeaker: return [("FBank.mlmodelc", .cpuOnly), ("Embedding.mlmodelc", .cpuAndNeuralEngine)]
-        case .campplus: return [("CamPlusPreprocessor.mlmodelc", .cpuOnly), ("CamPlusPlus.mlmodelc", .cpuAndNeuralEngine)]
+        case .campplus: return [("CamPlusPreprocessor.mlmodelc", .cpuOnly), ("CamPlusPlus.mlmodelc", .cpuOnly)]
         }
     }
 
