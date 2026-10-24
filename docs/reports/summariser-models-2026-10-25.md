@@ -30,7 +30,7 @@ These replace the matching parts of the recommendation in section 9.
   - measure each with the chat model loaded and generating at the same time, because that contention is the real constraint;
   - expect the extractive fallback to be used more often at 1.5B than at 3B.
 
-  Question 7 in section 10 (the LFM licence) now blocks the preferred option.
+  The LFM licence (question 7 in section 10) is accepted. As the owner understands it, Liquid asks for payment once annual revenue passes about $10 million; revisit it then.
 
 ## 1. Mike's providers and models today
 
@@ -268,7 +268,7 @@ Reading: the owner's 1.3-2x guess for B is right on Phala pricing (1.2-1.7x here
 4. Is the 1 s target a hard requirement for step summaries, or is 2-3 s fine? That changes which local hardware and model size are acceptable.
 5. Should summaries follow the conversation's language, and should the setting allow different models per language?
 6. What is the Go cached-input price? (Not found; it decides whether B is attractive on Go.)
-7. Do you accept an LFM2.5 licence if the bake-off picks it? (Not Apache; terms not verified.)
+7. Do you accept an LFM2.5 licence if the bake-off picks it? (Not Apache; terms not verified.) **Answered 2026-10-25: yes.** The owner's reading is that payment is due above about $10 million annual revenue, to be handled if that comes.
 
 ## Sources and caveats
 
