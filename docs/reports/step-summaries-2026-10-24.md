@@ -43,6 +43,77 @@ Summaries are an oversight tool. They exist so the person can see and supervise 
   Each needs a recorded event before its sources can be shown.
 - **The contract change grows a little.** Each summary node (step, group, run) carries `sources`: references to the events it covers, deduplicated upward. The UI can then render source chips or a source list at any level without parsing text.
 
+### Engineering: recording sources deterministically
+
+Traced on 2026-10-25 in `backend/src/modules/chat/engine/`.
+
+**There is already one chokepoint.** In code mode the model sees only `run_python`. Every `await tools.x(...)` a cell makes comes back to the host through `onHostRequest` in `streaming.ts`. It then runs through `runTurnToolsNow`, then `runToolCalls` in `tools/toolDispatcher.ts`, with the same guardrails as a direct call. Each inner call already gets the id `<cell call_id>.<n>`, so a source recorded there knows which cell, and so which step, it belongs to. A few tools are answered before the dispatcher, in `onHostRequest` itself:
+
+- `read_memory`;
+- `history_search` and `history_read`;
+- `delegate` and the background-agent tools;
+- `documents` list and load, which already emits `doc_read`.
+
+Word add-in tools run through `clientTools.execute`. Those are the only other places to hook.
+
+**What each tool already knows:**
+
+| Tool | Source facts available at the call |
+| --- | --- |
+| `read_document`, `fetch_documents`, `documents` load | document id, version id and number, filename (emitted today as `doc_read`) |
+| `find_in_document(s)` | the same, plus the query and match count (`doc_find`) |
+| `edit_document`, `generate_*`, `replicate_document`, `save_to_mike` | document and version created or edited (`doc_edited`, `doc_created`, `doc_replicated`) |
+| `web_search` | query, provider, and each result's URL and title. **Not emitted today.** |
+| `fetch_web_page` | final URL, title, `sha256` of the content, offset and length read. Kept in the in-memory web snapshot cache, saved only when cited. **Not emitted today.** |
+| CourtListener tools, `check_citations` | cluster and opinion ids, queries (`courtlistener_*`, `case_citation`) |
+| MCP connector tools | connector and tool name (`mcp_tool_call`). The resource itself only when the arguments name it, or the result carries MCP `resource_link` or embedded-resource URIs. |
+| Google Workspace tools | file ids and names in the arguments and results |
+| `read_memory`, `history_*` | memory scope; the conversation and messages read |
+| `delegate` | the child conversation, whose own sources roll up |
+
+**The design.**
+
+1. **One `SourceRef` type** in `packages/contracts`, with these fields:
+   - `kind`: `document`, `web_search`, `web_page`, `case`, `connector`, `workspace_file`, `memory`, `history` or `subagent`;
+   - `access`: `read`, `searched`, `created` or `edited`;
+   - `label`, which is display text;
+   - a `locator`: document plus version id, URL plus `sha256` plus snapshot id, cluster id, or connector, tool and resource URI;
+   - `query` and the match or result count, where they apply;
+   - `call_id` and `recorded_at`.
+
+   The version id or content hash pins exactly what was read, not just its name.
+2. **Each dispatcher branch returns its sources.** Today the dispatcher returns typed arrays (`docsRead`, `docsFound`, `mcpEvents`, and others). The engine records them grouped by type after each batch, which loses which call produced them. Replace that with a `sources` array built where each branch already has the facts, and stamp the `call_id` on every source and on the existing `doc_*` events. Branches should report sources as structured data, not leave them to be re-parsed from the JSON sent back to the model. A registry of per-tool extractors over arguments and results is acceptable only for MCP, whose results are opaque.
+3. **The build fails if a tool has no source accounting.** A test lists every tool that can be advertised:
+   - the static schemas;
+   - the Python specs;
+   - the client tools;
+   - the MCP and Workspace wrappers, as classes.
+
+   It fails unless each one either reports sources or is explicitly declared source-free (for example `ask_inputs`). This is what makes the record deterministic rather than best effort: a new tool cannot ship without saying what it touches. The connector-approval and mutation gates already work this way.
+4. **Recording.** Sources are emitted as they happen, so they appear live, and stored on the assistant message with the other events. Group and run summaries reference sources by id and deduplicate them upward. A later `message_sources` table would allow audit queries across chats ("everything that read this document") and exports. It would follow the deletion policy (`docs/deletion-policy.md`).
+5. **Web pages are pinned.** Store `sha256` and `retrieved_at` for every page read, not only cited pages. Whether to also keep a snapshot of every page read is a retention choice. Snapshots let a reviewer see what the model saw, at a storage cost.
+6. **Summaries reference sources by id.** The summariser receives the step's sources with short ids and writes "[s2]"-style references. These become links. A reference to an id the step never recorded is rejected, which is the faithfulness check described above.
+7. **Citations are cross-linked.** An answer citation whose document version or URL matches a step source links to it, so a reader can go from a claim to the step that read its source.
+
+**What tool hooks cannot see.** Code in the workstation can bypass tools in two ways:
+
+- **Files:** it can read the synced copies in `~/mike` with plain `open()`. Capturing that needs an audit inside the VM, either an fanotify watcher on `~/mike` reporting over the existing vsock, or a mount that reports opens.
+- **Network:** it can reach the network through the egress proxy. Tinyproxy already logs every request per VM (`infra/node-a/workstations.nix`), so requests made during a cell can be attributed to it by VM and time. For HTTPS that gives only the host, not the URL.
+
+Both should be shown as "observed" rather than "recorded", so the precision is honest. Recorded sources say what a tool touched. Neither kind proves the model relied on a source: that is what citations claim, and what the citation checker verifies.
+
+**Order of work.**
+
+1. `SourceRef`, plus `call_id` on the existing events.
+2. Emit `web_search` and `fetch_web_page` sources (the largest gap).
+3. The coverage test.
+4. Source lists on the code-cell row and the run line.
+5. MCP resource URIs and the Workspace extractors.
+6. Subagent roll-up.
+7. Workstation file and network observation.
+
+Steps 1 to 4 need no model call and send no data anywhere new.
+
 ### Shapes to try
 
 These are options for the UX work, not decisions.
