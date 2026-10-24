@@ -547,6 +547,32 @@ The lines, all `notice` level:
 - `voice prepare: preparing true, first time true, ready ...` on each change
   of the state the web app shows.
 
+### Open work on start-up (2026-10-24)
+
+Paused while other work comes first; nothing below is tested on a phone yet.
+
+- **Last device run** (first start after an install, run from Xcode):
+  listening at 18.7 s. VAD 1.7 s, Phonon 16 s and Fluid Speech Mini 16.3 s
+  (in parallel, the one-time compile), Smart Turn attached at 20.5 s, the EOU
+  encoder at 26 s, the new WeSpeaker pair 1.6 s. Phonon loaded twice and
+  CAM++ never finished on the Neural Engine; both are fixed in commit
+  27659360 (one in-flight load per model, CAM++ on the CPU) but not yet
+  re-measured.
+- **To confirm on a phone:** one `phonon loaded` line; `speaker wespeaker
+  attached` near 20 s; CAM++ loading in seconds; no `still loading after
+  60 s`; the "Preparing voice mode" status after an install; turns ending on
+  1.5 s of silence until the EOU stream attaches. Measure once without Xcode
+  attached, since Metal API validation slows GPU work.
+- **EOU encoder on the Neural Engine:** a converted encoder compiles and runs
+  there on a Mac (`mobile/plugins/speech/tools/eou-ane/`). Shipping it needs a
+  place to host the converted files (a public model repository or release
+  asset, the owner's call), a `VoiceModels` entry with hashes, and three code
+  changes: load it with `.cpuAndNeuralEngine`, make the cache inputs fp16,
+  and count the cache length in the app. Test on a phone before switching.
+- **Still the first-start floor:** Phonon and Fluid Speech Mini each take
+  about 16 s to compile once after an install. Whether they slow each other
+  was not measured.
+
 ### Lifetime
 
 Voice mode runs in the foreground with the screen awake. Locked-screen
