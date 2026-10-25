@@ -133,7 +133,7 @@ export function PublishRequestField({
                 >
                     <p className="text-xs text-gray-600">
                         This publishes this version as a frozen copy. The password, if any, is not shared with the
-                        assistant.
+                        agent.
                     </p>
                     <PublishOptionsForm
                         value={options}

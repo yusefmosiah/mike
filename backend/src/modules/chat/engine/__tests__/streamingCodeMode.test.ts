@@ -398,6 +398,13 @@ except Exception:
     expect(results).toEqual([]);
     const frames = write.mock.calls.map(([chunk]) => String(chunk));
     expect(frames.some((frame) => frame.includes('"type":"ask_inputs"'))).toBe(true);
+    // The cell ended as designed: not a failure, and no traceback on its line.
+    const ended = frames
+      .map((frame) => (frame.startsWith("data: {") ? JSON.parse(frame.slice(6)) : null))
+      .filter((event) => event?.type === "code_cell" && event.status !== "running")
+      .at(-1);
+    expect(ended).toMatchObject({ status: "ok" });
+    expect(ended.output).not.toMatch(/UserQuestionPending|Traceback/);
     const [next] = await turn([cell("draft")], { conversationId: "conv-ask" });
     expect(next.content).toBe("[result]\n'kept'");
   });

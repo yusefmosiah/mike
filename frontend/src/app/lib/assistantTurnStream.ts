@@ -5,7 +5,12 @@ import { readSseFrames } from "@/app/lib/sse";
 import { isPanelDocument } from "@/app/components/shared/types";
 import type { AssistantEvent, Citation } from "@/app/components/shared/types";
 import type { AssistantTurnHandle } from "@/app/lib/assistantTurns";
-import type { ConnectorApprovalItem, StepSummary } from "@mike/contracts";
+import type {
+    ConnectorApprovalItem,
+    PublishRequestItem,
+    SecretRequestItem,
+    StepSummary,
+} from "@mike/contracts";
 import {
   createTurnReconnectPolicy,
   waitForReconnect,
@@ -61,6 +66,43 @@ function readableStreamError(value: unknown, safeToDisplay: boolean): string {
     return value.trim();
   }
   return "Sorry, something went wrong.";
+}
+
+const hasText = (value: unknown): value is string =>
+    typeof value === "string" && !!value.trim();
+
+/** A publish card the server built (publish_document); its fields are the server's. */
+function isPublishRequestItem(
+    item: Record<string, unknown>,
+): item is PublishRequestItem {
+    return (
+        item.kind === "publish" &&
+        hasText(item.id) &&
+        hasText(item.document_id) &&
+        hasText(item.filename) &&
+        (item.version_id === null || typeof item.version_id === "string") &&
+        (item.audience === "public" || item.audience === "password") &&
+        typeof item.require_sign_in === "boolean" &&
+        (item.expires_in_days === null || typeof item.expires_in_days === "number") &&
+        typeof item.purpose === "string"
+    );
+}
+
+/** A vault credential request the server built (vault_request_secret). */
+function isSecretRequestItem(
+    item: Record<string, unknown>,
+): item is SecretRequestItem {
+    return (
+        item.kind === "secret" &&
+        hasText(item.id) &&
+        hasText(item.name) &&
+        typeof item.purpose === "string" &&
+        Array.isArray(item.hosts) &&
+        item.hosts.every((host) => typeof host === "string") &&
+        !!item.injection &&
+        typeof item.injection === "object" &&
+        (item.replaces === undefined || typeof item.replaces === "string")
+    );
 }
 
 function isConnectorApprovalItem(
@@ -1191,6 +1233,12 @@ export async function consumeAssistantTurnStream(
               // questions. Keep their exact IDs and reviewed action data so a
               // live pause renders the same prompt as restored chat history.
               if (isConnectorApprovalItem(row)) acc.push(row);
+              return acc;
+            }
+            // Publish cards and credential requests are built by the server
+            // too: keep them whole, or the live pause shows no card at all.
+            if (row.kind === "publish" || row.kind === "secret") {
+              if (isPublishRequestItem(row) || isSecretRequestItem(row)) acc.push(row);
               return acc;
             }
             const id =

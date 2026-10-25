@@ -1534,6 +1534,21 @@ describe("ask_inputs frames", () => {
     ]);
   });
 
+  it("keeps a live publish card and credential request, so the pause shows them", async () => {
+    const publish = {
+      id: "publish-1", kind: "publish", document_id: "doc-1", version_id: "v1", filename: "Briefing.html",
+      audience: "public", require_sign_in: false, expires_in_days: 30, purpose: "Share the briefing.",
+    };
+    const secret = {
+      id: "secret-1", kind: "secret", name: "gitlab-blog", purpose: "Post to the blog.",
+      hosts: ["gitlab.com"], injection: { type: "bearer" },
+    };
+    const event = { type: "ask_inputs", event_id: "ask-publish", items: [publish, secret] };
+    expect(await eventsOf([event])).toEqual([event]);
+    // An incomplete one is dropped, like any malformed item.
+    expect(await eventsOf([{ type: "ask_inputs", event_id: "ask-bad", items: [{ ...publish, document_id: "" }] }])).toEqual([]);
+  });
+
   it("keeps live Google Drive approvals and their reviewed source", async () => {
     const approval: ConnectorApprovalItem = {
       id: "approve-drive", kind: "approval", connector_name: "Google Drive",

@@ -178,6 +178,17 @@ describe("StepSummariser", () => {
     expect(frames(write).at(-1)).toEqual(run);
   });
 
+  it("tells the run summary when the turn stopped to ask the person", async () => {
+    const complete = vi.fn().mockResolvedValue("Wrote the page and asked whether to publish it.");
+    const summariser = new StepSummariser({ model: "m", request: "q", write: vi.fn(), complete });
+    for (const text of ["Wrote the page", "Checked the page", "Asked to publish the page"]) {
+      summariser.cell({ type: "code_cell", call_id: text, code: "x", status: "ok", summary: { text, source: "model" } });
+    }
+    await summariser.finish({ waitingOnUser: true });
+    const runPrompt = (complete.mock.calls[0] as unknown as [{ user: string }])[0].user;
+    expect(runPrompt).toContain("3. Asked to publish the page\n4. Stopped to ask the person; their answer has not arrived.");
+  });
+
   it("keeps a step's own line when the summariser fails or says nothing usable", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const write = vi.fn();

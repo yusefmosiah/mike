@@ -995,6 +995,8 @@ export async function runLLMStream(params: {
   keepAlive.unref?.();
 
   let turnUsage: StreamChatResult["usage"];
+  // The turn stopped to ask the user (ask_inputs, a publish card, a secret).
+  let waitingOnUser = false;
   try {
     throwIfAborted(signal);
     // A guest working in the host's VM could read anything lent to it: the
@@ -1345,9 +1347,12 @@ export async function runLLMStream(params: {
       const content = sync && !sync.ok
         ? `[note] Your documents and skills could not all be brought up to date in ~/mike and ~/skills this turn; what is there may be out of date.\n${cellResultContent(outcome)}`
         : cellResultContent(outcome);
+      // A cell that stopped to ask the user ended as designed: its line shows
+      // what it printed, not the UserQuestionPending traceback.
+      const asked = isAskInputsPause(stopTurn) && outcome.error?.ename === "UserQuestionPending";
       Object.assign(cellEvent, {
-        status: outcome.status === "ok" ? "ok" : "failed",
-        output: capText(content, MAX_CELL_EVENT_CHARS),
+        status: outcome.status === "ok" || asked ? "ok" : "failed",
+        output: capText(asked ? cellResultContent({ ...outcome, error: null }) : content, MAX_CELL_EVENT_CHARS),
         tool_calls: outcome.hostRequests,
         duration_ms: outcome.durationMs,
       } satisfies Partial<CodeCellEvent>);
@@ -1824,6 +1829,7 @@ export async function runLLMStream(params: {
     // it, or the stored events, afterwards.
     stepSummaries?.stop();
     if (isAskInputsPause(err)) {
+      waitingOnUser = true;
       // The ask_inputs event has already been emitted and persisted in `events`.
       // Stop this assistant turn here so the model does not add redundant
       // prose telling the user to answer the picker or attach documents.
@@ -1887,7 +1893,7 @@ export async function runLLMStream(params: {
 
   // The step summaries still being written get a few seconds; then the run's
   // own summary, written from them, goes before the usage line.
-  const runSummary = await stepSummaries?.finish();
+  const runSummary = await stepSummaries?.finish({ waitingOnUser });
   if (runSummary) events.push(runSummary);
 
   if (turnUsage) {

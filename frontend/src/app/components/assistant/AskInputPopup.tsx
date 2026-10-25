@@ -590,14 +590,14 @@ export function AskInputPopup({
                                             </p>
                                         ) : activeItem.kind === "secret" ? (
                                             <p className="text-sm text-gray-800">
-                                                The assistant needs a credential.
+                                                The agent needs a credential.
                                                 Store it in your vault: it goes
                                                 there directly, never into this
                                                 chat.
                                             </p>
                                         ) : activeItem.kind === "publish" ? (
                                             <p className="text-sm text-gray-800">
-                                                The assistant suggests
+                                                The agent suggests
                                                 publishing a document as a
                                                 link. Nothing is published
                                                 until you choose to.
