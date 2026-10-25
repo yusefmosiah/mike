@@ -248,9 +248,7 @@ export class TurnPolicy {
         else this.setState("listening", out);
     }
 
-    private commit(reason: CommitReason, endMs: number, out: PolicyDecision[]): void {
-        const start = this.utteranceStartMs;
-        if (start === null) return;
+    private commit(reason: CommitReason, start: number, endMs: number, out: PolicyDecision[]): void {
         const end = Math.max(start, endMs);
         out.push({
             type: "commit",
@@ -274,13 +272,13 @@ export class TurnPolicy {
     private evaluate(out: PolicyDecision[]): void {
         switch (this.phase.kind) {
             case "userTurn": {
-                const start = this.utteranceStartMs;
-                if (start === null) return;
+                // A user turn always has its start (beginUtterance sets it).
+                const start = this.utteranceStartMs ?? this.nowMs;
                 if (this.nowMs - start >= this.config.maxTurnMs) {
-                    this.commit("maxTurn", this._inSpeech ? this.nowMs : (this.silenceStartMs ?? this.nowMs), out);
+                    this.commit("maxTurn", start, this._inSpeech ? this.nowMs : (this.silenceStartMs ?? this.nowMs), out);
                 } else if (!this._inSpeech && this.silenceStartMs !== null) {
                     if (this.nowMs - this.silenceStartMs >= this.silenceLimitMs) {
-                        this.commit("maxSilence", this.silenceStartMs, out);
+                        this.commit("maxSilence", start, this.silenceStartMs, out);
                     }
                 }
                 return;

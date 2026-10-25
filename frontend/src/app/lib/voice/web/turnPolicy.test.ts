@@ -98,3 +98,38 @@ describe("turnPolicyConfig", () => {
         expect(policy.state).toBe("listening");
     });
 });
+
+describe("TurnPolicy direct", () => {
+    const vad = (policy: TurnPolicy, probability: number, startMs: number, endMs: number) =>
+        policy.handle({ type: "vad", probability, startMs, endMs });
+
+    it("speech resuming inside a turn keeps the person speaking without a new state", () => {
+        const policy = new TurnPolicy();
+        expect(vad(policy, 0.9, 0, 32)).toEqual([{ type: "state", state: "user-speaking" }]);
+        expect(vad(policy, 0.05, 32, 64)).toEqual([]);
+        expect(policy.inSpeech).toBe(false);
+        expect(vad(policy, 0.9, 64, 96)).toEqual([]);
+        expect(policy.inSpeech).toBe(true);
+        expect(policy.state).toBe("user-speaking");
+    });
+
+    it("cuts a turn that runs too long, at the clock while speaking and at the silence's start otherwise", () => {
+        const config = { maxTurnMs: 1000 };
+        const speaking = new TurnPolicy(config);
+        vad(speaking, 0.9, 0, 32);
+        const cut = speaking.handle({ type: "tick", nowMs: 1000 });
+        expect(cut).toContainEqual({
+            type: "commit",
+            commit: { startMs: 0, endMs: 1000, decidedAtMs: 1000, reason: "maxTurn" },
+        });
+
+        const paused = new TurnPolicy(config);
+        vad(paused, 0.9, 0, 100);
+        vad(paused, 0.05, 100, 132);
+        const late = paused.handle({ type: "tick", nowMs: 1000 });
+        expect(late).toContainEqual({
+            type: "commit",
+            commit: { startMs: 0, endMs: 100, decidedAtMs: 1000, reason: "maxTurn" },
+        });
+    });
+});

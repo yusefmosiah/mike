@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     SAFARI_WEBGPU_HINT,
     WEB_VOICE_NEEDS_SERVER_MESSAGE,
@@ -48,6 +48,15 @@ describe("webVoiceSupported", () => {
     it("is false in the test environment, which has no microphone or AudioWorklet", () => {
         expect(webVoiceSupported()).toBe(false);
     });
+
+    it("is false where there is no window at all", () => {
+        vi.stubGlobal("window", undefined);
+        try {
+            expect(webVoiceSupported()).toBe(false);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
 });
 
 describe("probeWebGpu", () => {
@@ -71,6 +80,21 @@ describe("probeWebGpu", () => {
             await probeWebGpu({ gpu: gpuWith(adapter({ requestDevice: async () => Promise.reject(new Error("lost")) })) }),
         ).toBe("device-failed");
         expect(await probeWebGpu({ gpu: { requestAdapter: () => new Promise(() => undefined) } }, 5)).toBe("timeout");
+    });
+
+    it("reads missing or short limits as too small", async () => {
+        const limits = async (found: Record<string, unknown>) => probeWebGpu({ gpu: gpuWith(adapter(found)) });
+        expect(await limits({ limits: undefined })).toBe("limits");
+        expect(await limits({ limits: { maxStorageBufferBindingSize: 2 ** 30 } })).toBe("limits");
+        expect(await limits({ limits: { maxBufferSize: 2 ** 30 } })).toBe("limits");
+        expect(await limits({ limits: { maxBufferSize: 2 ** 30, maxStorageBufferBindingSize: 2 ** 20 } })).toBe("limits");
+    });
+
+    it("gives up on a device that is never created, and tolerates one that cannot be destroyed", async () => {
+        const stuck = adapter({ requestDevice: () => new Promise(() => undefined) });
+        expect(await probeWebGpu({ gpu: gpuWith(stuck) }, 5)).toBe("timeout");
+        const plain = adapter({ requestDevice: async () => ({}) });
+        expect(await probeWebGpu({ gpu: gpuWith(plain) })).toBe("usable");
     });
 });
 
@@ -206,6 +230,19 @@ describe("planWebVoice", () => {
         expect(modelBytes("vad", false)).toBeGreaterThan(2e6);
         expect(modelBytes("whisper", true)).toBeLessThan(modelBytes("whisper", false));
         expect(modelBytes("phonon", false)).toBeGreaterThan(6e7);
+    });
+});
+
+describe("probeVoiceCapabilities without a navigator", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("reads the page's own navigator by default, and copes with there being none", async () => {
+        const own = await probeVoiceCapabilities({ navigator: { userAgent: CHROME } });
+        expect(own.basics).toBe(false);
+        expect((await probeVoiceCapabilities({ basics: () => false })).basics).toBe(false);
+        vi.stubGlobal("navigator", undefined);
+        const none = await probeVoiceCapabilities({ basics: () => true });
+        expect(none).toMatchObject({ webgpu: "missing", webkit: false, appleMobile: false, lowMemory: false });
     });
 });
 

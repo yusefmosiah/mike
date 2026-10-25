@@ -124,7 +124,7 @@ export class WebClausePlayer implements ClausePlayer {
             element.src = url;
         }
         element.volume = options.step ? STEP_VOLUME : 1;
-        let settle: () => void = () => undefined;
+        let settle!: () => void;
         const ended = new Promise<void>((resolve) => (settle = resolve));
         let stopped = false;
         const finish = () => {
@@ -167,7 +167,7 @@ export class WebClausePlayer implements ClausePlayer {
         utterance.volume = step ? STEP_VOLUME : 1;
         let spokenTo = 0;
         let stopped = false;
-        let settle: () => void = () => undefined;
+        let settle!: () => void;
         const ended = new Promise<void>((resolve) => (settle = resolve));
         utterance.onboundary = (event) => {
             spokenTo = Math.max(spokenTo, event.charIndex);

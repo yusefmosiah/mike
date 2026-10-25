@@ -373,13 +373,20 @@ describe("a page that died while a model ran", () => {
     it("is reported once instead of silently running again", async () => {
         mod.setBrowserModelConsent("transcription", true);
         window.sessionStorage.setItem(RUNNING_KEY, "transcription");
-        lib.pipeline.mockResolvedValue(vi.fn(async () => ({ text: "hi" })));
+        const run = vi.fn(async () => ({ text: "hi" }));
+        lib.pipeline.mockResolvedValue(run);
         stubAudio([new Float32Array([0])]);
 
+        expect(mod.previousBrowserModelRunDied()).toBe(true);
         await expect(mod.transcribeInBrowser(blob())).rejects.toThrow(mod.BROWSER_MODEL_RESTARTED_MESSAGE);
         expect(lib.pipeline).not.toHaveBeenCalled();
         expect(window.sessionStorage.getItem(RUNNING_KEY)).toBeNull();
+        expect(mod.previousBrowserModelRunDied()).toBe(false);
         expect(await mod.transcribeInBrowser(blob())).toBe("hi");
+        // Voice mode's turns arrive as 16 kHz samples already.
+        const samples = new Float32Array([0.1, 0.2]);
+        expect(await mod.transcribeSamplesInBrowser(samples)).toBe("hi");
+        expect(run).toHaveBeenLastCalledWith(samples);
         expect(window.sessionStorage.getItem(RUNNING_KEY)).toBeNull();
     });
 

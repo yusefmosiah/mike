@@ -34,6 +34,14 @@ class FakeTensor {
 }
 
 describe("SileroDetector", () => {
+    it("reads an output that is not a number as no speech", async () => {
+        const session = {
+            run: vi.fn(async () => ({ output: { data: Float32Array.of(Number.NaN) }, stateN: { data: new Float32Array(256) } })),
+        };
+        const detector = new SileroDetector({ Tensor: FakeTensor } as unknown as OrtLike, session);
+        expect(await detector.probability(ramp(0, 512))).toBe(0);
+    });
+
     it("feeds 64 samples of context before each frame and carries the state over", async () => {
         const feeds: Record<string, FakeTensor>[] = [];
         const session = {

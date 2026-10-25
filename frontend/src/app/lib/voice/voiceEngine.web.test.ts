@@ -75,6 +75,7 @@ describe("voiceEngine in a browser", () => {
         });
         const voice = await load();
         expect(voice.backend()).toBe("native");
+        expect(voice.voiceUnavailableMessage()).toBe(voice.VOICE_UNAVAILABLE_MESSAGE);
         voice.voicePrime();
         expect(prime).not.toHaveBeenCalled();
         await voice.voiceStatus();
@@ -125,6 +126,52 @@ describe("voiceEngine in a browser", () => {
         expect(heard).toHaveLength(1);
         await voice.voiceStop();
         expect(engine.stop).toHaveBeenCalled();
+    });
+
+    it("never lets a failing web engine call reach the caller", async () => {
+        const voice = await load();
+        await voice.voiceStatus();
+        const fail = () => {
+            throw new Error("broken");
+        };
+        engine.speak.mockImplementation(fail);
+        engine.endAnswer.mockImplementation(fail);
+        engine.cancelAnswer.mockRejectedValue(new Error("broken"));
+        engine.stop.mockRejectedValue(new Error("broken"));
+        voice.voiceSpeak("t1", 0, "Hello.");
+        voice.voiceSpeakStep("t1", 1, "Reading.");
+        voice.voiceEndAnswer("t1");
+        await expect(voice.voiceCancelAnswer("t1")).resolves.toBeUndefined();
+        await expect(voice.voiceStop()).resolves.toBeUndefined();
+        await flush();
+        expect(engine.speak).toHaveBeenCalledTimes(2);
+    });
+
+    it("tries the web engine's import again after it failed to load", async () => {
+        vi.resetModules();
+        vi.doMock("./web/webBackend", () => {
+            throw new Error("offline");
+        });
+        const voice = await import("./voiceEngine");
+        expect((await voice.voiceStatus()).available).toBe(false);
+        await voice.voiceStop();
+        voice.voiceSpeak("t1", 0, "Hello.");
+        voice.voiceSpeakStep("t1", 1, "Reading.");
+        voice.voiceEndAnswer("t1");
+        await voice.voiceCancelAnswer("t1");
+        await flush();
+        vi.doUnmock("./web/webBackend");
+        vi.doMock("./web/webBackend", () => ({
+            WebVoiceBackend: class {
+                constructor(emit: (event: unknown) => void) {
+                    created.count += 1;
+                    engine.emit = emit;
+                    return engine;
+                }
+            },
+        }));
+        expect((await voice.voiceStatus()).available).toBe(true);
+        expect(created.count).toBe(1);
     });
 
     it("words the web engine's failures for a browser", async () => {

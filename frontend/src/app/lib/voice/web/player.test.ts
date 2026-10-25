@@ -141,4 +141,168 @@ describe("WebClausePlayer", () => {
         await playing.ended;
         expect(playing.stop()).toBe(1);
     });
+
+    it("builds its own parts when none are given, and has no system voice without speechSynthesis", () => {
+        const created: unknown[] = [];
+        vi.stubGlobal(
+            "Audio",
+            class {
+                constructor() {
+                    created.push(this);
+                }
+            },
+        );
+        vi.stubGlobal("window", {});
+        try {
+            const player = new WebClausePlayer();
+            expect(created).toHaveLength(2);
+            player.prime();
+            const spoken = player.play({ kind: "utterance", text: "Hi." }, { step: false });
+            expect(spoken.stop()).toBe(1);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("has no system voice without a window", () => {
+        vi.stubGlobal("Audio", class {});
+        vi.stubGlobal("window", undefined);
+        try {
+            const player = new WebClausePlayer();
+            expect(player.play({ kind: "utterance", text: "Hi." }, { step: false }).stop()).toBe(1);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("uses the window's speechSynthesis, utterances and the URL functions by default", () => {
+        const speak = vi.fn();
+        const synth = { speak, cancel: vi.fn(), getVoices: () => [] };
+        vi.stubGlobal("window", { speechSynthesis: synth });
+        vi.stubGlobal("Audio", class {});
+        vi.stubGlobal(
+            "SpeechSynthesisUtterance",
+            class {
+                constructor(public text: string) {}
+            },
+        );
+        const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:default");
+        const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+        try {
+            const player = new WebClausePlayer();
+            player.prime();
+            expect(speak).toHaveBeenCalledTimes(1);
+            expect(speak.mock.calls[0][0].text).toBe("");
+        } finally {
+            create.mockRestore();
+            revoke.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("loads and revokes through the URL functions by default", () => {
+        const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:default");
+        const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+        try {
+            const player = new WebClausePlayer({ createAudio: () => new FakeAudio(), synth: null });
+            const blob = wav();
+            player.preload({ kind: "audio", blob });
+            expect(create).toHaveBeenCalledWith(blob);
+            player.preload({ kind: "audio", blob: wav() });
+            expect(revoke).toHaveBeenCalledWith("blob:default");
+        } finally {
+            create.mockRestore();
+            revoke.mockRestore();
+        }
+    });
+
+    it("ignores a preload for text and keeps playing when a refusal or throw comes from the element", async () => {
+        const { player, audios, revoked } = setup();
+        player.preload({ kind: "utterance", text: "Not audio." });
+        expect(audios[0].load).not.toHaveBeenCalled();
+        // A refused prime does not matter, whether it rejects or throws.
+        audios[0].play.mockImplementationOnce(() => Promise.reject(new Error("blocked")));
+        audios[1].play.mockImplementationOnce(() => {
+            throw new Error("blocked");
+        });
+        expect(() => player.prime()).not.toThrow();
+        // A refused play ends the clause as if it had finished.
+        audios[0].play.mockImplementationOnce(() => Promise.reject(new Error("blocked")));
+        const refused = player.play({ kind: "audio", blob: wav() }, { step: false });
+        await refused.ended;
+        audios[1].play.mockImplementationOnce(() => {
+            throw new Error("blocked");
+        });
+        const thrown = player.play({ kind: "audio", blob: wav() }, { step: false });
+        await thrown.ended;
+        expect(revoked).toHaveLength(2);
+    });
+
+    it("primes without a system voice, and survives one that throws", () => {
+        const none = new WebClausePlayer({ createAudio: () => new FakeAudio(), synth: null });
+        expect(() => none.prime()).not.toThrow();
+        none.reset();
+        const throwing: SynthLike = {
+            speak: () => {
+                throw new Error("no voice");
+            },
+            cancel: () => {
+                throw new Error("nothing");
+            },
+            getVoices: () => [],
+        };
+        const player = new WebClausePlayer({
+            createAudio: () => new FakeAudio(),
+            synth: throwing,
+            createUtterance: (text) => ({ text, voice: null, rate: 1, volume: 1, onend: null, onerror: null, onboundary: null }),
+        });
+        expect(() => player.prime()).not.toThrow();
+        expect(() => player.reset()).not.toThrow();
+    });
+
+    it("clamps the share heard and ignores an unknown duration or voice", () => {
+        const { player, audios } = setup();
+        const long = player.play({ kind: "audio", blob: wav() }, { step: false });
+        audios[0].duration = 2;
+        audios[0].currentTime = 5;
+        expect(long.stop()).toBe(1);
+        const unknown = player.play({ kind: "audio", blob: wav() }, { step: false });
+        audios[1].duration = Number.POSITIVE_INFINITY;
+        expect(unknown.stop()).toBe(0);
+
+        player.voiceURI = "Missing";
+        const spoken = player.play({ kind: "utterance", text: "" }, { step: false });
+        expect(spoken.stop()).toBe(0);
+    });
+
+    it("speaks nothing when there is no system voice, and an utterance error ends the clause", async () => {
+        const quiet = new WebClausePlayer({ createAudio: () => new FakeAudio(), synth: null });
+        const playing = quiet.play({ kind: "utterance", text: "Hello." }, { step: false });
+        await playing.ended;
+        expect(playing.stop()).toBe(1);
+
+        const { player, spoken } = setup();
+        const failing = player.play({ kind: "utterance", text: "Oops." }, { step: false });
+        spoken[0].onerror?.({ error: "synthesis-failed" });
+        await failing.ended;
+
+        // Events that arrive after a stop settle nothing.
+        const stopped = player.play({ kind: "utterance", text: "Stopped." }, { step: false });
+        let settled = false;
+        void stopped.ended.then(() => (settled = true));
+        stopped.stop();
+        spoken[1].onend?.();
+        spoken[1].onerror?.({ error: "canceled" });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+    });
+
+    it("resets both elements and forgets what was loaded ahead", () => {
+        const { player, audios, revoked, cancel } = setup();
+        player.preload({ kind: "audio", blob: wav() });
+        player.reset();
+        for (const audio of audios) expect(audio.pause).toHaveBeenCalled();
+        expect(revoked).toEqual(["blob:1"]);
+        expect(cancel).toHaveBeenCalled();
+    });
 });

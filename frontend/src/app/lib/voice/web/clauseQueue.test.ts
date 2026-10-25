@@ -203,4 +203,90 @@ describe("ClauseQueue", () => {
         expect(events).toEqual([]);
         expect(queue.currentTurn).toBe("t2");
     });
+
+    it("is not busy before any clause arrives", () => {
+        const { queue } = harness();
+        expect(queue.busy).toBe(false);
+        queue.begin("t1");
+        expect(queue.busy).toBe(false);
+        expect(queue.audible).toBe(false);
+    });
+
+    it("cancelling after every clause played reports the last one as fully heard", async () => {
+        const { queue, renders, plays, events, audio } = harness();
+        queue.begin("t1");
+        queue.accept("t1", 0, "First.");
+        renders[0].done.resolve(audio("First."));
+        await flush();
+        plays[0].done.resolve();
+        await flush();
+        queue.cancel("t1");
+        expect(events.at(-1)).toEqual({ type: "interrupted", turnId: "t1", clauseId: 0, fraction: 1 });
+    });
+
+    it("reports 0 for a stop that gives no usable share", async () => {
+        const { queue, renders, plays, events, audio } = harness();
+        queue.begin("t1");
+        queue.accept("t1", 0, "First.");
+        renders[0].done.resolve(audio("First."));
+        await flush();
+        plays[0].fraction = Number.NaN;
+        queue.cancel("t1");
+        expect(events.at(-1)).toMatchObject({ type: "interrupted", fraction: 0 });
+    });
+
+    it("a playback that rejects counts as played", async () => {
+        const { queue, renders, plays, events, audio } = harness();
+        queue.begin("t1");
+        queue.accept("t1", 0, "First.");
+        renders[0].done.resolve(audio("First."));
+        await flush();
+        plays[0].done.reject(new Error("audio failed"));
+        await flush();
+        expect(events.at(-1)).toEqual({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+    });
+
+    it("an answer clause leaves a playing answer clause alone when only later steps are waiting", async () => {
+        const { queue, renders, plays, events, audio } = harness();
+        queue.begin("t1");
+        queue.accept("t1", 0, "Answer one.");
+        renders[0].done.resolve(audio("Answer one."));
+        await flush();
+        queue.accept("t1", 1, "A late step.", true);
+        queue.accept("t1", 2, "Answer two.");
+        expect(plays[0].stopped).toBe(false);
+        expect(queue.audible).toBe(true);
+        expect(events.slice(-2)).toEqual([
+            { type: "clauseStarted", turnId: "t1", clauseId: 1 },
+            { type: "clausePlayed", turnId: "t1", clauseId: 1 },
+        ]);
+    });
+
+    it("an answer whose turn id is empty has nothing to pump or yield", () => {
+        const { queue, renders } = harness();
+        queue.begin("");
+        expect(queue.accept("", 0, "Anonymous.", false)).toBe(true);
+        expect(renders).toHaveLength(0);
+    });
+
+    it("renders two ahead unless told otherwise", async () => {
+        const events: ClauseQueueEvent[] = [];
+        const renders: string[] = [];
+        const queue = new ClauseQueue({
+            emit: (event) => events.push(event),
+            renderer: {
+                render: (text) => {
+                    renders.push(text);
+                    return Promise.resolve({ kind: "none" });
+                },
+            },
+            player: { play: () => ({ ended: new Promise<void>(() => undefined), stop: () => 0 }) },
+        });
+        queue.begin("t1");
+        queue.accept("t1", 0, "One.");
+        queue.accept("t1", 1, "Two.");
+        expect(renders).toEqual(["One."]);
+        await flush();
+        expect(renders).toEqual(["One.", "Two."]);
+    });
 });
