@@ -18,8 +18,8 @@ import { setVoiceModeActive } from "@/app/lib/voice/voiceMode";
 import {
     VOICE_INSTALL_FAILURE_MESSAGE,
     VOICE_START_FAILURE_MESSAGE,
-    VOICE_UNAVAILABLE_MESSAGE,
     VoiceEngineError,
+    backend as voiceBackend,
     endedMessage,
     markVoiceUsed,
     onVoiceEvent,
@@ -28,6 +28,8 @@ import {
     voiceEndAnswer,
     voiceInstall,
     voicePrewarm,
+    voicePrime,
+    voiceUnavailableMessage,
     voiceSpeak,
     voiceSpeakStep,
     voiceStart,
@@ -111,8 +113,19 @@ export interface UseVoiceChatOptions {
 }
 
 export interface UseVoiceChatResult {
-    /** The app has the voice engine (an iPhone app build with it). */
+    /** Voice mode can run here: the iPhone app with its engine, or a browser that can run the web engine. */
     supported: boolean;
+    /** Voice mode runs in this browser (docs/voice-web.md), not the app's engine. */
+    inBrowser?: boolean;
+    /** In a browser: how voice mode runs here, in a sentence. */
+    sentence?: string;
+    /** In a browser: the downloads still to make, in minutes. */
+    downloadMinutes?: number;
+    /**
+     * Ends the answer being spoken or awaited, as speaking over it would
+     * (the browser's engine does not listen while it speaks).
+     */
+    interrupt?: () => void;
     phase: VoicePhase;
     activity: VoiceActivity;
     /** The person's words while they speak; cleared when the turn is sent. */
@@ -238,6 +251,7 @@ function promptOf(turn: VoiceTurn, messages: readonly Message[]): { id: string; 
 const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const joinWords = (...parts: string[]) => parts.filter(Boolean).join(" ");
 const subscribeNever = () => () => undefined;
+const inBrowserEngine = () => voiceBackend() === "web";
 
 export function useVoiceChat({
     chatId,
@@ -249,6 +263,7 @@ export function useVoiceChat({
     config,
 }: UseVoiceChatOptions): UseVoiceChatResult {
     const supported = useSyncExternalStore(subscribeNever, voiceChatSupported, () => false);
+    const inBrowser = useSyncExternalStore(subscribeNever, inBrowserEngine, () => false);
     // Someone who has used voice mode before has its models loaded in the
     // background shortly after the app opens, so the next start is quick.
     useEffect(() => {
@@ -262,6 +277,8 @@ export function useVoiceChat({
     const [ignoredOtherVoice, setIgnoredOtherVoice] = useState(false);
     const [installProgress, setInstallProgress] = useState<number | null>(null);
     const [downloadBytes, setDownloadBytes] = useState(0);
+    const [downloadMinutes, setDownloadMinutes] = useState<number | undefined>(undefined);
+    const [sentence, setSentence] = useState<string | undefined>(undefined);
     const [preparation, setPreparation] = useState({ preparing: false, firstTime: false });
     const [error, setError] = useState<string | null>(null);
     // Bumped when a turn is waiting to be sent, so the effect below runs.
@@ -568,27 +585,32 @@ export function useVoiceChat({
     );
     const start = useCallback(async () => {
         if (phaseRef.current !== "off") return;
+        // Still inside the tap: a browser lets audio start only from here.
+        voicePrime();
         const session = ++sessionRef.current;
         setError(null);
         setPhase("checking");
         const status = await voiceStatus();
         if (sessionRef.current !== session) return;
         setPreparation({ preparing: status.preparing, firstTime: status.firstTime });
+        setSentence(status.sentence);
         if (status.available) {
             await begin(session);
             return;
         }
         if (status.missing.length > 0) {
             setDownloadBytes(status.downloadBytes);
+            setDownloadMinutes(status.downloadMinutes);
             setPhase("setup");
             return;
         }
         setPhase("off");
-        setError(VOICE_UNAVAILABLE_MESSAGE);
+        setError(status.unavailableMessage ?? voiceUnavailableMessage());
     }, [begin, setPhase]);
 
     const install = useCallback(async () => {
         if (phaseRef.current !== "setup") return;
+        voicePrime();
         const session = sessionRef.current;
         setError(null);
         setPhase("installing");
@@ -787,8 +809,26 @@ export function useVoiceChat({
     // Leaving the page does too.
     useEffect(() => () => stop(), [stop]);
 
+    // "Tap to interrupt": what speaking over the answer does on the iPhone.
+    // The answer stops, and what was heard of it is recorded from where the
+    // engine says speech stopped (its `interrupted`), or from the clauses
+    // played when nothing was playing.
+    const interrupt = useCallback(() => {
+        if (phaseRef.current !== "on") return;
+        const turn = turnRef.current;
+        if (!turn || turn.finished || turn.heard !== undefined) return;
+        const playing = [...turn.started].some((id) => !turn.played.has(id));
+        cutOff(turn);
+        void voiceCancelAnswer(turn.turnId);
+        if (!playing) settleHeard(turn);
+    }, [cutOff, settleHeard]);
+
     return {
         supported,
+        inBrowser,
+        sentence,
+        downloadMinutes,
+        interrupt,
         phase,
         activity: activityOf(engineState),
         partial,
