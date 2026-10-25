@@ -137,8 +137,7 @@ None of these proves the model relied on a source. That is what citations claim,
 4. Source lists on the code-cell row and the run line.
 5. MCP resource URIs and the Workspace extractors.
 6. Subagent roll-up.
-7. Audit hooks in the kernel (files, URLs, subprocesses), with `~/mike` paths resolved through the manifest.
-7b. Per-cell proxy attribution, then fanotify on `~/mike`. TLS interception only if full URLs from subprocesses turn out to matter.
+7. Audit hooks in the kernel (files, URLs, subprocesses), with `~/mike` paths resolved through the manifest. Then per-cell proxy attribution, then fanotify on `~/mike`. TLS interception only if full URLs from subprocesses turn out to matter.
 
 Then, for subagents:
 
