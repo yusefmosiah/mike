@@ -1,13 +1,22 @@
 "use client";
 
 import { errorCode, knownErrorCodeMessage } from "@/app/lib/userFacingError";
+import { primeWebAudio } from "./web/prime";
+import { webVoiceSupported } from "./web/support";
+import type { WebVoiceBackend } from "./web/webBackend";
 
 /**
- * The app's native voice engine (the iPhone app; Android has none yet), for hands-free voice chat
- * (docs/voice-chat.md; the interface is docs/voice-chat-contract.md). The
- * engine listens, decides when a turn ends and when the person speaks over the
- * answer, and plays the clauses this page sends it. It lives in the
- * `MikeSpeech` plugin; app builds without it, and browsers, have no voice mode.
+ * The voice engine for hands-free voice chat (docs/voice-chat.md; the
+ * interface is docs/voice-chat-contract.md). The engine listens, decides when
+ * a turn ends and when the person speaks over the answer, and plays the
+ * clauses this page sends it.
+ *
+ * Two backends sit behind the same functions and events. In the iPhone app
+ * it is the native engine in the `MikeSpeech` plugin, and it always wins
+ * where the plugin has it. In a plain browser it is the web engine
+ * (web/webBackend.ts, docs/voice-web.md), imported only when voice mode
+ * starts. App builds without the native engine (Android for now) have no
+ * voice mode.
  */
 
 /** Thresholds the engine runs with; every field is optional and has the engine's default. */
@@ -34,6 +43,12 @@ export interface VoiceConfig {
     falseStartMs: number;
     /** A single turn is cut here, 60000 ms (at most 120000; a larger value falls back to the default). */
     maxTurnMs: number;
+    /**
+     * Without Smart Turn, the silence that ends the turn: 1500 ms in the
+     * iPhone app while Smart Turn loads, 900 ms in a browser (where phase 1
+     * has no Smart Turn); never more than `maxSilenceMs`.
+     */
+    fallbackSilenceMs: number;
     /**
      * The speaker model that decides whether speech is the person's, "wespeaker";
      * "both" decides in the two models' joined space, "off" checks and learns nothing.
@@ -99,6 +114,12 @@ export interface VoiceStatus extends VoicePreparation {
     downloadBytes: number;
     /** Voice mode has learned the person's voice and ignores other voices. */
     speakerLearned: boolean;
+    /** In a browser: how voice mode runs here, in a sentence. */
+    sentence?: string;
+    /** In a browser: the downloads, in minutes (said as "about N minutes", never as a size). */
+    downloadMinutes?: number;
+    /** In a browser: why voice mode cannot run here, written for the person. */
+    unavailableMessage?: string;
 }
 
 interface CapacitorBridge {
@@ -123,6 +144,21 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     unavailable: VOICE_UNAVAILABLE_MESSAGE,
 };
 
+export const WEB_VOICE_UNAVAILABLE_MESSAGE = "Voice mode is not available in this browser.";
+export const WEB_VOICE_MICROPHONE_MESSAGE =
+    "This site is not allowed to use the microphone. Allow it in the browser’s site settings (usually the icon beside the address), then try again.";
+export const WEB_VOICE_NO_MICROPHONE_MESSAGE = "No microphone was found. Connect one, or check that no other app is using it, then try again.";
+const WEB_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+    "permission-denied": WEB_VOICE_MICROPHONE_MESSAGE,
+    "no-microphone": WEB_VOICE_NO_MICROPHONE_MESSAGE,
+    unavailable: WEB_VOICE_UNAVAILABLE_MESSAGE,
+};
+
+/** "Voice mode is not available" for this device: the phone, or this browser. */
+export function voiceUnavailableMessage(): string {
+    return backend() === "web" ? WEB_VOICE_UNAVAILABLE_MESSAGE : VOICE_UNAVAILABLE_MESSAGE;
+}
+
 /** Why voice mode ended, for the person; null when they ended it themselves. */
 export function endedMessage(reason: VoiceEndReason): string | null {
     switch (reason) {
@@ -131,7 +167,9 @@ export function endedMessage(reason: VoiceEndReason): string | null {
         case "interruption":
             return "Voice mode ended because a call or another app took over the audio.";
         case "route":
-            return "Voice mode ended because the audio output changed.";
+            return backend() === "web"
+                ? "Voice mode ended because the microphone was disconnected."
+                : "Voice mode ended because the audio output changed.";
         case "error":
             return "Voice mode stopped because of a problem. Please try again.";
     }
@@ -159,9 +197,49 @@ function hasMethod(name: string): boolean {
     return !!header?.methods?.some((method) => method.name === name);
 }
 
-/** True in an app build whose plugin has the voice engine. */
+/**
+ * Which engine voice mode uses here: the app's native engine where its plugin
+ * has it, the web engine in a plain browser that can run it, none otherwise
+ * (an app build without the native engine, or an old browser).
+ */
+export function backend(): "native" | "web" | null {
+    if (hasMethod("voiceStatus")) return "native";
+    if (typeof window === "undefined") return null;
+    // Inside the app shell the web engine is not offered: the shell's web
+    // view is not a browser the web engine was built for.
+    if ((window as unknown as { Capacitor?: unknown }).Capacitor) return null;
+    return webVoiceSupported() ? "web" : null;
+}
+
+/** True in an app build whose plugin has the voice engine, and in a browser that can run voice mode. */
 export function voiceChatSupported(): boolean {
-    return hasMethod("voiceStatus");
+    return backend() !== null;
+}
+
+/** The web engine, created on first use (its module is imported then). */
+let webEngine: Promise<WebVoiceBackend> | null = null;
+function web(): Promise<WebVoiceBackend> {
+    webEngine ??= import("./web/webBackend")
+        .then(({ WebVoiceBackend }) => new WebVoiceBackend(emit))
+        .catch((error: unknown) => {
+            webEngine = null;
+            throw error;
+        });
+    return webEngine;
+}
+
+/** The web engine if voice mode has already loaded it; for calls that need nothing new. */
+function loadedWeb(): Promise<WebVoiceBackend> | null {
+    return backend() === "web" ? webEngine : null;
+}
+
+/**
+ * Call synchronously inside the tap that starts voice mode (or installs its
+ * models), before anything is awaited: in a browser it unlocks audio, which
+ * browsers allow only from a tap. The app's engine needs nothing.
+ */
+export function voicePrime(): void {
+    if (backend() === "web") primeWebAudio();
 }
 
 /** True when the app can open the system's microphone modes (Voice Isolation). */
@@ -208,6 +286,7 @@ function parseStatus(value: unknown): VoiceStatus {
 /** What the engine can do now. Never rejects: anything wrong reads as unavailable. */
 export async function voiceStatus(): Promise<VoiceStatus> {
     try {
+        if (backend() === "web") return await (await web()).status();
         return parseStatus(await call("voiceStatus"));
     } catch {
         return { available: false, missing: [], downloadBytes: 0, speakerLearned: false, ...parsePreparation({}) };
@@ -223,6 +302,7 @@ export async function voiceStatus(): Promise<VoiceStatus> {
 export async function voiceRemove(): Promise<VoiceStatus> {
     let result: unknown;
     try {
+        if (backend() === "web") return await (await web()).remove();
         result = await call("voiceRemove");
     } catch (error) {
         throw new VoiceEngineError(
@@ -261,6 +341,7 @@ export async function voiceMicrophoneModes(): Promise<void> {
  */
 export async function voiceInstall(): Promise<boolean> {
     try {
+        if (backend() === "web") return await (await web()).install();
         return record(await call("voiceInstall")).available === true;
     } catch (error) {
         throw new VoiceEngineError(VOICE_INSTALL_FAILURE_MESSAGE, errorCode(error) ?? undefined);
@@ -269,11 +350,13 @@ export async function voiceInstall(): Promise<boolean> {
 
 /** Starts listening; asks for the microphone if needed. `voice` is a Phonon voice. */
 export async function voiceStart(options: { config: Partial<VoiceConfig>; voice?: string }): Promise<void> {
+    const inBrowser = backend() === "web";
     try {
-        await call("voiceStart", { config: options.config, ...(options.voice ? { voice: options.voice } : {}) });
+        if (inBrowser) await (await web()).start(options.config, options.voice);
+        else await call("voiceStart", { config: options.config, ...(options.voice ? { voice: options.voice } : {}) });
     } catch (error) {
         throw new VoiceEngineError(
-            knownErrorCodeMessage(error, ERROR_MESSAGES, VOICE_START_FAILURE_MESSAGE),
+            knownErrorCodeMessage(error, inBrowser ? WEB_ERROR_MESSAGES : ERROR_MESSAGES, VOICE_START_FAILURE_MESSAGE),
             errorCode(error) ?? undefined,
         );
     }
@@ -316,11 +399,21 @@ export function voicePrewarm(config: Partial<VoiceConfig> = {}): void {
 
 /** Releases the audio and ends any answer being spoken. Never rejects. */
 export async function voiceStop(): Promise<void> {
+    const engine = loadedWeb();
+    if (engine) {
+        await engine.then((loaded) => loaded.stop()).catch(() => undefined);
+        return;
+    }
+    if (backend() === "web") return;
     await call("voiceStop").catch(() => undefined);
 }
 
 /** Queues one clause of the answer to turn `turnId`. `text` is already speakable. */
 export function voiceSpeak(turnId: string, clauseId: number, text: string, final?: boolean): void {
+    if (backend() === "web") {
+        void loadedWeb()?.then((engine) => engine.speak(turnId, clauseId, text, false)).catch(() => undefined);
+        return;
+    }
     call("voiceSpeak", { turnId, clauseId, text, ...(final ? { final: true } : {}) }).catch(() => undefined);
 }
 
@@ -331,16 +424,28 @@ export function voiceSpeak(turnId: string, clauseId: number, text: string, final
  * it as an ordinary clause.
  */
 export function voiceSpeakStep(turnId: string, clauseId: number, text: string): void {
+    if (backend() === "web") {
+        void loadedWeb()?.then((engine) => engine.speak(turnId, clauseId, text, true)).catch(() => undefined);
+        return;
+    }
     call("voiceSpeak", { turnId, clauseId, text, kind: "step" }).catch(() => undefined);
 }
 
 /** No more clauses for this turn; the engine listens again once the last one has played. */
 export function voiceEndAnswer(turnId: string): void {
+    if (backend() === "web") {
+        void loadedWeb()?.then((engine) => engine.endAnswer(turnId)).catch(() => undefined);
+        return;
+    }
     call("voiceEndAnswer", { turnId }).catch(() => undefined);
 }
 
 /** Drops the turn's answer; resolves once playback has stopped. Never rejects. */
 export async function voiceCancelAnswer(turnId: string): Promise<void> {
+    if (backend() === "web") {
+        await loadedWeb()?.then((engine) => engine.cancelAnswer(turnId)).catch(() => undefined);
+        return;
+    }
     await call("voiceCancelAnswer", { turnId }).catch(() => undefined);
 }
 
@@ -423,20 +528,25 @@ function removeListener(): void {
  * removes this handler.
  */
 export function onVoiceEvent(handler: (event: VoiceEvent) => void): () => void {
-    const cap = bridge();
-    if (typeof cap?.addListener !== "function") return () => undefined;
+    const inBrowser = backend() === "web";
+    const cap = inBrowser ? null : bridge();
+    if (!inBrowser && typeof cap?.addListener !== "function") return () => undefined;
     // Each subscription is its own entry, even for the same function.
     const entry = (event: VoiceEvent) => handler(event);
     handlers.add(entry);
-    if (!listener) {
+    if (cap?.addListener && !listener) {
         listener = cap.addListener(PLUGIN, "voiceEvent", (data) => {
             const event = parseVoiceEvent(data);
-            if (!event) return;
-            for (const each of [...handlers]) each(event);
+            if (event) emit(event);
         });
     }
     return () => {
         if (!handlers.delete(entry)) return;
-        if (handlers.size === 0) removeListener();
+        if (handlers.size === 0 && listener) removeListener();
     };
+}
+
+/** Hands an engine event to every handler (the web engine calls this directly). */
+function emit(event: VoiceEvent): void {
+    for (const each of [...handlers]) each(event);
 }

@@ -3,9 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "predev": "node scripts/copy-phonon-tts.mjs",
+        "predev": "node scripts/copy-phonon-tts.mjs && node scripts/copy-voice-web.mjs",
         "dev": "next dev",
-        "prebuild": "node scripts/copy-phonon-tts.mjs",
+        "prebuild": "node scripts/copy-phonon-tts.mjs && node scripts/copy-voice-web.mjs",
         "build": "next build",
         "start": "next start",
         "lint": "eslint",

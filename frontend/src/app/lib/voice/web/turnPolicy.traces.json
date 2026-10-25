@@ -1,0 +1,184 @@
+{
+    "about": "Event traces replayed through web/turnPolicy.ts (turnPolicy.test.ts). Each step feeds VAD frames of frameMs (each followed by a clock tick, as the Swift tests' Trace does), 10 ms ticks, or an engine event, and lists the decisions it must produce. `source` names the Swift test in mobile/plugins/speech/ios/Tests/MikeSpeechPluginTests/TurnPolicyTests.swift each one is taken from; traces that need Smart Turn or live words are left out (phase 1 has neither).",
+    "traces": [
+        {
+            "name": "silence alone ends the turn after the fallback silence",
+            "source": "testWithoutSmartTurnNoPauseCheckOpensAndSilenceAloneEndsTheTurnEarly (the iPhone's 1500 ms fallback)",
+            "frameMs": 256,
+            "config": { "fallbackSilenceMs": 1500 },
+            "steps": [
+                { "op": "speech", "count": 2, "expect": [{ "type": "state", "state": "user-speaking" }] },
+                { "op": "silence", "count": 3, "expect": [] },
+                { "op": "tick", "until": 2011, "expect": [] },
+                {
+                    "op": "tick",
+                    "until": 2012,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 0, "endMs": 512, "decidedAtMs": 2012, "reason": "maxSilence" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "the fallback silence never exceeds maxSilenceMs",
+            "source": "testTheFallbackSilenceNeverExceedsMaxSilence",
+            "frameMs": 256,
+            "config": { "maxSilenceMs": 1000, "fallbackSilenceMs": 1500 },
+            "steps": [
+                { "op": "speech", "count": 2 },
+                { "op": "silence", "count": 1 },
+                { "op": "tick", "until": 1511, "expect": [] },
+                {
+                    "op": "tick",
+                    "until": 1512,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 0, "endMs": 512, "decidedAtMs": 1512, "reason": "maxSilence" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "a long turn is cut at maxTurnMs, where the audio is",
+            "source": "testALongTurnIsCutAtMaxTurnMs",
+            "frameMs": 256,
+            "config": { "maxTurnMs": 3000 },
+            "steps": [
+                {
+                    "op": "speech",
+                    "count": 12,
+                    "expect": [
+                        { "type": "state", "state": "user-speaking" },
+                        { "type": "commit", "commit": { "startMs": 0, "endMs": 3072, "decidedAtMs": 3072, "reason": "maxTurn" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "hysteresis, and noise below the threshold",
+            "source": "testHysteresisKeepsSpeechThroughADipAboveThresholdMinusOffset, testNoiseBelowThresholdNeverStartsATurn",
+            "frameMs": 256,
+            "config": {},
+            "steps": [
+                { "op": "frames", "probability": 0.45, "count": 20, "expect": [], "state": "listening" },
+                { "op": "speech", "count": 2, "expect": [{ "type": "state", "state": "user-speaking" }] },
+                { "op": "frames", "probability": 0.4, "count": 3, "expect": [], "inSpeech": true },
+                { "op": "frames", "probability": 0.3, "count": 2, "expect": [], "inSpeech": false }
+            ]
+        },
+        {
+            "name": "the transcription's result, no timers meanwhile, then the answer plays and ends",
+            "source": "testCommitThenFinalPassResultDrivesThinkingOrBackToListening, testNoTimersRunWhileTheFinalPassIsRunning, testFirstClauseMovesThinkingToSpeakingAndAnswerEndReturnsToListening",
+            "frameMs": 32,
+            "config": { "fallbackSilenceMs": 900 },
+            "steps": [
+                { "op": "speech", "count": 16 },
+                {
+                    "op": "silence",
+                    "count": 29,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 0, "endMs": 512, "decidedAtMs": 1440, "reason": "maxSilence" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                },
+                { "op": "silence", "count": 100, "expect": [] },
+                { "op": "discarded", "expect": [{ "type": "state", "state": "listening" }] },
+                { "op": "speech", "count": 16 },
+                { "op": "silence", "count": 29 },
+                { "op": "committed", "turnId": "t1", "expect": [{ "type": "state", "state": "thinking" }], "answerTurnId": "t1" },
+                { "op": "clause", "turnId": "other", "expect": [] },
+                { "op": "clause", "turnId": "t1", "expect": [{ "type": "state", "state": "speaking" }] },
+                { "op": "clause", "turnId": "t1", "expect": [] },
+                { "op": "answerEnded", "turnId": "other", "expect": [] },
+                { "op": "answerEnded", "turnId": "t1", "expect": [{ "type": "state", "state": "listening" }], "answerTurnId": null }
+            ]
+        },
+        {
+            "name": "someone already speaking when the answer ends has the floor",
+            "source": "testEndOfAnswerWhileThePersonIsSpeakingGivesThemTheFloor",
+            "frameMs": 256,
+            "config": {},
+            "steps": [
+                { "op": "speech", "count": 4 },
+                { "op": "silence", "count": 4 },
+                { "op": "committed", "turnId": "t1" },
+                { "op": "clause", "turnId": "t1" },
+                { "op": "speech", "count": 1, "expect": [] },
+                { "op": "answerEnded", "turnId": "t1", "expect": [{ "type": "state", "state": "user-speaking" }] }
+            ]
+        },
+        {
+            "name": "speaking again soon after a turn was sent continues it",
+            "source": "testSpeakingAgainRightAfterATurnWasSentContinuesIt (speech alone here: no words in phase 1)",
+            "frameMs": 32,
+            "config": {},
+            "steps": [
+                { "op": "speech", "count": 32 },
+                { "op": "silence", "count": 29 },
+                { "op": "committed", "turnId": "t1" },
+                { "op": "tick", "until": 2952 },
+                { "op": "speech", "count": 10, "expect": [] },
+                { "op": "silence", "count": 5, "expect": [] },
+                {
+                    "op": "speech",
+                    "count": 23,
+                    "expect": [
+                        { "type": "bargeIn", "turnId": "t1" },
+                        { "type": "state", "state": "user-speaking" }
+                    ]
+                },
+                {
+                    "op": "silence",
+                    "count": 29,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 0, "endMs": 4168, "decidedAtMs": 5096, "reason": "maxSilence", "continues": "t1" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "after continueMs a barge-in starts a turn of its own",
+            "source": "testContinuingIsOffAtZeroAndAfterContinueMs",
+            "frameMs": 32,
+            "config": {},
+            "steps": [
+                { "op": "speech", "count": 32 },
+                { "op": "silence", "count": 29 },
+                { "op": "committed", "turnId": "t1" },
+                { "op": "tick", "until": 4200 },
+                { "op": "speech", "count": 23, "expect": [{ "type": "bargeIn", "turnId": "t1" }, { "type": "state", "state": "user-speaking" }] },
+                {
+                    "op": "silence",
+                    "count": 29,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 4200, "endMs": 4936, "decidedAtMs": 5864, "reason": "maxSilence" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "continuing is off at continueMs 0",
+            "source": "testContinuingIsOffAtZeroAndAfterContinueMs",
+            "frameMs": 32,
+            "config": { "continueMs": 0 },
+            "steps": [
+                { "op": "speech", "count": 32 },
+                { "op": "silence", "count": 29 },
+                { "op": "committed", "turnId": "t1" },
+                { "op": "speech", "count": 23, "expect": [{ "type": "bargeIn", "turnId": "t1" }, { "type": "state", "state": "user-speaking" }] },
+                {
+                    "op": "silence",
+                    "count": 29,
+                    "expect": [
+                        { "type": "commit", "commit": { "startMs": 1952, "endMs": 2688, "decidedAtMs": 3616, "reason": "maxSilence" } },
+                        { "type": "state", "state": "confirming-end" }
+                    ]
+                }
+            ]
+        }
+    ]
+}

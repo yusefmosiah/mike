@@ -276,6 +276,12 @@ function previousRunDied(): boolean {
     }
 }
 
+/**
+ * The page died while a model ran in this tab (most likely out of memory),
+ * and nothing has run since. Voice mode in the browser then picks lighter engines.
+ */
+export const previousBrowserModelRunDied = (): boolean => previousRunDied();
+
 let watchingPagehide = false;
 function watchPagehide(): void {
     if (watchingPagehide) return;
@@ -368,10 +374,19 @@ async function decodeForWhisper(blob: Blob): Promise<Float32Array> {
 }
 
 export async function transcribeInBrowser(blob: Blob): Promise<string> {
+    return transcribeSamples(() => decodeForWhisper(blob));
+}
+
+/** As `transcribeInBrowser`, for audio already at 16 kHz mono (voice mode's turns). */
+export function transcribeSamplesInBrowser(samples: Float32Array): Promise<string> {
+    return transcribeSamples(async () => samples);
+}
+
+async function transcribeSamples(samples: () => Promise<Float32Array>): Promise<string> {
     if (!consented("transcription")) throw new BrowserModelConsentError();
     try {
         return await withModel("transcription", async (runtime) =>
-            runEngine<string>({ op: "transcribe", runtime, samples: await decodeForWhisper(blob) }),
+            runEngine<string>({ op: "transcribe", runtime, samples: await samples() }),
         );
     } catch (error) {
         throw forUser(error);

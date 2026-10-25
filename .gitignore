@@ -20,6 +20,8 @@ coverage
 
 # phonon-tts, copied from node_modules at build time (frontend/scripts/copy-phonon-tts.mjs)
 frontend/public/phonon-tts/
+# ONNX Runtime Web for voice mode's listening worker (frontend/scripts/copy-voice-web.mjs)
+frontend/public/voice-web/ort/
 
 # Playwright artifacts and the bootstrapped e2e session (contains auth tokens)
 test-results/

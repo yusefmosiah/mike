@@ -562,7 +562,7 @@ export function VoiceSettings() {
         </SettingsCard>
       </section>
 
-      <VoiceModeSetup />
+      <VoiceModeSetup serverSpeechAvailable={availability.operatorTranscription} />
 
       <section className="space-y-3">
         <SettingsHeading>Test bench</SettingsHeading>

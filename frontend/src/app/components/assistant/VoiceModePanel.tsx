@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AudioLines, Loader2, Mic, PhoneOff, SlidersHorizontal } from "lucide-react";
+import { AudioLines, Hand, Loader2, Mic, PhoneOff, SlidersHorizontal } from "lucide-react";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { cn } from "@/app/lib/utils";
 import { CHAT_COMPOSER_SURFACE_CLASS } from "./composerSurface";
 import type { UseVoiceChatResult, VoiceActivity } from "@/app/hooks/useVoiceChat";
+import { setupEstimateLabel } from "@/app/lib/voice/pricing";
 import { voiceMicrophoneModes, voiceMicrophoneModesSupported } from "@/app/lib/voice/voiceEngine";
 
 /** A download size as said before it starts: "about 450 MB", "about 1.2 GB". */
@@ -98,10 +99,11 @@ function EndButton({ onClick, label = "End" }: { onClick: () => void; label?: st
 /**
  * Voice mode, in place of the composer. The person talks and is answered
  * aloud; the thread above shows the conversation as ordinary chat. There is
- * no push-to-talk and no tap to interrupt: speaking interrupts. End is the
- * one control. The live state and words are not announced as they change,
- * so VoiceOver does not talk over the spoken answer (the composer announces
- * only that voice mode began or ended).
+ * no push-to-talk. In the iPhone app speaking interrupts and End is the one
+ * control; in a browser (docs/voice-web.md) voice mode does not listen while
+ * it speaks, so "Tap to interrupt" stops the answer. The live state and words
+ * are not announced as they change, so a screen reader does not talk over the
+ * spoken answer (the composer announces only that voice mode began or ended).
  */
 export function VoiceModePanel({
     voice,
@@ -118,9 +120,11 @@ export function VoiceModePanel({
         | "error"
         | "install"
         | "stop"
-    >;
+    > &
+        Partial<Pick<UseVoiceChatResult, "inBrowser" | "sentence" | "downloadMinutes" | "interrupt">>;
 }) {
     const { phase, activity, partial, ignoredOtherVoice, installProgress, downloadBytes, preparation, error } = voice;
+    const { inBrowser, sentence, downloadMinutes } = voice;
 
     if (phase === "setup" || phase === "installing") {
         const fraction = installProgress ?? 0;
@@ -129,14 +133,28 @@ export function VoiceModePanel({
         return (
             <Frame label="Voice mode setup" phase={phase}>
                 <div className="min-w-0 flex-1 basis-56 space-y-2">
-                    <p className="text-sm text-gray-700">
-                        Voice mode needs speech models on this iPhone ({formatDownloadSize(downloadBytes)}, downloaded
-                        once). What you say stays on the phone.
-                    </p>
+                    {inBrowser ? (
+                        <>
+                            <p className="text-sm text-gray-700">
+                                Voice mode needs speech models in this browser ({setupEstimateLabel(downloadMinutes ?? 1)}{" "}
+                                to download, once).
+                            </p>
+                            {sentence && <p className="text-sm text-gray-600 [overflow-wrap:anywhere]">{sentence}</p>}
+                        </>
+                    ) : (
+                        <p className="text-sm text-gray-700">
+                            Voice mode needs speech models on this iPhone ({formatDownloadSize(downloadBytes)}, downloaded
+                            once). What you say stays on the phone.
+                        </p>
+                    )}
                     {phase === "installing" ? (
                         <div className="space-y-1">
                             <p className="text-xs text-gray-600">
-                                {preparing ? "Preparing for this phone…" : "Downloading speech models…"}
+                                {preparing
+                                    ? inBrowser
+                                        ? "Getting ready…"
+                                        : "Preparing for this phone…"
+                                    : "Downloading speech models…"}
                             </p>
                             <div
                                 role="progressbar"
@@ -209,6 +227,8 @@ export function VoiceModePanel({
         );
     }
 
+    // In a browser voice mode does not hear the person over its own answer.
+    const tapToInterrupt = inBrowser && activity !== "listening" && !!voice.interrupt;
     return (
         <Frame label="Voice mode" phase={phase}>
             <ActivityShape activity={activity} />
@@ -222,10 +242,20 @@ export function VoiceModePanel({
                             ? "Another voice, not sent."
                             : activity === "listening"
                               ? "Speak when you’re ready."
-                              : "Speak to interrupt.")}
+                              : inBrowser
+                                ? activity === "speaking"
+                                    ? "Not listening while it speaks."
+                                    : "Speak, or tap to interrupt."
+                                : "Speak to interrupt.")}
                 </p>
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-2">
+                {tapToInterrupt && (
+                    <PillButtonUI tone="black" size="sm" onClick={() => voice.interrupt?.()}>
+                        <Hand className="h-3.5 w-3.5" aria-hidden="true" />
+                        Tap to interrupt
+                    </PillButtonUI>
+                )}
                 {voiceMicrophoneModesSupported() && (
                     <PillButtonUI
                         tone="white"

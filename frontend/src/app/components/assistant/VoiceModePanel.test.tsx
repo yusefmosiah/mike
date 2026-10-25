@@ -128,6 +128,43 @@ describe("VoiceModePanel", () => {
         expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
     });
 
+    it("in a browser, says the download in minutes, how voice mode runs here, and never a phone or a size", () => {
+        const sentence = "Voice mode runs on this device, using its graphics processor. What you say stays in this browser.";
+        render(
+            <VoiceModePanel
+                voice={voice({ phase: "setup", inBrowser: true, downloadBytes: 273e6, downloadMinutes: 4, sentence })}
+            />,
+        );
+        const frame = document.querySelector("[data-slot='voice-mode-panel']")!;
+        expect(frame).toHaveTextContent("Voice mode needs speech models in this browser (about 4 minutes to download, once).");
+        expect(frame).toHaveTextContent(sentence);
+        expect(frame.textContent).not.toMatch(/\bphone\b|iPhone|MB|GB/);
+    });
+
+    it("in a browser, says it is getting ready rather than preparing for a phone", () => {
+        render(<VoiceModePanel voice={voice({ phase: "installing", installProgress: 1, inBrowser: true })} />);
+        expect(screen.getByText("Getting ready…")).toBeInTheDocument();
+    });
+
+    it("in a browser, offers Tap to interrupt while the answer is awaited or spoken", () => {
+        const interrupt = vi.fn();
+        const { rerender } = render(<VoiceModePanel voice={voice({ inBrowser: true, interrupt })} />);
+        expect(screen.queryByRole("button", { name: "Tap to interrupt" })).toBeNull();
+        rerender(<VoiceModePanel voice={voice({ inBrowser: true, interrupt, activity: "speaking" })} />);
+        expect(screen.getByText("Not listening while it speaks.")).toBeInTheDocument();
+        const button = screen.getByRole("button", { name: "Tap to interrupt" });
+        expect(button).toHaveAttribute("type", "button");
+        fireEvent.click(button);
+        expect(interrupt).toHaveBeenCalledTimes(1);
+        rerender(<VoiceModePanel voice={voice({ inBrowser: true, interrupt, activity: "thinking" })} />);
+        expect(screen.getByText("Speak, or tap to interrupt.")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Tap to interrupt" })).toBeInTheDocument();
+        // The iPhone app's engine hears the person over its answer: no button there.
+        rerender(<VoiceModePanel voice={voice({ interrupt, activity: "speaking" })} />);
+        expect(screen.queryByRole("button", { name: "Tap to interrupt" })).toBeNull();
+        expect(screen.getByText("Speak to interrupt.")).toBeInTheDocument();
+    });
+
     it("has the composer's surface and resting envelope in every step, including while starting", () => {
         const { rerender } = render(<VoiceModePanel voice={voice({ phase: "checking" })} />);
         for (const phase of ["checking", "starting", "setup", "installing", "on"] as const) {

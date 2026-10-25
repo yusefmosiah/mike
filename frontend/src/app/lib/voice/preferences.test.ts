@@ -13,6 +13,7 @@ import {
     resolveVoiceEngine,
     saveVoicePreferences,
     useVoicePreferences,
+    voiceModeServerSpeech,
     type VoiceAvailability,
 } from "./preferences";
 
@@ -192,5 +193,22 @@ describe("server rendering", () => {
             return createElement("span", null, useVoicePreferences()[0].speech.engine);
         }
         expect(renderToString(createElement(Probe))).toContain("operator");
+    });
+});
+
+describe("voice mode preferences", () => {
+    it("keeps the browser voice mode flags that are booleans, and leaves the server off by default", () => {
+        expect(parseVoicePreferences({}).voiceMode).toBeUndefined();
+        expect(voiceModeServerSpeech(parseVoicePreferences({}))).toBe(false);
+        expect(parseVoicePreferences({ voiceMode: "yes" }).voiceMode).toBeUndefined();
+        expect(parseVoicePreferences({ voiceMode: { serverSpeech: "true", headphones: 1 } }).voiceMode).toBeUndefined();
+        const parsed = parseVoicePreferences({ voiceMode: { serverSpeech: true, headphones: false, extra: 1 } });
+        expect(parsed.voiceMode).toEqual({ serverSpeech: true, headphones: false });
+        expect(voiceModeServerSpeech(parsed)).toBe(true);
+    });
+
+    it("stores the section with the rest", () => {
+        saveVoicePreferences({ ...DEFAULT_VOICE_PREFERENCES, voiceMode: { serverSpeech: true } });
+        expect(loadVoicePreferences().voiceMode).toEqual({ serverSpeech: true });
     });
 });

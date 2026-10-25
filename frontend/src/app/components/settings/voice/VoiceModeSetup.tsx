@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Loader2 } from "lucide-react";
 import {
   loadSpeakerModel,
@@ -14,7 +14,9 @@ import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
 import { SettingsDescription, SettingsLabel } from "@/app/components/settings/SettingsText";
 import { formatDownloadSize } from "@/app/components/assistant/VoiceModePanel";
+import { WebVoiceModeSetup } from "./WebVoiceModeSetup";
 import {
+  backend,
   onVoiceEvent,
   VOICE_INSTALL_FAILURE_MESSAGE,
   VOICE_FORGET_FAILURE_MESSAGE,
@@ -39,11 +41,23 @@ const SPEAKER_MODEL_LABELS: Record<SpeakerModel, string> = {
   off: "Off",
 };
 
+const subscribeNever = () => () => undefined;
+const inBrowserEngine = () => backend() === "web";
+
+/**
+ * Voice mode's settings: the iPhone app's engine, or voice mode in a browser
+ * (WebVoiceModeSetup). Nothing is shown where voice mode cannot run.
+ */
+export function VoiceModeSetup({ serverSpeechAvailable = false }: { serverSpeechAvailable?: boolean } = {}) {
+  const inBrowser = useSyncExternalStore(subscribeNever, inBrowserEngine, () => false);
+  return inBrowser ? <WebVoiceModeSetup serverSpeechAvailable={serverSpeechAvailable} /> : <NativeVoiceModeSetup />;
+}
+
 /**
  * Voice mode's models on the phone: downloaded here or on first use, and
  * removable to free the space. Shown only in an app build with the engine.
  */
-export function VoiceModeSetup() {
+function NativeVoiceModeSetup() {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
