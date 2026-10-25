@@ -31,7 +31,9 @@ export function primeWebAudio(): void {
             element.src = SILENT_WAV;
             void Promise.resolve(element.play()).catch(() => undefined);
         }
-        if ("speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined") {
+        // Headless Chromium under automation crashes the page on `speak`; a
+        // browser driven by a test has no person to hear the system's voice.
+        if ("speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined" && !navigator.webdriver) {
             const utterance = new SpeechSynthesisUtterance("");
             utterance.volume = 0;
             window.speechSynthesis.speak(utterance);

@@ -134,17 +134,23 @@ export async function probeVoiceCapabilities(deps: ProbeDeps = {}): Promise<Voic
     const nav = deps.navigator ?? (typeof navigator === "undefined" ? undefined : (navigator as unknown as NavigatorLike));
     const agent = nav?.userAgent ?? "";
     const basics = (deps.basics ?? webVoiceSupported)();
+    const appleMobile = appleMobileAgent(agent, nav?.maxTouchPoints);
+    const lowMemory = typeof nav?.deviceMemory === "number" && nav.deviceMemory < 4;
+    const priorCrash = deps.priorCrash?.() ?? false;
+    // The browser's own recognition is asked about only where the plan would
+    // use it: the check is not free, and headless Chromium crashes on it.
+    const wantsRecognition = basics && (appleMobile || lowMemory || priorCrash);
     const [webgpu, onDeviceRecognition] = await Promise.all([
         basics ? probeWebGpu(nav, deps.timeoutMs) : Promise.resolve<WebGpuStatus>("missing"),
-        basics && deps.onDeviceRecognition ? deps.onDeviceRecognition().catch(() => false) : Promise.resolve(false),
+        wantsRecognition && deps.onDeviceRecognition ? deps.onDeviceRecognition().catch(() => false) : Promise.resolve(false),
     ]);
     return {
         basics,
         webgpu,
         webkit: webkitAgent(agent),
-        appleMobile: appleMobileAgent(agent, nav?.maxTouchPoints),
-        lowMemory: typeof nav?.deviceMemory === "number" && nav.deviceMemory < 4,
-        priorCrash: deps.priorCrash?.() ?? false,
+        appleMobile,
+        lowMemory,
+        priorCrash,
         onDeviceRecognition,
         systemVoices: deps.systemVoices?.() ?? false,
     };

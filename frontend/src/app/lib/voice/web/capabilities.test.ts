@@ -104,9 +104,18 @@ describe("probeVoiceCapabilities", () => {
         expect(recognition).not.toHaveBeenCalled();
     });
 
+    it("asks about on-device recognition only where a lighter plan would use it", async () => {
+        const recognition = vi.fn(async () => true);
+        const caps = await probeVoiceCapabilities({ navigator: { userAgent: CHROME, deviceMemory: 8 }, basics: () => true, onDeviceRecognition: recognition });
+        expect(recognition).not.toHaveBeenCalled();
+        expect(caps.onDeviceRecognition).toBe(false);
+        await probeVoiceCapabilities({ navigator: { userAgent: CHROME }, basics: () => true, priorCrash: () => true, onDeviceRecognition: recognition });
+        expect(recognition).toHaveBeenCalledTimes(1);
+    });
+
     it("treats a failing recognition check as none", async () => {
         const caps = await probeVoiceCapabilities({
-            navigator: { userAgent: CHROME },
+            navigator: { userAgent: CHROME, deviceMemory: 2 },
             basics: () => true,
             onDeviceRecognition: () => Promise.reject(new Error("no")),
         });
