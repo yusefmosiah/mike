@@ -21,7 +21,29 @@ Date: 2026-10-24. Design only; no code changed.
   2. Video, then HTML sites on the user-content domain.
   3. Links for named people, links whose content is encrypted in the browser, and embeds.
 
-## What exists today
+## Owner direction (2026-10-24)
+
+This section overrides the defaults below for this install. Client installs keep the locked-down defaults.
+
+- **This install publishes to the whole internet.** It is for the owner's own use and for demos. Public links and password links to anyone are both on. A deployment setting (`PUBLISHING=open`, against the default `org`) chooses this; strict private mode still refuses it.
+- **The demo is an HTML article.** It is a page the agent writes, with text, tables, images, embedded YouTube or Vimeo, an audio player, video and links to other sites. A PDF link is supported but is not the point. So HTML publishing moves from phase 2 to phase 1 and leads the build.
+- **No view tracking yet.** `publication_views` and the view counts are left out. Revocation and expiry stay.
+- **Who publishes.** On this install only the owner publishes. The editor/owner rule matters only for shared installs, and stays as designed.
+- **What changes for HTML.**
+  - Each publication is served from its own subdomain of a separate content domain, for example `https://k3x9q2.<content-domain>/`. The link goes straight there: no app page in front, no staging gate.
+  - Because isolation comes from the separate domain, the page runs as a normal page, not in a CSP sandbox. The sandbox would break the YouTube player, which needs scripts and same-origin storage in its frame.
+  - The content-security policy allows `https:` for images, media, fonts and styles. Frames are allowed from YouTube's privacy-enhanced domain and Vimeo, and more can be added per page. Scripts are the page's own plus `https:`. `connect-src` is `https:`.
+  - The page's own files (images, audio, video) are bundled into the publication and served from the same subdomain.
+  - Password links show a password page on the content domain. A correct password sets a cookie for that subdomain only.
+- **Public Suffix List.** Not needed while only the owner publishes. Apply for the content domain before anyone else can publish there.
+
+Build order for this install:
+
+1. A content domain with wildcard DNS and TLS, served by Caddy on node-a outside the staging gate.
+2. A publications module: create, revoke and expire links, with public and password audiences. Bundles go to `publications/{id}/`.
+3. Publishing from the viewer and from an HTML artifact the assistant wrote, including the files it references.
+4. Then PDFs, images and Markdown as single-file publications.
+
 
 The facts come from a survey of the code; paths are relative to the repository root.
 
