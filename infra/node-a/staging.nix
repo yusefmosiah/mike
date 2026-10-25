@@ -1,7 +1,11 @@
 # Mike staging on node-a: the repository's own docker-compose stack under
 # rootful Podman (Docker would set the kernel's FORWARD policy to DROP and
 # cut off the workstation VMs' NAT), with Caddy terminating TLS for
-# choir-ip.com on 80/443.
+# choir-ip.com on 80/443, behind Cloudflare's proxy. Published links
+# (docs/publishing.md) are served at https://<token>.choir.chat, also through
+# Cloudflare, with a Cloudflare Origin CA certificate for *.choir.chat:
+#
+#   /var/lib/publication-tls/{cert,key}.pem   the origin certificate (root:caddy; the key never leaves node-a)
 #
 #   /var/lib/mike-staging/src          the tree being served: a commit of main (deploy-sha) or an rsync
 #   /var/lib/mike-staging/src.prev     the tree before the last deploy-sha, restored if it fails
@@ -19,6 +23,25 @@
 
 let
   domain = "choir-ip.com";
+  # Published links' own registrable domain, so a published page cannot reach
+  # the app's cookies. Wildcard DNS (proxied) points here.
+  publicationDomain = "choir.chat";
+  publicationPort = 3002;
+  publicationTls = "/var/lib/publication-tls";
+  # Cloudflare's edge addresses (https://www.cloudflare.com/ips/). Only a
+  # request from one of these may name its client in CF-Connecting-IP.
+  cloudflareRanges = [
+    "173.245.48.0/20" "103.21.244.0/22" "103.22.200.0/22" "103.31.4.0/22"
+    "141.101.64.0/18" "108.162.192.0/18" "190.93.240.0/20" "188.114.96.0/20"
+    "197.234.240.0/22" "198.41.128.0/17" "162.158.0.0/15" "104.16.0.0/13"
+    "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
+    "2400:cb00::/32" "2606:4700::/32" "2803:f800::/32" "2405:b500::/32"
+    "2405:8100::/32" "2a06:98c0::/29" "2c0f:f248::/32"
+  ];
+  # Every upstream sees exactly one address, the client's: the gate and the
+  # backend read the first X-Forwarded-For entry, and an appended header
+  # would let a visitor put 127.0.0.1 there.
+  clientIp = "header_up X-Forwarded-For {client_ip}";
   root = "/var/lib/mike-staging";
   overrideFile = ./staging/compose.override.yml;
   repoUrl = "https://github.com/yusefmosiah/mike.git";
@@ -78,6 +101,9 @@ let
             echo "ALLOWED_ORIGINS=https://${domain}"
           } > ${root}/app.env
         fi
+        if ! grep -q '^PUBLICATION_SECRET=' ${root}/app.env; then
+          echo "PUBLICATION_SECRET=$(rand)" >> ${root}/app.env
+        fi
       }
 
       # The compose root .env is the backend's env_file.
@@ -97,6 +123,9 @@ let
           echo "WORKSTATION_SSH_IDENTITY_FILE=/run/workstation-key/harness_ed25519"
           echo "WORKSTATION_SNAPSHOT_SOCKET=/run/mike-workstations/control.sock"
           echo "VAULT_CONTROL_SOCKET=/run/mike-vault/control.sock"
+          echo "PUBLISHING=open"
+          echo "PUBLICATION_BASE_URL=https://${publicationDomain}"
+          echo "PUBLICATION_PORT=${toString publicationPort}"
         } > ${root}/src/.env
         # A private stack reports errors to no one.
         echo "SENTRY_DISABLED=true" >> ${root}/src/.env
@@ -320,7 +349,11 @@ in
   };
   virtualisation.containers.containersConf.settings.network.firewall_driver = "nftables";
 
-  systemd.tmpfiles.rules = [ "d ${root} 0700 root root -" "d ${root}/src 0755 root root -" ];
+  systemd.tmpfiles.rules = [
+    "d ${root} 0700 root root -"
+    "d ${root}/src 0755 root root -"
+    "d ${publicationTls} 0750 root caddy -"
+  ];
 
   # Bring the stack back after a reboot (images and volumes persist).
   systemd.services.mike-staging = {
@@ -360,6 +393,12 @@ in
   services.caddy = {
     enable = true;
     email = "staging@${domain}";
+    globalConfig = ''
+      servers {
+        trusted_proxies static ${lib.concatStringsSep " " cloudflareRanges}
+        client_ip_headers CF-Connecting-IP
+      }
+    '';
     virtualHosts.${domain}.extraConfig = ''
       encode zstd gzip
       # The whole site sits behind the shared password (./gate.nix); only
@@ -367,9 +406,12 @@ in
       @gated not path /__gate /__gate/* /robots.txt /api/health /gotrue/health
       forward_auth @gated 127.0.0.1:9180 {
         uri /verify
+        ${clientIp}
       }
       handle /__gate {
-        reverse_proxy 127.0.0.1:9180
+        reverse_proxy 127.0.0.1:9180 {
+          ${clientIp}
+        }
       }
       # A private staging site: nothing here is for search engines.
       handle /robots.txt {
@@ -379,7 +421,9 @@ Disallow: /
       }
       # GoTrue, for email links and OAuth callbacks.
       handle_path /gotrue/* {
-        reverse_proxy 127.0.0.1:54321
+        reverse_proxy 127.0.0.1:54321 {
+          ${clientIp}
+        }
       }
       # Presigned S3 requests (path-style, bucket "mike") go to RustFS with the
       # host and path they were signed for.
@@ -391,11 +435,14 @@ Disallow: /
         request_body {
           max_size 110MB
         }
-        reverse_proxy 127.0.0.1:9000
+        reverse_proxy 127.0.0.1:9000 {
+          ${clientIp}
+        }
       }
       handle {
         reverse_proxy 127.0.0.1:3000 {
           flush_interval -1
+          ${clientIp}
         }
       }
       header {
@@ -407,6 +454,20 @@ Disallow: /
         -X-Powered-By
       }
     '';
+    # The content server, outside the gate: anyone with a link may open it.
+    virtualHosts."*.${publicationDomain}" = {
+      # Hostnames carry link tokens; keep them out of access logs.
+      logFormat = "output discard";
+      extraConfig = ''
+        tls ${publicationTls}/cert.pem ${publicationTls}/key.pem
+        reverse_proxy 127.0.0.1:${toString publicationPort} {
+          ${clientIp}
+        }
+        header {
+          -Server
+        }
+      '';
+    };
   };
 
   networking.firewall.allowedTCPPorts = [ 80 443 ];

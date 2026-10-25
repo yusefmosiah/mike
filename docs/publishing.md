@@ -103,15 +103,22 @@ such as `http://<token>.pub.localhost:3002/` work without any DNS setup.
 
 ## Domains for this install
 
-The staging domain is temporary. The product will get two new domains:
+Staging publishes at `https://<token>.choir.chat/` (`infra/node-a/staging.nix`):
 
-1. **The app's domain.**
-2. **A content domain for published links.** It needs wildcard DNS (`*.<content domain>`) pointing at node-a and a wildcard TLS certificate. Caddy serves it from `PUBLICATION_PORT`, outside the staging gate.
+- **DNS.** `*.choir.chat` is a proxied (orange-cloud) record pointing at the same address as staging, `choir-ip.com`. Cloudflare's universal certificate covers `*.choir.chat` at the edge.
+- **Origin certificate.** Caddy on node-a serves `*.choir.chat` with a Cloudflare Origin CA certificate (`/var/lib/publication-tls/`, valid until 2041). The zone's SSL mode is Full (strict). Its private key was generated on node-a and has never left it. A wildcard certificate keeps link tokens out of the public Certificate Transparency logs, where a certificate per link would list every token.
+- **Caddy.** The content site is outside the staging gate, and its access log is off because hostnames carry tokens. Behind Cloudflare, Caddy takes the client's address from `CF-Connecting-IP`, but only from Cloudflare's address ranges. Every upstream then gets that one address in `X-Forwarded-For`.
+- **Backend.** `staging.nix` writes `PUBLISHING=open`, `PUBLICATION_BASE_URL=https://choir.chat` and `PUBLICATION_PORT=3002`, and generates `PUBLICATION_SECRET` once. The compose override binds the port to loopback.
+- **Zone settings.** Email obfuscation is off in both zones, because it rewrites HTML. The minimum TLS version is 1.2.
+- **Staging zone.** `choir-ip.com` is proxied too, with Full (strict) SSL and a cache rule that bypasses Cloudflare's cache for everything except `/_next/static/`. Without that rule, a signed document download could outlive its expiry at the edge.
 
-Until then, publishing works locally as above, and on staging only once a
-content domain is set up. Before anyone other than the owner can publish,
-submit the content domain to the Public Suffix List, so that the browser
-treats each subdomain as its own site for cookies too.
+Limits of the current setup:
+
+- **Uploads.** Cloudflare's free plan limits a request body to 100 MB.
+- **Idle streams.** It closes a response after 100 seconds with no bytes.
+- **Client addresses.** The staging address forwards to node-a from the hosting network's own addresses, not Cloudflare's. So Caddy, and so the gate and rate limits, still see the forwarder rather than the visitor, as they did before Cloudflare.
+
+Before anyone other than the owner can publish, submit the content domain to the Public Suffix List, so that browsers treat each subdomain as its own site for cookies too. The product's own domains will replace these later.
 
 ## Not built yet
 

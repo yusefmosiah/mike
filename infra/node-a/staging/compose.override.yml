@@ -30,6 +30,10 @@ services:
       - R2_ACCESS_KEY_ID=${STORAGE_ACCESS_KEY:?}
       - R2_SECRET_ACCESS_KEY=${STORAGE_SECRET_KEY:?}
   backend:
+    ports:
+      # The publication content server (PUBLICATION_PORT); Caddy serves it
+      # as *.choir.chat.
+      - "127.0.0.1:3002:3002"
     environment:
       - NODE_ENV=production
       - AUTH_SERVICE_KEY=${AUTH_SERVICE_KEY:?}

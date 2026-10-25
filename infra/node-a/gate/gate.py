@@ -140,8 +140,9 @@ class Gate(BaseHTTPRequestHandler):
     sys_version = ""
 
     def client_ip(self) -> str:
-        # Caddy sets X-Forwarded-For to the connecting address; it trusts no
-        # upstream proxy, so a client cannot choose this value.
+        # Caddy sets X-Forwarded-For to the client's address alone: the
+        # connecting address, or CF-Connecting-IP when the connection comes
+        # from Cloudflare (staging.nix), so a client cannot choose this value.
         forwarded = self.headers.get("X-Forwarded-For", "")
         return forwarded.split(",")[0].strip() or self.client_address[0]
 
