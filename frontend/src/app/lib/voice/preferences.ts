@@ -45,6 +45,19 @@ export interface VoicePreferences {
      * step summaries (spokenSteps.ts). Omitted means on.
      */
     speakSteps?: boolean;
+    /** Hands-free voice mode in a browser (docs/voice-web.md). */
+    voiceMode?: VoiceModePreferences;
+}
+
+export interface VoiceModePreferences {
+    /**
+     * In a browser that cannot recognise or speak on this device, voice mode
+     * may send what is said to the deployment's speech server and have the
+     * answer spoken by it. Off unless the person turns it on.
+     */
+    serverSpeech?: boolean;
+    /** The person listens on headphones (reserved: lets voice mode listen while it speaks). */
+    headphones?: boolean;
 }
 
 export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
@@ -102,8 +115,24 @@ export function parseVoicePreferences(raw: unknown): VoicePreferences {
         },
         ...(rate(root.readAloudRate) ? { readAloudRate: root.readAloudRate as number } : {}),
         ...(typeof root.speakSteps === "boolean" ? { speakSteps: root.speakSteps } : {}),
+        ...voiceModeField(root.voiceMode),
     };
 }
+
+/** The voice mode section, with only the flags that are booleans; omitted when none are. */
+function voiceModeField(raw: unknown): { voiceMode?: VoiceModePreferences } {
+    if (!raw || typeof raw !== "object") return {};
+    const section = raw as Record<string, unknown>;
+    const voiceMode: VoiceModePreferences = {
+        ...(typeof section.serverSpeech === "boolean" ? { serverSpeech: section.serverSpeech } : {}),
+        ...(typeof section.headphones === "boolean" ? { headphones: section.headphones } : {}),
+    };
+    return Object.keys(voiceMode).length > 0 ? { voiceMode } : {};
+}
+
+/** Whether voice mode in a browser may use the deployment's speech server: only when chosen. */
+export const voiceModeServerSpeech = (preferences: VoicePreferences): boolean =>
+    preferences.voiceMode?.serverSpeech === true;
 
 let cachedRaw: string | null | undefined;
 let cachedDevice: boolean | undefined;
