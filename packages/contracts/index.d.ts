@@ -381,6 +381,40 @@ export type StepSummary = {
   generated_at?: string;
 };
 
+/**
+ * A thinking block. `id` names it so a summary written after it streamed
+ * (StepSummaryFrame) can find it; `summary` is that summary, stored.
+ */
+export type ReasoningEvent = {
+  type: "reasoning";
+  text: string;
+  id?: string;
+  summary?: StepSummary;
+};
+
+/**
+ * What the whole run of steps did, written from the step summaries once the
+ * turn's work is done (docs/reports/step-summaries-2026-10-24.md). Stored
+ * with the turn; streamed as itself.
+ */
+export type RunSummaryEvent = {
+  type: "run_summary";
+  summary: StepSummary;
+  /** How many step summaries it was written from. */
+  steps: number;
+};
+
+/**
+ * Streamed only, never stored: a summary written after its step streamed.
+ * The stored copy lives on the step itself (ReasoningEvent.summary,
+ * CodeCellEvent.summary).
+ */
+export type StepSummaryFrame = {
+  type: "step_summary";
+  target: { kind: "reasoning"; id: string } | { kind: "code_cell"; call_id: string };
+  summary: StepSummary;
+};
+
 /** A web search a step ran: the query and every result it was shown. */
 export type WebSearchEvent = {
   type: "web_search";
@@ -407,7 +441,8 @@ export type WebFetchEvent = {
 };
 
 export type AssistantEvent =
-  | { type: "reasoning"; text: string }
+  | ReasoningEvent
+  | RunSummaryEvent
   | AskInputsEvent
   | {
       type: "ask_inputs_response";

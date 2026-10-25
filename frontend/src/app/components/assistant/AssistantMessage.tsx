@@ -20,7 +20,7 @@ import { PreResponseWrapper } from "./PreResponseWrapper";
 import { CodeApprovalBlock } from "./message/CodeApprovalBlock";
 import { CodeCellBlock } from "./message/CodeCellBlock";
 import { WebFetchBlock, WebSearchBlock } from "./message/WebSourceBlocks";
-import { nestCellSources, sourceSummary } from "@/app/lib/stepSources";
+import { mergedReasoningSummary, nestCellSources, sourceSummary } from "@/app/lib/stepSources";
 import { CitationCheckStatus } from "./message/CitationCheckStatus";
 import { openWebCitation } from "../shared/types";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
@@ -244,7 +244,9 @@ export function AssistantMessage({
         event.type !== "ask_inputs_response" &&
         event.type !== "case_citation" &&
         event.type !== "case_opinions" &&
-        event.type !== "turn_usage";
+        event.type !== "turn_usage" &&
+        // Shown on the run's line, not as a step (see below).
+        event.type !== "run_summary";
 
     // Find the last content event so its raw text can be smoothed before
     // citation preprocessing — slicing already-preprocessed text would risk
@@ -414,10 +416,12 @@ export function AssistantMessage({
                     // The model emits a fresh reasoning event per pass, but a
                     // run of them is one continuous thought: separate blocks
                     // read as separate thoughts and stack up the timeline.
+                    const summary = mergedReasoningSummary(previous, e);
                     current.events[current.events.length - 1] = {
                         ...previous,
                         text: `${previous.text}\n\n${e.text}`.trim(),
                         isStreaming: e.isStreaming,
+                        summary,
                     };
                     return;
                 }
@@ -427,6 +431,12 @@ export function AssistantMessage({
         });
         if (current) groups.push(current);
     }
+
+    // The run summary covers every step of the turn, so it goes on the run's
+    // line only when the turn has one run.
+    const preGroupCount = groups.filter((group) => group.kind === "pre").length;
+    const runSummary = events?.findLast((event) => event.type === "run_summary")
+        ?.summary.text;
 
     const hasContentAfter = (groupIdx: number): boolean => {
         for (let i = groupIdx + 1; i < groups.length; i++) {
@@ -470,6 +480,7 @@ export function AssistantMessage({
                 <ReasoningBlock
                     key={globalIdx}
                     text={event.text}
+                    summary={event.summary?.text}
                     isStreaming={!!event.isStreaming}
                     showConnector={showConnector}
                 />
@@ -1013,6 +1024,11 @@ export function AssistantMessage({
                                     key={`p-${g.indices[0]}`}
                                     stepCount={steps.length}
                                     detail={sourcesRead ?? undefined}
+                                    summary={
+                                        preGroupCount === 1
+                                            ? runSummary
+                                            : undefined
+                                    }
                                     shouldMinimize={
                                         pendingAskInput
                                             ? false

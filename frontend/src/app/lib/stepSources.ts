@@ -111,3 +111,30 @@ export function sourceSummary(events: AssistantEvent[]): string | null {
     );
     return parts.length ? parts.join(", ") : null;
 }
+
+type ReasoningEvent = Extract<AssistantEvent, { type: "reasoning" }>;
+
+/** Thinking this short is its own summary (as on the server, stepSummaries.ts). */
+const SHORT_REASONING_CHARS = 280;
+
+/**
+ * The summary of two thinking blocks shown as one: both summaries in order,
+ * with a short block standing for itself. None when a long block has no
+ * summary, since the merged line would then leave part of the thought out.
+ */
+export function mergedReasoningSummary(
+    first: ReasoningEvent,
+    second: ReasoningEvent,
+): ReasoningEvent["summary"] {
+    if (!first.summary && !second.summary) return undefined;
+    const parts: string[] = [];
+    for (const part of [first, second]) {
+        const text = part.summary?.text ?? (
+            part.text.trim().length < SHORT_REASONING_CHARS ? part.text.trim() : null
+        );
+        if (!text) return undefined;
+        parts.push(text);
+    }
+    const source = (first.summary ?? second.summary)!;
+    return { ...source, text: parts.join("\n") };
+}

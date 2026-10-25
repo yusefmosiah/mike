@@ -379,6 +379,12 @@ export type ConfiguredModel = {
     /** Price in US dollars per million tokens, so spend is visible. Omitted, zero. */
     cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
     /**
+     * Writes the step summaries for chats on models from the same provider
+     * (same `group`, else the same `baseUrl`), so the summaries see no more
+     * than the chat already did. See docs/configured-models.md.
+     */
+    summariser?: boolean;
+    /**
      * Longest silence (ms) tolerated on a response stream once it is flowing.
      * Defaults to CONFIGURED_STREAM_IDLE_TIMEOUT_MS for configured models.
      */

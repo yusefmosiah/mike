@@ -2,6 +2,13 @@
 
 Date: 2026-10-24. Read-only research; no code changed.
 
+## Implementation status
+
+- **Sources and model summaries (shipped).** Every source event names the call that produced it, a code cell's sources show under it, and the run line counts what was read. `run_python` takes a `summary` argument; a cell without one uses its first comment.
+- **Side-model summaries (shipped).** `backend/src/modules/chat/engine/stepSummaries.ts` pairs the chat with a summariser on the same provider (docs/configured-models.md, "Step summaries") and summarises each thinking block of 280 characters or more, and each code cell without a summary, as it ends. A summary is streamed as a `step_summary` frame and stored on its step. Each prompt carries the request (first 1,500 characters), the last ten step summaries, and the step (up to 6,000 characters), fenced as material rather than instructions. Two run at once; each has 8 seconds. Output that is empty, over 1,200 characters, or starts like thinking aloud ("The user wants…") is dropped.
+- **Run summary (shipped).** With three or more steps, a summary of the step summaries is written at the end of the turn (after up to 5 seconds' wait for the last step summaries, then up to 6 seconds) and stored as a `run_summary` event. It shows under the run line, open or closed, when the turn has one run.
+- **Not yet:** group and phase summaries for long runs; a run summary for turns whose work is split by prose; subagents on the same summaries; summariser usage in the turn's cost; the Word add-in's parser; a `role="status"` announcement.
+
 ## Summary
 
 - Nothing today produces a summary. Each reasoning cell and code cell is a bare label or the full raw text. All the content to summarise is already complete and capped per step.

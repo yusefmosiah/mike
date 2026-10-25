@@ -434,6 +434,45 @@ that needs it, or off for a local one that behaves properly.
 Set `DEBUG_LLM_TOOL_CALLS=1` to log the raw text of a tool call that could not
 be recovered.
 
+## Step summaries
+
+The assistant's timeline summarises each step for the person watching: what a
+thinking block concluded, what a code cell did when the model gave it no
+summary of its own, and, once the work is done, the whole run. A small side
+model writes them. So that the summaries see nothing the chat did not, it
+runs on the same provider as the chat:
+
+| Chat model | Summariser |
+| --- | --- |
+| A configured model | the configured model marked `"summariser": true` with the same `group`, else the same `baseUrl` |
+| `opencode-go/*` | `opencode-go/deepseek-v4.1-flash` |
+| `ollama/*` | the configured model marked `"summariser": true` whose `location` is `local` |
+| anything else | none: steps keep the model's own summaries and the cells' first comments |
+
+Mark the summariser in the provider's block, for example:
+
+```json
+{
+  "id": "phala/gemma-4-26b-a4b",
+  "group": "Phala (encrypted)",
+  "summariser": true,
+  "provider": "openai-compatible",
+  "location": "cloud",
+  "baseUrl": "https://phala-gateway.example/v1"
+}
+```
+
+A summariser is an ordinary configured model, so it is also offered in the
+model pickers. Two settings override the pairing for every chat:
+
+- `STEP_SUMMARY_MODEL=<model id>` uses that model for every chat.
+- `STEP_SUMMARIES=off` turns side summaries off.
+
+In strict private mode a summariser the mode would refuse is not used. A
+summary that fails, times out (8 seconds per step, about 11 at the end of the
+turn) or reads like the model thinking aloud is dropped, and the step keeps its
+own line. The summariser's tokens are not yet counted in the turn's usage.
+
 ---
 
 ## OpenCode Go Model Limits & Synchronization (Models.dev)

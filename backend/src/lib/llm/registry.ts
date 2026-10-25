@@ -424,6 +424,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
       typeof record.tolerateTextToolCalls !== "boolean") ||
     (record.supportsVision !== undefined &&
       typeof record.supportsVision !== "boolean") ||
+    (record.summariser !== undefined && typeof record.summariser !== "boolean") ||
     (maxTokensField !== undefined &&
       maxTokensField !== "max_tokens" &&
       maxTokensField !== "max_completion_tokens") ||
@@ -466,6 +467,7 @@ function parseConfiguredModel(value: unknown): ConfiguredModel | null {
     ...(reasoning ? { reasoning } : {}),
     ...(cost ? { cost } : {}),
     ...(streamIdleTimeoutMs !== undefined ? { streamIdleTimeoutMs } : {}),
+    ...(record.summariser === true ? { summariser: true } : {}),
   };
 }
 

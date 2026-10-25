@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantEvent } from "@/app/components/shared/types";
-import { nestCellSources, sourceSummary } from "./stepSources";
+import { mergedReasoningSummary, nestCellSources, sourceSummary } from "./stepSources";
 
 const cell = (call_id: string): AssistantEvent => ({ type: "code_cell", call_id, code: "x", status: "ok" });
 
@@ -95,4 +95,34 @@ describe("sourceSummary", () => {
     it("says nothing when nothing was read", () => {
         expect(sourceSummary([{ type: "reasoning", text: "x" }])).toBeNull();
     });
+});
+
+describe("mergedReasoningSummary", () => {
+  const long = "x".repeat(300);
+  const said = (text: string) => ({ text, source: "side_model" as const, model: "m" });
+
+  it("joins both summaries, letting a short block stand for itself", () => {
+    expect(
+      mergedReasoningSummary(
+        { type: "reasoning", text: long, summary: said("Read the lease.") },
+        { type: "reasoning", text: "  Now the deed. " },
+      ),
+    ).toEqual(said("Read the lease.\nNow the deed."));
+    expect(
+      mergedReasoningSummary(
+        { type: "reasoning", text: "Short." },
+        { type: "reasoning", text: long, summary: said("Read the deed.") },
+      ),
+    ).toEqual(said("Short.\nRead the deed."));
+  });
+
+  it("has none when neither has one, or a long block has none", () => {
+    expect(mergedReasoningSummary({ type: "reasoning", text: "a" }, { type: "reasoning", text: "b" })).toBeUndefined();
+    expect(
+      mergedReasoningSummary(
+        { type: "reasoning", text: long, summary: said("Read the lease.") },
+        { type: "reasoning", text: long },
+      ),
+    ).toBeUndefined();
+  });
 });

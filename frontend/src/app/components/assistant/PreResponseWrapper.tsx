@@ -7,6 +7,7 @@ export function PreResponseWrapper({
     children,
     stepCount,
     detail,
+    summary,
     shouldMinimize,
     isStreaming,
     forceOpen = false,
@@ -15,6 +16,8 @@ export function PreResponseWrapper({
     stepCount: number;
     /** What the steps read, such as "3 documents, 2 web pages". */
     detail?: string;
+    /** What the work did, written from its step summaries. */
+    summary?: string;
     shouldMinimize: boolean;
     isStreaming: boolean;
     forceOpen?: boolean;
@@ -23,6 +26,7 @@ export function PreResponseWrapper({
         <PreResponseWrapperUI
             stepCount={stepCount}
             detail={detail}
+            summary={summary}
             shouldMinimize={shouldMinimize}
             isStreaming={isStreaming}
             forceOpen={forceOpen}

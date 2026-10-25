@@ -812,6 +812,8 @@ const COMPLETES_TEXTLESS_TURN = {
   // Intermediate work, like the tool calls it made.
   code_cell: false,
   code_approval: false,
+  // A summary of that work.
+  run_summary: false,
   turn_usage: false,
   error: true,
 } satisfies Record<AssistantEvent["type"], boolean>;

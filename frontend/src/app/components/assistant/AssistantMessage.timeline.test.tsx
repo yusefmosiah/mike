@@ -95,6 +95,56 @@ describe("AssistantMessage timeline", () => {
         ).toHaveLength(2);
     });
 
+    it("shows a thought's summary on its line, and the run summary under the run's line", () => {
+        const long = "Weighing the notice period. ".repeat(20);
+        const said = (text: string) => ({ text, source: "side_model" as const });
+        render(
+            <AssistantMessage
+                events={[
+                    { type: "reasoning", text: long, id: "reasoning-1", summary: said("Checked notice.") },
+                    { type: "reasoning", text: "And the deed.", id: "reasoning-2" },
+                    {
+                        type: "doc_read",
+                        filename: "lease.pdf",
+                        document_id: "d1",
+                        version_id: "v1",
+                        version_number: 1,
+                    },
+                    { type: "content", text: "They agree." },
+                    { type: "run_summary", summary: said("Compared the lease and the deed."), steps: 3 },
+                ]}
+            />,
+        );
+        // Visible with the run closed: it is what the reader sees first.
+        expect(screen.getByText("Compared the lease and the deed.")).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: /Completed in 2 steps/ }));
+        // The two thoughts read as one, so their summaries do too.
+        const thought = screen.getByRole("button", { name: /Checked notice\.\s+And the deed\..*thought process/ });
+        expect(thought).toBeInTheDocument();
+    });
+
+    it("leaves the run summary off when the turn has more than one run", () => {
+        const read = (filename: string): AssistantEvent => ({
+            type: "doc_read",
+            filename,
+            document_id: filename,
+            version_id: "v1",
+            version_number: 1,
+        });
+        render(
+            <AssistantMessage
+                events={[
+                    read("lease.pdf"),
+                    { type: "content", text: "First." },
+                    read("deed.pdf"),
+                    { type: "content", text: "Second." },
+                    { type: "run_summary", summary: { text: "Read both.", source: "side_model" }, steps: 3 },
+                ]}
+            />,
+        );
+        expect(screen.queryByText("Read both.")).not.toBeInTheDocument();
+    });
+
     it("keeps steps separated only by blank text in one card", () => {
         const read = (filename: string): AssistantEvent => ({
             type: "doc_read",

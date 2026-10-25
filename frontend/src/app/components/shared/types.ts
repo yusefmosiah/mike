@@ -358,6 +358,7 @@ export type AssistantEvent =
   | WireActivity<"code_cell">
   | WireActivity<"web_search">
   | WireActivity<"web_fetch">
+  | WireActivity<"run_summary">
   | WireActivity<"code_approval">
   | WireActivity<"turn_usage">
   | (Omit<WireActivity<"content">, "isStreaming"> & { isStreaming?: boolean });

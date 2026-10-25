@@ -79,10 +79,13 @@ export function EventBlock({
 
 export function ReasoningBlock({
     text,
+    summary,
     isStreaming,
     showConnector,
 }: {
     text: string;
+    /** What the thought concluded (a step summary); the line shows it. */
+    summary?: string;
     isStreaming: boolean;
     showConnector?: boolean;
 }) {
@@ -119,10 +122,18 @@ export function ReasoningBlock({
                 open={isContentOpen}
                 onToggle={toggleContent}
                 label={
-                    isStreaming
-                        ? THINKING_PHRASES[thinkingIndex]
-                        : "Thought process"
+                    isStreaming ? (
+                        THINKING_PHRASES[thinkingIndex]
+                    ) : summary ? (
+                        <span className="whitespace-pre-line font-normal text-gray-600">
+                            {summary}
+                        </span>
+                    ) : (
+                        "Thought process"
+                    )
                 }
+                // With a summary on the line, say what opening it shows.
+                detail={!isStreaming && summary ? "· thought process" : undefined}
             />
             {isContentOpen && (
                 <div className="mt-2">

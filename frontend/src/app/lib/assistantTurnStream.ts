@@ -133,6 +133,7 @@ const CALL_ID_EXEMPT: ReadonlySet<string> = new Set([
   "thinking",
   "error",
   "turn_usage",
+  "run_summary",
 ]);
 
 function codeCellEventFrom(
@@ -681,6 +682,8 @@ export async function consumeAssistantTurnStream(
               {
                 type: "reasoning" as const,
                 text: last.text,
+                // Names the block for a summary written after it.
+                ...(typeof data.id === "string" ? { id: data.id } : {}),
               },
             ];
           }
@@ -851,6 +854,33 @@ export async function consumeAssistantTurnStream(
             output: data.output,
             cost: data.cost,
           });
+          continue;
+        }
+
+        if (data.type === "step_summary") {
+          // A summary written after its step streamed: it goes on the step.
+          const summary = stepSummaryFrom(data.summary);
+          const target = data.target as Record<string, unknown> | undefined;
+          if (!summary || !target) continue;
+          if (target.kind === "reasoning" && typeof target.id === "string") {
+            updateMatchingEvent(
+              (e) => e.type === "reasoning" && e.id === target.id,
+              (e) => ({ ...e, summary }) as AssistantEvent,
+            );
+          } else if (target.kind === "code_cell" && typeof target.call_id === "string") {
+            updateMatchingEvent(
+              (e) => e.type === "code_cell" && e.call_id === target.call_id,
+              (e) => ({ ...e, summary }) as AssistantEvent,
+            );
+          }
+          continue;
+        }
+
+        if (data.type === "run_summary") {
+          const summary = stepSummaryFrom(data.summary);
+          if (summary && typeof data.steps === "number") {
+            pushEvent({ type: "run_summary", summary, steps: data.steps });
+          }
           continue;
         }
 

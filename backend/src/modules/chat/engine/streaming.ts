@@ -101,6 +101,7 @@ import {
   type KernelToolSpec,
 } from "../../../lib/codemode";
 import { createSubagentHost, delegateToolSchema } from "./subagents/subagentHost";
+import { StepSummariser, requestText, summariserFor } from "./stepSummaries";
 import { READ_MEMORY_TOOL } from "../../../lib/memory/editTool";
 import { getAutoModeDecisionModel, getAutocompactTokensFor } from "../../user/user.service";
 import {
@@ -116,7 +117,7 @@ import {
 } from "../../../lib/guardrails";
 
 export type { AssistantEvent } from "@mike/contracts";
-import type { AssistantEvent, AssistantErrorCode, CodeApprovalEvent, CodeCellEvent } from "@mike/contracts";
+import type { AssistantEvent, AssistantErrorCode, CodeApprovalEvent, CodeCellEvent, ReasoningEvent } from "@mike/contracts";
 
 /** How much of a cell's code and output the chat keeps (CodeCellEvent). */
 const MAX_CELL_EVENT_CHARS = 20_000;
@@ -780,6 +781,13 @@ export async function runLLMStream(params: {
   if (memory.message) chatMessages.unshift(memory.message);
 
   const events: AssistantEvent[] = [];
+  // Side-model summaries of the turn's steps (stepSummaries.ts), when the
+  // chat's provider has a summariser.
+  let stepSummaries: StepSummariser | null = null;
+  let reasoningBlocks = 0;
+  // Unique across the turns that build one answer (a paused answer resumes
+  // in a new run), so a summary finds only its own block.
+  const reasoningPrefix = crypto.randomUUID().slice(0, 8);
   // One assistant turn produces at most one document_versions row per
   // edited doc. `runToolCalls` fires once per tool-call batch; the model
   // may emit multiple batches in a single turn, so this map persists
@@ -1025,6 +1033,15 @@ export async function runLLMStream(params: {
     // after the user's saved selection is applied, before any provider or
     // stored BYOK key can be spent. No-op outside strict mode.
     assertModelAllowed(selectedModel);
+    const summariser = summariserFor(selectedModel);
+    if (summariser) {
+      stepSummaries = new StepSummariser({
+        model: summariser,
+        request: requestText(chatMessages),
+        write,
+        ...(apiKeys ? { apiKeys } : {}),
+      });
+    }
     // Writes from concurrent subagents take turns, so edits to one document
     // build on each other's versions instead of racing (the parent's own
     // writes already run their round in order).
@@ -1330,7 +1347,10 @@ export async function runLLMStream(params: {
         tool_calls: outcome.hostRequests,
         duration_ms: outcome.durationMs,
       } satisfies Partial<CodeCellEvent>);
-      if (showCell) write(`data: ${JSON.stringify(cellEvent)}\n\n`);
+      if (showCell) {
+        write(`data: ${JSON.stringify(cellEvent)}\n\n`);
+        stepSummaries?.cell(cellEvent);
+      }
       if (stopTurn) throw stopTurn;
       return content;
     };
@@ -1767,8 +1787,14 @@ export async function runLLMStream(params: {
         },
         onReasoningBlockEnd: () => {
           if (!iterReasoning) return;
-          events.push({ type: "reasoning", text: iterReasoning });
-          write(`data: ${JSON.stringify({ type: "reasoning_block_end" })}\n\n`);
+          const reasoningEvent: ReasoningEvent = {
+            type: "reasoning",
+            text: iterReasoning,
+            id: `reasoning-${reasoningPrefix}-${++reasoningBlocks}`,
+          };
+          events.push(reasoningEvent);
+          write(`data: ${JSON.stringify({ type: "reasoning_block_end", id: reasoningEvent.id })}\n\n`);
+          stepSummaries?.reasoning(reasoningEvent, reasoningEvent.id!);
           iterReasoning = "";
         },
         // Fires after Claude's turn ends with stop_reason=tool_use, before
@@ -1790,6 +1816,9 @@ export async function runLLMStream(params: {
       runTools: (calls) => runTurnTools(calls, "parent"),
     })).usage;
   } catch (err) {
+    // The response is ending: a summary still being written must not reach
+    // it, or the stored events, afterwards.
+    stepSummaries?.stop();
     if (isAskInputsPause(err)) {
       // The ask_inputs event has already been emitted and persisted in `events`.
       // Stop this assistant turn here so the model does not add redundant
@@ -1851,6 +1880,11 @@ export async function runLLMStream(params: {
   }
 
   flushText();
+
+  // The step summaries still being written get a few seconds; then the run's
+  // own summary, written from them, goes before the usage line.
+  const runSummary = await stepSummaries?.finish();
+  if (runSummary) events.push(runSummary);
 
   if (turnUsage) {
     const usageEvent: AssistantEvent = { type: "turn_usage", ...turnUsage };

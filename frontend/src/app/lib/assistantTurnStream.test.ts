@@ -1971,3 +1971,40 @@ describe("step sources", () => {
     ]);
   });
 });
+
+describe("step summaries", () => {
+  const summary = { text: "Compared the notice periods.", source: "side_model", model: "m" };
+
+  it("puts a late summary on the thinking block or cell it names", async () => {
+    const events = await eventsOf([
+      { type: "reasoning_delta", text: "Thinking about notice." },
+      { type: "reasoning_block_end", id: "reasoning-1" },
+      { type: "code_cell", call_id: "c1", code: "x", status: "ok" },
+      { type: "step_summary", target: { kind: "reasoning", id: "reasoning-1" }, summary },
+      { type: "step_summary", target: { kind: "code_cell", call_id: "c1" }, summary: { ...summary, text: "Ran x." } },
+      // Unknown targets and malformed summaries change nothing.
+      { type: "step_summary", target: { kind: "reasoning", id: "reasoning-9" }, summary },
+      { type: "step_summary", target: { kind: "subagent", id: "x" }, summary },
+      { type: "step_summary", target: { kind: "code_cell", call_id: "c1" }, summary: { text: "", source: "side_model" } },
+      { type: "step_summary", summary },
+    ]);
+    expect(events?.find((event) => event.type === "reasoning")).toEqual({
+      type: "reasoning",
+      text: "Thinking about notice.",
+      id: "reasoning-1",
+      summary,
+    });
+    expect(events?.find((event) => event.type === "code_cell")).toMatchObject({ summary: { text: "Ran x." } });
+  });
+
+  it("keeps a well-formed run summary and drops a malformed one", async () => {
+    const events = await eventsOf([
+      { type: "run_summary", summary, steps: 4 },
+      { type: "run_summary", summary, steps: "4" },
+      { type: "run_summary", summary: { text: "x", source: "guess" }, steps: 4 },
+    ]);
+    expect(events?.filter((event) => event.type === "run_summary")).toEqual([
+      { type: "run_summary", summary, steps: 4 },
+    ]);
+  });
+});
