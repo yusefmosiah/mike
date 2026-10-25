@@ -25,6 +25,7 @@ export const DOCUMENT_MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "generate_docx",
   "generate_excel",
   "generate_ppt",
+  "generate_html",
   "save_to_mike",
   "save_skill",
   "install_skill",
@@ -883,6 +884,28 @@ export const TOOLS = [
           },
         },
         required: ["title", "slides"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_html",
+      description:
+        "Create an HTML page: an article, report or briefing that mixes prose, tables, images, embedded video and audio, and links. Use when the person wants something to read in a browser or to publish as a link; Word stays the default for legal drafts. Write one complete, self-contained document (<!doctype html>, <title>, inline <style>, readable on a phone). Media and fonts may load over https. Embed YouTube with https://www.youtube-nocookie.com/embed/<id> in an <iframe>, Vimeo with https://player.vimeo.com/video/<id>; use <audio controls> and <video controls> for files. Refer to the person's images and other documents in the same project by their filename as a relative path (e.g. <img src=\"site-plan.png\">); they are published with the page. Forms do not work on a published page. Returns {\"doc_id\", ...}; the person gets its card automatically and can publish it from the viewer.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Page title, used as the filename.",
+          },
+          html: {
+            type: "string",
+            description: "The complete HTML document.",
+          },
+        },
+        required: ["title", "html"],
       },
     },
   },

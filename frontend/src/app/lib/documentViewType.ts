@@ -1,4 +1,4 @@
-export type DocumentViewType = "pdf" | "docx" | "spreadsheet" | "image" | "text";
+export type DocumentViewType = "pdf" | "docx" | "spreadsheet" | "image" | "text" | "html";
 
 type LegacyDocViewType = Extract<DocumentViewType, "pdf" | "docx">;
 
@@ -12,7 +12,7 @@ export interface ResolveDocumentViewTypeOptions {
 }
 
 type DocumentTypeToken =
-  "pdf" | "doc" | "docx" | "spreadsheet" | "presentation" | "image" | "text" | "other";
+  "pdf" | "doc" | "docx" | "spreadsheet" | "presentation" | "image" | "text" | "html" | "other";
 
 function documentTypeToken(
   value: string | null | undefined,
@@ -29,6 +29,7 @@ function documentTypeToken(
   if (normalized.includes("presentation")) return "presentation";
   if (normalized === "application/pdf") return "pdf";
   if (/^image\/(png|jpeg|webp|gif)$/.test(normalized)) return "image";
+  if (/^text\/html(;|$)/.test(normalized)) return "html";
   if (/^text\/(plain|markdown|csv)(;|$)/.test(normalized)) return "text";
 
   const withoutQuery = normalized.split(/[?#]/, 1)[0];
@@ -43,6 +44,7 @@ function documentTypeToken(
   if (token === "pptx" || token === "ppt") return "presentation";
   if (token === "pdf") return "pdf";
   if (["png", "jpg", "jpeg", "webp", "gif"].includes(token)) return "image";
+  if (token === "html") return "html";
   if (["txt", "md", "csv"].includes(token)) return "text";
   return "other";
 }
@@ -65,6 +67,7 @@ export function resolveDocumentViewType({
     return "spreadsheet";
   }
   if (fileTypeToken === "image" || filenameToken === "image") return "image";
+  if (fileTypeToken === "html" || filenameToken === "html") return "html";
   if (fileTypeToken === "text" || filenameToken === "text") return "text";
 
   const wordToken =
@@ -79,4 +82,14 @@ export function resolveDocumentViewType({
   }
 
   return "pdf";
+}
+
+/**
+ * The panel contract's name for a viewer. It has no HTML kind: a page is a
+ * "text" source there, and the viewer finds the sandboxed renderer by name.
+ */
+export function panelTypeForViewType(
+  viewType: DocumentViewType,
+): Exclude<DocumentViewType, "html"> {
+  return viewType === "html" ? "text" : viewType;
 }

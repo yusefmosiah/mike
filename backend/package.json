@@ -42,6 +42,7 @@
     "libreoffice-convert": "^1.6.0",
     "linkedom": "0.18.13",
     "mammoth": "^1.13.0",
+    "marked": "18.0.14",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.1",
     "resend": "^6.30.0",

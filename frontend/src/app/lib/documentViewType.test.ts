@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveDocumentViewType } from "./documentViewType";
+import { panelTypeForViewType, resolveDocumentViewType } from "./documentViewType";
 
 describe("resolveDocumentViewType", () => {
   it.each([
@@ -45,7 +45,17 @@ describe("resolveDocumentViewType", () => {
     expect(resolveDocumentViewType({ fileType: "text/csv; charset=utf-8" })).toBe("text");
     expect(resolveDocumentViewType({ fileType: "text/plain" })).toBe("text");
     expect(resolveDocumentViewType({ filename: "Notes.TXT" })).toBe("text");
-    expect(resolveDocumentViewType({ fileType: "text/html" })).toBe("pdf");
+  });
+
+  it("shows HTML pages in the sandboxed HTML viewer, by type, MIME or filename", () => {
+    expect(resolveDocumentViewType({ fileType: "html" })).toBe("html");
+    expect(resolveDocumentViewType({ fileType: "text/html; charset=utf-8" })).toBe("html");
+    expect(resolveDocumentViewType({ filename: "Report.HTML" })).toBe("html");
+  });
+
+  it("names the panel type for a viewer, folding HTML into text", () => {
+    expect(panelTypeForViewType("html")).toBe("text");
+    expect(panelTypeForViewType("docx")).toBe("docx");
   });
 
   it("allows a caller to override the legacy Word viewer", () => {

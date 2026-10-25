@@ -48,7 +48,7 @@ vi.mock("../../../../../lib/db", () => ({
   createDb: vi.fn(),
 }));
 
-import { generatePpt } from "../documentOps";
+import { MAX_GENERATED_HTML_BYTES, generateHtml, generatePpt } from "../documentOps";
 
 type Insert = { table: string; payload: Record<string, unknown> };
 
@@ -162,5 +162,25 @@ describe("generatePpt rendition path", () => {
     expect(out).not.toHaveProperty("error");
     expect(docxToPdf).not.toHaveBeenCalled();
     expect(enqueueConversion).not.toHaveBeenCalled();
+  });
+});
+
+describe("generateHtml", () => {
+  it("stores the page as an HTML document with no rendition, as plain text", async () => {
+    const db = makeDb();
+    const out = await generateHtml("Field notes", "<!doctype html><title>x</title>", "user-1", db as never);
+    expect(out).not.toHaveProperty("error");
+    expect(docxToPdf).not.toHaveBeenCalled();
+    expect(uploadFile.mock.calls[0][0]).toMatch(/\.html$/);
+    expect(uploadFile.mock.calls[0][2]).toBe("text/plain; charset=utf-8");
+    const version = db.inserts.find((i) => i.table === "document_versions");
+    expect(version?.payload).toMatchObject({ file_type: "html", pdf_storage_path: null });
+  });
+
+  it("refuses an empty or oversized page", async () => {
+    expect(await generateHtml("x", "  ", "user-1", makeDb() as never)).toEqual({ error: "html is required" });
+    const big = "a".repeat(MAX_GENERATED_HTML_BYTES + 1);
+    expect(await generateHtml("x", big, "user-1", makeDb() as never)).toHaveProperty("error");
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 });

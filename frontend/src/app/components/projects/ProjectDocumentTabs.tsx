@@ -1,5 +1,6 @@
 "use client";
 
+import type { usePublishAction } from "@/app/hooks/usePublishAction";
 import { DocumentTabBar } from "@/app/components/shared/DocumentTabBar";
 import type { Document, PanelDocument } from "@/app/components/shared/types";
 import { isExternalSourceType } from "@/app/components/shared/types";
@@ -11,6 +12,7 @@ interface Props {
     tabs: ReadonlyArray<{
         documentId: string;
         filename: string;
+        versionId?: string | null;
         sourceDocument?: PanelDocument;
     }>;
     documents: ReadonlyArray<Document>;
@@ -18,6 +20,8 @@ interface Props {
     onActivate: (documentId: string) => void;
     onAddToChat?: (document: Document) => void;
     onDownloadDoc?: (document: Document) => Promise<void>;
+    /** From usePublishAction: the Publish callback for a tab, if it may publish. */
+    publishAction?: ReturnType<typeof usePublishAction>["publishAction"];
     onRenameDoc?: (documentId: string, filename: string) => Promise<void>;
     onDeleteDoc?: (documentId: string) => Promise<void>;
     documentPermissions?: (documentId: string) => DocumentPermissions;
@@ -41,6 +45,7 @@ export function ProjectDocumentTabs({
     onActivate,
     onAddToChat,
     onDownloadDoc,
+    publishAction,
     onRenameDoc,
     onDeleteDoc,
     documentPermissions,
@@ -76,6 +81,15 @@ export function ProjectDocumentTabs({
                         onDownload:
                             document && onDownloadDoc
                                 ? () => onDownloadDoc(document)
+                                : undefined,
+                        onPublish:
+                            !legalSource && publishAction
+                                ? publishAction({
+                                      documentId: tab.documentId,
+                                      versionId: tab.versionId,
+                                      filename: tab.filename,
+                                      fileType: document?.file_type,
+                                  })
                                 : undefined,
                         onRename:
                             !legalSource && documentPermissions?.(tab.documentId).canEdit && onRenameDoc

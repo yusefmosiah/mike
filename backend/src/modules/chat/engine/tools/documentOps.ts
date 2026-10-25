@@ -1191,7 +1191,7 @@ ${slides
 
 async function persistGeneratedFile(params: {
   title: string;
-  extension: "docx" | "xlsx" | "pptx";
+  extension: "docx" | "xlsx" | "pptx" | "html";
   buffer: Buffer;
   userId: string;
   db: Db;
@@ -1351,6 +1351,34 @@ export async function generatePpt(
     return persistGeneratedFile({
       title: normalizedTitle,
       extension: "pptx",
+      buffer,
+      userId,
+      db,
+      projectId: options?.projectId ?? null,
+    });
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+export const MAX_GENERATED_HTML_BYTES = 2 * 1024 * 1024;
+
+export async function generateHtml(
+  title: string,
+  html: string,
+  userId: string,
+  db: Db,
+  options?: { projectId?: string | null },
+) {
+  try {
+    const normalizedTitle = typeof title === "string" && title.trim() ? title : "Page";
+    if (typeof html !== "string" || !html.trim()) return { error: "html is required" };
+    const buffer = Buffer.from(html, "utf8");
+    if (buffer.byteLength > MAX_GENERATED_HTML_BYTES)
+      return { error: "The page is larger than 2 MB. Move large media to files and refer to them." };
+    return persistGeneratedFile({
+      title: normalizedTitle,
+      extension: "html",
       buffer,
       userId,
       db,

@@ -15,10 +15,11 @@ export const ALLOWED_DOCUMENT_TYPES = new Set([
   "txt",
   "md",
   "csv",
+  "html",
 ]);
 
 export const ALLOWED_DOCUMENT_TYPES_LABEL =
-  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif, txt, md, csv";
+  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif, txt, md, csv, html";
 
 /**
  * Upload extensions handled as images (lib/images cleans them on the way in),
@@ -111,6 +112,12 @@ export function contentTypeForDocumentType(fileType: string | null | undefined) 
       return "text/markdown; charset=utf-8";
     case "csv":
       return "text/csv; charset=utf-8";
+    // HTML is stored and served by the app as plain text, so a browser that
+    // opens it from the app's origin (or a presigned URL) shows the markup
+    // instead of running it. It runs only on the content origin, when it is
+    // published (modules/publications).
+    case "html":
+      return "text/plain; charset=utf-8";
     default:
       return "application/octet-stream";
   }

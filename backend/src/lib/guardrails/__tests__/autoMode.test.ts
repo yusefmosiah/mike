@@ -49,6 +49,7 @@ const T2_NAMES = [
     "replicate_document",
     "generate_docx",
     "generate_excel",
+    "generate_html",
     "generate_ppt",
     "save_to_mike",
     "save_skill",

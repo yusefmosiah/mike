@@ -117,6 +117,39 @@ export interface Document {
   latest_version_number?: number | null;
 }
 
+/** Which kinds of link this install lets people publish. */
+export interface PublishingConfig {
+  enabled: boolean;
+  audiences: PublicationAudience[];
+  reason?: "off" | "strict_private" | "no_content_origin" | "no_secret";
+}
+
+export type PublicationAudience = "public" | "password";
+
+/** A document version published as a link anyone holding it can open. */
+export interface Publication {
+  id: string;
+  document_id: string;
+  version_id: string;
+  title: string;
+  kind: "site" | "file";
+  audience: PublicationAudience;
+  /** Null once revoked, or when the install has stopped publishing. */
+  url: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  file_count: number;
+}
+
+export interface CreatePublicationInput {
+  document_id: string;
+  version_id?: string | null;
+  audience: PublicationAudience;
+  password?: string;
+  expires_in_days: number | null;
+}
+
 export type PanelDocumentType = SourceDocumentType;
 export type PanelDocumentMetadata = SourceDocumentMetadata;
 export type PanelDocumentAction = SourceDocumentAction;
@@ -578,7 +611,16 @@ export function panelDocumentType(filename: string): PanelDocumentType {
     return "spreadsheet";
   }
   if (extension && isImageFilename(filename)) return "image";
-  if (extension === "txt" || extension === "md" || extension === "csv") return "text";
+  // An HTML page is a "text" source to the panel contract; the viewer
+  // picks its sandboxed renderer by file name (resolveDocumentViewType).
+  if (
+    extension === "txt" ||
+    extension === "md" ||
+    extension === "csv" ||
+    extension === "html"
+  ) {
+    return "text";
+  }
   return "pdf";
 }
 

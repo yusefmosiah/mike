@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import {
     Download,
     FileText,
+    Globe,
     MessageSquarePlus,
     Pencil,
     Trash2,
@@ -31,6 +32,8 @@ import type { HeaderActionsMenuItem } from "./HeaderActionsMenu";
 export interface DocumentActions {
     onAddToChat?: () => void | Promise<void>;
     onDownload?: () => void | Promise<void>;
+    /** Publish the document as a link; supplied only where publishing is on and the type allows it. */
+    onPublish?: () => void;
     onRename?: (filename: string) => Promise<void>;
     onDelete?: () => void | Promise<void>;
     addToChatDisabled?: boolean;
@@ -67,6 +70,9 @@ export function documentContextMenuItems(
                       disabled: actions.downloading,
                   },
               ]
+            : []),
+        ...(actions.onPublish
+            ? [{ label: "Publish", icon: Globe, onSelect: actions.onPublish }]
             : []),
         ...(actions.onRename
             ? [{ label: "Rename", icon: Pencil, onSelect: actions.onRename }]

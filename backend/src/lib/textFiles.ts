@@ -1,8 +1,8 @@
-// Plain-text documents: .txt, .md and .csv (docs/reports/file-intake-2026-10-10.md,
+// Plain-text documents: .txt, .md, .csv and .html (docs/reports/file-intake-2026-10-10.md,
 // phase I2). They are stored as uploaded, after one check that they are text:
 // valid UTF-8 with no NUL bytes. A binary file renamed .txt is refused.
 
-export const TEXT_FILE_TYPES = ["txt", "md", "csv"] as const;
+export const TEXT_FILE_TYPES = ["txt", "md", "csv", "html"] as const;
 
 const TEXT_TYPES = new Set<string>(TEXT_FILE_TYPES);
 

@@ -6,6 +6,7 @@ import {
     AlertCircle,
     Check,
     Download,
+    Globe,
     Eye,
     Loader2,
     Pencil,
@@ -20,6 +21,7 @@ import { DocxView } from "@/app/components/shared/views/DocxView";
 import { SpreadsheetView } from "@/app/components/shared/views/SpreadsheetView";
 import { ImageView } from "@/app/components/shared/views/ImageView";
 import { TextView } from "@/app/components/shared/views/TextView";
+import { HtmlView } from "@/app/components/shared/views/HtmlView";
 import { CloseButton } from "@/shared/ui/CloseButton";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
@@ -79,6 +81,8 @@ interface DocumentSidePanelProps {
     canDelete?: boolean;
     onOwnerOnlyAction?: (action: string) => void;
     onDelete: (doc: Document) => Promise<void> | void;
+    /** Opens the publish dialog; omitted when this file cannot be published. */
+    onPublish?: () => void;
 }
 
 export function DocumentSidePanel({
@@ -101,6 +105,7 @@ export function DocumentSidePanel({
     canDelete = true,
     onOwnerOnlyAction,
     onDelete,
+    onPublish,
 }: DocumentSidePanelProps) {
     const [mounted, setMounted] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -477,6 +482,13 @@ export function DocumentSidePanel({
         document.body.style.userSelect = "none";
     }
 
+    const publishButton = onPublish ? (
+        <PillButtonUI tone="white" size="normal" onClick={onPublish}>
+            <Globe className="h-3.5 w-3.5 shrink-0" />
+            Publish
+        </PillButtonUI>
+    ) : null;
+
     return createPortal(
         <div
             ref={panelRef}
@@ -557,6 +569,14 @@ export function DocumentSidePanel({
                             />
                         ) : selectedViewType === "image" ? (
                             <ImageView
+                                rounded="top-right"
+                                key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
+                                documentId={doc.id}
+                                versionId={selectedVersionId}
+                                filename={selectedFilename}
+                            />
+                        ) : selectedViewType === "html" ? (
+                            <HtmlView
                                 rounded="top-right"
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 documentId={doc.id}
@@ -958,15 +978,17 @@ export function DocumentSidePanel({
                         )}
                     >
                         {readOnly ? (
-                            <PillButtonUI
-                                tone="white"
-                                size="normal"
-                                onClick={() => void onDownloadDocument(doc.id)}
-                                className="ml-auto"
-                            >
-                                <Download className="h-3.5 w-3.5 shrink-0" />
-                                Download
-                            </PillButtonUI>
+                            <div className="ml-auto flex flex-wrap items-center gap-2">
+                                {publishButton}
+                                <PillButtonUI
+                                    tone="white"
+                                    size="normal"
+                                    onClick={() => void onDownloadDocument(doc.id)}
+                                >
+                                    <Download className="h-3.5 w-3.5 shrink-0" />
+                                    Download
+                                </PillButtonUI>
+                            </div>
                         ) : (
                             <>
                                 <input
@@ -1014,6 +1036,7 @@ export function DocumentSidePanel({
                                     <Upload className="h-3.5 w-3.5 shrink-0" />
                                     Upload new version
                                 </PillButtonUI>
+                                {publishButton}
                             </>
                         )}
                     </div>

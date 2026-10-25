@@ -87,6 +87,10 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     group: "Drafting and editing",
     text: "create a PowerPoint deck from slides. Use when asked for slides or a presentation.",
   },
+  generate_html: {
+    group: "Drafting and editing",
+    text: "create an HTML page (article, report, briefing) with tables, images, embedded video and audio, and links. Use for something to read in a browser or publish as a link.",
+  },
   save_to_mike: {
     group: "Drafting and editing",
     text: "save a file from the workstation into the person's documents, new or as a new version. The only way a workstation file reaches them.",

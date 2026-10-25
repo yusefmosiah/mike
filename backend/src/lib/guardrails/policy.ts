@@ -60,6 +60,7 @@ export const DOCUMENT_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "generate_docx",
   "generate_excel",
   "generate_ppt",
+  "generate_html",
   "save_to_mike",
   // The caller's own skills (goals/mission-17-skills.md). install_skill reads
   // one fixed host, GitHub, and sends it only the link.

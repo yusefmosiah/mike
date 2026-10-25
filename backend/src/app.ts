@@ -26,6 +26,10 @@ import { uploadSessionsRouter } from "./modules/uploads/uploads.routes";
 import { audioRouter } from "./modules/audio/audio.routes";
 import { citationsRouter } from "./modules/citations/citations.routes";
 import {
+  publicationContentRouter,
+  publicationsRouter,
+} from "./modules/publications/publications.routes";
+import {
   projectMemoryRouter,
   userMemoryRouter,
 } from "./modules/memory/memory.routes";
@@ -261,6 +265,7 @@ app.use("/audit", auditRouter);
 app.use("/upload-sessions", uploadSessionsRouter);
 app.use("/audio", audioRouter);
 app.use("/vault", vaultRouter);
+app.use("/publications", publicationsRouter);
 // /diligence (RLM deep runs) is not mounted: the work is tabled until its
 // sandbox and model lane are redone (goals/STATUS.md).
 
@@ -298,3 +303,13 @@ app.get("/manifest-signing-key", (_req, res) => {
 // leak the stack trace in a non-production environment. Must stay last: Express
 // only reaches an error handler registered after the middleware that failed.
 app.use(handleUnhandledError);
+
+// The content origin (docs/publishing.md): published pages, on their own
+// listener so nothing the API sends (its CORS, its cookies, its routes) is
+// reachable from a published page's origin. index.ts binds it to
+// PUBLICATION_PORT when that is set.
+export const publicationContentApp = express();
+publicationContentApp.disable("x-powered-by");
+publicationContentApp.set("trust proxy", envInt("TRUST_PROXY_HOPS", 1));
+publicationContentApp.use(publicationContentRouter);
+publicationContentApp.use(handleUnhandledError);

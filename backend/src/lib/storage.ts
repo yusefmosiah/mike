@@ -270,13 +270,21 @@ export async function downloadFile(key: string): Promise<ArrayBuffer | null> {
  * from the returned stream, allowing archive writers to apply backpressure
  * without buffering whole files or opening every object concurrently.
  */
-export function createFileReadStream(key: string): Readable {
+export function createFileReadStream(
+  key: string,
+  range?: { start: number; end: number },
+): Readable {
   return Readable.from(
     (async function* () {
       requireStorageConfig();
       try {
         const response = (await getClient().send(
-          new GetObjectCommand({ Bucket: BUCKET, Key: key }),
+          new GetObjectCommand({
+            Bucket: BUCKET,
+            Key: key,
+            // Inclusive byte range, for HTTP Range requests on media.
+            ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+          }),
         )) as any;
         if (!response.Body) {
           throw new StorageOperationError("download");

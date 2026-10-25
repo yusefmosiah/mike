@@ -22,7 +22,8 @@ import { InitialView } from "./InitialView";
 import { QuickActionsModal } from "./QuickActionsModal";
 import { AddDocumentsModal } from "@/app/components/modals/AddDocumentsModal";
 import { useQuickActions } from "@/app/hooks/useQuickActions";
-import { resolveDocumentViewType } from "@/app/lib/documentViewType";
+import { usePublishAction } from "@/app/hooks/usePublishAction";
+import { panelTypeForViewType, resolveDocumentViewType } from "@/app/lib/documentViewType";
 import type { ChatInputHandle, EditedPrompt } from "./ChatInput";
 import {
     AssistantSidePanel,
@@ -211,10 +212,12 @@ function panelDocumentForOpen(args: {
         document_id: args.documentId,
         title: args.filename,
         type: args.fileType
-            ? resolveDocumentViewType({
-                  filename: args.filename,
-                  fileType: args.fileType,
-              })
+            ? panelTypeForViewType(
+                  resolveDocumentViewType({
+                      filename: args.filename,
+                      fileType: args.fileType,
+                  }),
+              )
             : panelDocumentType(args.filename),
         metadata: [],
         quotes: [],
@@ -268,6 +271,7 @@ export function ChatView({
     const [deleteTarget, setDeleteTarget] = useState<PanelDocument | null>(null);
     const [deletingDocument, setDeletingDocument] = useState(false);
     const [tabs, setTabs] = useState<AssistantSidePanelTab[]>([]);
+    const { publishAction, publishModal } = usePublishAction();
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const [panelMounted, setPanelMounted] = useState(false);
     const [panelVisible, setPanelVisible] = useState(false);
@@ -1391,6 +1395,8 @@ export function ChatView({
                 }}
             />
 
+            {publishModal}
+
             {panelMounted && (
                 <div
                     ref={attachPanelElement}
@@ -1402,6 +1408,11 @@ export function ChatView({
                         tabs={tabs}
                         canEdit={canWrite}
                         documentActions={(document) => ({
+                            onPublish: publishAction({
+                                documentId: document.document_id,
+                                versionId: document.version_id,
+                                filename: document.title,
+                            }),
                             addToChatDisabled: !canWrite || !!chatLoading,
                             onAddToChat: async () => {
                                 const file = await getDocument(

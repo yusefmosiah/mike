@@ -34,6 +34,7 @@ describe("fileTypeKind", () => {
 
     it("knows plain text", () => {
         expect(["txt", "md", "CSV"].map(fileTypeKind)).toEqual(["text", "text", "text"]);
+        expect(fileTypeKind("page.html")).toBe("html");
     });
 
     it("falls back to other for unknown, empty, or nullish input", () => {
@@ -50,6 +51,12 @@ describe("FileTypeIcon", () => {
 
     it("renders a decorative image icon for an image", () => {
         const { container } = render(<FileTypeIcon fileType="webp" />);
+        expect(imgOf(container)).toBeNull();
+        expect(svgOf(container)).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("renders a decorative code icon for an HTML page", () => {
+        const { container } = render(<FileTypeIcon fileType="page.html" />);
         expect(imgOf(container)).toBeNull();
         expect(svgOf(container)).toHaveAttribute("aria-hidden", "true");
     });

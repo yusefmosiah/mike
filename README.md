@@ -210,6 +210,7 @@ lists what is sent.
 - [Backend architecture](docs/backend-architecture.md)
 - [Design system](docs/design-system.md)
 - [Configured models](docs/configured-models.md) and [model costs](docs/model-costs.md)
+- [Publishing documents as links](docs/publishing.md)
 - [Resuming interrupted answers](docs/resume-interrupted-answers.md)
 - [Inline citations](docs/inline-citations.md)
 - [Secrets vault](docs/vault.md)

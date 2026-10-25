@@ -9,6 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { ProjectDocumentTabs } from "../projects/ProjectDocumentTabs";
 import { AssistantSidePanel } from "../assistant/AssistantSidePanel";
+import { documentContextMenuItems } from "./DocumentTabActions";
 import type { Document } from "./types";
 
 vi.mock("@/app/hooks/useDocumentPermissions", () => ({ useDocumentPermissions: (_ids: string[], enabled: boolean) => () => ({ canEdit: enabled, canDelete: enabled }) }));
@@ -251,4 +252,40 @@ it("downloads the assistant tab's open editor rather than fetching an older file
     fireEvent.click(within(menuFor()).getByText("Download"));
     expect(localDownload).toHaveBeenCalledOnce();
     expect(action).not.toHaveBeenCalled();
+});
+
+describe("documentContextMenuItems: Publish", () => {
+    it("lists Publish only when a publish action is supplied", () => {
+        const onPublish = vi.fn();
+        const withIt = documentContextMenuItems({ onPublish });
+        expect(withIt.map((item) => item.label)).toEqual(["Publish"]);
+        withIt[0]!.onSelect();
+        expect(onPublish).toHaveBeenCalledOnce();
+        expect(documentContextMenuItems({}).map((item) => item.label)).toEqual([]);
+    });
+});
+
+describe("project tabs: Publish", () => {
+    it("asks for a publish action per tab and shows Publish only where one is given", () => {
+        const onPublish = vi.fn();
+        const publishAction = vi.fn((t: { filename: string }) => (t.filename === "a.html" ? onPublish : undefined));
+        render(
+            <ProjectDocumentTabs
+                tabs={[
+                    { documentId: "a", filename: "a.html", versionId: "v9" },
+                    { documentId: "b", filename: "b.xlsx" },
+                ]}
+                documents={[{ id: "a", file_type: "html" } as Document]}
+                activeTabId="a"
+                onActivate={vi.fn()}
+                onClose={vi.fn()}
+                onReorder={vi.fn()}
+                publishAction={publishAction}
+            />,
+        );
+        expect(publishAction).toHaveBeenCalledWith({ documentId: "a", versionId: "v9", filename: "a.html", fileType: "html" });
+        fireEvent.contextMenu(screen.getByRole("tab", { name: "a.html" }), { clientX: 10, clientY: 10 });
+        fireEvent.click(within(screen.getByRole("menu")).getByText("Publish"));
+        expect(onPublish).toHaveBeenCalledOnce();
+    });
 });

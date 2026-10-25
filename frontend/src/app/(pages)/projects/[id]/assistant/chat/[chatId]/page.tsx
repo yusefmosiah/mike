@@ -78,6 +78,7 @@ import {
 } from "@/app/components/projects/ProjectExplorer";
 import { ProjectMemoryModal } from "@/app/components/projects/ProjectMemoryModal";
 import { ChatPanelHeader } from "@/app/components/shared/ChatPanelHeader";
+import { usePublishAction } from "@/app/hooks/usePublishAction";
 import { ProjectDocumentTabs } from "@/app/components/projects/ProjectDocumentTabs";
 import {
     ProjectDocumentPanels,
@@ -402,6 +403,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
 
     // Tabs
     const [tabs, setTabs] = useState<ProjectDocumentTab[]>([]);
+    const { publishAction, publishModal } = usePublishAction();
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
     const [resolvingEdits, setResolvingEdits] = useState<
@@ -2231,6 +2233,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     </div>
                 )}
                 <ProjectDocumentTabs
+                    publishAction={publishAction}
                     onClosePanel={
                         isDesktop ? undefined : () => setMobilePane(null)
                     }
@@ -2600,6 +2603,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 message={explorerDownload.error}
                 onClose={explorerDownload.clearError}
             />
+            {publishModal}
             <PermissionDeniedPopup
                 open={!!ownerOnlyAction}
                 action={ownerOnlyAction ?? undefined}

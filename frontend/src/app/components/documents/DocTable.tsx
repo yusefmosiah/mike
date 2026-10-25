@@ -104,6 +104,7 @@ import { TableLoadMoreRow } from "@/app/components/shared/TableLoadMoreRow";
 import { LibrarySkeuoIcon } from "@/app/components/shared/AppSidebarSkeuoIcons";
 import { EmptyState } from "@/app/components/ui/empty-state";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
+import { usePublishAction } from "@/app/hooks/usePublishAction";
 import {
     LIQUID_GLASS_SELECTED_CLASS,
     LIQUID_GLASS_GROUP_HOVER_CLASS,
@@ -3416,6 +3417,7 @@ export function DocTable({
     }, []);
 
     const sidePanelDoc = viewingDoc ? (docs.find((doc) => doc.id === viewingDoc.id) ?? viewingDoc) : null;
+    const { publishAction, publishModal } = usePublishAction();
     const versionUploadAccept = ".pdf,.docx,.doc,.xlsx,.xlsm,.xls,.pptx,.ppt";
     const q = serverQueryActive ? "__server_results__" : search.toLowerCase();
     const viewedFolder = viewedFolderId
@@ -4690,7 +4692,18 @@ export function DocTable({
                 onDelete={async (doc) => {
                     await handleRemoveDoc(doc.id);
                 }}
+                onPublish={
+                    sidePanelDoc
+                        ? publishAction({
+                              documentId: sidePanelDoc.id,
+                              versionId: viewingDocVersion?.id ?? null,
+                              filename: sidePanelDoc.filename,
+                              fileType: sidePanelDoc.file_type,
+                          })
+                        : undefined
+                }
             />
+            {publishModal}
         </div>
     );
 }

@@ -3,7 +3,7 @@ import "./instrument";
 import type { Server } from "node:http";
 import { Worker as ThreadWorker } from "node:worker_threads";
 import path from "node:path";
-import { app } from "./app";
+import { app, publicationContentApp } from "./app";
 import { enforceDocumentLifecycleMigration } from "./lib/dbq/lifecycleGuard";
 import { manifestPublicKey } from "./lib/manifestSigning";
 import { validateRuntimeConfiguration } from "./lib/runtimeConfig";
@@ -116,6 +116,7 @@ function spawnWorkerThread(): void {
 }
 
 let server: Server | null = null;
+let contentServer: Server | null = null;
 
 async function main(): Promise<void> {
   await validateBootConfiguration();
@@ -153,6 +154,15 @@ async function main(): Promise<void> {
     // What background subagents sent chats that were idle, then and from now on.
     void startAgentMessageDelivery(createDb());
   });
+
+  // Published pages (docs/publishing.md) get their own port, which the
+  // proxy serves on the content domain.
+  const publicationPort = process.env.PUBLICATION_PORT?.trim();
+  if (publicationPort) {
+    contentServer = listenOrFail(publicationContentApp, publicationPort, () => {
+      console.log(`Published pages served on port ${publicationPort}`);
+    });
+  }
 }
 
 void main();
@@ -193,7 +203,9 @@ const shutdown = createShutdown({
   onStart: () => {
     shuttingDown = true;
   },
-  closeServer: () => closeHttpServer(server),
+  closeServer: async () => {
+    await Promise.all([closeHttpServer(server), closeHttpServer(contentServer)]);
+  },
   stopBackgroundWork,
   drain: {
     maxMs: SHUTDOWN_TURN_DRAIN_MS,

@@ -75,6 +75,7 @@ import {
   generateDocx,
   generateExcel,
   generatePpt,
+  generateHtml,
   getTurnReadIdentity,
   duplicateReadDocumentResult,
   clearTurnReadsForDocument,
@@ -2446,6 +2447,26 @@ export async function runToolCalls(
         result as Record<string, unknown>,
         previewFilename,
         "pptx",
+      );
+    } else if (tc.function.name === "generate_html") {
+      const title = args.title as string;
+      devLog(`[generate_html] title="${title}"`);
+      const previewFilename = safeGeneratedFilename(title, "html");
+      write(
+        `data: ${JSON.stringify({ type: "doc_created_start", filename: previewFilename })}\n\n`,
+      );
+      const result = await generateHtml(
+        title,
+        args.html as string,
+        userId,
+        db,
+        { projectId: projectId ?? null },
+      );
+      registerGeneratedDocument(
+        tc,
+        result as Record<string, unknown>,
+        previewFilename,
+        "html",
       );
     }
     } finally {

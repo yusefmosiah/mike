@@ -10,10 +10,10 @@ export const UNSUPPORTED_DOCUMENT_WARNING_MESSAGE =
  */
 export const SUPPORTED_IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
 /** Plain text attaches where images do; the backend checks it is UTF-8. */
-export const SUPPORTED_TEXT_ACCEPT = ".txt,.md,.csv";
+export const SUPPORTED_TEXT_ACCEPT = ".txt,.md,.csv,.html";
 export const SUPPORTED_ATTACHMENT_ACCEPT = `${SUPPORTED_DOCUMENT_ACCEPT},${SUPPORTED_IMAGE_ACCEPT},${SUPPORTED_TEXT_ACCEPT}`;
 export const UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE =
-    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, text (TXT, Markdown, CSV) and image (PNG, JPEG, WebP, GIF) files can be uploaded.";
+    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, text (TXT, Markdown, CSV, HTML) and image (PNG, JPEG, WebP, GIF) files can be uploaded.";
 export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const IMAGE_TOO_LARGE_WARNING_MESSAGE = "Images can be at most 20 MB.";
 
@@ -35,7 +35,7 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
 ]);
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
-const TEXT_EXTENSIONS = new Set(["txt", "md", "csv"]);
+const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "html"]);
 
 function extensionOf(name: string): string | undefined {
     return name.split(".").pop()?.toLowerCase();
@@ -58,6 +58,7 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
     "text/plain": "txt",
     "text/markdown": "md",
     "text/csv": "csv",
+    "text/html": "html",
 };
 
 const isKnownExtension = (extension: string | undefined) =>

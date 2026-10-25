@@ -17,7 +17,7 @@ import {
     type EditAnnotation,
     type PanelDocument,
 } from "@/app/components/shared/types";
-import { resolveDocumentViewType } from "@/app/lib/documentViewType";
+import { panelTypeForViewType, resolveDocumentViewType } from "@/app/lib/documentViewType";
 import { cn } from "@/app/lib/utils";
 
 type EditMode = Extract<DocumentContentMode, { kind: "edit" }>;
@@ -117,7 +117,7 @@ export const ProjectDocumentPanels = memo(function ProjectDocumentPanels({
                 ...sourceDocument,
                 document_id: tab.documentId,
                 title: tab.filename,
-                type: sourceDocument?.type ?? viewType,
+                type: sourceDocument?.type ?? panelTypeForViewType(viewType),
                 version_id: versionId,
                 version_number:
                     !tab.versionId ||

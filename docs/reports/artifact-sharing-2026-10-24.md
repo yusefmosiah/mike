@@ -1,6 +1,6 @@
 # Sharing documents and artifacts from the viewer: design
 
-Date: 2026-10-24. Design only; no code changed.
+Date: 2026-10-24. Built in part the same day; see "Implementation status" below and `docs/publishing.md`.
 
 ## Summary
 
@@ -20,6 +20,23 @@ Date: 2026-10-24. Design only; no code changed.
   1. Organisation and password links for inert formats.
   2. Video, then HTML sites on the user-content domain.
   3. Links for named people, links whose content is encrypted in the browser, and embeds.
+
+## Implementation status (2026-10-24)
+
+Steps 2 to 4 of the build order below are built and tested. `docs/publishing.md` is the operator's page.
+
+- **Publications module.** `backend/src/modules/publications/`, with migrations `20261024_01_html_upload_type.sql` (HTML documents) and `20261024_02_publications.sql`.
+  - Public and password links, expiry, revocation, and frozen copies under `publications/{id}/`.
+  - The content server runs on its own port (`PUBLICATION_PORT`), with subdomain or path-style links.
+- **HTML documents.** They can be uploaded, and the assistant writes them with a new `generate_html` tool. The app shows them in a sandboxed frame and stores them as plain text, so its own origin never runs them.
+  - An HTML page is published with the project files it refers to by name.
+  - Markdown, text, images, PDFs and Office renditions publish too.
+- **In the app.** The Publish dialog is reached from the document side panel and from a viewer tab's menu.
+- **Verified.**
+  - Unit and route tests.
+  - Against the local Docker stack in Chromium: the page renders, its script runs, a bundled image loads and a YouTube embed plays. The password page refuses a wrong password and opens with the right one.
+
+Step 1, the domains, waits on the owner. The staging domain is temporary: the product will get two new domains, one for the app and one for published content.
 
 ## Owner direction (2026-10-24)
 

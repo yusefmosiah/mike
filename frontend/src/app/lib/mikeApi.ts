@@ -43,6 +43,7 @@ import type {
     ThreadAuthor,
     ActiveAssistantTurn,
     Citation,
+    CreatePublicationInput,
     Document,
     Folder,
     LibraryFolder,
@@ -52,6 +53,8 @@ import type {
     OpenSourceWorkflowContributorMode,
     OpenSourceWorkflowResponse,
     Project,
+    Publication,
+    PublishingConfig,
     QuickAction,
     Workflow,
     WorkflowAddon,
@@ -2202,6 +2205,37 @@ export async function listStandaloneDocuments(): Promise<Document[]> {
 
 export async function getDocument(documentId: string): Promise<Document> {
     return apiRequest<Document>(`/single-documents/${documentId}`);
+}
+
+export async function getPublishingConfig(): Promise<PublishingConfig> {
+    return apiRequest<PublishingConfig>("/publications/config");
+}
+
+export async function listPublications(
+    documentId: string,
+): Promise<Publication[]> {
+    const { publications } = await apiRequest<{ publications: Publication[] }>(
+        `/publications?document_id=${encodeURIComponent(documentId)}`,
+    );
+    return publications;
+}
+
+export async function createPublication(
+    input: CreatePublicationInput,
+): Promise<{ publication: Publication; missing_files: string[] }> {
+    return apiRequest("/publications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+    });
+}
+
+export async function revokePublication(id: string): Promise<Publication> {
+    const { publication } = await apiRequest<{ publication: Publication }>(
+        `/publications/${encodeURIComponent(id)}/revoke`,
+        { method: "POST" },
+    );
+    return publication;
 }
 
 export async function deleteDocument(documentId: string): Promise<void> {

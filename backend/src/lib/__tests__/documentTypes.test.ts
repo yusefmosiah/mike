@@ -99,6 +99,8 @@ describe("contentTypeForDocumentType", () => {
             txt: "text/plain; charset=utf-8",
             md: "text/markdown; charset=utf-8",
             csv: "text/csv; charset=utf-8",
+            // Plain text on purpose: the app never serves HTML it would run.
+            html: "text/plain; charset=utf-8",
         };
         for (const type of ALLOWED_DOCUMENT_TYPES) {
             expect(contentTypeForDocumentType(type)).toBe(expected[type]);

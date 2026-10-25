@@ -144,7 +144,7 @@ describe("attachments: documents, images and text", () => {
     });
 
     it("accepts plain text only where attachments are", () => {
-        for (const name of ["notes.txt", "README.md", "ledger.CSV"]) {
+        for (const name of ["notes.txt", "README.md", "ledger.CSV", "page.html"]) {
             expect(isSupportedDocumentFile(file(name), ATTACHMENTS)).toBe(true);
             expect(isSupportedDocumentFile(file(name))).toBe(false);
         }

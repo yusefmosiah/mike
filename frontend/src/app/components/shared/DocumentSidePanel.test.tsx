@@ -27,7 +27,7 @@ const doc: Document = {
 
 function renderPanel(
     onClose = vi.fn(),
-    options: { readOnly?: boolean; versions?: DocumentVersion[] } = {},
+    options: { readOnly?: boolean; versions?: DocumentVersion[]; onPublish?: () => void } = {},
 ) {
     render(
         <DocumentSidePanel
@@ -45,6 +45,7 @@ function renderPanel(
             onUploadNewVersion={vi.fn()}
             onReplaceVersion={vi.fn()}
             onDelete={vi.fn()}
+            onPublish={options.onPublish}
         />,
     );
     return onClose;
@@ -88,4 +89,22 @@ it("titles the document view and lists the latest version first", () => {
         "Download Version 2",
         "Download Version 1",
     ]);
+});
+
+it("offers Publish beside the other actions only when the file can be published", () => {
+    const onPublish = vi.fn();
+    renderPanel(vi.fn(), { readOnly: true, onPublish });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(onPublish).toHaveBeenCalledOnce();
+});
+
+it("shows Publish in the editable footer too, and hides it without a handler", () => {
+    const onPublish = vi.fn();
+    renderPanel(vi.fn(), { readOnly: false, onPublish });
+    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+});
+
+it("has no Publish button when publishing is unavailable", () => {
+    renderPanel(vi.fn(), { readOnly: true });
+    expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
 });
