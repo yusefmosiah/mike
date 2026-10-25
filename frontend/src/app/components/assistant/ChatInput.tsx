@@ -380,6 +380,9 @@ function ChatInputForChatImpl(
     // keeps a recording from starting while the composer is closed or a
     // response is already running.
     const dictation = useDictation({ disabled: isLoading || !composerOpen });
+    // True from a send-while-dictating tap until its message is handed over.
+    const [finishing, setFinishing] = useState(false);
+    const finishingRef = useRef(false);
     const [compactControls, setCompactControls] = useState(false);
     const [docSelectorOpen, setDocSelectorOpen] = useState(false);
     const [docSelectorInitialTab, setDocSelectorInitialTab] =
@@ -1002,25 +1005,81 @@ function ChatInputForChatImpl(
         }
     };
 
+    // Tapping send during a dictation ends it and sends what was said. The
+    // hook hands the final text back (it does not also publish it as
+    // `transcript`), so it is spliced exactly once, here, and sent directly
+    // rather than after a render.
+    const finishAndSend = async () => {
+        if (finishingRef.current) return;
+        finishingRef.current = true;
+        setFinishing(true);
+        try {
+            const liveBase = liveBaseRef.current;
+            const text = await dictation.finish();
+            // A failure is shown through the dictation error; the composer
+            // keeps its text (a live dictation gives the original back).
+            if (text === null) return;
+            const el = textareaRef.current;
+            let composed: string;
+            if (liveBase) {
+                liveBaseRef.current = null;
+                composed = text
+                    ? spliceDictation(liveBase.before, text, liveBase.after)
+                    : liveBase.original;
+            } else {
+                const current = el?.value ?? value;
+                const caret = el?.selectionStart ?? current.length;
+                const selectionEnd = el?.selectionEnd ?? caret;
+                composed = spliceDictation(
+                    current.slice(0, caret),
+                    text,
+                    current.slice(selectionEnd),
+                );
+            }
+            // Leave the text in the composer first: if sending is refused
+            // (no model, no key), nothing said or typed is lost.
+            setValue(composed);
+            if (el) {
+                el.value = composed;
+                resizeTextarea(el);
+            }
+            sendComposed(composed);
+        } finally {
+            finishingRef.current = false;
+            setFinishing(false);
+        }
+    };
+
     const handleSubmit = () => {
-        const query = value.trim();
-        if (!composerOpen || liveActive) return;
+        if (finishingRef.current || !composerOpen) return;
+        if (dictation.recording) {
+            void finishAndSend();
+            return;
+        }
+        if (liveActive) return;
+        sendComposed(value);
+    };
+
+    const sendComposed = (text: string) => {
+        const slashQuery = slashCommandQuery(text);
+        const query = text.trim();
+        if (!composerOpen) return;
         // An edited prompt is sent as written: commands apply to new messages.
         if (editTarget) {
             submitMessage(query, null);
             return;
         }
-        const autocompact = parseAutocompactCommand(value);
+        const autocompact = parseAutocompactCommand(text);
         if (autocompact) {
             void runAutocompact(autocompact);
             return;
         }
-        const note = noResponseContent(value);
+        const note = noResponseContent(text);
         if (note !== null) {
             submitNote(note);
             return;
         }
-        if (slashCommandsLoading) return;
+        if (slashQuery !== null && slashWorkflows === null) return;
         const slashWorkflow = slashQuery
             ? exactSlashWorkflow(slashWorkflows ?? [], slashQuery)
             : undefined;
@@ -1442,7 +1501,8 @@ function ChatInputForChatImpl(
                                     isLoading
                                         ? !canStop
                                         : !composerOpen ||
-                                          !value.trim() ||
+                                          finishing ||
+                                          (!value.trim() && !dictation.recording) ||
                                           autocompactRunning ||
                                           (slashCommandsLoading &&
                                               parseAutocompactCommand(value) === null) ||
@@ -1456,6 +1516,8 @@ function ChatInputForChatImpl(
                                         fill="currentColor"
                                         strokeWidth={0}
                                     />
+                                ) : finishing ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                     <ArrowRight className="h-4 w-4" />
                                 )}

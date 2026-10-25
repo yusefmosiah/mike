@@ -102,6 +102,35 @@ describe("useDictation with live dictation", () => {
         expect(phone.cancelLiveDictation).not.toHaveBeenCalled();
     });
 
+    it("finish hands back the final text without publishing it as a transcript", async () => {
+        phone.stopLiveDictation.mockResolvedValueOnce(" ask Conquo Lindqvist ");
+        const { result } = await startLive();
+        let text: string | null = null;
+        await act(async () => {
+            text = await result.current.finish();
+        });
+        expect(text).toBe("ask Okonkwo-Lindqvist");
+        expect(result.current.transcript).toBeNull();
+        expect(result.current.transcriptVersion).toBe(0);
+        expect(result.current.recording).toBe(false);
+        expect(result.current.liveText).toBeNull();
+    });
+
+    it("finish resolves null when stopping fails and when nothing is recording", async () => {
+        phone.stopLiveDictation.mockRejectedValueOnce(new Error("boom"));
+        const { result } = await startLive();
+        let text: string | null = "x";
+        await act(async () => {
+            text = await result.current.finish();
+        });
+        expect(text).toBeNull();
+        expect(result.current.error).not.toBeNull();
+        await act(async () => {
+            text = await result.current.finish();
+        });
+        expect(text).toBeNull();
+    });
+
     it("toggle starts and stops", async () => {
         const { result } = await startLive();
         await act(async () => {

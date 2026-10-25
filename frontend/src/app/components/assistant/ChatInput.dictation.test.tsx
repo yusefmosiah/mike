@@ -93,6 +93,7 @@ function renderInput(
             onCancel={vi.fn()}
             isLoading={false}
             canSend
+            chatModel="gpt-5.6-luna"
             {...props}
         />,
     );
@@ -185,6 +186,58 @@ describe("ChatInput dictation", () => {
         expect(
             screen.queryByRole("button", { name: "Stop dictation" }),
         ).toBeNull();
+    });
+
+    it("sends the typed text and the transcription once when send is tapped while recording", async () => {
+        const onSubmit = vi.fn();
+        let release: (value: { text: string }) => void = () => undefined;
+        transcribeAudio.mockImplementation(
+            () => new Promise((resolve) => (release = resolve)),
+        );
+        renderInput({ onSubmit });
+        const textarea = screen.getByRole("combobox") as HTMLTextAreaElement;
+        fireEvent.change(textarea, { target: { value: "Summarize the ." } });
+        textarea.setSelectionRange(14, 14);
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Dictate prompt" }));
+        });
+        await screen.findByRole("button", { name: "Stop dictation" });
+
+        const sendButton = screen.getByRole("button", { name: "Send message" });
+        expect(sendButton).toBeEnabled();
+        await act(async () => {
+            fireEvent.click(sendButton);
+        });
+        expect(onSubmit).not.toHaveBeenCalled();
+        expect(sendButton).toBeDisabled();
+        await act(async () => {
+            fireEvent.click(sendButton);
+        });
+        await act(async () => release({ text: "contract" }));
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(onSubmit.mock.calls[0][0]).toMatchObject({
+            content: "Summarize the contract.",
+        });
+        expect(transcribeAudio).toHaveBeenCalledTimes(1);
+        // The transcript is not also inserted afterwards.
+        await waitFor(() => expect(textarea).toHaveValue(""));
+    });
+
+    it("sends nothing when the recording yields no text and the composer is empty", async () => {
+        const onSubmit = vi.fn();
+        transcribeAudio.mockResolvedValue({ text: "  " });
+        renderInput({ onSubmit });
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Dictate prompt" }));
+        });
+        await screen.findByRole("button", { name: "Stop dictation" });
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+        });
+        await waitFor(() => expect(transcribeAudio).toHaveBeenCalledTimes(1));
+        expect(onSubmit).not.toHaveBeenCalled();
+        expect(screen.getByRole("combobox")).toHaveValue("");
     });
 
     it("shows a denied microphone through the composer warning surface", async () => {

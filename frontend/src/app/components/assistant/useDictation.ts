@@ -84,6 +84,14 @@ export interface UseDictationResult {
     transcriptVersion: number;
     start: () => Promise<void>;
     stop: () => void;
+    /**
+     * Stops like `stop`, but hands the final trimmed text to the caller
+     * instead of publishing it as `transcript` (so the caller can use it
+     * directly, e.g. to send it, without it also being inserted a second
+     * time). Resolves to "" when nothing was heard and to null when there was
+     * nothing to stop or the stop failed (`error` then says why).
+     */
+    finish: () => Promise<string | null>;
     /** Stops and throws the recording away; nothing is transcribed. */
     cancel: () => void;
     toggle: () => void;
@@ -124,6 +132,9 @@ export function useDictation({
     // True from the moment a live dictation is asked for until it ends.
     const liveRef = useRef(false);
     const busyRef = useRef(false);
+    // Set by `finish` for a recorded clip: the transcription's text goes to
+    // this resolver rather than into `transcript`.
+    const waiterRef = useRef<((text: string | null) => void) | null>(null);
     const disabledRef = useRef(disabled);
     disabledRef.current = disabled;
     // Keep the phone awake while it listens.
@@ -148,6 +159,8 @@ export function useDictation({
             recorderRef.current = null;
             recordingRef.current = false;
             setRecording(false);
+            const waiter = waiterRef.current;
+            waiterRef.current = null;
             const recorded = new Blob(
                 chunksRef.current,
                 mimeType ? { type: mimeType } : {},
@@ -155,17 +168,23 @@ export function useDictation({
             chunksRef.current = [];
             // A stop with no captured audio (an immediate tap) has nothing
             // to transcribe and is not an error.
-            if (recorded.size === 0) return;
+            if (recorded.size === 0) {
+                waiter?.("");
+                return;
+            }
             busyRef.current = true;
             setBusy(true);
             try {
                 const text = await transcribeRecording(recorded);
                 const trimmed = text.trim();
-                if (trimmed) {
+                if (waiter) {
+                    waiter(trimmed);
+                } else if (trimmed) {
                     setTranscript(trimmed);
                     setTranscriptVersion((version) => version + 1);
                 }
             } catch (transcribeError) {
+                waiter?.(null);
                 setError(
                     transcribeError instanceof DeviceSpeechError ||
                         transcribeError instanceof BrowserModelError
@@ -186,24 +205,26 @@ export function useDictation({
     // Ends a live dictation: the final text goes to the composer. Also what
     // happens when the app ends it itself (a call, the app going to the
     // background), which keeps the text so far.
-    const finishLive = useCallback(() => {
-        if (!liveRef.current) return;
+    const finishLive = useCallback((handBack = false): Promise<string | null> => {
+        if (!liveRef.current) return Promise.resolve(null);
         liveRef.current = false;
         clearTimer();
         recordingRef.current = false;
         setRecording(false);
         busyRef.current = true;
         setBusy(true);
-        stopLiveTranscription()
-            .then((text) => {
+        return stopLiveTranscription()
+            .then((text): string | null => {
                 const trimmed = text.trim();
-                if (trimmed && activeRef.current) {
+                if (!handBack && trimmed && activeRef.current) {
                     setTranscript(trimmed);
                     setTranscriptVersion((version) => version + 1);
                 }
+                return trimmed;
             })
-            .catch((stopError: unknown) => {
+            .catch((stopError: unknown): string | null => {
                 setError(liveFailure(stopError));
+                return null;
             })
             .finally(() => {
                 busyRef.current = false;
@@ -219,7 +240,7 @@ export function useDictation({
                 onText: (text, ended) => {
                     if (!liveRef.current || !activeRef.current) return;
                     setLiveText(text);
-                    if (ended) finishLive();
+                    if (ended) void finishLive();
                 },
             });
         } catch (liveError) {
@@ -373,46 +394,65 @@ export function useDictation({
         }
     }, [clearTimer, finishRecording, releaseStream, startLive]);
 
+    // Ends the recording. With `handBack` the final text is returned to the
+    // caller and not published as `transcript`.
+    const end = useCallback(
+        (handBack: boolean): Promise<string | null> => {
+            if (liveRef.current) return finishLive(handBack);
+            const session = browserSessionRef.current;
+            if (session) {
+                browserSessionRef.current = null;
+                clearTimer();
+                recordingRef.current = false;
+                setRecording(false);
+                busyRef.current = true;
+                setBusy(true);
+                return session
+                    .stop()
+                    .then((text) => correctDictation(text))
+                    .then((text): string | null => {
+                        const trimmed = text.trim();
+                        if (!handBack && trimmed && activeRef.current) {
+                            setTranscript(trimmed);
+                            setTranscriptVersion((version) => version + 1);
+                        }
+                        return trimmed;
+                    })
+                    .catch((browserError: unknown): string | null => {
+                        setError(
+                            browserError instanceof Error && browserError.message
+                                ? browserError.message
+                                : TRANSCRIBE_FAILURE_MESSAGE,
+                        );
+                        return null;
+                    })
+                    .finally(() => {
+                        busyRef.current = false;
+                        setBusy(false);
+                    });
+            }
+            const recorder = recorderRef.current;
+            if (!recorder || recorder.state === "inactive") {
+                return Promise.resolve(null);
+            }
+            if (!handBack) {
+                recorder.stop();
+                return Promise.resolve(null);
+            }
+            return new Promise((resolve) => {
+                // Set before stopping: a recorder may fire onstop synchronously.
+                waiterRef.current = resolve;
+                recorder.stop();
+            });
+        },
+        [clearTimer, finishLive],
+    );
+
     const stop = useCallback(() => {
-        if (liveRef.current) {
-            finishLive();
-            return;
-        }
-        const session = browserSessionRef.current;
-        if (session) {
-            browserSessionRef.current = null;
-            clearTimer();
-            recordingRef.current = false;
-            setRecording(false);
-            busyRef.current = true;
-            setBusy(true);
-            session
-                .stop()
-                .then((text) => correctDictation(text))
-                .then((text) => {
-                    const trimmed = text.trim();
-                    if (trimmed && activeRef.current) {
-                        setTranscript(trimmed);
-                        setTranscriptVersion((version) => version + 1);
-                    }
-                })
-                .catch((browserError: unknown) => {
-                    setError(
-                        browserError instanceof Error && browserError.message
-                            ? browserError.message
-                            : TRANSCRIBE_FAILURE_MESSAGE,
-                    );
-                })
-                .finally(() => {
-                    busyRef.current = false;
-                    setBusy(false);
-                });
-            return;
-        }
-        const recorder = recorderRef.current;
-        if (!recorder || recorder.state === "inactive") return;
-        recorder.stop();
-    }, [clearTimer, finishLive]);
+        void end(false);
+    }, [end]);
+
+    const finish = useCallback(() => end(true), [end]);
 
     const cancel = useCallback(() => {
         if (liveRef.current) {
@@ -424,6 +464,8 @@ export function useDictation({
             setLiveText(null);
             return;
         }
+        waiterRef.current?.(null);
+        waiterRef.current = null;
         const session = browserSessionRef.current;
         if (session) {
             browserSessionRef.current = null;
@@ -464,6 +506,8 @@ export function useDictation({
             }
             browserSessionRef.current?.cancel();
             browserSessionRef.current = null;
+            waiterRef.current?.(null);
+            waiterRef.current = null;
             const recorder = recorderRef.current;
             recorderRef.current = null;
             if (recorder && recorder.state !== "inactive") {
@@ -487,6 +531,7 @@ export function useDictation({
         transcriptVersion,
         start,
         stop,
+        finish,
         cancel,
         toggle,
         clearError,
