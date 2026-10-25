@@ -201,9 +201,9 @@ describe("voice mode preferences", () => {
         expect(parseVoicePreferences({}).voiceMode).toBeUndefined();
         expect(voiceModeServerSpeech(parseVoicePreferences({}))).toBe(false);
         expect(parseVoicePreferences({ voiceMode: "yes" }).voiceMode).toBeUndefined();
-        expect(parseVoicePreferences({ voiceMode: { serverSpeech: "true", headphones: 1 } }).voiceMode).toBeUndefined();
-        const parsed = parseVoicePreferences({ voiceMode: { serverSpeech: true, headphones: false, extra: 1 } });
-        expect(parsed.voiceMode).toEqual({ serverSpeech: true, headphones: false });
+        expect(parseVoicePreferences({ voiceMode: { serverSpeech: "true", headphones: 1, phoneBrowser: "x" } }).voiceMode).toBeUndefined();
+        const parsed = parseVoicePreferences({ voiceMode: { serverSpeech: true, headphones: false, phoneBrowser: true, extra: 1 } });
+        expect(parsed.voiceMode).toEqual({ serverSpeech: true, headphones: false, phoneBrowser: true });
         expect(voiceModeServerSpeech(parsed)).toBe(true);
     });
 

@@ -12,6 +12,7 @@ the Word add-in through its `@brand` webpack alias, and the API through
 | `title` | The browser tab and link-preview title |
 | `description` | The page description and link previews |
 | `website` | Where the logo links in production |
+| `appUrl` | Optional. Where to get the phone app (an App Store, Google Play or download page). When set, the phone-browser voice prompt offers it; when absent, the prompt offers only voice mode in the browser |
 | `sourceUrl` | Where the source code is published. The AGPL requires an install to offer its users the source it runs, so a rebranded install keeps this pointing at its own published source |
 
 To rebrand an install, replace `brand.json` before building the images. Text

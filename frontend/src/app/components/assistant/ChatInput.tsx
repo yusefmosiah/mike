@@ -52,6 +52,8 @@ import {
 } from "./ModelToggle";
 import { NoModelsWarningPopup } from "../popups/NoModelsWarningPopup";
 import { WarningPopup } from "../popups/WarningPopup";
+import { VoiceAppModal } from "../modals/VoiceAppModal";
+import { phoneAppPromptNeeded, phoneAppUrl, rememberPhoneBrowserChoice } from "@/app/lib/voice/phoneApp";
 import {
     useSelectedModel,
     useSelectedReasoning,
@@ -401,6 +403,8 @@ function ChatInputForChatImpl(
     const [noModelsWarning, setNoModelsWarning] =
         useState<NoModelsReason | null>(null);
     const [modelRequiredWarning, setModelRequiredWarning] = useState(false);
+    // A phone browser's first voice tap offers the app before voice mode here.
+    const [voiceAppPrompt, setVoiceAppPrompt] = useState(false);
     const [reasoningLevel, setReasoningLevel] = useSelectedReasoning({
         selectionKey: chatKey,
         chatReasoningLevel,
@@ -1432,7 +1436,10 @@ function ChatInputForChatImpl(
                                     type="button"
                                     aria-label="Start voice mode"
                                     title="Start voice mode"
-                                    onClick={() => void voiceChat.start()}
+                                    onClick={() => {
+                                        if (phoneAppPromptNeeded()) setVoiceAppPrompt(true);
+                                        else void voiceChat.start();
+                                    }}
                                     disabled={isLoading || dictation.busy}
                                     className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-default disabled:text-gray-300"
                                 >
@@ -1598,6 +1605,17 @@ function ChatInputForChatImpl(
             <ApiKeyMissingPopup
                 open={apiKeyModalProvider !== null}
                 onClose={() => setApiKeyModalProvider(null)}
+            />
+            <VoiceAppModal
+                open={voiceAppPrompt}
+                appUrl={phoneAppUrl()}
+                onClose={() => setVoiceAppPrompt(false)}
+                onUseBrowser={() => {
+                    rememberPhoneBrowserChoice();
+                    setVoiceAppPrompt(false);
+                    // Still inside the tap, which a browser needs to start audio.
+                    void voiceChat.start();
+                }}
             />
             <NoModelsWarningPopup
                 reason={noModelsWarning}

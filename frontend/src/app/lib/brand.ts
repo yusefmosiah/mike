@@ -9,6 +9,8 @@ export interface Brand {
     description: string;
     website: string;
     sourceUrl: string;
+    /** Where to get the phone app; absent when the install has no public link. */
+    appUrl?: string;
 }
 
 export function parseBrand(json: string | undefined): Brand {

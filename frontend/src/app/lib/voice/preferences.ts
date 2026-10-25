@@ -58,6 +58,11 @@ export interface VoiceModePreferences {
     serverSpeech?: boolean;
     /** The person listens on headphones (reserved: lets voice mode listen while it speaks). */
     headphones?: boolean;
+    /**
+     * In a phone browser, the person has chosen to use voice mode here rather
+     * than in the app, so the button no longer stops to suggest the app first.
+     */
+    phoneBrowser?: boolean;
 }
 
 export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
@@ -126,6 +131,7 @@ function voiceModeField(raw: unknown): { voiceMode?: VoiceModePreferences } {
     const voiceMode: VoiceModePreferences = {
         ...(typeof section.serverSpeech === "boolean" ? { serverSpeech: section.serverSpeech } : {}),
         ...(typeof section.headphones === "boolean" ? { headphones: section.headphones } : {}),
+        ...(typeof section.phoneBrowser === "boolean" ? { phoneBrowser: section.phoneBrowser } : {}),
     };
     return Object.keys(voiceMode).length > 0 ? { voiceMode } : {};
 }

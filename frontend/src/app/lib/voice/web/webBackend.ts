@@ -166,8 +166,28 @@ export class WebVoiceBackend {
         return seam?.capabilities ? { ...found, ...seam.capabilities } : found;
     }
 
+    private serverSpeech: Promise<boolean> | null = null;
+
+    /** Whether this deployment has a speech server; asked only when a plan would use it. */
+    private serverAvailable(): Promise<boolean> {
+        this.serverSpeech ??= import("@/app/lib/mikeApi")
+            .then(({ getVoiceOptions }) => getVoiceOptions())
+            .then((options) => !!options.operator.transcription)
+            .catch(() => {
+                this.serverSpeech = null;
+                return false;
+            });
+        return this.serverSpeech;
+    }
+
     private async plan() {
-        return planWebVoice(await this.probe(), { serverSpeech: voiceModeServerSpeech(loadVoicePreferences()) });
+        const caps = await this.probe();
+        const serverSpeech = voiceModeServerSpeech(loadVoicePreferences());
+        const result = planWebVoice(caps, { serverSpeech });
+        // Only a plan that needs the speech server checks that there is one.
+        const needsServer = result.available ? result.plan.words === "server" : result.reason === "needs-server";
+        if (!needsServer || (await this.serverAvailable())) return result;
+        return planWebVoice(caps, { serverSpeech, serverAvailable: false });
     }
 
     private async missing(plan: WebVoicePlan): Promise<string[]> {

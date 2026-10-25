@@ -21,6 +21,33 @@ Differences from this plan, as built:
 - Headless Chromium crashes on `speechSynthesis.speak` and on
   `SpeechRecognition.available`; the silent voice prime is skipped under
   automation, and recognition is asked about only where tier C could apply.
+
+## Owner decisions (2026-10-25)
+
+- **Next priority: full-duplex barge-in.** "Tap to interrupt" stays on the web
+  for now ("if it's needed for web I guess, but not ideally"); automatic
+  barge-in while an answer plays (phase 2 below) is the next thing to build.
+- **Server speech is opt-in.** The deployment's speech server is used by voice
+  mode in a browser only when the person turns it on in Settings → Voice
+  (`voiceMode.serverSpeech`, default off). No path falls back to it silently:
+  `planWebVoice` returns tier D only when the setting is on, and the engine
+  uses the server only for a tier D plan. Where the deployment has no speech
+  server the setting is hidden, so a browser that needs the server is told
+  "Voice mode isn’t available in this browser." instead of being pointed to
+  that setting (the engine asks `/audio/options` only when a plan would need
+  the server).
+- **Phone browsers get a prompt, not a block.** The voice button stays. On an
+  iPhone, iPad or Android phone browser (not the native app, not a computer),
+  the first tap opens a modal (`VoiceAppModal`): voice mode works best in the
+  app, with "Get the app" (shown only when `appUrl` is set in
+  `packages/brand/brand.json`; the stock install has none, as the app is
+  distributed through enterprise MDM) and "Use voice mode in this browser",
+  which continues into the usual consent and download flow. That choice is
+  remembered (`voiceMode.phoneBrowser`), after which the button starts voice
+  mode directly.
+- **Models still download from Hugging Face** after consent (pinned revisions
+  with checksums), as built in phase 1.
+
 Read with `docs/voice-chat.md` (the native design; its "Browser" section at
 L704–724 is refined here) and `docs/voice-chat-contract.md` (the contract the
 web engine implements unchanged).

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     SAFARI_WEBGPU_HINT,
     WEB_VOICE_NEEDS_SERVER_MESSAGE,
+    WEB_VOICE_NO_SERVER_MESSAGE,
     modelBytes,
     planWebVoice,
     probeVoiceCapabilities,
@@ -191,6 +192,20 @@ describe("planWebVoice", () => {
             const result = planWebVoice(caps({ ...lighter, onDeviceRecognition: true }), local);
             expect(result).toMatchObject({ available: true, plan: { tier: "C", words: "web-speech", speaking: "system", models: ["vad"] } });
         }
+    });
+
+    it("says voice mode is unavailable, not to change a hidden setting, when the deployment has no speech server", () => {
+        for (const serverSpeech of [false, true]) {
+            expect(planWebVoice(caps({ appleMobile: true }), { serverSpeech, serverAvailable: false })).toEqual({
+                available: false,
+                reason: "needs-server",
+                message: WEB_VOICE_NO_SERVER_MESSAGE,
+            });
+        }
+        expect(WEB_VOICE_NO_SERVER_MESSAGE).not.toMatch(/Settings/);
+        expect(planWebVoice(caps({ appleMobile: true }), { serverSpeech: false, serverAvailable: true })).toMatchObject({
+            message: WEB_VOICE_NEEDS_SERVER_MESSAGE,
+        });
     });
 
     it("uses the speech server only when the person has allowed it (D)", () => {

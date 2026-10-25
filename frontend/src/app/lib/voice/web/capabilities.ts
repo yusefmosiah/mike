@@ -167,11 +167,16 @@ export const SAFARI_WEBGPU_HINT = "Turning on WebGPU in Safari’s Feature Flags
 
 export const WEB_VOICE_UNSUPPORTED_MESSAGE =
     "Voice mode needs a microphone and a newer browser. Try the latest Chrome, Edge, Firefox or Safari.";
+/** For a browser that needs the speech server when the deployment has none: Settings has nothing to turn on. */
+export const WEB_VOICE_NO_SERVER_MESSAGE = "Voice mode isn’t available in this browser.";
 export const WEB_VOICE_NEEDS_SERVER_MESSAGE =
     "This browser cannot turn speech into text on this device. To use voice mode here, allow the speech server in Settings → Voice.";
 
 /** How voice mode runs in this browser, or why it cannot. */
-export function planWebVoice(caps: VoiceCapabilities, options: { serverSpeech: boolean }): WebVoicePlanResult {
+export function planWebVoice(
+    caps: VoiceCapabilities,
+    options: { serverSpeech: boolean; serverAvailable?: boolean },
+): WebVoicePlanResult {
     if (!caps.basics) return { available: false, reason: "unsupported", message: WEB_VOICE_UNSUPPORTED_MESSAGE };
     const lighter = caps.appleMobile || caps.lowMemory || caps.priorCrash;
     const gpu = caps.webgpu === "usable" && !caps.webkit;
@@ -218,6 +223,10 @@ export function planWebVoice(caps: VoiceCapabilities, options: { serverSpeech: b
                 sentence: "Voice mode uses this browser’s on-device speech recognition and your system’s voice. What you say stays on this device.",
             },
         };
+    }
+    // The speech server is used only when the person allowed it, and only if the deployment has one.
+    if (options.serverAvailable === false) {
+        return { available: false, reason: "needs-server", message: WEB_VOICE_NO_SERVER_MESSAGE };
     }
     if (!options.serverSpeech) return { available: false, reason: "needs-server", message: WEB_VOICE_NEEDS_SERVER_MESSAGE };
     const speaking: SpeakingEngine = localVoice ?? "server";

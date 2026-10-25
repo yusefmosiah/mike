@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     startOnDeviceRecognition: vi.fn(),
     transcribeAudio: vi.fn(),
     synthesizeSpeech: vi.fn(),
+    getVoiceOptions: vi.fn(),
     webVoiceSupported: vi.fn(),
 }));
 
@@ -54,6 +55,7 @@ vi.mock("../browserSpeech", () => ({
 vi.mock("@/app/lib/mikeApi", () => ({
     transcribeAudio: mocks.transcribeAudio,
     synthesizeSpeech: mocks.synthesizeSpeech,
+    getVoiceOptions: mocks.getVoiceOptions,
 }));
 vi.mock("./prime", () => ({ takePrimedAudio: () => mocks.primed }));
 vi.mock("./support", () => ({ webVoiceSupported: mocks.webVoiceSupported }));
@@ -177,6 +179,7 @@ beforeEach(() => {
     mocks.consent.clear();
     mocks.primed = null;
     for (const mock of Object.values(mocks)) if (typeof mock === "function" && "mockReset" in mock) (mock as ReturnType<typeof vi.fn>).mockReset();
+    mocks.getVoiceOptions.mockResolvedValue({ operator: { transcription: { model: "m" }, speech: null } });
     mocks.sileroCached.mockImplementation(async () => mocks.cached);
     mocks.downloadSilero.mockImplementation(async (progress?: (f: number) => void) => {
         progress?.(0.5);
@@ -228,7 +231,37 @@ describe("WebVoiceBackend status and setup", () => {
         const status = await backend.status();
         expect(status.available).toBe(false);
         expect(status.missing).toEqual([]);
-        expect(status.unavailableMessage).toMatch(/speech server/);
+        expect(status.unavailableMessage).toMatch(/Settings/);
+    });
+
+    it("says voice mode is not available, not to turn on a setting that is hidden, when the deployment has no speech server", async () => {
+        mocks.getVoiceOptions.mockResolvedValue({ operator: { transcription: null, speech: null } });
+        const { backend } = setup({}, { appleMobile: true });
+        const status = await backend.status();
+        expect(status.available).toBe(false);
+        expect(status.unavailableMessage).toBe("Voice mode isn’t available in this browser.");
+        expect(status.unavailableMessage).not.toMatch(/Settings/);
+        expect(mocks.getVoiceOptions).toHaveBeenCalledTimes(1);
+        await backend.status();
+        expect(mocks.getVoiceOptions).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats a speech server it cannot ask about as none, and asks again later", async () => {
+        mocks.getVoiceOptions.mockRejectedValueOnce(new Error("offline"));
+        const { backend } = setup({}, { appleMobile: true });
+        expect((await backend.status()).unavailableMessage).toMatch(/isn’t available/);
+        expect((await backend.status()).unavailableMessage).toMatch(/Settings/);
+    });
+
+    it("never falls back to the speech server on its own, and ignores an allowance when the deployment has none", async () => {
+        const { backend } = setup({}, { appleMobile: true });
+        expect((await backend.status()).available).toBe(false);
+        expect(mocks.transcribeAudio).not.toHaveBeenCalled();
+        expect(mocks.synthesizeSpeech).not.toHaveBeenCalled();
+        prefs({ voiceMode: { serverSpeech: true } });
+        mocks.getVoiceOptions.mockResolvedValue({ operator: { transcription: null, speech: null } });
+        const other = setup({}, { appleMobile: true });
+        expect((await other.backend.status()).available).toBe(false);
     });
 });
 
