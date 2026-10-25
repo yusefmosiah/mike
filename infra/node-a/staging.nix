@@ -395,6 +395,17 @@ in
     email = "staging@${domain}";
     globalConfig = ''
       servers {
+        # The OVH load balancer (147.135.24.51) connects from 10.88.0.0/16
+        # (its /natIp) and sends a PROXY header naming the real peer, here
+        # Cloudflare. Only that range may set the address; a header from
+        # anyone else is ignored and the connection still accepted. Caddy
+        # listens dual-stack, so the range is also written IPv4-mapped.
+        listener_wrappers {
+          proxy_protocol {
+            allow 10.88.0.0/16 ::ffff:10.88.0.0/112
+          }
+          tls
+        }
         trusted_proxies static ${lib.concatStringsSep " " cloudflareRanges}
         client_ip_headers CF-Connecting-IP
       }
