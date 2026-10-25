@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyDarkMode } from "./theme";
+import { applyDarkMode, followDarkMode } from "./theme";
 
 afterEach(() => {
     vi.unstubAllGlobals();
@@ -24,5 +24,42 @@ describe("applyDarkMode", () => {
     it("does nothing when rendered without a document", () => {
         vi.stubGlobal("document", undefined);
         expect(() => applyDarkMode(true)).not.toThrow();
+    });
+});
+
+describe("followDarkMode", () => {
+    function stubSystem(dark: boolean) {
+        const listeners = new Set<() => void>();
+        const query = {
+            matches: dark,
+            addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+            removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+        };
+        vi.stubGlobal("matchMedia", () => query);
+        return {
+            set(next: boolean) {
+                query.matches = next;
+                listeners.forEach((fn) => fn());
+            },
+            listeners,
+        };
+    }
+
+    it("applies an explicit choice whatever the device says", () => {
+        stubSystem(true);
+        followDarkMode(false);
+        expect(document.documentElement.classList.contains("dark")).toBe(false);
+    });
+
+    it("follows the device, including when it switches", () => {
+        const system = stubSystem(true);
+        const stop = followDarkMode(null);
+        expect(document.documentElement.classList.contains("dark")).toBe(true);
+        system.set(false);
+        expect(document.documentElement.classList.contains("dark")).toBe(false);
+        stop();
+        expect(system.listeners.size).toBe(0);
+        system.set(true);
+        expect(document.documentElement.classList.contains("dark")).toBe(false);
     });
 });

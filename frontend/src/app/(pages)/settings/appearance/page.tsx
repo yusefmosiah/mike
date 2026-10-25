@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { userFacingApiError } from "@/app/lib/userFacingError";
+import type { DarkModePreference } from "@/app/lib/theme";
 import {
   SettingsDescription,
   SettingsLabel,
@@ -10,30 +11,48 @@ import {
 import { SettingsCard } from "@/app/components/settings/SettingsCard";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
-import { ToggleSwitchUI } from "@/shared/ui/ToggleSwitchUI";
+import { ModalSegmentedToggle } from "@/app/components/modals/ModalSegmentedToggle";
+
+type Appearance = "light" | "dark" | "system";
+
+const APPEARANCE_OPTIONS: { value: Appearance; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
+
+function toAppearance(preference: DarkModePreference): Appearance {
+  if (preference === null) return "system";
+  return preference ? "dark" : "light";
+}
+
+function toPreference(appearance: Appearance): DarkModePreference {
+  if (appearance === "system") return null;
+  return appearance === "dark";
+}
 
 export default function AppearancePage() {
   const { profile, updateDarkMode } = useUserProfile();
-  const [savingDarkMode, setSavingDarkMode] = useState(false);
-  const [darkModeError, setDarkModeError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!profile) return null;
 
-  const handleDarkModeToggle = async (enabled: boolean) => {
-    if (savingDarkMode) return;
-    setSavingDarkMode(true);
-    setDarkModeError(null);
+  const handleChange = async (appearance: Appearance) => {
+    if (saving || appearance === toAppearance(profile.darkMode)) return;
+    setSaving(true);
+    setError(null);
     try {
-      await updateDarkMode(enabled);
-    } catch (toggleError) {
-      setDarkModeError(
+      await updateDarkMode(toPreference(appearance));
+    } catch (changeError) {
+      setError(
         userFacingApiError(
-          toggleError,
+          changeError,
           "Could not update the appearance setting.",
         ),
       );
     } finally {
-      setSavingDarkMode(false);
+      setSaving(false);
     }
   };
 
@@ -43,23 +62,25 @@ export default function AppearancePage() {
       <SettingsCard>
         <SettingsRow>
           <div className="min-w-0 space-y-1">
-            <SettingsLabel>Dark mode</SettingsLabel>
+            <SettingsLabel>Theme</SettingsLabel>
             <SettingsDescription>
-              Use a darker color palette throughout the app.
+              System matches your device&apos;s light or dark setting.
             </SettingsDescription>
-            {darkModeError && (
+            {error && (
               <p role="alert" className="text-xs text-red-600">
-                {darkModeError}
+                {error}
               </p>
             )}
           </div>
-          <ToggleSwitchUI
-            checked={profile.darkMode === true}
-            disabled={savingDarkMode}
-            aria-busy={savingDarkMode}
-            aria-label="Dark mode"
-            onCheckedChange={(checked) => void handleDarkModeToggle(checked)}
-          />
+          <div role="group" aria-label="Theme" aria-busy={saving}>
+            <ModalSegmentedToggle
+              value={toAppearance(profile.darkMode)}
+              onChange={(value) => void handleChange(value)}
+              options={APPEARANCE_OPTIONS}
+              disabled={saving}
+              className="w-full sm:w-72"
+            />
+          </div>
         </SettingsRow>
       </SettingsCard>
     </section>

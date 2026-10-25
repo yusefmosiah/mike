@@ -577,6 +577,21 @@ describe("user.routes", () => {
             expect(res.body.darkMode).toBe(true);
         });
 
+        it("accepts null, to follow the device's appearance", async () => {
+            dbState.tables.user_profiles = {
+                data: profileRow({ dark_mode: null }),
+                error: null,
+            };
+
+            const res = await request(app)
+                .patch("/user/profile")
+                .set(...AUTH)
+                .send({ darkMode: null });
+
+            expect(res.status).toBe(200);
+            expect(res.body.darkMode).toBeNull();
+        });
+
         it("rejects a non-boolean darkMode", async () => {
             const res = await request(app)
                 .patch("/user/profile")

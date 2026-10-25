@@ -57,6 +57,9 @@ interface Props {
  */
 export const COLLAPSED_PROMPT_HEIGHT_PX = 240;
 
+/** Fades a folded prompt's last three lines out. */
+const FOLD_MASK = "linear-gradient(to bottom, black calc(100% - 3rem), transparent)";
+
 export function UserMessage({
     content,
     files,
@@ -202,7 +205,7 @@ export function UserMessage({
                             Editing below
                         </span>
                     )}
-                    <div className="relative">
+                    <div>
                         <p
                             ref={textRef}
                             id={messageId ? `prompt-${messageId}` : undefined}
@@ -212,18 +215,16 @@ export function UserMessage({
                                     ? {
                                           maxHeight: COLLAPSED_PROMPT_HEIGHT_PX,
                                           overflow: "hidden",
+                                          // The text itself fades, so the fold
+                                          // matches the bubble in either theme.
+                                          maskImage: FOLD_MASK,
+                                          WebkitMaskImage: FOLD_MASK,
                                       }
                                     : undefined
                             }
                         >
                             {content}
                         </p>
-                        {folded && (
-                            <div
-                                aria-hidden="true"
-                                className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-gray-100 to-transparent"
-                            />
-                        )}
                     </div>
                     {foldable && (
                         <div className="mt-1 flex justify-end">

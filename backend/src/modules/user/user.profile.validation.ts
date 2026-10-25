@@ -208,7 +208,7 @@ export function validateProfilePayload(body: unknown):
         last_selected_reasoning_level?: string | null;
         legal_research_us?: boolean;
         quick_actions_visible?: boolean;
-        dark_mode?: boolean;
+        dark_mode?: boolean | null;
         project_memory_default?: boolean;
         background_agents?: boolean;
         updated_at: string;
@@ -373,10 +373,10 @@ export function validateProfilePayload(body: unknown):
     }
 
     if ("darkMode" in raw) {
-        if (typeof raw.darkMode !== "boolean") {
+        if (typeof raw.darkMode !== "boolean" && raw.darkMode !== null) {
             return {
                 ok: false,
-                detail: "darkMode must be a boolean",
+                detail: "darkMode must be a boolean or null",
             };
         }
         update.dark_mode = raw.darkMode;

@@ -840,7 +840,8 @@ export interface UserProfile {
     mfaOnLogin: boolean;
     legalResearchUs: boolean;
     quickActionsVisible: boolean;
-    darkMode: boolean;
+    /** Null follows the device's light or dark setting. */
+    darkMode: boolean | null;
     projectMemoryDefault: boolean;
     backgroundAgents: boolean;
     openRouterModels: string[];
@@ -955,7 +956,7 @@ export async function updateUserProfile(payload: {
     lastSelectedReasoningLevel?: NonNullable<Message["reasoning"]>;
     legalResearchUs?: boolean;
     quickActionsVisible?: boolean;
-    darkMode?: boolean;
+    darkMode?: boolean | null;
     projectMemoryDefault?: boolean;
     backgroundAgents?: boolean;
     openRouterModels?: string[];

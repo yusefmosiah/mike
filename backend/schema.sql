@@ -57,7 +57,8 @@ create table if not exists public.user_profiles (
   mfa_on_login boolean not null default false,
   legal_research_us boolean not null default true,
   quick_actions_visible boolean not null default true,
-  dark_mode boolean not null default false,
+  -- Null follows the device's light or dark setting.
+  dark_mode boolean default null,
   -- Whether projects this user creates start with shared memory enabled. Any
   -- project owner can still turn a given project's memory on or off later.
   project_memory_default boolean not null default true,
@@ -8405,5 +8406,6 @@ insert into public.schema_migrations (filename) values
   ('20261022_05_agent_messaging.sql'),
   ('20261024_01_html_upload_type.sql'),
   ('20261024_02_publications.sql'),
-  ('20261024_03_publication_sign_in.sql')
+  ('20261024_03_publication_sign_in.sql'),
+  ('20261025_01_dark_mode_follows_system.sql')
 on conflict (filename) do nothing;

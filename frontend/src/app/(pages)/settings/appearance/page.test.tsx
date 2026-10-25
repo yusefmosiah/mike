@@ -5,7 +5,7 @@ import AppearancePage from "./page";
 
 const { updateDarkMode, profile } = vi.hoisted(() => ({
     updateDarkMode: vi.fn(),
-    profile: { darkMode: false },
+    profile: { darkMode: false as boolean | null },
 }));
 
 vi.mock("@/app/contexts/UserProfileContext", () => ({
@@ -22,21 +22,33 @@ describe("AppearancePage", () => {
         profile.darkMode = false;
     });
 
-    it("saves dark mode without rendering a decorative card icon", async () => {
+    it("offers light, dark and system, without a decorative card icon", async () => {
         const user = userEvent.setup();
         const { container } = render(<AppearancePage />);
 
         expect(
             screen.getByRole("heading", { name: "Appearance" }),
         ).toBeVisible();
-        expect(screen.getByText("Dark mode")).toBeVisible();
         expect(container.querySelector("svg")).toBeNull();
+        expect(screen.getByRole("button", { name: "Light" })).toHaveAttribute(
+            "aria-pressed",
+            "true",
+        );
 
-        const toggle = screen.getByRole("switch", { name: "Dark mode" });
-        expect(toggle).toHaveAttribute("aria-checked", "false");
-
-        await user.click(toggle);
+        await user.click(screen.getByRole("button", { name: "Dark" }));
         expect(updateDarkMode).toHaveBeenCalledWith(true);
+
+        await user.click(screen.getByRole("button", { name: "System" }));
+        expect(updateDarkMode).toHaveBeenLastCalledWith(null);
+    });
+
+    it("shows System as chosen when the profile follows the device", () => {
+        profile.darkMode = null;
+        render(<AppearancePage />);
+        expect(screen.getByRole("button", { name: "System" })).toHaveAttribute(
+            "aria-pressed",
+            "true",
+        );
     });
 
     it("reports a failed change without leaking the raw error", async () => {
@@ -44,7 +56,7 @@ describe("AppearancePage", () => {
         updateDarkMode.mockRejectedValue(new Error("pg: connection refused"));
         render(<AppearancePage />);
 
-        await user.click(screen.getByRole("switch", { name: "Dark mode" }));
+        await user.click(screen.getByRole("button", { name: "Dark" }));
         await waitFor(() =>
             expect(screen.getByRole("alert")).toHaveTextContent(
                 "Could not update the appearance setting.",
@@ -52,5 +64,4 @@ describe("AppearancePage", () => {
         );
         expect(screen.queryByText(/connection refused/i)).not.toBeInTheDocument();
     });
-
 });

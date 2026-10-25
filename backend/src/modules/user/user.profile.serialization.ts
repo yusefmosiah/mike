@@ -52,7 +52,8 @@ export function serializeProfile(
         mfaOnLogin: row.mfa_on_login === true,
         legalResearchUs: row.legal_research_us !== false,
         quickActionsVisible: row.quick_actions_visible !== false,
-        darkMode: row.dark_mode === true,
+        // Null follows the device's light or dark setting.
+        darkMode: typeof row.dark_mode === "boolean" ? row.dark_mode : null,
         projectMemoryDefault: row.project_memory_default !== false,
         backgroundAgents: row.background_agents === true,
         ...Object.fromEntries(

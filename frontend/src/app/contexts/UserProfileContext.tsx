@@ -32,7 +32,10 @@ import {
     parseTabularChatSelectionKey,
 } from "@/app/lib/mikeApi";
 import type { Message } from "@/app/components/shared/types";
-import { applyDarkMode } from "@/app/lib/theme";
+import {
+    followDarkMode,
+    type DarkModePreference,
+} from "@/app/lib/theme";
 import { publishTabularChatSettingsUpdate } from "@/app/lib/tabularChatSettingsEvents";
 import {
     clearConfiguredModels,
@@ -63,7 +66,8 @@ interface UserProfile {
     openRouterModels: string[];
     vercelModels: string[];
     openCodeGoModels: string[];
-    darkMode: boolean;
+    /** Null follows the device's light or dark setting. */
+    darkMode: DarkModePreference;
     projectMemoryDefault: boolean;
     backgroundAgents: boolean;
     apiKeys: ApiKeyState;
@@ -106,7 +110,7 @@ interface UserProfileContextType {
     updateOpenRouterModels: (models: string[]) => Promise<boolean>;
     updateVercelModels: (models: string[]) => Promise<boolean>;
     updateOpenCodeGoModels: (models: string[]) => Promise<boolean>;
-    updateDarkMode: (enabled: boolean) => Promise<void>;
+    updateDarkMode: (preference: DarkModePreference) => Promise<void>;
     updateProjectMemoryDefault: (enabled: boolean) => Promise<void>;
     updateBackgroundAgents: (enabled: boolean) => Promise<boolean>;
     updateApiKey: (
@@ -240,7 +244,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 openRouterModels: [],
                 vercelModels: [],
                 openCodeGoModels: [],
-                darkMode: false,
+                darkMode: null,
                 projectMemoryDefault: true,
                 backgroundAgents: false,
                 apiKeys: emptyApiKeys(),
@@ -276,9 +280,9 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         }
     }, [isAuthenticated, userId, loadProfile]);
 
-    useEffect(() => {
-        applyDarkMode(profile?.darkMode === true);
-    }, [profile?.darkMode]);
+    // Until a profile loads, and when signed out, follow the device.
+    const darkMode = profile ? profile.darkMode : null;
+    useEffect(() => followDarkMode(darkMode), [darkMode]);
 
     const updateDisplayName = useCallback(
         async (displayName: string): Promise<boolean> => {
@@ -546,22 +550,22 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     );
 
     const updateDarkMode = useCallback(
-        async (enabled: boolean): Promise<void> => {
+        async (preference: DarkModePreference): Promise<void> => {
             if (!user) throw new Error("Sign in to update Dark Mode.");
-            const previous = profile?.darkMode === true;
-            applyDarkMode(enabled);
+            const previous = profile ? profile.darkMode : null;
+            setProfile((prev) => (prev ? { ...prev, darkMode: preference } : null));
             try {
-                const updated = await updateUserProfile({ darkMode: enabled });
+                const updated = await updateUserProfile({ darkMode: preference });
                 const normalized = toProfile(updated);
                 setProfile((prev) =>
-                    prev ? { ...prev, ...normalized, darkMode: enabled } : null,
+                    prev ? { ...prev, ...normalized, darkMode: preference } : null,
                 );
             } catch (error) {
-                applyDarkMode(previous);
+                setProfile((prev) => (prev ? { ...prev, darkMode: previous } : null));
                 throw error;
             }
         },
-        [user, profile?.darkMode],
+        [user, profile],
     );
 
     const updateProjectMemoryDefault = useCallback(
