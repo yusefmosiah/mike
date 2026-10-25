@@ -20,8 +20,10 @@ function detailText(event: CodeCellEvent): string | null {
         parts.push(`${event.tool_calls} ${event.tool_calls === 1 ? "step" : "steps"}`);
     }
     if (typeof event.duration_ms === "number") {
-        const seconds = event.duration_ms / 1000;
-        parts.push(seconds < 10 ? `${seconds.toFixed(1)} s` : `${Math.round(seconds)} s`);
+        // Only a run long enough to notice is worth saying.
+        if (event.duration_ms >= 10_000) {
+            parts.push(`${Math.round(event.duration_ms / 1000)} s`);
+        }
     }
     return parts.length ? parts.join(" · ") : null;
 }

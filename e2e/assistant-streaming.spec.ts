@@ -124,14 +124,13 @@ for (const scope of ["assistant", "project", "tabular"] as const) {
                     await input.press("ControlOrMeta+Enter");
                     if (streamKind === "reasoning" && turn === 2) {
                         await page.waitForFunction(() => Boolean((window as Window & { finishReasoning?: () => void }).finishReasoning), undefined, { timeout: 180_000 });
-                        // Thinking starts closed; opened while it streams, it
-                        // shows the collapsed window.
+                        // Thinking starts closed; the line itself opens it.
                         const disclosure = page.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\.$/ }).last();
                         await expect(disclosure).toHaveAttribute("aria-expanded", "false");
                         await page.setViewportSize({ width: 480, height: 720 });
                         await disclosure.click();
                         await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-                        await expect(page.getByRole("button", { name: "Expand thought process", exact: true }).last()).toBeVisible();
+                        await expect(page.getByRole("button", { name: /show (more|less)/i })).toHaveCount(0);
                         await disclosure.click();
                         await expect(disclosure).toHaveAttribute("aria-expanded", "false");
                         await page.setViewportSize({ width: 1280, height: 720 });

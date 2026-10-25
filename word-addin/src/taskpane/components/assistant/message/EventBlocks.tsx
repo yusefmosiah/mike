@@ -14,7 +14,6 @@ const THINKING_PHRASES = [
   "Reviewing...",
   "Reasoning...",
 ];
-const REASONING_COLLAPSED_MAX_HEIGHT_REM = 9;
 
 function EventConnector(): React.ReactElement {
   return (
@@ -65,17 +64,7 @@ export function ReasoningBlock({
   isStreaming: boolean;
   showConnector?: boolean;
 }): React.ReactElement {
-  const {
-    contentRef,
-    isContentOpen,
-    isExpanded,
-    isOverflowing,
-    setIsExpanded,
-    toggleContent,
-    windowRef,
-    onWindowScroll,
-    windowScroll,
-  } = useReasoningDisclosure(isStreaming);
+  const { isContentOpen, toggleContent } = useReasoningDisclosure();
   const [thinkingIndex, setThinkingIndex] = useState(0);
 
   useEffect(() => {
@@ -85,8 +74,6 @@ export function ReasoningBlock({
     }, 2000);
     return () => window.clearInterval(interval);
   }, [isStreaming]);
-
-  const isCollapsed = isContentOpen && isOverflowing && !isExpanded;
 
   return (
     <EventBlock
@@ -113,63 +100,9 @@ export function ReasoningBlock({
       </button>
       {isContentOpen && (
         <div className="mt-2">
-          <div className="relative">
-            <div
-              ref={windowRef}
-              onScroll={onWindowScroll}
-              // Collapsed, the window scrolls: the bottom padding lifts the
-              // newest line clear of the fade and the expand button.
-              className={
-                isCollapsed
-                  ? "overflow-y-auto pb-10 [scrollbar-width:none]"
-                  : undefined
-              }
-              style={
-                isCollapsed
-                  ? { maxHeight: `${REASONING_COLLAPSED_MAX_HEIGHT_REM}rem` }
-                  : undefined
-              }
-            >
-              <div ref={contentRef}>
-                <Markdown className="font-serif text-sm leading-6 text-gray-400 [&_*]:text-gray-400">
-                  {text}
-                </Markdown>
-              </div>
-            </div>
-            {isCollapsed && (
-              <>
-                {windowScroll !== "start" && (
-                  <div className="content-top-fade pointer-events-none absolute inset-x-0 top-0 h-10" />
-                )}
-                <div className="content-bottom-fade pointer-events-none absolute inset-x-0 bottom-0 h-10" />
-                {/* The whole faded strip is the target, not just its chevron. */}
-                <button
-                  type="button"
-                  onClick={() => setIsExpanded(true)}
-                  className="absolute inset-x-0 bottom-0 z-10 flex h-10 items-end justify-center pb-1.5 font-sans text-xs text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
-                  aria-label="Expand thought process"
-                >
-                  <span className="inline-flex items-center gap-1" aria-hidden="true">
-                    Show more
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </span>
-                </button>
-              </>
-            )}
-          </div>
-          {isOverflowing && isContentOpen && isExpanded && (
-            <button
-              type="button"
-              onClick={() => setIsExpanded(false)}
-              className="mt-1 flex min-h-8 w-full items-center justify-center gap-1 rounded-md font-sans text-xs text-gray-500 transition-colors hover:bg-gray-100/80 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
-              aria-label="Minimise thought process"
-            >
-              <span className="inline-flex items-center gap-1" aria-hidden="true">
-                Show less
-                <ChevronDown className="h-3.5 w-3.5 rotate-180" />
-              </span>
-            </button>
-          )}
+          <Markdown className="font-serif text-sm leading-6 text-gray-400 [&_*]:text-gray-400">
+            {text}
+          </Markdown>
         </div>
       )}
     </EventBlock>

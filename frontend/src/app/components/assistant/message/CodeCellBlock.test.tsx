@@ -15,14 +15,25 @@ describe("CodeCellBlock", () => {
     it("shows steps and time when done, and the code and result when opened", () => {
         render(
             <CodeCellBlock
-                event={{ type: "code_cell", call_id: "p1", code, status: "ok", output: "1", tool_calls: 3, duration_ms: 1234 }}
+                event={{ type: "code_cell", call_id: "p1", code, status: "ok", output: "1", tool_calls: 3, duration_ms: 12_400 }}
             />,
         );
-        const toggle = screen.getByRole("button", { name: /Computed\s?· 3 steps · 1\.2 s/ });
+        const toggle = screen.getByRole("button", { name: /Computed\s?· 3 steps · 12 s/ });
         fireEvent.click(toggle);
         expect(toggle).toHaveAttribute("aria-expanded", "true");
         expect(screen.getByText(/print\(len\(docs\)\)/)).toBeInTheDocument();
         expect(screen.getByText("Result")).toBeInTheDocument();
+    });
+
+    it("leaves the run time off when it is under ten seconds", () => {
+        render(
+            <CodeCellBlock
+                event={{ type: "code_cell", call_id: "p1", code, status: "ok", output: "1", tool_calls: 3, duration_ms: 9_900 }}
+            />,
+        );
+        const toggle = screen.getByRole("button", { name: /Computed/ });
+        expect(toggle).toHaveTextContent(/3 steps/);
+        expect(toggle).not.toHaveTextContent(/\d\s?s\b(?!teps)/);
     });
 
     it("names a cell that stopped on an error", () => {

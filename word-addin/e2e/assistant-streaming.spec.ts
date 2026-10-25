@@ -65,8 +65,12 @@ test("sixteen exchanges keep reasoning, resizing and disclosure updates bounded"
       if (turn === 10) {
         await page.waitForFunction(() => Boolean((window as Window & { finishReasoning?: () => void }).finishReasoning), undefined, { timeout: 180_000 });
         const assistant = page.locator("[data-assistant-message-id]").last();
-        // Thinking opens in full by default.
-        await expect(assistant.getByRole("button", { name: "Minimise thought process", exact: true })).toBeVisible();
+        // Thinking starts closed; its line opens it in full.
+        const disclosure = assistant.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\.$/ });
+        await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+        await disclosure.click();
+        await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+        await expect(assistant.getByRole("button", { name: /show (more|less)/i })).toHaveCount(0);
         await page.setViewportSize({ width: 320, height: 640 });
         // The fetch reader can finish before Word's batched publication paints
         // the final chunk. Wait for that content, then use the pane's explicit
@@ -77,8 +81,6 @@ test("sixteen exchanges keep reasoning, resizing and disclosure updates bounded"
         await expect.poll(() => page.getByTestId("messages-container").evaluate((element) =>
           Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight),
         )).toBeLessThan(2);
-        await assistant.getByRole("button", { name: "Minimise thought process", exact: true }).click();
-        const disclosure = assistant.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\.$/ });
         await disclosure.click();
         await expect(disclosure).toHaveAttribute("aria-expanded", "false");
         await disclosure.click();

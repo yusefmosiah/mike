@@ -121,8 +121,13 @@ describe("AssistantMessage timeline", () => {
         expect(screen.getByText("Compared the lease and the deed.")).toBeVisible();
         fireEvent.click(screen.getByRole("button", { name: /Completed in 2 steps/ }));
         // The two thoughts read as one, so their summaries do too.
-        const thought = screen.getByRole("button", { name: /Checked notice\.\s+And the deed\..*thought process/ });
+        const thought = screen.getByRole("button", { name: /Checked notice\.\s+And the deed\./ });
         expect(thought).toBeInTheDocument();
+        expect(thought).not.toHaveTextContent(/thought process/i);
+        // Opening it shows the full text, with no second level of buttons.
+        fireEvent.click(thought);
+        expect(thought).toHaveAttribute("aria-expanded", "true");
+        expect(screen.queryByRole("button", { name: /show (more|less)|thought process/i })).toBeNull();
     });
 
     it("leaves the run summary off when the turn has more than one run", () => {

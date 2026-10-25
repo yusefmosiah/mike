@@ -6,7 +6,7 @@ test.use({ storageState: { cookies: [], origins: [] }, actionTimeout: 30_000 });
 // How a streamed answer scrolls, against a scripted backend in the browser:
 // the view follows the newest text, stays where the reader scrolled to, and
 // never jumps when the answer finishes; a short answer ends right above the
-// composer; the collapsed thought process shows its newest lines; Enter in
+// composer; a streaming thought opens in full from its line; Enter in
 // the composer starts a new line.
 
 const CHUNKS = 90;
@@ -228,30 +228,19 @@ for (const [name, viewport] of [
             expect((await scrollState(page)).fromBottom).toBeLessThanOrEqual(4);
         });
 
-        test("shows the newest reasoning in the collapsed thought process while it streams", async ({ page }) => {
+        test("opens a streaming thought in full from its line", async ({ page }) => {
             await stubBackend(page, { reasoning: true });
             await openChat(page);
             await send(page, "Think it through.");
-            // A thought starts closed; opened while it streams, it shows the
-            // collapsed window.
-            await page.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\./ }).click();
+            // A thought starts closed; its line opens it in full.
+            const disclosure = page.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\./ });
+            await disclosure.click();
+            await expect(disclosure).toHaveAttribute("aria-expanded", "true");
             await expect(page.getByText("Thought 40 weighs the clause.")).toBeAttached({ timeout: 30_000 });
-            const result = await page.evaluate(() => new Promise<{ frames: number; hidden: string[] }>((resolve) => {
-                const newestThought = () =>
-                    [...document.querySelectorAll("p")].filter((p) => /^Thought \d+ weighs the clause\.$/.test(p.textContent ?? "")).at(-1)!;
-                const content = newestThought().parentElement!;
-                // The collapsed window: the nearest ancestor with a max height.
-                let clip = content.parentElement!;
-                while (getComputedStyle(clip).maxHeight === "none") clip = clip.parentElement!;
-                const hidden: string[] = [];
-                let frames = 0;
-                const observer = new ResizeObserver(() => {
-                    frames++;
-                    const last = newestThought();
-                    const box = clip.getBoundingClientRect();
-                    const rect = last.getBoundingClientRect();
-                    if (rect.top < box.top - 1 || rect.bottom > box.bottom + 1) hidden.push(last.textContent!);
-                });
+            // Opened, the whole thought shows: no height cap, no second level.
+            await expect(page.getByText("Thought 0 weighs the clause.")).toBeVisible();
+            await expect(page.getByRole("button", { name: /show (more|less)|thought process/i })).toHaveCount(0);
+        });
                 observer.observe(content);
                 setTimeout(() => { observer.disconnect(); resolve({ frames, hidden }); }, 1_500);
             }));
