@@ -147,3 +147,40 @@ test("a chat thread scrolls the page on a phone, under a composer that stays put
     expect(sidebar!.y).toBeGreaterThanOrEqual(0);
     expect(sidebar!.y).toBeLessThan(scroll.screen / 2);
 });
+
+// An iPad in portrait sits just above the phone layout: the sidebar is a
+// column and leaves the chat about 500px. A long model name once held the
+// composer at its full width there, so the send button ran off the screen.
+for (const [width, height] of [[768, 1024], [834, 1194]] as const) {
+    test(`the composer fits beside the open sidebar at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height });
+        await page.addInitScript(() => localStorage.setItem("sidebarOpen", "true"));
+        // Installed after mockApi's, so this answers these two paths first.
+        await mockApi(page);
+        await page.addInitScript(() => {
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = (input, init) => {
+                const url = input instanceof Request ? input.url : String(input);
+                const path = new URL(url, location.href).pathname;
+                const reply = (body: unknown) =>
+                    Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
+                if (path === "/api/user/profile") {
+                    return reply({ onboardingComplete: true, displayName: "Tablet", apiKeyStatus: {}, creditsRemaining: 100, lastSelectedChatModel: "test-model" });
+                }
+                if (path === "/api/models/configured") {
+                    return reply({ models: [{ id: "test-model", label: "A Configured Model With A Long Name 1017", source: "Configured" }] });
+                }
+                return originalFetch(input, init);
+            };
+        });
+
+        await page.goto("/assistant/chat/mobile-chat");
+        await expect(page.getByPlaceholder("How can I help?")).toBeVisible();
+        await expect(page.getByRole("button", { name: "Close sidebar" })).toBeVisible();
+
+        const send = await page.getByRole("button", { name: /^Send/ }).boundingBox();
+        expect(send, "the send button is on screen").not.toBeNull();
+        expect(send!.x + send!.width).toBeLessThanOrEqual(width);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+}

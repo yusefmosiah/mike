@@ -121,7 +121,7 @@ export function InitialView({
                 </div>
             </div>
 
-            <div className="w-full max-w-4xl justify-self-center px-0 xl:px-8">
+            <div className="w-full min-w-0 max-w-4xl justify-self-center px-0 xl:px-8">
                 <ChatInput
                     ref={chatInputRef}
                     onSubmit={onSubmit}
@@ -132,7 +132,7 @@ export function InitialView({
                 />
             </div>
 
-            <div className="min-h-0 w-full max-w-4xl justify-self-center px-0 pt-1 xl:px-8">
+            <div className="min-h-0 w-full min-w-0 max-w-4xl justify-self-center px-0 pt-1 xl:px-8">
                 <div className="text-center">
                     <p className="text-xs py-2 mb-12 text-gray-500">
                         AI can make mistakes.

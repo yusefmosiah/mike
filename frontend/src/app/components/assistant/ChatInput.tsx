@@ -255,6 +255,9 @@ function formatDictationTime(elapsedMs: number): string {
     return `${minutes}:${seconds}`;
 }
 
+/** Below this width the composer controls always hide their labels. */
+const COMPACT_CONTROLS_BELOW_PX = 430;
+
 function ChatInputForChatImpl(
     {
         onSubmit,
@@ -491,15 +494,32 @@ function ChatInputForChatImpl(
         Math.max(0, slashOptionCount - 1),
     );
 
+    // The controls drop their labels when the full row would not fit: under
+    // 430px, or narrower than the row needs with its labels (a long model
+    // name, a wider system font). The needed width is measured while the
+    // labels show and kept while they are hidden, so the row does not flip
+    // back and forth.
+    const compactControlsRef = useRef(false);
+    const fullControlsWidthRef = useRef(0);
+    const measureControls = useCallback(() => {
+        const el = controlsRef.current;
+        if (!el) return;
+        if (!compactControlsRef.current) fullControlsWidthRef.current = el.scrollWidth;
+        const compact =
+            el.clientWidth < Math.max(COMPACT_CONTROLS_BELOW_PX, fullControlsWidthRef.current);
+        if (compact === compactControlsRef.current) return;
+        compactControlsRef.current = compact;
+        setCompactControls(compact);
+    }, []);
     useEffect(() => {
         const el = controlsRef.current;
         if (!el) return;
-        const update = () => setCompactControls(el.offsetWidth < 430);
-        update();
-        const observer = new ResizeObserver(update);
+        const observer = new ResizeObserver(measureControls);
         observer.observe(el);
         return () => observer.disconnect();
-    }, []);
+    }, [measureControls]);
+    // The labels change width too (the model's name), without resizing the row.
+    useLayoutEffect(measureControls);
 
     useEffect(() => {
         if (!slashCommandsLoading) return;
