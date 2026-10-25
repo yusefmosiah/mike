@@ -277,12 +277,16 @@ export type EditAnnotation = {
 export type CourtlistenerToolEvent =
   | {
       type: "courtlistener_search_case_law";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       query: string;
       result_count: number;
       error?: string;
     }
   | {
       type: "courtlistener_get_cases";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       cluster_ids: number[];
       case_count: number;
       opinion_count: number;
@@ -297,6 +301,8 @@ export type CourtlistenerToolEvent =
     }
   | {
       type: "courtlistener_find_in_case";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       cluster_id: number | null;
       query: string;
       total_matches: number;
@@ -314,6 +320,8 @@ export type CourtlistenerToolEvent =
     }
   | {
       type: "courtlistener_read_case";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       cluster_id: number | null;
       case_name?: string | null;
       citation?: string | null;
@@ -322,6 +330,8 @@ export type CourtlistenerToolEvent =
     }
   | {
       type: "courtlistener_verify_citations";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       citation_count: number;
       match_count: number;
       error?: string;
@@ -329,6 +339,8 @@ export type CourtlistenerToolEvent =
 
 export type CaseCitationEvent = {
   type: "case_citation";
+  /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+  call_id?: string;
   cluster_id: number | null;
   case_name: string | null;
   citation: string | null;
@@ -340,6 +352,8 @@ export type CaseCitationEvent = {
 
 export type McpToolEvent = {
   type: "mcp_tool_call";
+  /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+  call_id?: string;
   connector_id: string;
   connector_name: string;
   tool_name: string;
@@ -350,6 +364,46 @@ export type McpToolEvent = {
   approval_id?: string;
   /** Bounded tool output replayed to the model after an approved call. */
   result?: string;
+};
+
+/**
+ * A short account of one step, for the person supervising the work. Its
+ * length follows the step: two words, a sentence or a paragraph.
+ * `model`: written by the working model as it acted (run_python's
+ * `summary`). `extractive`: taken from the step itself (a cell's first
+ * comment). `side_model`: written afterwards by the summariser.
+ */
+export type StepSummary = {
+  text: string;
+  source: "model" | "extractive" | "side_model";
+  /** The model that wrote it, for side_model summaries. */
+  model?: string;
+  generated_at?: string;
+};
+
+/** A web search a step ran: the query and every result it was shown. */
+export type WebSearchEvent = {
+  type: "web_search";
+  call_id?: string;
+  query: string;
+  provider?: string;
+  results: { url: string; title?: string }[];
+  error?: boolean;
+};
+
+/** A web page a step read, pinned by the hash of the text it was given. */
+export type WebFetchEvent = {
+  type: "web_fetch";
+  call_id?: string;
+  url: string;
+  title?: string;
+  /** SHA-256 of the page text, as the tool result reported it. */
+  sha256?: string;
+  /** The span of the page text the step was given. */
+  offset?: number;
+  chars_read?: number;
+  total_chars?: number;
+  error?: boolean;
 };
 
 export type AssistantEvent =
@@ -367,6 +421,8 @@ export type AssistantEvent =
     }
   | {
       type: "doc_read";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       filename: string;
       document_id?: string;
       version_id?: string | null;
@@ -374,6 +430,8 @@ export type AssistantEvent =
     }
   | {
       type: "doc_find";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       filename: string;
       document_id?: string;
       version_id?: string | null;
@@ -383,6 +441,8 @@ export type AssistantEvent =
     }
   | {
       type: "doc_created";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       filename: string;
       download_url: string;
       document_id?: string;
@@ -392,6 +452,8 @@ export type AssistantEvent =
   | { type: "doc_download"; filename: string; download_url: string }
   | {
       type: "doc_replicated";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       /** Source document being copied. */
       filename: string;
       count: number;
@@ -403,6 +465,8 @@ export type AssistantEvent =
     }
   | {
       type: "workflow_applied";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       workflow_id: string;
       title: string;
       /** A skill saved or installed from chat; absent when a workflow was read. */
@@ -412,6 +476,8 @@ export type AssistantEvent =
   | {
       /** The assistant changed a memory file; the change is one version of it. */
       type: "memory_updated";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       scope: "app" | "project";
       /** The project whose memory changed; null for app memory. */
       project_id: string | null;
@@ -423,6 +489,8 @@ export type AssistantEvent =
     }
   | {
       type: "doc_edited";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
       filename: string;
       document_id: string;
       version_id: string;
@@ -434,6 +502,8 @@ export type AssistantEvent =
   | CaseCitationEvent
   | CourtlistenerToolEvent
   | McpToolEvent
+  | WebSearchEvent
+  | WebFetchEvent
   | {
       type: "case_opinions";
       cluster_id: number;
@@ -505,6 +575,8 @@ export type CodeCellEvent = {
   output?: string;
   tool_calls?: number;
   duration_ms?: number;
+  /** What the cell does, for the person watching (see StepSummary). */
+  summary?: StepSummary;
 };
 
 /**

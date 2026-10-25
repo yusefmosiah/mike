@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
     Check,
     Copy,
@@ -19,6 +19,8 @@ import { EditCard } from "./EditCard";
 import { PreResponseWrapper } from "./PreResponseWrapper";
 import { CodeApprovalBlock } from "./message/CodeApprovalBlock";
 import { CodeCellBlock } from "./message/CodeCellBlock";
+import { WebFetchBlock, WebSearchBlock } from "./message/WebSourceBlocks";
+import { nestCellSources, sourceSummary } from "@/app/lib/stepSources";
 import { CitationCheckStatus } from "./message/CitationCheckStatus";
 import { openWebCitation } from "../shared/types";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
@@ -456,6 +458,8 @@ export function AssistantMessage({
         i: number,
         allEvents: AssistantEvent[],
         globalIdx: number,
+        /** A code cell's sources, already rendered (stepSources.ts). */
+        cellSources?: ReactNode,
     ) => {
         const nextEvent = allEvents[i + 1];
         const showConnector =
@@ -655,6 +659,25 @@ export function AssistantMessage({
         if (event.type === "code_cell") {
             return (
                 <CodeCellBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
+                    sources={cellSources}
+                />
+            );
+        }
+        if (event.type === "web_search") {
+            return (
+                <WebSearchBlock
+                    key={globalIdx}
+                    event={event}
+                    showConnector={showConnector}
+                />
+            );
+        }
+        if (event.type === "web_fetch") {
+            return (
+                <WebFetchBlock
                     key={globalIdx}
                     event={event}
                     showConnector={showConnector}
@@ -978,10 +1001,18 @@ export function AssistantMessage({
                                         "isStreaming" in event &&
                                         !!event.isStreaming,
                                 ) || pendingAskInput;
+                            // A cell's sources show under the cell, so the
+                            // steps are the cells and what stands alone.
+                            const steps = nestCellSources(g.events, g.indices);
+                            const stepEvents = steps.map((step) => step.event);
+                            const sourcesRead = wrapperIsStreaming
+                                ? null
+                                : sourceSummary(g.events);
                             return (
                                 <PreResponseWrapper
                                     key={`p-${g.indices[0]}`}
-                                    stepCount={g.events.length}
+                                    stepCount={steps.length}
+                                    detail={sourcesRead ?? undefined}
                                     shouldMinimize={
                                         pendingAskInput
                                             ? false
@@ -990,12 +1021,22 @@ export function AssistantMessage({
                                     isStreaming={wrapperIsStreaming}
                                     forceOpen={pendingAskInput}
                                 >
-                                    {g.events.map((event, i) =>
+                                    {steps.map((step, i) =>
                                         renderEvent(
-                                            event,
+                                            step.event,
                                             i,
-                                            g.events,
-                                            g.indices[i],
+                                            stepEvents,
+                                            step.index,
+                                            step.sources.length
+                                                ? step.sources.map((source, j) =>
+                                                      renderEvent(
+                                                          source.event,
+                                                          j,
+                                                          [],
+                                                          source.index,
+                                                      ),
+                                                  )
+                                                : undefined,
                                         ),
                                     )}
                                 </PreResponseWrapper>

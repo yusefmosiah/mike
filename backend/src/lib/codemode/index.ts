@@ -10,6 +10,7 @@ export { KernelManager, kernelKey, localKernelLauncher, sshKernelLauncher, type 
 export { KernelSession, type CellOutcome, type HostReply, type KernelToolSpec } from "./kernel/session";
 export {
   cellResultContent,
+  cellSummary,
   CODE_MODE_GUIDE,
   DEFAULT_CELL_TIMEOUT_MS,
   MAX_CELL_TIMEOUT_MS,

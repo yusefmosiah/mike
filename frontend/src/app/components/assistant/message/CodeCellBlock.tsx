@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
     disclosurePreference,
     rememberDisclosure,
@@ -31,18 +31,22 @@ function detailText(event: CodeCellEvent): string | null {
 }
 
 /**
- * One code-mode cell (run_python). The line says the assistant is computing
- * and, once done, how many steps it took; the steps themselves (documents
- * read, searches) are their own lines below it. Opening it shows the code and
- * what came back, for anyone who wants to check the work; the next cell then
- * opens too, until the reader closes one.
+ * One code-mode cell (run_python): one step of the work. The line says what
+ * the cell does (its summary, else that the assistant is computing) and,
+ * once done, how many calls it made. Under it, always visible, are the
+ * sources those calls touched: documents read, searches, pages, cases.
+ * Opening it shows the code and what came back, for anyone who wants to
+ * check the work; the next cell then opens too, until the reader closes one.
  */
 export function CodeCellBlock({
     event,
     showConnector,
+    sources,
 }: {
     event: CodeCellEvent;
     showConnector?: boolean;
+    /** The sources the cell's calls touched, rendered under its line. */
+    sources?: ReactNode;
 }) {
     // Opens the way the reader left the last cell (disclosurePreference.ts).
     const [open, setOpen] = useState(() => disclosurePreference("code-cell"));
@@ -52,6 +56,18 @@ export function CodeCellBlock({
     };
     const running = event.status === "running";
     const detail = running ? null : detailText(event);
+    const summary = event.summary?.text.trim();
+    // With a summary, the line says what the cell does in the model's words
+    // (or its first comment); the status moves into the detail.
+    const label = summary ? (
+        <span className="whitespace-pre-line font-normal text-gray-600">{summary}</span>
+    ) : (
+        LABEL[event.status]
+    );
+    const detailParts = [
+        summary && event.status === "failed" ? LABEL.failed : null,
+        detail,
+    ].filter(Boolean);
     return (
         <EventBlock
             showConnector={showConnector}
@@ -61,10 +77,15 @@ export function CodeCellBlock({
             <EventDisclosureButton
                 open={open}
                 onToggle={toggle}
-                label={LABEL[event.status]}
-                detail={detail ? `· ${detail}` : undefined}
+                label={label}
+                detail={detailParts.length ? `· ${detailParts.join(" · ")}` : undefined}
                 isStreaming={running}
             />
+            {sources ? (
+                <div className="mt-2 flex flex-col gap-2" role="group" aria-label="Sources this step used">
+                    {sources}
+                </div>
+            ) : null}
             {open && (
                 <div className="mt-2 flex flex-col gap-2">
                     <div>

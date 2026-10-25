@@ -1930,3 +1930,44 @@ describe("code_approval frames", () => {
     expect(events?.filter((event) => event.type === "code_approval")).toEqual([]);
   });
 });
+
+describe("step sources", () => {
+  it("carries a cell's summary through its frames", async () => {
+    const summary = { text: "Read the lease", source: "model" };
+    const events = await eventsOf([{ type: "code_cell", call_id: "c1", code: "x", status: "running", summary }]);
+    expect(events?.[0]).toMatchObject({ type: "code_cell", summary });
+  });
+
+  it("drops a summary without text or a known source", async () => {
+    const events = await eventsOf([
+      { type: "code_cell", call_id: "c1", code: "x", status: "running", summary: { text: "  ", source: "model" } },
+      { type: "code_cell", call_id: "c2", code: "x", status: "running", summary: { text: "Hi", source: "guess" } },
+    ]);
+    expect(events?.filter((event) => event.type === "code_cell").every((event) => !("summary" in event))).toBe(true);
+  });
+
+  it("names the call on the events its frames create and complete", async () => {
+    const events = await eventsOf([
+      { type: "doc_read_start", filename: "lease.docx", call_id: "c1.1" },
+      { type: "doc_read", filename: "lease.docx", document_id: "d1", call_id: "c1.1" },
+    ]);
+    expect(events?.find((event) => event.type === "doc_read")).toMatchObject({ call_id: "c1.1", document_id: "d1" });
+  });
+
+  it("records web searches and page reads, keeping only well-formed results", async () => {
+    const events = await eventsOf([
+      {
+        type: "web_search",
+        call_id: "c1.2",
+        query: "break clause",
+        results: [{ url: "https://a.example/", title: "A" }, { title: "no url" }, null],
+      },
+      { type: "web_fetch", call_id: "c1.3", url: "https://a.example/", sha256: "f00d", chars_read: 10, total_chars: 20 },
+      { type: "web_fetch", url: 7 },
+    ]);
+    expect(events?.filter((event) => event.type === "web_search" || event.type === "web_fetch")).toEqual([
+      { type: "web_search", call_id: "c1.2", query: "break clause", results: [{ url: "https://a.example/", title: "A" }] },
+      { type: "web_fetch", call_id: "c1.3", url: "https://a.example/", sha256: "f00d", chars_read: 10, total_chars: 20 },
+    ]);
+  });
+});

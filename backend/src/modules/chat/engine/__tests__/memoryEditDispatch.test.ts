@@ -48,6 +48,7 @@ it("streams and returns a memory_updated event for an edit that changed the file
   const event = {
     type: "memory_updated", scope: "project", project_id: "p1",
     version_id: "v7", version_number: 7, summary: "Added the governing law.",
+    call_id: "call-1",
   };
   expect(editMemoryFromConversation).toHaveBeenCalledWith(expect.anything(), target, JSON.parse(call.function.arguments));
   expect(write).toHaveBeenCalledWith(`data: ${JSON.stringify(event)}\n\n`);

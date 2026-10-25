@@ -5,7 +5,7 @@ import { readSseFrames } from "@/app/lib/sse";
 import { isPanelDocument } from "@/app/components/shared/types";
 import type { AssistantEvent, Citation } from "@/app/components/shared/types";
 import type { AssistantTurnHandle } from "@/app/lib/assistantTurns";
-import type { ConnectorApprovalItem } from "@mike/contracts";
+import type { ConnectorApprovalItem, StepSummary } from "@mike/contracts";
 import {
   createTurnReconnectPolicy,
   waitForReconnect,
@@ -123,6 +123,18 @@ function codeApprovalEventFrom(
 const CODE_CELL_STATUSES = new Set(["running", "ok", "failed"]);
 
 /** A `code_cell` frame, or null when its call id, code or status is missing. */
+/** Events whose own `call_id` means something else, or that no call makes. */
+const CALL_ID_EXEMPT: ReadonlySet<string> = new Set([
+  "code_cell",
+  "code_approval",
+  "subagent",
+  "content",
+  "reasoning",
+  "thinking",
+  "error",
+  "turn_usage",
+]);
+
 function codeCellEventFrom(
   data: Record<string, unknown>,
 ): Extract<AssistantEvent, { type: "code_cell" }> | null {
@@ -139,7 +151,63 @@ function codeCellEventFrom(
     ...(typeof data.output === "string" ? { output: data.output } : {}),
     ...(typeof data.tool_calls === "number" ? { tool_calls: data.tool_calls } : {}),
     ...(typeof data.duration_ms === "number" ? { duration_ms: data.duration_ms } : {}),
+    ...(stepSummaryFrom(data.summary) ? { summary: stepSummaryFrom(data.summary) } : {}),
   };
+}
+
+const STEP_SUMMARY_SOURCES = new Set(["model", "extractive", "side_model"]);
+
+function stepSummaryFrom(value: unknown): StepSummary | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const summary = value as Record<string, unknown>;
+  if (typeof summary.text !== "string" || !summary.text.trim()) return undefined;
+  if (typeof summary.source !== "string" || !STEP_SUMMARY_SOURCES.has(summary.source)) return undefined;
+  return {
+    text: summary.text,
+    source: summary.source as StepSummary["source"],
+    ...(typeof summary.model === "string" ? { model: summary.model } : {}),
+    ...(typeof summary.generated_at === "string" ? { generated_at: summary.generated_at } : {}),
+  };
+}
+
+/** A web search or page read a step made (a step source). */
+function webEventFrom(
+  data: Record<string, unknown>,
+): Extract<AssistantEvent, { type: "web_search" | "web_fetch" }> | null {
+  const callId = typeof data.call_id === "string" ? { call_id: data.call_id } : {};
+  const error = data.error === true ? { error: true } : {};
+  if (data.type === "web_search" && typeof data.query === "string") {
+    const results = Array.isArray(data.results)
+      ? data.results.flatMap((result) => {
+          const row = result as Record<string, unknown> | null;
+          if (!row || typeof row.url !== "string") return [];
+          return [{ url: row.url, ...(typeof row.title === "string" && row.title ? { title: row.title } : {}) }];
+        })
+      : [];
+    return {
+      type: "web_search",
+      ...callId,
+      query: data.query,
+      ...(typeof data.provider === "string" ? { provider: data.provider } : {}),
+      results,
+      ...error,
+    };
+  }
+  if (data.type === "web_fetch" && typeof data.url === "string") {
+    const number = (key: string) => (typeof data[key] === "number" ? { [key]: data[key] as number } : {});
+    return {
+      type: "web_fetch",
+      ...callId,
+      url: data.url,
+      ...(typeof data.title === "string" && data.title ? { title: data.title } : {}),
+      ...(typeof data.sha256 === "string" ? { sha256: data.sha256 } : {}),
+      ...number("offset"),
+      ...number("chars_read"),
+      ...number("total_chars"),
+      ...error,
+    };
+  }
+  return null;
 }
 
 const SUBAGENT_STATUSES = new Set([
@@ -412,11 +480,20 @@ export async function consumeAssistantTurnStream(
     finalizeStreamingReasoning,
     clearStreamingPlaceholders,
     pushThinkingPlaceholder,
-    pushEvent,
-    updateMatchingEvent,
     appendCancellation,
   } = sink;
   const updateLatestAssistantMessage = turn.update;
+  // The server names the tool call behind each source frame (`call_id`).
+  // Carry it onto the event the frame creates or completes, so the timeline
+  // can show a step's sources under the step.
+  let frameCallId: string | undefined;
+  const withFrameCallId = (event: AssistantEvent): AssistantEvent =>
+    frameCallId && !CALL_ID_EXEMPT.has(event.type) && !("call_id" in event && event.call_id)
+      ? ({ ...event, call_id: frameCallId } as AssistantEvent)
+      : event;
+  const pushEvent = (event: AssistantEvent) => sink.pushEvent(withFrameCallId(event));
+  const updateMatchingEvent: TurnEventSink["updateMatchingEvent"] = (predicate, updater) =>
+    sink.updateMatchingEvent(predicate, (event) => withFrameCallId(updater(event)));
 
   for await (const frame of readSseFrames(response, {
     signal,
@@ -426,6 +503,7 @@ export async function consumeAssistantTurnStream(
     },
   })) {
     const data = frame as Record<string, unknown>;
+    frameCallId = typeof data.call_id === "string" ? data.call_id : undefined;
 
     try {
         if (data.type === "stream_incarnation") {
@@ -773,6 +851,13 @@ export async function consumeAssistantTurnStream(
             output: data.output,
             cost: data.cost,
           });
+          continue;
+        }
+
+        if (data.type === "web_search" || data.type === "web_fetch") {
+          const event = webEventFrom(data);
+          if (event) pushEvent(event);
+          pushThinkingPlaceholder();
           continue;
         }
 

@@ -15,7 +15,7 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
-import type { AssistantEvent } from "@mike/contracts";
+import type { AssistantEvent, WebFetchEvent, WebSearchEvent } from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
@@ -115,6 +115,7 @@ import {
   upsertCourtlistenerCases,
   type CourtlistenerTurnState,
 } from "./courtlistenerTurnState";
+import { sourceMarks, stampCallIds, withCallId } from "./stepSources";
 import type { Db } from "../../../../lib/db";
 
 function sourceMaterialNotice(
@@ -236,7 +237,7 @@ export async function runToolCalls(
   docStore: DocStore,
   userId: string,
   db: Db,
-  write: (s: string) => void,
+  writeFrame: (s: string) => void,
   workflowStore?: WorkflowStore,
   tabularStore?: TabularCellStore,
   docIndex?: DocIndex,
@@ -297,6 +298,7 @@ export async function runToolCalls(
   caseCitationEvents: CaseCitationEvent[];
   mcpEvents: McpToolEvent[];
   memoryUpdates: MemoryUpdatedEvent[];
+  webEvents: (WebSearchEvent | WebFetchEvent)[];
 }> {
   const toolResults: unknown[] = [];
   const docsRead: {
@@ -322,6 +324,29 @@ export async function runToolCalls(
   const caseCitationEvents: CaseCitationEvent[] = [];
   const mcpEvents: McpToolEvent[] = [];
   const memoryUpdates: MemoryUpdatedEvent[] = [];
+  const webEvents: (WebSearchEvent | WebFetchEvent)[] = [];
+  // Every frame and event a call produces names the call, so the timeline
+  // can show each step's sources under the step (stepSources.ts).
+  let activeCallId: string | null = null;
+  const write = (chunk: string) => writeFrame(activeCallId ? withCallId(chunk, activeCallId) : chunk);
+  const sourceLists: unknown[][] = [
+    docsRead,
+    docsFound,
+    docsCreated,
+    docsReplicated,
+    workflowsApplied,
+    docsEdited,
+    courtlistenerEvents,
+    caseCitationEvents,
+    mcpEvents,
+    memoryUpdates,
+    webEvents,
+  ];
+  /** A web search or page read: streamed now, recorded on the message. */
+  const recordWeb = (event: WebSearchEvent | WebFetchEvent) => {
+    webEvents.push(event);
+    write(`data: ${JSON.stringify(event)}\n\n`);
+  };
   const approvalItems: AskInputItem[] = [];
   const courtState: CourtlistenerTurnState = courtlistenerState ?? {
     casesByClusterId: new Map(),
@@ -425,6 +450,9 @@ export async function runToolCalls(
   };
 
   for (const tc of toolCalls) {
+    activeCallId = tc.id;
+    const marks = sourceMarks(sourceLists);
+    try {
     let args: Record<string, unknown> = {};
     try {
       args = JSON.parse(tc.function.arguments || "{}");
@@ -1876,12 +1904,22 @@ export async function runToolCalls(
       const provider = args.provider as SearchProvider | undefined;
       try {
         const results = await webSearch(query, { limit, provider });
+        recordWeb({
+          type: "web_search",
+          query,
+          ...(provider ? { provider } : {}),
+          results: results.map((result) => ({
+            url: result.url,
+            ...(result.title ? { title: result.title } : {}),
+          })),
+        });
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
           content: JSON.stringify({ results, count: results.length }),
         });
       } catch (err) {
+        recordWeb({ type: "web_search", query, ...(provider ? { provider } : {}), results: [], error: true });
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -1950,6 +1988,15 @@ export async function runToolCalls(
         const end = Math.min(total, start + maxChars);
         const window = page.content.slice(start, end);
         const truncated = start > 0 || end < total;
+        recordWeb({
+          type: "web_fetch",
+          url: page.url,
+          ...(page.title ? { title: page.title } : {}),
+          sha256: page.contentSha256,
+          offset: start,
+          chars_read: window.length,
+          total_chars: total,
+        });
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -1974,6 +2021,7 @@ export async function runToolCalls(
           }),
         });
       } catch (err) {
+        recordWeb({ type: "web_fetch", url, error: true });
         toolResults.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -2400,6 +2448,10 @@ export async function runToolCalls(
         "pptx",
       );
     }
+    } finally {
+      stampCallIds(sourceLists, marks, tc.id);
+      activeCallId = null;
+    }
   }
 
   if (shouldGroupFindInCase && groupedFindInCaseEvents.length > 0) {
@@ -2451,5 +2503,6 @@ export async function runToolCalls(
     caseCitationEvents,
     mcpEvents,
     memoryUpdates,
+    webEvents,
   };
 }

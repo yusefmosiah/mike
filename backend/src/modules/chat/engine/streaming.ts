@@ -96,6 +96,7 @@ import {
   pythonToolSpecs,
   RUN_PYTHON_SCHEMA,
   RUN_PYTHON_TOOL,
+  cellSummary,
   type HostReply,
   type KernelToolSpec,
 } from "../../../lib/codemode";
@@ -167,6 +168,12 @@ const SURFACED_CHILD_FRAMES: ReadonlySet<string> = new Set([
   "mcp_tool_start",
   "mcp_tool_result",
 ]);
+
+/** The call that produced a dispatcher result (stepSources.ts stamps it). */
+function callIdOf(result: object): { call_id?: string } {
+  const callId = (result as { call_id?: unknown }).call_id;
+  return typeof callId === "string" ? { call_id: callId } : {};
+}
 
 function isSurfacedChildFrame(chunk: string): boolean {
   const match = /^data: (\{.*\})\n\n$/s.exec(chunk);
@@ -1134,7 +1141,8 @@ export async function runLLMStream(params: {
      * documents this turn can read, and one document as the common reading
      * model. A load is a read, so it shows in the transcript like one.
      */
-    const documentsRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
+    /** `callId` names the step: `<cell call_id>.docs` for a read through `docs`. */
+    const documentsRequest = async (data: Record<string, unknown>, callId?: string): Promise<HostReply> => {
       if (data.op === "list") {
         const documents = [...docStore.entries()]
           .filter(([, info]) => info.inline_text === undefined)
@@ -1157,6 +1165,7 @@ export async function runLLMStream(params: {
         modelsRead.add(readKey);
         const read: AssistantEvent = {
           type: "doc_read",
+          ...(callId ? { call_id: callId } : {}),
           filename: loaded.filename,
           document_id: loaded.readIdentity?.documentId ?? docIndex?.[docLabel]?.document_id,
           version_id: loaded.versionId,
@@ -1216,11 +1225,13 @@ export async function runLLMStream(params: {
         return "[error]\nThe Python workstation is unavailable right now, so no tool can run. Tell the user their workstation could not be reached and that they can try again in a minute.";
       }
       // The cell's line in the chat: shown as it starts, updated when it ends.
+      const summary = cellSummary(code, call.input.summary);
       const cellEvent: CodeCellEvent = {
         type: "code_cell",
         call_id: call.id,
         code: capText(code, MAX_CELL_EVENT_CHARS),
         status: "running",
+        ...(summary ? { summary } : {}),
       };
       // A subagent's cells are its own work, shown in its transcript.
       const showCell = scope === "parent";
@@ -1233,7 +1244,7 @@ export async function runLLMStream(params: {
       let stopTurn: unknown = null;
       const onHostRequest = async (data: Record<string, unknown>): Promise<HostReply> => {
         if (stopTurn) return { ok: false, error: "the turn is ending" };
-        if (data.type === "documents") return documentsRequest(data);
+        if (data.type === "documents") return documentsRequest(data, `${call.id}.docs`);
         const name = typeof data.name === "string" ? data.name : "";
         if (data.type !== "tool" || !names.has(name)) {
           return { ok: false, error: `No tool named '${name}'.` };
@@ -1537,6 +1548,7 @@ export async function runLLMStream(params: {
         caseCitationEvents,
         mcpEvents,
         memoryUpdates = [],
+        webEvents = [],
       } = await runToolCalls(
         toolCalls,
         docStore,
@@ -1570,6 +1582,7 @@ export async function runLLMStream(params: {
       for (const r of docsRead) {
         record({
           type: "doc_read",
+          ...callIdOf(r),
           filename: r.filename,
           document_id: r.document_id,
           version_id: r.version_id,
@@ -1579,6 +1592,7 @@ export async function runLLMStream(params: {
       for (const f of docsFound) {
         record({
           type: "doc_find",
+          ...callIdOf(f),
           filename: f.filename,
           document_id: f.document_id,
           version_id: f.version_id,
@@ -1590,6 +1604,7 @@ export async function runLLMStream(params: {
       for (const dl of docsCreated) {
         record({
           type: "doc_created",
+          ...callIdOf(dl),
           filename: dl.filename,
           download_url: dl.download_url,
           document_id: dl.document_id,
@@ -1600,6 +1615,7 @@ export async function runLLMStream(params: {
       for (const r of docsReplicated) {
         record({
           type: "doc_replicated",
+          ...callIdOf(r),
           filename: r.filename,
           count: r.count,
           copies: r.copies,
@@ -1608,6 +1624,7 @@ export async function runLLMStream(params: {
       for (const wf of workflowsApplied) {
         record({
           type: "workflow_applied",
+          ...callIdOf(wf),
           workflow_id: wf.workflow_id,
           title: wf.title,
           ...(wf.action ? { action: wf.action, version_number: wf.version_number } : {}),
@@ -1619,6 +1636,7 @@ export async function runLLMStream(params: {
       for (const e of docsEdited) {
         record({
           type: "doc_edited",
+          ...callIdOf(e),
           filename: e.filename,
           document_id: e.document_id,
           version_id: e.version_id,
@@ -1635,6 +1653,9 @@ export async function runLLMStream(params: {
         record(event);
       }
       for (const event of mcpEvents) {
+        record(event);
+      }
+      for (const event of webEvents) {
         record(event);
       }
       for (const event of caseCitationEvents) {

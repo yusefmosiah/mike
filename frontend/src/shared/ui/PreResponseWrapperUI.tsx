@@ -7,6 +7,8 @@ import { GlassCardUI } from "./GlassCardUI";
 export interface PreResponseWrapperUIProps {
     children: ReactNode;
     stepCount: number;
+    /** What the steps read, shown after the count once the work is done. */
+    detail?: string;
     shouldMinimize: boolean;
     isStreaming: boolean;
     forceOpen?: boolean;
@@ -20,6 +22,7 @@ export interface PreResponseWrapperUIProps {
 export function PreResponseWrapperUI({
     children,
     stepCount,
+    detail,
     shouldMinimize,
     isStreaming,
     forceOpen = false,
@@ -44,7 +47,7 @@ export function PreResponseWrapperUI({
     const stepWord = `step${stepCount === 1 ? "" : "s"}`;
     const label = isStreaming
         ? "Working"
-        : `Completed in ${stepCount} ${stepWord}`;
+        : `Completed in ${stepCount} ${stepWord}${detail ? ` · ${detail}` : ""}`;
 
     return (
         <GlassCardUI>
@@ -58,7 +61,7 @@ export function PreResponseWrapperUI({
                 className={`flex w-full items-center justify-between px-3 font-serif text-sm text-gray-500 transition-colors hover:text-gray-700 ${isOpen ? "pt-2" : "py-2"}`}
             >
                 <span className="flex min-w-0 items-baseline">
-                    <span className="truncate">{label}</span>
+                    <span className="min-w-0 text-left [overflow-wrap:anywhere]">{label}</span>
                     {isStreaming && (
                         <span
                             className="ml-1 inline-flex shrink-0 items-baseline"

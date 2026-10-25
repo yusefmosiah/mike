@@ -58,7 +58,7 @@ describe("changing a saved skill from chat", () => {
         const saved = await call("save_skill", edit, store);
         expect(runSaveSkill).toHaveBeenCalledTimes(1);
         expect(saved.workflowsApplied).toEqual([
-            { workflow_id: "w1", title: "deal-memo", action: "saved", version_number: 2 },
+            { workflow_id: "w1", title: "deal-memo", action: "saved", version_number: 2, call_id: "call-save_skill" },
         ]);
     });
 

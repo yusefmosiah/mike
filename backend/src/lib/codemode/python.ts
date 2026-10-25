@@ -7,6 +7,7 @@
  * cell makes comes back to the harness and runs exactly as a direct call
  * would: same permissions, same events in the chat, same write ordering.
  */
+import type { StepSummary } from "@mike/contracts";
 import type { CellOutcome, KernelToolSpec } from "./kernel/session";
 import { CONNECTOR_PREFIXES, FULL_DOC_TOOLS, TOOL_GROUPS, TOOL_STUBS } from "./toolStubs";
 
@@ -27,6 +28,11 @@ export const RUN_PYTHON_SCHEMA = {
       type: "object",
       properties: {
         code: { type: "string", description: "Python source to run, as a notebook cell." },
+        summary: {
+          type: "string",
+          description:
+            "What this cell does, for the person watching your work: as short as fits, from two words (\"Read the lease\") to a few sentences for a complex step. Name the documents, pages or data it works on. Plain language, no code.",
+        },
         timeout_seconds: {
           type: "number",
           description: "Time limit for the code's own running time, not counting tool calls (default 300, at most 3600).",
@@ -40,6 +46,32 @@ export const RUN_PYTHON_SCHEMA = {
     },
   },
 } as const;
+
+/** The longest summary kept from a cell, in characters. */
+const MAX_CELL_SUMMARY_CHARS = 1_000;
+const MAX_COMMENT_SUMMARY_CHARS = 200;
+
+/**
+ * What a cell does, for the timeline: the model's own \`summary\` argument
+ * when it gave one, else the cell's first comment line, else nothing (the
+ * timeline then shows the cell's sources alone).
+ */
+export function cellSummary(code: string, given: unknown): StepSummary | undefined {
+  if (typeof given === "string") {
+    const text = given.trim().replace(/\s+\n/g, "\n");
+    if (text) return { text: text.slice(0, MAX_CELL_SUMMARY_CHARS), source: "model" };
+  }
+  for (const line of code.split("\n").slice(0, 10)) {
+    const match = /^\s*#\s*(.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const text = match[1]!;
+    // Interpreter, encoding and linter lines say nothing about the step.
+    if (text.startsWith("!") || /^(-\*-|type:|noqa|pylint|fmt:|%%)/.test(text)) continue;
+    if (!/[A-Za-z]{2}/.test(text)) continue;
+    return { text: text.slice(0, MAX_COMMENT_SUMMARY_CHARS), source: "extractive" };
+  }
+  return undefined;
+}
 
 type FunctionSchema = { function?: { name?: string; description?: string; parameters?: unknown } };
 
@@ -157,6 +189,7 @@ How these instructions apply:
 - A cell may compute for 300 seconds (pass timeout_seconds for up to 3600); time spent waiting on tools does not count. Split long work into steps that each print their progress.
 - Citations quote text verbatim, so print the exact passages you will cite before citing them, or check them with \`d.quote(block_id, text)\`: for documents with their [Page N] markers (the chat-local labels such as "doc-3f9a1c2e" are the doc_id values the tools take and the doc values in cite tags), and for web pages with the url and title the search or fetch returned.
 - Send a descriptive User-Agent header when fetching websites directly; some sites (sec.gov among them) refuse requests without one.
+- Give each run_python call a \`summary\`: what the cell does, for the person watching. Its length follows the step: a few words for a simple one, a sentence or two for a complex one. Name the documents, pages or data it works on.
 - To the user, describe what you found and did in plain language. Do not show code or mention Python unless they ask.
 
 DOCUMENTS IN PYTHON:

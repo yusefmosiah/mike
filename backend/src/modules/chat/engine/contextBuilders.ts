@@ -802,6 +802,8 @@ const COMPLETES_TEXTLESS_TURN = {
   courtlistener_read_case: false,
   courtlistener_verify_citations: false,
   mcp_tool_call: false,
+  web_search: false,
+  web_fetch: false,
   case_opinions: false,
   content: false,
   word_edit_block: false,

@@ -112,6 +112,7 @@ describe("document tool spotlighting", () => {
                 document_id: "document-1",
                 version_id: "version-2",
                 version_number: 2,
+                call_id: "call-1",
             },
         ]);
     });

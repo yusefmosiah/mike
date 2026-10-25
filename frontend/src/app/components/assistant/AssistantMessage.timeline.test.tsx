@@ -120,7 +120,7 @@ describe("AssistantMessage timeline", () => {
         // Blank chunks between tool calls do not split the run; prose does.
         expect(
             screen.getAllByRole("button", { name: /Completed in/ }).map((b) => b.textContent),
-        ).toEqual(["Completed in 3 steps", "Completed in 1 step"]);
+        ).toEqual(["Completed in 3 steps · 3 documents", "Completed in 1 step · 1 document"]);
         expect(screen.getByText("All three agree.")).toBeInTheDocument();
     });
 
@@ -171,7 +171,7 @@ describe("AssistantMessage timeline", () => {
             />,
         );
         fireEvent.click(
-            screen.getByRole("button", { name: "Completed in 1 step" }),
+            screen.getByRole("button", { name: "Completed in 1 step · 1 connector call" }),
         );
         expect(container.querySelector(".bg-green-400")).not.toBeNull();
         expect(container.querySelector(".bg-red-400")).toBeNull();
@@ -229,7 +229,7 @@ describe("AssistantMessage timeline", () => {
         );
 
         fireEvent.click(
-            screen.getByRole("button", { name: "Completed in 2 steps" }),
+            screen.getByRole("button", { name: "Completed in 2 steps · 1 connector call" }),
         );
         fireEvent.click(screen.getByText("Asked for approval"));
         expect(screen.getByText("Approved")).toBeVisible();

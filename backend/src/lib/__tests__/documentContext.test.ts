@@ -599,6 +599,7 @@ describe("active Word document context", () => {
                 document_id: undefined,
                 version_id: null,
                 version_number: null,
+                call_id: "read-active-word-document",
             },
         ]);
     });
