@@ -106,6 +106,19 @@ export class ClauseCutter {
         return this.drainAll(false);
     }
 
+    /** No words are waiting to make a clause: the answer is not mid-sentence. */
+    get idle(): boolean {
+        return ![...this.pending.matchAll(TOKENS)].some(([token]) => isWord(token));
+    }
+
+    /**
+     * The next clause id, for something said between the answer's clauses (a
+     * step summary): the engine wants ids that increase within a turn.
+     */
+    reserveId(): number {
+        return this.nextId++;
+    }
+
     /** The answer has ended: the clauses left, the last one marked `final`. */
     finish(): Clause[] {
         return this.drainAll(true);

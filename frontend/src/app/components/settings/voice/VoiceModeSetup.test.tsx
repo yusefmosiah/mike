@@ -32,6 +32,7 @@ import {
     VOICE_INSTALL_FAILURE_MESSAGE,
     VOICE_REMOVE_FAILURE_MESSAGE,
 } from "@/app/lib/voice/voiceEngine";
+import { loadVoicePreferences } from "@/app/lib/voice/preferences";
 import { VoiceModeSetup } from "./VoiceModeSetup";
 
 const IDLE = { preparing: false, firstTime: false, ready: [] };
@@ -79,6 +80,19 @@ describe("VoiceModeSetup", () => {
         expect(await screen.findByRole("button", { name: "Download speech models" })).toBeInTheDocument();
         expect(screen.getByText(/about 42 MB, downloaded once/)).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "Remove voice mode models" })).not.toBeInTheDocument();
+    });
+
+    it("says what it is doing while it works unless told to stay quiet", async () => {
+        window.localStorage.clear();
+        engine.status.mockResolvedValue(INSTALLED);
+        render(<VoiceModeSetup />);
+        const say = await screen.findByRole("button", { name: "Say what it is doing" });
+        expect(say).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(screen.getByRole("button", { name: "Stay quiet" }));
+        expect(screen.getByRole("button", { name: "Stay quiet" })).toHaveAttribute("aria-pressed", "true");
+        expect(loadVoicePreferences().speakSteps).toBe(false);
+        fireEvent.click(say);
+        expect(loadVoicePreferences().speakSteps).toBe(true);
     });
 
     it("offers removal when only another model is missing", async () => {

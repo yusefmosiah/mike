@@ -40,6 +40,11 @@ export interface VoicePreferences {
      * engine speaks it (so choosing another engine or voice keeps it).
      */
     readAloudRate?: number;
+    /**
+     * In voice mode, say what the assistant is doing while it works, from its
+     * step summaries (spokenSteps.ts). Omitted means on.
+     */
+    speakSteps?: boolean;
 }
 
 export const DEFAULT_VOICE_PREFERENCES: VoicePreferences = {
@@ -96,6 +101,7 @@ export function parseVoicePreferences(raw: unknown): VoicePreferences {
             ...(text(s.voice) ? { voice: text(s.voice) } : {}),
         },
         ...(rate(root.readAloudRate) ? { readAloudRate: root.readAloudRate as number } : {}),
+        ...(typeof root.speakSteps === "boolean" ? { speakSteps: root.speakSteps } : {}),
     };
 }
 

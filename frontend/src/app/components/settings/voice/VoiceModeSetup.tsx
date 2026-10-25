@@ -27,6 +27,7 @@ import {
   voiceStatus,
   type VoiceStatus,
 } from "@/app/lib/voice/voiceEngine";
+import { useVoicePreferences } from "@/app/lib/voice/preferences";
 
 /** Voice mode's own models; Phonon and Fluid Speech Mini have their own settings. */
 const VOICE_MODE_MODELS = ["vad", "eou", "smart-turn", "speaker", "speaker-campplus"];
@@ -50,6 +51,8 @@ export function VoiceModeSetup() {
   const [forgetFailed, setForgetFailed] = useState<string | null>(null);
   const [speakerModel, setSpeakerModel] = useState<SpeakerModel>(loadSpeakerModel);
   const [failed, setFailed] = useState<string | null>(null);
+  const [preferences, setPreferences] = useVoicePreferences();
+  const speakSteps = preferences.speakSteps !== false;
 
   useEffect(() => {
     if (!voiceChatSupported()) return;
@@ -172,6 +175,31 @@ export function VoiceModeSetup() {
               {failed}
             </p>
           )}
+        </SettingsRow>
+        <SettingsRow layout="stacked">
+          <div className="min-w-0 space-y-1">
+            <SettingsLabel>While it works</SettingsLabel>
+            <SettingsDescription>
+              When an answer takes a while, voice mode can say what the assistant is doing, a short line at a time, so the
+              wait is not silent.
+            </SettingsDescription>
+          </div>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="While it works">
+            {[
+              { value: true, label: "Say what it is doing" },
+              { value: false, label: "Stay quiet" },
+            ].map((option) => (
+              <PillButtonUI
+                key={option.label}
+                tone={speakSteps === option.value ? "black" : "white"}
+                size="sm"
+                aria-pressed={speakSteps === option.value}
+                onClick={() => setPreferences({ ...preferences, speakSteps: option.value })}
+              >
+                {option.label}
+              </PillButtonUI>
+            ))}
+          </div>
         </SettingsRow>
         {voiceForgetSpeakerSupported() && (
           <SettingsRow layout="stacked">

@@ -12,6 +12,7 @@ import { SpeakableStream } from "@/app/lib/voice/speakable";
 import { speakerModelConfig } from "@/app/lib/voice/speakerCheck";
 import { spokenAnswer } from "@/app/lib/voice/spokenAnswer";
 import { spokenPrefix } from "@/app/lib/voice/spokenPrefix";
+import { STEP_GAP_MS, currentSteps, spokenStep } from "@/app/lib/voice/spokenSteps";
 import { correctWithVocabulary } from "@/app/lib/voice/vocabulary";
 import { setVoiceModeActive } from "@/app/lib/voice/voiceMode";
 import {
@@ -156,6 +157,10 @@ interface VoiceTurn {
     speakable: SpeakableStream;
     cutter: ClauseCutter;
     clauses: Clause[];
+    /** Steps said while the answer worked: their keys, clause ids and when the last was sent. */
+    saidSteps: Set<string>;
+    stepClauses: number[];
+    lastStepAt: number;
     started: Set<number>;
     played: Set<number>;
     /** The engine played the whole answer. */
@@ -191,6 +196,9 @@ function newTurn(turnId: string, text: string, carried = ""): VoiceTurn {
         speakable: new SpeakableStream(),
         cutter: new ClauseCutter(),
         clauses: [],
+        saidSteps: new Set(),
+        stepClauses: [],
+        lastStepAt: 0,
         started: new Set(),
         played: new Set(),
         finished: false,
@@ -257,6 +265,10 @@ export function useVoiceChat({
     const [error, setError] = useState<string | null>(null);
     // Bumped when a turn is waiting to be sent, so the effect below runs.
     const [queued, setQueued] = useState(0);
+    // Bumped to look again for a step to say: a clause finished playing, or
+    // the gap between spoken steps is over.
+    const [stepCheck, setStepCheck] = useState(0);
+    const stepTimerRef = useRef<number | null>(null);
 
     const [announcement, setAnnouncement] = useState("");
     // Keep the phone awake from the tap, the models loading included.
@@ -354,6 +366,8 @@ export function useVoiceChat({
         unsubscribeRef.current?.();
         unsubscribeRef.current = null;
         clearSendTimer();
+        if (stepTimerRef.current !== null) window.clearTimeout(stepTimerRef.current);
+        stepTimerRef.current = null;
         turnRef.current = null;
         previousRef.current = null;
         pendingRef.current = null;
@@ -498,6 +512,7 @@ export function useVoiceChat({
                 case "clausePlayed":
                     current?.started.add(event.clauseId);
                     current?.played.add(event.clauseId);
+                    setStepCheck((count) => count + 1);
                     return;
                 case "answerFinished":
                     if (current) current.finished = true;
@@ -719,8 +734,34 @@ export function useVoiceChat({
             turn.ended = true;
             speak([...turn.cutter.push(turn.speakable.finish()), ...turn.cutter.finish()]);
             voiceEndAnswer(turn.turnId);
+            return;
         }
-    }, [messages, isResponseLoading, flushHeard]);
+        // While it works, say what it is doing: the newest step of the run,
+        // once nothing else is waiting to be heard, and not too often. A step
+        // is not part of the answer, so it is never in what was heard.
+        if (loadVoicePreferences().speakSteps === false) return;
+        const fresh = currentSteps(answer.events ?? []).filter((step) => !turn.saidSteps.has(step.key));
+        if (fresh.length === 0 || !turn.cutter.idle) return;
+        const sent = [...turn.clauses.map((clause) => clause.id), ...turn.stepClauses];
+        if (sent.some((id) => !turn.played.has(id))) return;
+        const wait = turn.lastStepAt + STEP_GAP_MS - Date.now();
+        if (wait > 0) {
+            // Nothing else may change before then; look again when it is time.
+            if (stepTimerRef.current === null) {
+                stepTimerRef.current = window.setTimeout(() => {
+                    stepTimerRef.current = null;
+                    setStepCheck((count) => count + 1);
+                }, wait);
+            }
+            return;
+        }
+        // Older steps are passed over: the person hears where the work is now.
+        for (const step of fresh) turn.saidSteps.add(step.key);
+        const id = turn.cutter.reserveId();
+        turn.stepClauses.push(id);
+        turn.lastStepAt = Date.now();
+        voiceSpeak(turn.turnId, id, spokenStep(fresh[fresh.length - 1].text));
+    }, [messages, isResponseLoading, flushHeard, stepCheck]);
 
     // While voice mode is on, read-aloud stays silent.
     const voiceOn = phase !== "off";

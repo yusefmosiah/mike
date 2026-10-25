@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message } from "@/app/components/shared/types";
+import type { AssistantEvent, Message } from "@/app/components/shared/types";
 import { recordSpokenAnswer } from "@/app/lib/mikeApi";
 import { VOICE_PREFERENCES_KEY } from "@/app/lib/voice/preferences";
 import { endedMessage, VOICE_MICROPHONE_MESSAGE, VOICE_UNAVAILABLE_MESSAGE } from "@/app/lib/voice/voiceEngine";
@@ -281,6 +281,77 @@ describe("useVoiceChat", () => {
             "Clause 12 needs ninety days' written notice.",
         ]);
         expect(calls("voiceEndAnswer")).toEqual([{ turnId: "t1" }]);
+    });
+
+    describe("saying what it is doing", () => {
+        const cell = (call_id: string, summary?: string): AssistantEvent => ({
+            type: "code_cell",
+            call_id,
+            code: "x",
+            status: "running",
+            ...(summary ? { summary: { text: summary, source: "model" as const } } : {}),
+        });
+        const setEvents = (view: Awaited<ReturnType<typeof started>>, events: Message["events"]) =>
+            act(() =>
+                view.result.current.setMessages((prev) => {
+                    const next = [...prev];
+                    next[next.length - 1] = { ...next[next.length - 1], id: "a1", events };
+                    return next;
+                }),
+            );
+        const spoken = () => calls("voiceSpeak").map((call) => call as { clauseId: number; text: string });
+
+        it("says the newest step once the answer's words have played, then waits before the next", async () => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+            const view = await started();
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            const before = { type: "content" as const, text: "Let me check the lease." };
+            setEvents(view, [before, cell("c1", "Reading the lease. Then the deed.")]);
+            // The answer's words go first; the step waits until they have played.
+            expect(spoken()).toEqual([{ turnId: "t1", clauseId: 0, text: "Let me check the lease." }]);
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+            expect(spoken()[1]).toEqual({ turnId: "t1", clauseId: 1, text: "Reading the lease." });
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 1 });
+
+            // Two more steps inside the gap: only the newest is said, when it is over.
+            setEvents(view, [before, cell("c1", "Reading the lease."), cell("c2", "Counting clauses"), cell("c3", "Checking notice")]);
+            expect(spoken()).toHaveLength(2);
+            await act(async () => {
+                vi.advanceTimersByTime(6_000);
+            });
+            expect(spoken()[2]).toEqual({ turnId: "t1", clauseId: 2, text: "Checking notice." });
+
+            // The answer's text carries on with the next clause id; what was heard leaves the steps out.
+            setEvents(view, [
+                before,
+                cell("c1", "Reading the lease."),
+                { type: "content", text: "Ninety days' notice is needed.", isStreaming: true },
+            ]);
+            view.finish();
+            expect(spoken().at(-1)).toMatchObject({ clauseId: 3, text: "Ninety days' notice is needed." });
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 2 });
+            emit({ type: "bargeIn", turnId: "t1" });
+            expect(recordMock).toHaveBeenCalledWith("chat-1", "a1", "Let me check the lease.");
+        });
+
+        it("says nothing over the answer, nothing from before its words, and nothing when turned off", async () => {
+            const view = await started();
+            emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+            // Mid-sentence: the step waits.
+            setEvents(view, [cell("c1", "Reading the lease"), { type: "content", text: "The lease says", isStreaming: true }]);
+            expect(spoken()).toEqual([]);
+            // The step came before the answer's words: it is not said after them.
+            setEvents(view, [cell("c1", "Reading the lease"), { type: "content", text: "The lease says ninety days." }]);
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+            expect(spoken().map((call) => call.text)).toEqual(["The lease says ninety days."]);
+
+            window.localStorage.setItem(VOICE_PREFERENCES_KEY, JSON.stringify({ speakSteps: false }));
+            setEvents(view, [{ type: "content", text: "The lease says ninety days." }, cell("c2", "Reading the deed")]);
+            emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+            expect(spoken()).toHaveLength(1);
+            // Played out, so unmounting stops at once rather than waiting for an `interrupted`.
+            emit({ type: "answerFinished", turnId: "t1" });
+        });
     });
 
     it("on a barge-in mid-answer stops the chat turn and records what was heard", async () => {

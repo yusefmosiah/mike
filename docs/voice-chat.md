@@ -402,6 +402,29 @@ clauses, and the engine speaks one clause per call.
   - If the estimate proves too rough, run Fluid Speech Mini over the played
     audio to align it.
 
+### Speaking while it works
+
+A long run of tool calls is silence in voice mode unless something fills it.
+The step summaries (docs/reports/step-summaries-2026-10-24.md) fill it: the
+web app says what the assistant is doing, one short line at a time
+(`lib/voice/spokenSteps.ts`, used by `useVoiceChat`).
+
+- **What is said:** the newest summarised step of the run in progress (a code
+  cell's summary, or a thinking block's side-model summary), as its first
+  sentence, at most 160 characters, made speakable. Steps from before the
+  answer's last words are never said, and older steps of the run are passed
+  over, so the person hears where the work is now.
+- **When:** only once every clause already sent has played, never while the
+  answer is mid-sentence, at most one step every 6 seconds, and never after
+  the answer has ended.
+- **Clause ids:** a step is sent as a clause of the answer's turn, with the
+  next id from the answer's `ClauseCutter`, since the engine wants ids that
+  increase within a turn. It is not part of the answer: it is left out of
+  what was heard, and a barge-in during a step records only the answer's
+  clauses that played.
+- **Setting:** Settings → Voice, "While it works": say what it is doing (the
+  default) or stay quiet (`speakSteps` in the voice preferences).
+
 ### Models in memory and on the Neural Engine
 
 | Model | Memory | Runs |

@@ -175,3 +175,17 @@ describe("a pause in the answer (a tool call or thinking follows)", () => {
         expect([...cutter.push(stream.flush()), ...cutter.flush()]).toEqual([]);
     });
 });
+
+describe("ClauseCutter between clauses", () => {
+    it("is idle only with no words waiting, and lends ids in order with the answer's", () => {
+        const cutter = new ClauseCutter();
+        expect(cutter.idle).toBe(true);
+        cutter.push("The lease says");
+        expect(cutter.idle).toBe(false);
+        expect(cutter.reserveId()).toBe(0);
+        const [clause] = cutter.flush();
+        expect(clause.id).toBe(1);
+        cutter.push(" — ");
+        expect(cutter.idle).toBe(true);
+    });
+});
