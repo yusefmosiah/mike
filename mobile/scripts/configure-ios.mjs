@@ -32,6 +32,11 @@
 //     Fluid Speech Mini and Phonon need iOS 18 themselves.
 //   - SceneDelegate: on a Mac, no white title bar: the window controls sit
 //     over the page's own colour (MIKE_MAC_TITLEBAR).
+//   - Mac Catalyst (MIKE_MAC_CATALYST, MIKE_MAC_CATALYST_SCENE): the App
+//     target also builds for the Mac ("Optimize for Mac"), with its own
+//     sandbox entitlements, a Mac window (minimum size, no title text, the
+//     privacy cover only once the window leaves the screen), and the local
+//     packages `npm run mac:deps` writes when they exist (docs/mac-app.md).
 //   - AppUITests: an XCUITest target (ui-tests/AppUITests.swift) and a shared
 //     "App" scheme that runs it, for scripts/ui-test-ios.sh.
 import { execFileSync } from "node:child_process";
@@ -55,7 +60,8 @@ const has = (key) => {
 
 const strings = {
   NSMicrophoneUsageDescription: "The microphone is used when you dictate a message or talk in voice mode.",
-  NSSpeechRecognitionUsageDescription: "Mike turns your dictation into text on this iPhone. The recording never leaves it.",
+  // MIKE_DEVICE_NAME is "iPhone", and "Mac" in the Mac build (MIKE_MAC_CATALYST below).
+  NSSpeechRecognitionUsageDescription: "Mike turns your dictation into text on this $(MIKE_DEVICE_NAME). The recording never leaves it.",
   NSCameraUsageDescription: "Mike uses the camera when you scan a document.",
   NSPhotoLibraryUsageDescription: "Mike opens your photo library when you choose a picture to attach.",
   NSPhotoLibraryAddUsageDescription: "Mike saves pictures to your photo library when you ask it to.",
@@ -375,6 +381,59 @@ patch("SceneDelegate.swift", "MIKE_MAC_TITLEBAR", (source) =>
     ),
 );
 
+// MIKE_MAC_CATALYST_SCENE: the Mac app is this app built with Mac Catalyst
+// (docs/mac-app.md). `isiOSAppOnMac` is false there, while
+// `isMacCatalystApp` is true both for the Catalyst build and for the iPhone
+// app run on a Mac, so the title-bar code above keys on it. The window gets
+// the Electron app's minimum size (800x600, above the web app's 768px mobile
+// breakpoint) and no title text or toolbar over the page. The privacy cover
+// waits until the window leaves the screen (hidden or minimised): a Mac
+// window stays visible behind other apps, and covering it whenever another
+// window takes focus would only hide it from its own user.
+patch("SceneDelegate.swift", "MIKE_MAC_CATALYST_SCENE", (source) =>
+  source
+    .replaceAll("ProcessInfo.processInfo.isiOSAppOnMac", "ProcessInfo.processInfo.isMacCatalystApp")
+    .replace(
+      "        window = UIWindow(windowScene: windowScene)\n",
+      `        window = UIWindow(windowScene: windowScene)
+        #if targetEnvironment(macCatalyst)
+        // MIKE_MAC_CATALYST_SCENE: a Mac window (see configure-ios.mjs).
+        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 800, height: 600)
+        windowScene.titlebar?.titleVisibility = .hidden
+        windowScene.titlebar?.toolbar = nil
+        #endif
+`,
+    )
+    .replace(
+      "        if Bundle.main.object(forInfoDictionaryKey: \"MikeAppSwitcherPreview\") as? Bool == true { return }\n",
+      `        if Bundle.main.object(forInfoDictionaryKey: "MikeAppSwitcherPreview") as? Bool == true { return }
+        #if targetEnvironment(macCatalyst)
+        // A Mac window behind another app is still on screen: cover it only
+        // once it leaves the screen (sceneDidEnterBackground).
+        guard macWindowHidden else { return }
+        #endif
+`,
+    )
+    .replace(
+      "    func sceneDidBecomeActive(_ scene: UIScene) {\n",
+      `    #if targetEnvironment(macCatalyst)
+    private var macWindowHidden = false
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        macWindowHidden = true
+        sceneWillResignActive(scene)
+    }
+
+    func sceneWillEnterForeground(_ scene: UIScene) {
+        macWindowHidden = false
+    }
+    #endif
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+`,
+    ),
+);
+
 // MIKE_UI_TESTS: the UI-test target. Written into project.pbxproj directly
 // (no Ruby gem needed) with fixed ids, so a second run finds the marker and
 // changes nothing. The Swift source is copied in on every run.
@@ -397,6 +456,112 @@ const MIN_IOS = "18.0";
     if (spmNext !== spm) writeFileSync(spmPath, spmNext);
   }
 }
+// MIKE_MAC_CATALYST: the Mac app is this app built with Mac Catalyst
+// (docs/mac-app.md), so it has the iPhone's voice mode and plugins. Only the
+// App target changes, and only for the Mac: device family 6 ("Optimize for
+// Mac", native Mac controls and 100% scale instead of a scaled iPad), the
+// same bundle identifier as on iOS, and, under the macosx SDK alone, the
+// entitlements file below and the hardened runtime that notarization needs.
+// iOS builds read none of these. The Mac's deployment target follows
+// IPHONEOS_DEPLOYMENT_TARGET (iOS 18 is macOS 15 under Catalyst), which is
+// also what the speech plugin's models need.
+const catalystEntitlements = "App/App-MacCatalyst.entitlements";
+writeFileSync(
+  `${iosApp}${catalystEntitlements}`,
+  `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- MIKE_MAC_CATALYST: written by scripts/configure-ios.mjs; the Mac build only.
+     The app runs in the App Sandbox. It reaches the Mike server and downloads
+     speech models (network client), records for dictation and voice mode
+     (audio input), scans with the camera, reads and writes files the person
+     picks, and saves downloads to ~/Downloads. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.files.downloads.read-write</key>
+	<true/>
+</dict>
+</plist>
+`,
+);
+{
+  const source = readFileSync(pbxPath, "utf8");
+  const settings = [
+    `"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = ${catalystEntitlements};`,
+    // iOS strips dead code by default and the Mac's Debug build does not.
+    // Two Rust static libraries (FluidAudio's NemoTextProcessing and
+    // Phonon's core) each carry Rust's std; without stripping the linker
+    // loads both copies and fails on `_rust_eh_personality`.
+    '"DEAD_CODE_STRIPPING[sdk=macosx*]" = YES;',
+    "DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;",
+    '"ENABLE_HARDENED_RUNTIME[sdk=macosx*]" = YES;',
+    // Apple silicon only: Phonon's core has no Intel slice (nor does the
+    // Catalyst one built by mac:deps), and the models need the Neural Engine.
+    '"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;',
+    "MIKE_DEVICE_NAME = iPhone;",
+    '"MIKE_DEVICE_NAME[sdk=macosx*]" = Mac;',
+    "SUPPORTS_MACCATALYST = YES;",
+    "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;",
+  ];
+  // Each setting is added to both of the App target's configurations (the
+  // ones with its bundle identifier) when missing, so a project configured
+  // before a setting existed gets it too.
+  let next = source;
+  for (const setting of settings) {
+    if (next.includes(setting)) continue;
+    const added = next.replace(
+      /(\t+)PRODUCT_BUNDLE_IDENTIFIER = com\.firm\.mike;\n/g,
+      (line, tabs) => `${line}${tabs}${setting}\n`,
+    );
+    if (added === next) throw new Error("could not find the App target's build settings in project.pbxproj");
+    next = added;
+  }
+  // The App target's device family: iPhone, iPad and Mac (Optimize for Mac).
+  next = next.replace(
+    // (Within the same configuration: no line may close it.)
+    /(PRODUCT_BUNDLE_IDENTIFIER = com\.firm\.mike;\n(?:\t+(?=[^\t}]).*\n)*?\t+)TARGETED_DEVICE_FAMILY = "1,2";/g,
+    '$1TARGETED_DEVICE_FAMILY = "1,2,6";',
+  );
+  if (next !== source) writeFileSync(pbxPath, next);
+}
+
+// MIKE_MAC_CATALYST: capacitor-swift-pm and xn-ptts publish no Catalyst slice.
+// `npm run mac:deps` (scripts/build-mac-catalyst.mjs) writes local packages of
+// the same names, holding the releases' own iOS slices plus a Catalyst one,
+// to ios/App/MacCatalyst/. A local package overrides the remote one of the same
+// name for the whole build, so they are referenced only while they exist: a
+// project without them builds for iOS exactly as before.
+{
+  const packages = [
+    ["A1B2C3D4E5F60718293A4C01", "MacCatalyst/capacitor-swift-pm"],
+    ["A1B2C3D4E5F60718293A4C02", "MacCatalyst/xn-ptts"],
+  ];
+  const source = readFileSync(pbxPath, "utf8");
+  let next = source;
+  for (const [id, path] of packages) {
+    const listed = `\t\t\t\t${id} /* XCLocalSwiftPackageReference "${path}" */,\n`;
+    const object = `\t\t${id} /* XCLocalSwiftPackageReference "${path}" */ = {\n\t\t\tisa = XCLocalSwiftPackageReference;\n\t\t\trelativePath = "${path}";\n\t\t};\n`;
+    const wanted = existsSync(`${iosApp}${path}/Package.swift`);
+    if (wanted && !next.includes(object)) {
+      next = next
+        .replace(/(\t+packageReferences = \(\n)/, `$1${listed}`)
+        .replace("/* End XCLocalSwiftPackageReference section */", `${object}/* End XCLocalSwiftPackageReference section */`);
+    } else if (!wanted) {
+      next = next.replace(listed, "").replace(object, "");
+    }
+  }
+  if (next !== source) writeFileSync(pbxPath, next);
+}
+
 const pbx = readFileSync(pbxPath, "utf8");
 if (!pbx.includes("MIKE_UI_TESTS")) {
   const appTarget = /(\w{24}) \/\* App \*\/ = \{\n\t*isa = PBXNativeTarget;/.exec(pbx)?.[1];

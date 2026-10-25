@@ -18,6 +18,8 @@
         "android:debug": "npm run android:sync && cd android && ./gradlew assembleDebug",
         "android:run": "npm run android:sync && cap run android --no-sync",
         "build:ios": "cap build ios",
+        "mac:deps": "node scripts/build-mac-catalyst.mjs && npm run ios:configure",
+        "mac:build": "scripts/build-mac.sh",
         "build:android": "cap build android"
     },
     "dependencies": {

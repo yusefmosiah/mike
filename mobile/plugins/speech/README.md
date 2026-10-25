@@ -92,6 +92,25 @@ length of the call and deleted afterwards; nothing is logged. Only the plugin
 class may carry an `@objc(...)` name: the Capacitor CLI registers every such
 name it finds as a plugin.
 
+## Mac
+
+The Mac app is the iPhone app built with Mac Catalyst (`docs/mac-app.md`),
+and this plugin runs there unchanged: Apple's recognizer (`SpeechAnalyzer`
+with `SpeechTranscriber` on macOS 26 and later), Fluid Speech Mini, Apple's
+voices, Phonon and the voice-mode models all load and run on an
+Apple-silicon Mac. Phonon's core needs a Catalyst slice that xn-ptts does
+not publish; `npm run mac:deps` builds it. To run this package's tests under
+Catalyst, put `plugins/speech` and the two packages in
+`ios/App/MacCatalyst/` in one Xcode workspace (so they override the remote
+packages), then:
+
+```bash
+xcodebuild test -workspace <that workspace> -scheme MikeSpeechPluginTests \
+  -destination 'platform=macOS,variant=Mac Catalyst' CODE_SIGN_IDENTITY=- DEAD_CODE_STRIPPING=YES
+```
+
+The workspace rewrites `Package.resolved`; restore it afterwards.
+
 ## Android
 
 `android/` implements the same contract for dictation and read-aloud

@@ -21,9 +21,13 @@ enum FluidSpeechMini {
 
     /// The directory of the bundled model, or nil when the app was built
     /// without it. A Swift package copies its resources into a bundle named
-    /// `<package>_<target>` inside the app.
+    /// `<package>_<target>` inside the app. Its resources are at its top on
+    /// iOS and in Contents/Resources in the Mac (Catalyst) app, which
+    /// `resourceURL` resolves either way.
     static func modelDirectory(in bundle: Bundle = .main) -> URL? {
-        let directories = [bundle.url(forResource: "MikeSpeech_MikeSpeechPlugin", withExtension: "bundle"), bundle.resourceURL]
+        let packageBundle = bundle.url(forResource: "MikeSpeech_MikeSpeechPlugin", withExtension: "bundle")
+            .flatMap { Bundle(url: $0)?.resourceURL }
+        let directories = [packageBundle, bundle.resourceURL]
         for case let base? in directories {
             let directory = base.appendingPathComponent("FluidSpeechMini", isDirectory: true)
             if hasModel(at: directory) { return directory }
