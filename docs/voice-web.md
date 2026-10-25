@@ -1,6 +1,26 @@
 # Hands-free voice mode in the browser: plan
 
-Status: planned 2026-10-25. Phase 1 in progress on `feat/web-voice-mode`.
+Status: planned 2026-10-25. Phase 1 implemented on `feat/web-voice-mode`
+(engine in `frontend/src/app/lib/voice/web/`, dispatch in `voiceEngine.ts`,
+synthetic end-to-end spec `e2e/voice-web.spec.ts`, passing in headless
+Chromium on Linux). Not yet tried on real devices or in Safari and Firefox.
+Differences from this plan, as built:
+
+- The turn policy runs on the main thread; the worker keeps only the ring
+  buffer and Silero, and posts each frame's probability.
+- Speech without words interrupts only while the answer is being worked on
+  (`thinking`); while it plays, the microphone is muted (half duplex) and
+  "Tap to interrupt" is the way in.
+- Tier B uses Whisper on the CPU (no Moonshine yet); with Web Speech (tier C)
+  recognition starts at speech onset.
+- Silero is downloaded after consent from a pinned Hugging Face revision with
+  a checksum, not self-hosted; ONNX Runtime is the copy that
+  `@huggingface/transformers` already brings, copied to `public/voice-web/ort/`.
+- The speech-server choice appears in Settings only when the deployment has a
+  speech server.
+- Headless Chromium crashes on `speechSynthesis.speak` and on
+  `SpeechRecognition.available`; the silent voice prime is skipped under
+  automation, and recognition is asked about only where tier C could apply.
 Read with `docs/voice-chat.md` (the native design; its "Browser" section at
 L704–724 is refined here) and `docs/voice-chat-contract.md` (the contract the
 web engine implements unchanged).
