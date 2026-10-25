@@ -1,6 +1,7 @@
 const AUTH_REDIRECT_PATHS = new Set([
     "/assistant",
     "/login",
+    "/published",
     "/reset-password",
     "/settings",
 ]);
@@ -29,6 +30,14 @@ export function safeAuthNext(
         return fallback;
     }
     return `${resolved.pathname}${resolved.search}`;
+}
+
+/** The login page, remembering where to return to after signing in. */
+export function loginPathFor(pathname: string, search = ""): string {
+    const next = safeAuthNext(`${pathname}${search}`);
+    return next === "/assistant"
+        ? "/login"
+        : `/login?next=${encodeURIComponent(next)}`;
 }
 
 export function authCallbackUrl(origin: string, next: string): string {

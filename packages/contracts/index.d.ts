@@ -112,7 +112,31 @@ export type AskInputItem =
       response_prefix?: string;
     }
   | ConnectorApprovalItem
-  | SecretRequestItem;
+  | SecretRequestItem
+  | PublishRequestItem;
+
+/**
+ * The assistant asks the user to publish a document as a link
+ * (docs/publishing.md). Its choices are suggestions: the user confirms or
+ * changes them and sets any password in a dedicated form, which creates the
+ * publication directly; the response carries only the publication's id.
+ */
+export type PublishRequestItem = {
+  id: string;
+  kind: "publish";
+  document_id: string;
+  /** The version to publish; null for the current one. */
+  version_id: string | null;
+  filename: string;
+  /** Anyone with the link, or with the link and a password. */
+  audience: "public" | "password";
+  /** Only people signed in to the app who can open the document. */
+  require_sign_in: boolean;
+  /** 7, 30 or 90, or null for no expiry. */
+  expires_in_days: number | null;
+  /** Why the assistant suggests publishing, in its words; shown as untrusted text. */
+  purpose: string;
+};
 
 /**
  * The assistant asks the user to store a credential in the vault. The value
@@ -247,6 +271,18 @@ export type AskInputResponseItem =
       /** The name the secret was stored under. */
       secret_name?: string;
       skipped?: boolean;
+    }
+  | {
+      id: string;
+      kind: "publish";
+      /** The publication the user created from the form. */
+      publication_id?: string;
+      skipped?: boolean;
+      /** Filled in by the server from the publication, never by the client. */
+      url?: string;
+      audience?: "public" | "password";
+      require_sign_in?: boolean;
+      expires_at?: string | null;
     };
 
 export type AskInputsResponseRequest = {

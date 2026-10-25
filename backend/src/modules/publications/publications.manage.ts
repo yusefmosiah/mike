@@ -20,7 +20,9 @@ import {
     newToken,
     publicationUrl,
     publishingConfig,
+    safeInnerPath,
     sealToken,
+    signInGrant,
     unsealToken,
     type PublicationAudience,
     type PublicationKind,
@@ -35,6 +37,7 @@ export type PublicationView = {
     title: string;
     kind: PublicationKind;
     audience: PublicationAudience;
+    require_sign_in: boolean;
     url: string | null;
     created_at: string;
     expires_at: string | null;
@@ -73,6 +76,7 @@ export type CreatePublicationInput = {
     versionId?: string | null;
     audience: unknown;
     password?: unknown;
+    requireSignIn?: unknown;
     expiresInDays?: unknown;
 };
 
@@ -163,6 +167,7 @@ export async function createPublication(
                 token_hash: hashToken(token),
                 token_sealed: sealToken(token),
                 password_hash: password ? await hashPassword(password) : null,
+                require_sign_in: input.requireSignIn === true,
                 title: built.title,
                 expires_at: expiresAt,
             })
@@ -182,7 +187,13 @@ export async function createPublication(
             title: built.title,
             documentId: input.documentId,
             projectId: access.doc.project_id ?? null,
-            detail: { publication_id: id, audience, expires_at: expiresAt, files: files.length },
+            detail: {
+                publication_id: id,
+                audience,
+                require_sign_in: input.requireSignIn === true,
+                expires_at: expiresAt,
+                files: files.length,
+            },
         });
         return {
             ok: true,
@@ -274,10 +285,98 @@ function toView(row: PublicationRow, config: PublishingConfig, fileCount: number
         title: row.title,
         kind: row.kind,
         audience: row.audience,
+        require_sign_in: row.require_sign_in === true,
         url: config.enabled && token ? publicationUrl(config, token) : null,
         created_at: row.created_at,
         expires_at: row.expires_at,
         revoked_at: row.revoked_at,
         file_count: fileCount,
     };
+}
+
+/**
+ * The publisher's own live publication, for the chat to tell the assistant
+ * where it went; null when it is not theirs, not live, or not of that document.
+ */
+export async function describeOwnPublication(
+    db: Db,
+    userId: string,
+    publicationId: string,
+    documentId: string,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<PublicationView | null> {
+    const { data } = await db
+        .from("publications")
+        .select(PUBLICATION_COLUMNS)
+        .eq("id", publicationId)
+        .eq("created_by", userId)
+        .maybeSingle();
+    const row = data as PublicationRow | null;
+    if (!row || row.document_id !== documentId || row.revoked_at) return null;
+    const view = toView(row, publishingConfig(env), 0);
+    return view.url ? view : null;
+}
+
+/**
+ * A signed-in visitor asks to open a signed-in-only link. They may when the
+ * link is live and they can open its document in the app; the answer is the
+ * link's grant address, which sets the member cookie on its origin.
+ */
+export async function grantPublicationAccess(
+    db: Db,
+    userId: string,
+    userEmail: string | undefined,
+    publicationId: string,
+    path: unknown,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<{ ok: true; url: string } | { ok: false }> {
+    const config = publishingConfig(env);
+    if (!config.enabled) return { ok: false };
+    const { data } = await db
+        .from("publications")
+        .select(PUBLICATION_COLUMNS)
+        .eq("id", publicationId)
+        .maybeSingle();
+    const row = data as PublicationRow | null;
+    if (!row || row.revoked_at || !row.require_sign_in || !row.document_id) return { ok: false };
+    if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return { ok: false };
+    const access = await ensureDocumentAccess(row.document_id, userId, userEmail, db);
+    if (!access.ok) return { ok: false };
+    const token = unsealToken(row.token_sealed);
+    if (!token) return { ok: false };
+    const query = new URLSearchParams({ g: signInGrant(row.id) });
+    const inner = safeInnerPath(path);
+    if (inner) query.set("r", inner);
+    return { ok: true, url: `${publicationUrl(config, token)}__grant?${query.toString()}` };
+}
+
+export type PublishPreflight =
+    | { ok: true; documentId: string; versionId: string; filename: string }
+    | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" };
+
+const PUBLISHABLE = new Set(["html", "md", "txt", "pdf", "png", "jpg", "jpeg", "webp", "gif", "docx", "doc", "pptx", "ppt"]);
+const NEEDS_RENDITION = new Set(["docx", "doc", "pptx", "ppt"]);
+
+/**
+ * Whether the caller could publish this version, checked before the
+ * assistant asks them to: the same rules createPublication applies.
+ */
+export async function publishPreflight(
+    db: Db,
+    userId: string,
+    userEmail: string | undefined,
+    documentId: string,
+    versionId: string | null,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<PublishPreflight> {
+    if (!publishingConfig(env).enabled) return { ok: false, code: "publishing_off" };
+    const access = await ensureDocumentAccess(documentId, userId, userEmail, db);
+    if (!access.ok) return { ok: false, code: "not_found" };
+    if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
+    const version = await loadActiveVersion(documentId, db, versionId);
+    if (!version) return { ok: false, code: "not_found" };
+    const type = (version.file_type ?? "").toLowerCase();
+    if (!PUBLISHABLE.has(type)) return { ok: false, code: "unsupported_type" };
+    if (NEEDS_RENDITION.has(type) && !version.pdf_storage_path) return { ok: false, code: "no_rendition" };
+    return { ok: true, documentId, versionId: version.id, filename: version.filename ?? "Untitled" };
 }

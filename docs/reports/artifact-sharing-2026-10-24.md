@@ -32,6 +32,9 @@ Steps 2 to 4 of the build order below are built and tested. `docs/publishing.md`
   - An HTML page is published with the project files it refers to by name.
   - Markdown, text, images, PDFs and Office renditions publish too.
 - **In the app.** The Publish dialog is reached from the document side panel and from a viewer tab's menu.
+- **Later the same day.**
+  - A "signed in only" option, through an app grant, which takes the place of the organisation audience.
+  - A `publish_document` tool, so a person can ask the assistant to publish. It pauses on a card where the person confirms the options and sets the password.
 - **Verified.**
   - Unit and route tests.
   - Against the local Docker stack in Chromium: the page renders, its script runs, a bundled image loads and a YouTube embed plays. The password page refuses a wrong password and opens with the right one.

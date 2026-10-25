@@ -133,3 +133,47 @@ describe("event line consistency", () => {
         ).not.toBeNull();
     });
 });
+
+describe("AskInputsBlock publish requests", () => {
+    const event = {
+        type: "ask_inputs" as const,
+        event_id: "ask-2",
+        items: [
+            {
+                id: "pub",
+                kind: "publish" as const,
+                document_id: "d1",
+                version_id: null,
+                filename: "plan.html",
+                audience: "public" as const,
+                require_sign_in: false,
+                expires_in_days: 30,
+                purpose: "Share the plan",
+            },
+        ],
+    };
+    const answered = (responses: Record<string, unknown>[]) =>
+        render(
+            <AskInputsBlock
+                event={event}
+                response={{
+                    type: "ask_inputs_response",
+                    assistant_message_id: "assistant-1",
+                    ask_event_id: "ask-2",
+                    responses: responses as never,
+                }}
+            />,
+        );
+
+    it.each([
+        [{ id: "pub", kind: "publish", publication_id: "p1", url: "https://pub.example/p1" }, "Published: https://pub.example/p1"],
+        [{ id: "pub", kind: "publish", publication_id: "p1" }, "Published"],
+        [{ id: "pub", kind: "publish", skipped: true }, "Not published"],
+    ])("says what happened to the request", (response, text) => {
+        answered([response]);
+        fireEvent.click(screen.getByRole("button", { name: "Asked for input" }));
+        expect(screen.getByText(/1\. Publish link/)).toBeInTheDocument();
+        expect(screen.getByText("plan.html")).toBeInTheDocument();
+        expect(screen.getByText(text)).toBeInTheDocument();
+    });
+});

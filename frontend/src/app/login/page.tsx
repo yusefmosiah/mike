@@ -17,12 +17,18 @@ import { AuthDivider } from "@/app/components/auth/AuthDivider";
 import { SsoAuthButton } from "@/app/components/auth/SsoAuthButton";
 import { GoogleAuthButton } from "@/app/components/auth/GoogleAuthButton";
 import { FieldLabel } from "@/app/components/ui/form-field";
+import { safeAuthNext } from "@/app/lib/authRedirects";
 import { knownErrorCodeMessage } from "@/app/lib/userFacingError";
 
 const LOGIN_ERROR_MESSAGES = {
     invalid_credentials: "The email or password is incorrect.",
     email_not_confirmed: "Confirm your email address before logging in.",
 } as const;
+
+/** Where to go once signed in: the page the visitor wanted, if one was asked for. */
+function returnPath(): string {
+    return safeAuthNext(new URLSearchParams(window.location.search).get("next"));
+}
 
 export default function LoginPage() {
     const router = useRouter();
@@ -40,7 +46,7 @@ export default function LoginPage() {
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            router.replace("/assistant");
+            router.replace(returnPath());
         }
     }, [authLoading, isAuthenticated, router]);
 
@@ -52,7 +58,7 @@ export default function LoginPage() {
         try {
             await login(email, password);
             await refreshSession();
-            router.push("/assistant");
+            router.push(returnPath());
         } catch (error: unknown) {
             setError(
                 knownErrorCodeMessage(

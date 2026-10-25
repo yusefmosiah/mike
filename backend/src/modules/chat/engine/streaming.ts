@@ -43,6 +43,7 @@ import {
   TOOLS,
   WORKFLOW_TOOLS,
   VAULT_TOOLS,
+  PUBLISH_TOOLS,
   WORKSTATION_TOOLS,
   toolName,
   isDocumentMutatingTool,
@@ -83,6 +84,7 @@ import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
 import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
+import { publishingConfig } from "../../publications/publications.service";
 import { endOwnerTurn, startGuestTurn } from "../../../lib/vault/occupancy";
 import {
   cellResultContent,
@@ -652,6 +654,8 @@ export async function runLLMStream(params: {
     ...(params.includeSubagents && kernelLauncher ? [delegateToolSchema(backgroundAgents)] : []),
     ...(backgroundAgents ? AGENT_TOOLS : []),
     ...workstationTools,
+    // Publishing pauses for the person, like ask_inputs.
+    ...(includeAskInputs && !autoMode && !isGuest && publishingConfig().enabled ? PUBLISH_TOOLS : []),
   ];
   const advertisedTools = [
     ...baseTools,

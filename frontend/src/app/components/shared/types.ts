@@ -134,6 +134,8 @@ export interface Publication {
   title: string;
   kind: "site" | "file";
   audience: PublicationAudience;
+  /** Visitors must be signed in to the app and able to open the document. */
+  require_sign_in: boolean;
   /** Null once revoked, or when the install has stopped publishing. */
   url: string | null;
   created_at: string;
@@ -147,6 +149,7 @@ export interface CreatePublicationInput {
   version_id?: string | null;
   audience: PublicationAudience;
   password?: string;
+  require_sign_in?: boolean;
   expires_in_days: number | null;
 }
 

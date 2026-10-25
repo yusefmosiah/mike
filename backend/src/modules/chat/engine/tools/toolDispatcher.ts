@@ -43,6 +43,7 @@ import {
   planConnectorToolCall,
 } from "./connectorApprovals";
 import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
+import { PUBLISH_TOOL_NAME, runPublishTool } from "./publishTools";
 import type { MemoryEditTarget } from "../../../memory/memory.service";
 import { parseAskInputs } from "./askInputs";
 import {
@@ -488,6 +489,22 @@ export async function runToolCalls(
           })}\n\n`,
         );
       }
+      toolResults.push({ role: "tool", tool_call_id: tc.id, content: outcome.content });
+      continue;
+    }
+
+    if (tc.function.name === PUBLISH_TOOL_NAME) {
+      const label = typeof args.doc_id === "string" ? args.doc_id : "";
+      const indexed = docIndex?.[resolveDocLabel(label, docStore, docIndex) ?? label];
+      const outcome = await runPublishTool({
+        db,
+        args,
+        userId,
+        userEmail: options.userEmail ?? null,
+        document: indexed ?? null,
+        canAsk: !!options.connectorApprovals,
+      });
+      if (outcome.item) approvalItems.push(outcome.item);
       toolResults.push({ role: "tool", tool_call_id: tc.id, content: outcome.content });
       continue;
     }

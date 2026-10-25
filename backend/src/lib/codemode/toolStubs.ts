@@ -168,6 +168,12 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     text: "install a published skill from a GitHub link. Use when the person gives one.",
   },
 
+  // Publishing
+  publish_document: {
+    group: "Drafting and editing",
+    text: "ask the person to publish a document as a link (they choose who can open it and set any password); the turn pauses until they do.",
+  },
+
   // Credentials
   vault_secrets: {
     group: "Credentials",

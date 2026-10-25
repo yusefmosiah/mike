@@ -2238,6 +2238,21 @@ export async function revokePublication(id: string): Promise<Publication> {
     return publication;
 }
 
+/** Where a signed-in visitor of a signed-in-only link is sent to read it. */
+export async function openPublication(
+    id: string,
+    path?: string,
+): Promise<{ url: string }> {
+    return apiRequest<{ url: string }>(
+        `/publications/${encodeURIComponent(id)}/open`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(path ? { path } : {}),
+        },
+    );
+}
+
 export async function deleteDocument(documentId: string): Promise<void> {
     await apiRequest(`/single-documents/${documentId}`, { method: "DELETE" });
 }

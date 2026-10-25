@@ -12,7 +12,7 @@ import type { Publication } from "@/app/components/shared/types";
 const pub = (over: Partial<Publication> = {}): Publication => ({
     id: "p1", document_id: "d1", version_id: "v1", title: "T", kind: "file",
     audience: "public", url: "https://x/p1", created_at: "2026-01-02T00:00:00Z",
-    expires_at: null, revoked_at: null, file_count: 1, ...over,
+    expires_at: null, revoked_at: null, file_count: 1, require_sign_in: false, ...over,
 });
 
 describe("isPublishable", () => {

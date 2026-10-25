@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
-import { Copy, ExternalLink, Globe, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Copy, ExternalLink } from "lucide-react";
 import { Modal } from "./Modal";
-import { ModalSegmentedToggle } from "./ModalSegmentedToggle";
+import {
+    AUDIENCE_LABEL,
+    PublishOptionsForm,
+    initialPublishOptions,
+    publishOptionsToInput,
+    publishOptionsValid,
+    type PublishOptions,
+} from "./PublishOptionsForm";
 import { ConfirmPopup } from "@/app/components/popups/ConfirmPopup";
-import { FieldLabel, FormTextInput } from "@/app/components/ui/form-field";
 import { TextButtonUI } from "@/shared/ui/TextButtonUI";
 import {
     createPublication,
@@ -13,19 +19,12 @@ import {
     revokePublication,
 } from "@/app/lib/mikeApi";
 import {
-    EXPIRY_OPTIONS,
-    MIN_PASSWORD_LENGTH,
     formatPublicationDate,
-    generatePassphrase,
     publicationState,
     publishErrorMessage,
 } from "@/app/lib/publishing";
 import { userFacingApiError } from "@/app/lib/userFacingError";
-import type {
-    Publication,
-    PublicationAudience,
-    PublishingConfig,
-} from "@/app/components/shared/types";
+import type { Publication, PublishingConfig } from "@/app/components/shared/types";
 
 export interface PublishTarget {
     documentId: string;
@@ -40,17 +39,12 @@ interface Props {
     onClose: () => void;
 }
 
-const AUDIENCE_LABEL: Record<PublicationAudience, string> = {
-    public: "Anyone with the link",
-    password: "Anyone with the link and a password",
-};
-
 export function PublishModal(props: Props) {
     // Mounted only while open so each opening starts from a clean form.
     return props.open ? <PublishModalBody {...props} /> : null;
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
     const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
     return (
         <TextButtonUI
@@ -71,9 +65,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 function PublishModalBody({ target, config, onClose }: Props) {
     const audiences = config.audiences;
-    const [audience, setAudience] = useState<PublicationAudience>(audiences[0] ?? "public");
-    const [password, setPassword] = useState("");
-    const [expiry, setExpiry] = useState("30");
+    const [options, setOptions] = useState<PublishOptions>(() => initialPublishOptions(audiences));
     const [publishing, setPublishing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<{
@@ -85,9 +77,6 @@ function PublishModalBody({ target, config, onClose }: Props) {
     const [linksFailed, setLinksFailed] = useState(false);
     const [revokeId, setRevokeId] = useState<string | null>(null);
     const [revoking, setRevoking] = useState(false);
-    const passwordId = useId();
-    const expiryLabelId = useId();
-    const audienceLabelId = useId();
 
     useEffect(() => {
         let cancelled = false;
@@ -106,22 +95,18 @@ function PublishModalBody({ target, config, onClose }: Props) {
         };
     }, [target.documentId]);
 
-    const needsPassword = audience === "password";
-    const passwordOk = !needsPassword || password.length >= MIN_PASSWORD_LENGTH;
+    const passwordOk = publishOptionsValid(options);
 
     async function publish() {
         if (!passwordOk || publishing) return;
         setPublishing(true);
         setError(null);
         try {
-            const created = await createPublication({
-                document_id: target.documentId,
-                version_id: target.versionId ?? null,
-                audience,
-                ...(needsPassword ? { password } : {}),
-                expires_in_days: EXPIRY_OPTIONS.find((o) => o.value === expiry)!.days,
+            const created = await createPublication(publishOptionsToInput(target, options));
+            setResult({
+                ...created,
+                password: options.audience === "password" ? options.password : undefined,
             });
-            setResult({ ...created, password: needsPassword ? password : undefined });
             setLinks((current) => [created.publication, ...(current ?? [])]);
         } catch (cause) {
             setError(publishErrorMessage(cause));
@@ -165,64 +150,20 @@ function PublishModalBody({ target, config, onClose }: Props) {
             >
                 <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pb-4 pr-1">
                     <p className="text-xs leading-relaxed text-gray-600">
-                        {audience === "public"
-                            ? "Anyone who has a public link can open it, with no sign-in, and the link may be shared onward. "
-                            : "Anyone who has the link and its password can open it, with no sign-in. "}
+                        {options.requireSignIn
+                            ? "Only people signed in to this app whose account can open the document can read it, even if the link is shared onward. "
+                            : options.audience === "public"
+                              ? "Anyone who has a public link can open it, with no sign-in, and the link may be shared onward. "
+                              : "Anyone who has the link and its password can open it, with no sign-in. "}
                         This publishes this version as a frozen copy: later edits are not shared unless you publish again.
                     </p>
 
-                    <div role="group" aria-labelledby={audienceLabelId}>
-                        <FieldLabel as="p" id={audienceLabelId}>
-                            Who can open it
-                        </FieldLabel>
-                        <ModalSegmentedToggle
-                            value={audience}
-                            onChange={setAudience}
-                            options={audiences.map((value) => ({
-                                value,
-                                label: AUDIENCE_LABEL[value],
-                                icon: Globe,
-                            }))}
-                            className="max-w-full"
-                        />
-                    </div>
-
-                    {needsPassword && (
-                        <div>
-                            <FieldLabel htmlFor={passwordId}>Password</FieldLabel>
-                            <div className="flex items-center gap-2">
-                                <FormTextInput
-                                    id={passwordId}
-                                    type="text"
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    value={password}
-                                    onChange={(event) => setPassword(event.target.value)}
-                                    aria-invalid={password.length > 0 && !passwordOk}
-                                    className="min-w-0 flex-1"
-                                />
-                                <TextButtonUI type="button" onClick={() => setPassword(generatePassphrase())}>
-                                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                                    Generate
-                                </TextButtonUI>
-                            </div>
-                            <p className="mt-1.5 text-xs text-gray-500">
-                                At least {MIN_PASSWORD_LENGTH} characters. Send the password separately from the link.
-                            </p>
-                        </div>
-                    )}
-
-                    <div role="group" aria-labelledby={expiryLabelId}>
-                        <FieldLabel as="p" id={expiryLabelId}>
-                            Link expires
-                        </FieldLabel>
-                        <ModalSegmentedToggle
-                            value={expiry}
-                            onChange={setExpiry}
-                            options={EXPIRY_OPTIONS.map(({ value, label }) => ({ value, label }))}
-                            size="sm"
-                        />
-                    </div>
+                    <PublishOptionsForm
+                        value={options}
+                        onChange={setOptions}
+                        audiences={audiences}
+                        disabled={publishing}
+                    />
 
                     {error && (
                         <p role="alert" className="text-xs text-red-600 [overflow-wrap:anywhere]">
@@ -296,6 +237,7 @@ function LinkRow({ link, onRevoke }: { link: Publication; onRevoke: () => void }
     return (
         <li className="space-y-1">
             <p className="text-xs font-medium text-gray-800">{AUDIENCE_LABEL[link.audience]}</p>
+            {link.require_sign_in && <p className="text-xs text-gray-600">Signed in only</p>}
             <p className="text-xs text-gray-600">
                 Created {formatPublicationDate(link.created_at)}
                 {" · "}

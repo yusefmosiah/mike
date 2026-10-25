@@ -23,6 +23,7 @@ export type PublicationRow = {
     token_sealed: string;
     password_hash: string | null;
     password_version: number;
+    require_sign_in: boolean;
     title: string;
     expires_at: string | null;
     revoked_at: string | null;
@@ -30,7 +31,7 @@ export type PublicationRow = {
 };
 
 export const PUBLICATION_COLUMNS =
-    "id, created_by, document_id, version_id, kind, audience, token_hash, token_sealed, password_hash, password_version, title, expires_at, revoked_at, created_at";
+    "id, created_by, document_id, version_id, kind, audience, token_hash, token_sealed, password_hash, password_version, require_sign_in, title, expires_at, revoked_at, created_at";
 
 export const MIN_PASSWORD_LENGTH = 12;
 export const EXPIRY_DAYS = [7, 30, 90] as const;
@@ -293,6 +294,69 @@ export function unlockCookieValid(
     const expected = Buffer.from(unlockMac(row, expires));
     const actual = Buffer.from(mac);
     return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+// ---------------------------------------------------------------------------
+// Signed-in links
+// ---------------------------------------------------------------------------
+//
+// The content origin never sees the app's session. A signed-in-only link
+// sends its visitor to the app (/published), which checks they can open the
+// document and hands back a grant: a two-minute signature over the
+// publication id that the content server trades for a cookie on the link's
+// own origin. The cookie lasts an hour, so losing access to the document
+// closes the link within the hour.
+
+export const MEMBER_COOKIE = "pub_member";
+export const MEMBER_TTL_SECONDS = 60 * 60;
+const GRANT_TTL_SECONDS = 120;
+
+function signed(kind: "grant" | "member", publicationId: string, expires: number) {
+    return crypto
+        .createHmac("sha256", derivedKey("cookie"))
+        .update(`${kind}\0${publicationId}\0${expires}`)
+        .digest("base64url");
+}
+
+function signedValue(kind: "grant" | "member", publicationId: string, ttl: number, now: number) {
+    const expires = Math.floor(now / 1000) + ttl;
+    return `${expires}.${signed(kind, publicationId, expires)}`;
+}
+
+function signedValid(kind: "grant" | "member", publicationId: string, value: string | undefined, now: number) {
+    if (!value) return false;
+    const [expiresRaw, mac] = value.split(".");
+    const expires = Number(expiresRaw);
+    if (!Number.isInteger(expires) || !mac || expires * 1000 <= now) return false;
+    const expected = Buffer.from(signed(kind, publicationId, expires));
+    const actual = Buffer.from(mac);
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+export const signInGrant = (publicationId: string, now = Date.now()) =>
+    signedValue("grant", publicationId, GRANT_TTL_SECONDS, now);
+export const signInGrantValid = (publicationId: string, value: string | undefined, now = Date.now()) =>
+    signedValid("grant", publicationId, value, now);
+export const memberCookieValue = (publicationId: string, now = Date.now()) =>
+    signedValue("member", publicationId, MEMBER_TTL_SECONDS, now);
+export const memberCookieValid = (publicationId: string, value: string | undefined, now = Date.now()) =>
+    signedValid("member", publicationId, value, now);
+
+/** Where a signed-in-only link sends its visitor to sign in. */
+export function signInUrl(publicationId: string, path: string, env: NodeJS.ProcessEnv = process.env): string {
+    const app = (env.FRONTEND_URL?.trim() || "http://localhost:3000").replace(/\/+$/, "");
+    const query = new URLSearchParams({ p: publicationId });
+    if (path) query.set("r", path);
+    return `${app}/published?${query.toString()}`;
+}
+
+/** A path inside a publication that is safe to redirect to: relative, no climbing. */
+export function safeInnerPath(raw: unknown): string {
+    if (typeof raw !== "string") return "";
+    const path = raw.replace(/^\/+/, "");
+    if (path.length > 1024 || /[\\\u0000-\u001f]/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path)) return "";
+    if (path.split("/").some((segment) => segment === "..")) return "";
+    return path;
 }
 
 // ---------------------------------------------------------------------------

@@ -643,6 +643,13 @@ export function AskInputsBlock({
                                     !itemResponse.secret_name
                                     ? "Not stored"
                                     : `Stored as ${itemResponse.secret_name}`;
+                            if (itemResponse.kind === "publish")
+                                return itemResponse.skipped ||
+                                    !itemResponse.publication_id
+                                    ? "Not published"
+                                    : itemResponse.url
+                                      ? `Published: ${itemResponse.url}`
+                                      : "Published";
                             if (itemResponse.skipped) return "Skipped";
                             if (itemResponse.kind === "multi_choice") {
                                 return itemResponse.answers?.join(", ") ?? "";
@@ -665,7 +672,9 @@ export function AskInputsBlock({
                                           ? "Approval"
                                           : item.kind === "secret"
                                             ? "Credential"
-                                            : "Question"}
+                                            : item.kind === "publish"
+                                              ? "Publish link"
+                                              : "Question"}
                                 </p>
                                 <p className="mt-0.5 [overflow-wrap:anywhere]">
                                     {item.kind === "documents"
@@ -675,7 +684,9 @@ export function AskInputsBlock({
                                           ? `${item.connector_name}: ${item.title}`
                                           : item.kind === "secret"
                                             ? `${item.name}, for ${item.hosts.join(", ")}`
-                                            : item.question}
+                                            : item.kind === "publish"
+                                              ? item.filename
+                                              : item.question}
                                 </p>
                                 {responseText !== null && (
                                     <p className="mt-0.5 text-gray-600">

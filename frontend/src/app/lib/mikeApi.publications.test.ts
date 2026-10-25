@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPublication, getPublishingConfig, listPublications, revokePublication } from "./mikeApi";
+import { createPublication, getPublishingConfig, listPublications, openPublication, revokePublication } from "./mikeApi";
 
 const fetchMock = vi.fn();
 const json = (body: unknown, status = 200) =>
@@ -38,5 +38,18 @@ describe("publications API", () => {
         const [url, init] = calls()[0]!;
         expect(String(url)).toMatch(/\/publications\/p%201\/revoke$/);
         expect(init?.method).toBe("POST");
+    });
+
+    it("asks where a signed-in visitor reads a signed-in-only link, with or without a path", async () => {
+        fetchMock
+            .mockResolvedValueOnce(json({ url: "https://c.example/a/b" }))
+            .mockResolvedValueOnce(json({ url: "https://c.example/a" }));
+        await expect(openPublication("p 1", "/img/a.png")).resolves.toEqual({ url: "https://c.example/a/b" });
+        await expect(openPublication("p1")).resolves.toEqual({ url: "https://c.example/a" });
+        const [url, init] = calls()[0]!;
+        expect(String(url)).toMatch(/\/publications\/p%201\/open$/);
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ path: "/img/a.png" });
+        expect(JSON.parse(String(calls()[1]![1]?.body))).toEqual({});
     });
 });

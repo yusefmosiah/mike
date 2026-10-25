@@ -6,6 +6,9 @@ import type { Db } from "../../lib/db";
 import {
     PUBLICATION_COLUMNS,
     hashToken,
+    memberCookieValid,
+    memberCookieValue,
+    signInGrantValid,
     unlockCookieValid,
     unlockCookieValue,
     verifyPassword,
@@ -14,7 +17,14 @@ import {
 
 export type LivePublication = Pick<
     PublicationRow,
-    "id" | "kind" | "audience" | "title" | "password_hash" | "password_version"
+    | "id"
+    | "kind"
+    | "audience"
+    | "title"
+    | "password_hash"
+    | "password_version"
+    | "require_sign_in"
+    | "document_id"
 >;
 
 export async function findLivePublication(
@@ -35,6 +45,17 @@ export async function findLivePublication(
 
 export function publicationUnlocked(row: LivePublication, cookie: string | undefined): boolean {
     return row.audience === "public" || unlockCookieValid(row, cookie);
+}
+
+/** Signed-in-only links need the member cookie the app's grant set. */
+export function publicationMemberOk(row: LivePublication, cookie: string | undefined): boolean {
+    return !row.require_sign_in || memberCookieValid(row.id, cookie);
+}
+
+/** The member cookie for a valid grant, or null. */
+export function redeemSignInGrant(row: LivePublication, grant: unknown): string | null {
+    if (!row.require_sign_in || typeof grant !== "string") return null;
+    return signInGrantValid(row.id, grant) ? memberCookieValue(row.id) : null;
 }
 
 /** The cookie to set when the password is right, or null. */

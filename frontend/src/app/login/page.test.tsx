@@ -81,4 +81,16 @@ describe("LoginPage", () => {
                 Node.DOCUMENT_POSITION_FOLLOWING,
         ).toBeTruthy();
     });
+
+    it("returns to the page the visitor asked for after signing in", async () => {
+        login.mockResolvedValue({ user: { id: "user-1" } });
+        window.history.pushState({}, "", "/login?next=%2Fpublished%3Fp%3Dabc%26r%3D%252Fx");
+        const user = userEvent.setup();
+        render(<LoginPage />);
+        await user.type(screen.getByRole("textbox", { name: "Email" }), "a@b.co");
+        await user.type(screen.getByLabelText("Password"), "oldpass");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+        await vi.waitFor(() => expect(push).toHaveBeenCalledWith("/published?p=abc&r=%2Fx"));
+        window.history.pushState({}, "", "/login");
+    });
 });

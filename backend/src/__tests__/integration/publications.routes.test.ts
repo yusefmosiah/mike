@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
     db: undefined as Db | undefined,
     objects: new Map<string, Buffer>(),
     role: "owner" as string,
+    canOpen: true,
 }));
 
 vi.mock("../../lib/db", () => ({ createDb: () => state.db }));
@@ -21,7 +22,8 @@ vi.mock("../../middleware/auth", async () => {
 });
 vi.mock("../../lib/access", async (original) => ({
     ...(await original<typeof import("../../lib/access")>()),
-    ensureDocAccess: async () => ({ ok: true, isCreator: true, projectRole: state.role }),
+    ensureDocAccess: async () =>
+        state.canOpen ? { ok: true, isCreator: true, projectRole: state.role } : { ok: false },
 }));
 vi.mock("../../lib/storage", async (original) => {
     const actual = await original<typeof import("../../lib/storage")>();
@@ -59,6 +61,7 @@ vi.mock("../../lib/audit", async (original) => ({
 }));
 
 import { app, publicationContentApp } from "../../app";
+import { publishPreflight } from "../../modules/publications/publications.service";
 
 const ARTICLE = `<!doctype html><html><head><title>Field notes</title></head><body>
 <h1>Field notes</h1>
@@ -104,6 +107,8 @@ beforeEach(() => {
     state.db = store.db;
     state.objects.clear();
     state.role = "owner";
+    state.canOpen = true;
+    process.env.FRONTEND_URL = "http://app.test";
     process.env.PUBLISHING = "open";
     process.env.PUBLICATION_BASE_URL = "http://pub.test";
     delete process.env.PUBLICATION_URL_STYLE;
@@ -236,6 +241,89 @@ describe("password links", () => {
     });
 });
 
+describe("signed-in links", () => {
+    it("sends a visitor to the app to sign in, and lets in someone who can open the document", async () => {
+        const { body } = await publish({ document_id: "article", audience: "public", require_sign_in: true, expires_in_days: 30 });
+        const { publication } = body;
+        expect(publication.require_sign_in).toBe(true);
+        const host = hostOf(publication.url);
+
+        const away = await request(publicationContentApp).get("/site-plan.png").set("Host", host);
+        expect(away.status).toBe(302);
+        expect(away.headers.location).toBe(`http://app.test/published?p=${publication.id}&r=site-plan.png`);
+
+        const open = await request(app)
+            .post(`/publications/${publication.id}/open`)
+            .set("Authorization", "Bearer t")
+            .send({ path: "site-plan.png" });
+        expect(open.status).toBe(200);
+        const grant = new URL(open.body.url);
+        expect(grant.host).toBe(host);
+        expect(grant.pathname).toBe("/__grant");
+        expect(grant.searchParams.get("r")).toBe("site-plan.png");
+
+        const redeemed = await request(publicationContentApp).get(`${grant.pathname}${grant.search}`).set("Host", host);
+        expect(redeemed.status).toBe(303);
+        expect(redeemed.headers.location).toBe("/site-plan.png");
+        const cookie = (redeemed.headers["set-cookie"][0] as string).split(";")[0];
+        expect(cookie).toMatch(/^pub_member=/);
+        expect(redeemed.headers["set-cookie"][0]).toContain("Max-Age=3600");
+
+        const image = await request(publicationContentApp).get("/site-plan.png").set("Host", host).set("Cookie", cookie);
+        expect(image.status).toBe(200);
+
+        // A grant is for its own link only, and cannot be forged.
+        const forged = await request(publicationContentApp).get("/__grant?g=1.abc").set("Host", host);
+        expect(forged.status).toBe(404);
+    });
+
+    it("refuses someone who cannot open the document, and a link that does not ask for sign-in", async () => {
+        const signedIn = await publish({ document_id: "article", audience: "public", require_sign_in: true, expires_in_days: 30 });
+        state.canOpen = false;
+        const refused = await request(app)
+            .post(`/publications/${signedIn.body.publication.id}/open`)
+            .set("Authorization", "Bearer t")
+            .send({});
+        expect(refused.status).toBe(404);
+        state.canOpen = true;
+        const plain = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
+        const notNeeded = await request(app)
+            .post(`/publications/${plain.body.publication.id}/open`)
+            .set("Authorization", "Bearer t")
+            .send({});
+        expect(notNeeded.status).toBe(404);
+    });
+
+    it("asks for the password after sign-in when a link has both", async () => {
+        const { body } = await publish({
+            document_id: "article",
+            audience: "password",
+            password: "maple-river-lamp-stone",
+            require_sign_in: true,
+            expires_in_days: 30,
+        });
+        const host = hostOf(body.publication.url);
+        const unlockFirst = await request(publicationContentApp).post("/__unlock").set("Host", host).type("form").send({ password: "maple-river-lamp-stone" });
+        expect(unlockFirst.status).toBe(303);
+        expect(unlockFirst.headers.location).toContain("http://app.test/published?p=");
+        const open = await request(app).post(`/publications/${body.publication.id}/open`).set("Authorization", "Bearer t").send({});
+        const grant = new URL(open.body.url);
+        const redeemed = await request(publicationContentApp).get(`${grant.pathname}${grant.search}`).set("Host", host);
+        const member = (redeemed.headers["set-cookie"][0] as string).split(";")[0];
+        const locked = await request(publicationContentApp).get("/").set("Host", host).set("Cookie", member);
+        expect(locked.status).toBe(401);
+        const unlocked = await request(publicationContentApp)
+            .post("/__unlock")
+            .set("Host", host)
+            .set("Cookie", member)
+            .type("form")
+            .send({ password: "maple-river-lamp-stone" });
+        const password = (unlocked.headers["set-cookie"][0] as string).split(";")[0];
+        const page = await request(publicationContentApp).get("/").set("Host", host).set("Cookie", `${member}; ${password}`);
+        expect(page.status).toBe(200);
+    });
+});
+
 describe("other formats and refusals", () => {
     it("publishes Markdown as a page and a PDF as itself, with ranges", async () => {
         seedDocument("notes", "Notes.md", "md", Buffer.from("# Hello\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"));
@@ -304,6 +392,24 @@ describe("other formats and refusals", () => {
         expect(off.body.code).toBe("publishing_off");
         const content = await request(publicationContentApp).get("/").set("Host", "aaaaaaaaaaaaaaaaaaaaaaaaaa.pub.test");
         expect(content.status).toBe(404);
+    });
+
+    it("checks before the assistant asks, with the same rules as publishing", async () => {
+        expect(await publishPreflight(store.db, "u1", undefined, "article", null)).toEqual({
+            ok: true,
+            documentId: "article",
+            versionId: "article-v1",
+            filename: "Field notes.html",
+        });
+        seedDocument("memo", "Memo.docx", "docx", Buffer.from("DOCX"));
+        expect(await publishPreflight(store.db, "u1", undefined, "memo", null)).toEqual({ ok: false, code: "no_rendition" });
+        seedDocument("sheet", "Sheet.xlsx", "xlsx", Buffer.from("XLSX"));
+        expect(await publishPreflight(store.db, "u1", undefined, "sheet", null)).toEqual({ ok: false, code: "unsupported_type" });
+        expect(await publishPreflight(store.db, "u1", undefined, "gone", null)).toEqual({ ok: false, code: "not_found" });
+        state.role = "editor";
+        expect(await publishPreflight(store.db, "u1", undefined, "article", null)).toEqual({ ok: false, code: "not_owner" });
+        delete process.env.PUBLISHING;
+        expect(await publishPreflight(store.db, "u1", undefined, "article", null)).toEqual({ ok: false, code: "publishing_off" });
     });
 
     it("tells crawlers to stay out", async () => {

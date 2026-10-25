@@ -9,23 +9,33 @@
 
 export {
     createPublication,
+    describeOwnPublication,
+    grantPublicationAccess,
     listPublications,
+    publishPreflight,
     revokePublication,
     publishingConfigView,
     type PublicationView,
     type PublishFailure,
+    type PublishPreflight,
 } from "./publications.manage";
 export {
     findLivePublication,
     findPublicationFile,
+    publicationMemberOk,
     publicationUnlocked,
+    redeemSignInGrant,
     unlockPublication,
     type LivePublication,
     type PublicationFile,
 } from "./publications.serve";
 export {
+    MEMBER_COOKIE,
+    MEMBER_TTL_SECONDS,
     PAGE_CSP,
     SITE_CSP,
+    safeInnerPath,
+    signInUrl,
     UNLOCK_COOKIE,
     UNLOCK_TTL_SECONDS,
     publishingConfig,

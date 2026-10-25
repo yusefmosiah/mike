@@ -18,6 +18,8 @@ import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
 import { createFileReadStream } from "../../lib/storage";
 import {
+    MEMBER_COOKIE,
+    MEMBER_TTL_SECONDS,
     PAGE_CSP,
     SITE_CSP,
     UNLOCK_COOKIE,
@@ -26,9 +28,14 @@ import {
     escapeHtml,
     findLivePublication,
     findPublicationFile,
+    grantPublicationAccess,
     listPublications,
+    publicationMemberOk,
     publicationUnlocked,
     publishingConfig,
+    redeemSignInGrant,
+    safeInnerPath,
+    signInUrl,
     publishingConfigView,
     revokePublication,
     tokenFromRequest,
@@ -95,6 +102,7 @@ publicationsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         versionId: typeof body.version_id === "string" ? body.version_id : null,
         audience: body.audience,
         password: body.password,
+        requireSignIn: body.require_sign_in,
         expiresInDays: body.expires_in_days,
     });
     if (!result.ok) {
@@ -121,6 +129,21 @@ publicationsRouter.post("/:publicationId/revoke", requireAuth, asyncRoute(async 
     res.json({ publication: result.publication });
 }));
 
+// POST /publications/:publicationId/open
+// A signed-in visitor of a signed-in-only link, sent here by the content
+// server: the answer is where to send them next.
+publicationsRouter.post("/:publicationId/open", requireAuth, asyncRoute(async (req, res) => {
+    const result = await grantPublicationAccess(
+        createDb(),
+        res.locals.userId as string,
+        res.locals.userEmail as string | undefined,
+        req.params.publicationId,
+        (req.body as Record<string, unknown> | undefined)?.path,
+    );
+    if (!result.ok) return void res.status(404).json({ code: "not_found", detail: "Page not found" });
+    res.json({ url: result.url });
+}));
+
 publicationsRouter.use(routerErrorHandler("[publications]"));
 
 // ---------------------------------------------------------------------------
@@ -130,6 +153,7 @@ publicationsRouter.use(routerErrorHandler("[publications]"));
 export const publicationContentRouter = Router();
 
 const UNLOCK_PATH = "__unlock";
+const GRANT_PATH = "__grant";
 
 function contentKey(req: Request): string {
     return `${req.headers.host ?? ""}${req.path.split(UNLOCK_PATH)[0]}`;
@@ -171,6 +195,8 @@ publicationContentRouter.post(
         const resolved = await resolveRequest(req);
         if (!resolved) return void sendNotFound(res);
         const { row, hit, secure } = resolved;
+        if (!publicationMemberOk(row, parseCookies(req.headers.cookie ?? "")[MEMBER_COOKIE]))
+            return void res.redirect(303, signInUrl(row.id, ""));
         const cookie = await unlockPublication(row, (req.body as Record<string, unknown> | undefined)?.password);
         if (!cookie) return void sendPasswordPage(res, hit.prefix, true);
         res.setHeader(
@@ -187,6 +213,28 @@ publicationContentRouter.post(
     }),
 );
 
+// The app's grant for a signed-in visitor, traded for a cookie on this origin.
+publicationContentRouter.get(new RegExp(`/${GRANT_PATH}$`), asyncRoute(async (req, res) => {
+    const resolved = await resolveRequest(req);
+    if (!resolved) return void sendNotFound(res);
+    const { row, hit, secure } = resolved;
+    const cookie = redeemSignInGrant(row, req.query.g);
+    if (!cookie) return void sendNotFound(res);
+    res.setHeader(
+        "Set-Cookie",
+        serializeCookie(MEMBER_COOKIE, cookie, {
+            path: hit.prefix,
+            maxAge: MEMBER_TTL_SECONDS,
+            httpOnly: true,
+            sameSite: "lax",
+            secure,
+        }),
+    );
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(303, hit.prefix + safeInnerPath(req.query.r));
+}));
+
 publicationContentRouter.get(/.*/, asyncRoute(async (req, res) => {
     const resolved = await resolveRequest(req);
     if (!resolved) return void sendNotFound(res);
@@ -196,6 +244,10 @@ publicationContentRouter.get(/.*/, asyncRoute(async (req, res) => {
     if (hit.path === "" && !req.path.endsWith("/")) return void res.redirect(301, hit.prefix);
 
     const cookies = parseCookies(req.headers.cookie ?? "");
+    if (!publicationMemberOk(row, cookies[MEMBER_COOKIE])) {
+        res.setHeader("Cache-Control", "no-store");
+        return void res.redirect(302, signInUrl(row.id, hit.path));
+    }
     if (!publicationUnlocked(row, cookies[UNLOCK_COOKIE])) return void sendPasswordPage(res, hit.prefix, false);
 
     const file = await findPublicationFile(db, row, hit.path);

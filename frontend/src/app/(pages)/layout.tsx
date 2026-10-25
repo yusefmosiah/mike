@@ -10,6 +10,7 @@ import { PageChromeContext } from "@/app/contexts/PageChromeContext";
 import { AppSidebar } from "@/app/components/shared/AppSidebar";
 import { FullScreenLoader } from "@/app/components/shared/FullScreenLoader";
 import { HeaderButtonUI, HeaderButtonsUI } from "@/shared/ui/HeaderButtonsUI";
+import { loginPathFor } from "@/app/lib/authRedirects";
 import { cn } from "@/app/lib/utils";
 import { watchDisplayEdge } from "@/app/lib/displayEdge";
 import { watchNativeKeyboard } from "@/app/lib/nativeKeyboard";
@@ -139,9 +140,9 @@ export default function MikeLayout({
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {
-            router.push("/login");
+            router.push(loginPathFor(pathname, window.location.search));
         }
-    }, [authLoading, isAuthenticated, router]);
+    }, [authLoading, isAuthenticated, router, pathname]);
 
     if (!hasMounted || authLoading) {
         return <FullScreenLoader />;

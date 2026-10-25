@@ -102,6 +102,7 @@ export const TOOL_SOURCES: Record<string, "sources" | "none" | "pending"> = {
   // Vault: credential leases, audited by the vault itself, not sources
   vault_secrets: "none",
   vault_request_secret: "none",
+  publish_document: "none",
   vault_lease: "none",
   // Word add-in (client tools)
   read_active_document: "pending", // the open Word document; no event yet

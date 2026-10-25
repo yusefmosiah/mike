@@ -457,6 +457,48 @@ export const VAULT_TOOLS = [
   },
 ];
 
+/**
+ * Offered when the deployment publishes (publications module) and the
+ * conversation can pause for the person.
+ */
+export const PUBLISH_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "publish_document",
+      description:
+        "Ask the person to publish a document as a link others can open in a browser: an HTML page (an article with its images, video and audio), Markdown, text, a PDF, an image, or a Word or PowerPoint file as PDF. Use it when they ask to publish, post or share something as a link. You only propose: the turn pauses on a form where they confirm or change who can open it, set any password themselves and publish. You never see or choose the password, and you must never ask for one in the conversation. The form publishes a frozen copy of the current version; HTML pages take the project files they refer to by name with them. Their answer, with the link if they publish, arrives in the next message.",
+      parameters: {
+        type: "object",
+        properties: {
+          doc_id: {
+            type: "string",
+            description: "The document to publish, by its doc id in this conversation.",
+          },
+          password: {
+            type: "boolean",
+            description: "Suggest a password (the person sets it). Default false.",
+          },
+          require_sign_in: {
+            type: "boolean",
+            description: "Suggest that only people signed in to the app who can open this document may open the link. Default false.",
+          },
+          expires_in_days: {
+            type: ["integer", "null"],
+            enum: [7, 30, 90, null],
+            description: "Suggested expiry in days, or null for none. Default 30.",
+          },
+          purpose: {
+            type: "string",
+            description: "One sentence for the person: what is being published and for whom.",
+          },
+        },
+        required: ["doc_id"],
+      },
+    },
+  },
+];
+
 export const TOOLS = [
   {
     type: "function",
@@ -892,7 +934,7 @@ export const TOOLS = [
     function: {
       name: "generate_html",
       description:
-        "Create an HTML page: an article, report or briefing that mixes prose, tables, images, embedded video and audio, and links. Use when the person wants something to read in a browser or to publish as a link; Word stays the default for legal drafts. Write one complete, self-contained document (<!doctype html>, <title>, inline <style>, readable on a phone). Media and fonts may load over https. Embed YouTube with https://www.youtube-nocookie.com/embed/<id> in an <iframe>, Vimeo with https://player.vimeo.com/video/<id>; use <audio controls> and <video controls> for files. Refer to the person's images and other documents in the same project by their filename as a relative path (e.g. <img src=\"site-plan.png\">); they are published with the page. Forms do not work on a published page. Returns {\"doc_id\", ...}; the person gets its card automatically and can publish it from the viewer.",
+        "Create an HTML page: an article, report or briefing that mixes prose, tables, images, embedded video and audio, and links. Use when the person wants something to read in a browser or to publish as a link; Word stays the default for legal drafts. Write one complete, self-contained document (<!doctype html>, <title>, inline <style>, readable on a phone). Media and fonts may load over https. Embed YouTube with https://www.youtube-nocookie.com/embed/<id> in an <iframe>, Vimeo with https://player.vimeo.com/video/<id>; use <audio controls> and <video controls> for files. Refer to the person's images and other documents in the same project by their filename as a relative path (e.g. <img src=\"site-plan.png\">); they are published with the page. Forms do not work on a published page. Returns {\"doc_id\", ...}; the person gets its card automatically; to share it as a link, use publish_document when you have it.",
       parameters: {
         type: "object",
         properties: {

@@ -8217,6 +8217,7 @@ create table if not exists public.publications (
   token_sealed text not null,
   password_hash text,
   password_version integer not null default 0,
+  require_sign_in boolean not null default false,
   title text not null,
   expires_at timestamptz,
   revoked_at timestamptz,
@@ -8403,5 +8404,6 @@ insert into public.schema_migrations (filename) values
   ('20261022_04_drop_memory_curator_model.sql'),
   ('20261022_05_agent_messaging.sql'),
   ('20261024_01_html_upload_type.sql'),
-  ('20261024_02_publications.sql')
+  ('20261024_02_publications.sql'),
+  ('20261024_03_publication_sign_in.sql')
 on conflict (filename) do nothing;

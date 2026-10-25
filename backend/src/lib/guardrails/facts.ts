@@ -52,6 +52,8 @@ const KNOWN_EFFECTS: Readonly<Record<string, Effect>> = {
   edit_document: "create", replicate_document: "create", generate_docx: "create",
   generate_excel: "create", generate_ppt: "create", generate_html: "create", save_to_mike: "create",
   save_skill: "create", install_skill: "create",
+  // The person publishes from a form; the call itself only asks.
+  publish_document: "share",
   // The open web: a query or URL can carry matter text to any host.
   web_search: "egress", fetch_web_page: "egress",
   // Gmail.

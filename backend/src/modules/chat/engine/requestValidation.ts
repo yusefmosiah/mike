@@ -328,11 +328,12 @@ export function parseOptionalAskInputsResponse(
       response.kind !== "text" &&
       response.kind !== "documents" &&
       response.kind !== "approval" &&
-      response.kind !== "secret"
+      response.kind !== "secret" &&
+      response.kind !== "publish"
     ) {
       return {
         ok: false,
-        detail: `${field}.kind must be "choice", "multi_choice", "text", "documents", "approval", or "secret"`,
+        detail: `${field}.kind must be "choice", "multi_choice", "text", "documents", "approval", "secret", or "publish"`,
       };
     }
     if (
@@ -340,6 +341,16 @@ export function parseOptionalAskInputsResponse(
       typeof response.skipped !== "boolean"
     ) {
       return { ok: false, detail: `${field}.skipped must be a boolean` };
+    }
+
+    if (response.kind === "publish") {
+      if (
+        response.publication_id !== undefined &&
+        typeof response.publication_id !== "string"
+      ) {
+        return { ok: false, detail: `${field}.publication_id must be a string` };
+      }
+      continue;
     }
 
     if (response.kind === "secret") {

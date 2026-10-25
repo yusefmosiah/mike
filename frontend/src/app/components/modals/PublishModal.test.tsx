@@ -18,7 +18,7 @@ vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
 const pub = (over: Partial<Publication> = {}): Publication => ({
     id: "p1", document_id: "d1", version_id: "v1", title: "T", kind: "file", audience: "public",
     url: "https://pub.example/p1", created_at: "2026-01-02T12:00:00Z", expires_at: null, revoked_at: null,
-    file_count: 1, ...over,
+    file_count: 1, require_sign_in: false, ...over,
 });
 
 const target = { documentId: "d1", versionId: "v1", filename: "plan.html" };
@@ -208,5 +208,31 @@ describe("PublishModal", () => {
         unmount();
         reject(new Error("x"));
         await Promise.resolve();
+    });
+});
+
+describe("PublishModal signed-in-only links", () => {
+    it("sends require_sign_in when the toggle is on and explains it", async () => {
+        api.createPublication.mockResolvedValue({ publication: pub({ require_sign_in: true }), missing_files: [] });
+        open();
+        const toggle = screen.getByRole("switch", { name: /signed in who can open this document/ });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
+        expect(screen.getByText(/asked to sign in/)).toBeInTheDocument();
+        await userEvent.click(toggle);
+        expect(toggle).toHaveAttribute("aria-checked", "true");
+        expect(screen.getByText(/Only people signed in to this app/)).toBeInTheDocument();
+        await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+        expect(api.createPublication).toHaveBeenCalledWith({
+            document_id: "d1", version_id: "v1", audience: "public", require_sign_in: true, expires_in_days: 30,
+        });
+        await screen.findByRole("region", { name: "Published link" });
+        expect(within(screen.getByRole("region", { name: "Existing links" })).getByText("Signed in only")).toBeInTheDocument();
+    });
+
+    it("lists signed-in-only links as plain text", async () => {
+        api.listPublications.mockResolvedValue([pub({ require_sign_in: true }), pub({ id: "q" })]);
+        open();
+        const list = await screen.findByRole("region", { name: "Existing links" });
+        expect(within(list).getAllByText("Signed in only")).toHaveLength(1);
     });
 });

@@ -11,6 +11,10 @@ import { ConnectorActionCard } from "../shared/ConnectorActionCard";
 import { AddDocumentsModal } from "../modals/AddDocumentsModal";
 import { SecretRequestField } from "../vault/SecretRequestField";
 import {
+    PublishRequestField,
+    type PublishedLink,
+} from "../modals/PublishRequestField";
+import {
     LIQUID_GLASS_SUBTLE_CLASS,
     LIQUID_GLASS_TRANSLUCENT_CLASS,
 } from "@/app/components/ui/liquid-surface";
@@ -30,6 +34,8 @@ type ApprovalDecision = "approve" | "reject";
 type PendingDecision = { id: string; decision: ApprovalDecision };
 /** A secret stored by the handler that is about to submit, before its state lands. */
 type PendingSecret = { id: string; name: string };
+/** A publication created by the handler that is about to submit. */
+type PendingPublication = { id: string; publicationId: string };
 
 const OPEN_TEXT_MAX_LENGTH = 5_000;
 
@@ -57,6 +63,11 @@ export function AskInputPopup({
     const [docsByInput, setDocsByInput] = useState<
         Record<string, Record<number, Document[]>>
     >({});
+    // Links published from a publish request, kept for showing their address;
+    // the response carries only the publication id.
+    const [published, setPublished] = useState<Record<string, PublishedLink>>(
+        {},
+    );
     const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
     const [confirmed, setConfirmed] = useState<Set<string>>(() => new Set());
     const [submitted, setSubmitted] = useState(false);
@@ -95,7 +106,11 @@ export function AskInputPopup({
 
     const itemAnswered = useCallback(
         (item: AskInputItem) => {
-            if (item.kind === "approval" || item.kind === "secret")
+            if (
+                item.kind === "approval" ||
+                item.kind === "secret" ||
+                item.kind === "publish"
+            )
                 return !!answers[item.id];
             if (item.kind === "multi_choice") {
                 return (
@@ -239,8 +254,24 @@ export function AskInputPopup({
         pendingSkipId?: string,
         pendingDecision?: PendingDecision,
         pendingSecret?: PendingSecret,
+        pendingPublication?: PendingPublication,
     ): AskInputsResponse => {
         const responses = event.items.map((item) => {
+            if (item.kind === "publish") {
+                const publicationId =
+                    pendingPublication?.id === item.id
+                        ? pendingPublication.publicationId
+                        : answers[item.id];
+                return publicationId &&
+                    !skipped.has(item.id) &&
+                    item.id !== pendingSkipId
+                    ? {
+                          id: item.id,
+                          kind: "publish" as const,
+                          publication_id: publicationId,
+                      }
+                    : { id: item.id, kind: "publish" as const, skipped: true };
+            }
             if (item.kind === "secret") {
                 const name =
                     pendingSecret?.id === item.id
@@ -357,6 +388,14 @@ export function AskInputPopup({
     const buildContent = (response: AskInputsResponse) => {
         const itemsById = new Map(event.items.map((item) => [item.id, item]));
         const lines = response.responses.map((item, index) => {
+            if (item.kind === "publish") {
+                const asked = itemsById.get(item.id);
+                const requested =
+                    asked?.kind === "publish" ? asked.filename : "the document";
+                return item.skipped || !item.publication_id
+                    ? `${index + 1}. Did not publish "${requested}".`
+                    : `${index + 1}. Published "${requested}" as a link (publication ${item.publication_id}).`;
+            }
             if (item.kind === "secret") {
                 const asked = itemsById.get(item.id);
                 const requested = asked?.kind === "secret" ? asked.name : "credential";
@@ -389,7 +428,10 @@ export function AskInputPopup({
             (item) => item.kind === "approval",
         );
         const questions = response.responses.filter(
-            (item) => item.kind !== "approval" && item.kind !== "secret",
+            (item) =>
+                item.kind !== "approval" &&
+                item.kind !== "secret" &&
+                item.kind !== "publish",
         );
         // Skipping every question is declining them, not "go ahead with
         // defaults"; say so plainly so the assistant does not start the task.
@@ -411,12 +453,14 @@ export function AskInputPopup({
         pendingSkipId?: string,
         pendingDecision?: PendingDecision,
         pendingSecret?: PendingSecret,
+        pendingPublication?: PendingPublication,
     ) => {
         if (submitted || !onSubmit) return;
         const response = buildResponse(
             pendingSkipId,
             pendingDecision,
             pendingSecret,
+            pendingPublication,
         );
         setSubmitted(true);
         onSubmit(response, buildContent(response), responseFiles(response));
@@ -437,6 +481,20 @@ export function AskInputPopup({
         setConfirmed((prev) => new Set(prev).add(id));
         goToNextUnresolved(id);
         if (!firstUnresolvedId(id)) submit(undefined, undefined, { id, name });
+    };
+
+    const publicationCreated = (id: string, link: PublishedLink) => {
+        if (submitted) return;
+        setPublished((prev) => ({ ...prev, [id]: link }));
+        setAnswers((prev) => ({ ...prev, [id]: link.publication.id }));
+        setSkippedFor(id, false);
+        setConfirmed((prev) => new Set(prev).add(id));
+        goToNextUnresolved(id);
+        if (!firstUnresolvedId(id))
+            submit(undefined, undefined, undefined, {
+                id,
+                publicationId: link.publication.id,
+            });
     };
 
     const dismiss = useCallback(() => {
@@ -482,7 +540,9 @@ export function AskInputPopup({
                                                   ? "Approval"
                                                   : item.kind === "secret"
                                                     ? "Credential"
-                                                    : "Question";
+                                                    : item.kind === "publish"
+                                                      ? "Publish link"
+                                                      : "Question";
                                         return (
                                             <TabPillButtonUI
                                                 key={item.id}
@@ -534,6 +594,13 @@ export function AskInputPopup({
                                                 Store it in your vault: it goes
                                                 there directly, never into this
                                                 chat.
+                                            </p>
+                                        ) : activeItem.kind === "publish" ? (
+                                            <p className="text-sm text-gray-800">
+                                                The assistant suggests
+                                                publishing a document as a
+                                                link. Nothing is published
+                                                until you choose to.
                                             </p>
                                         ) : (
                                             <p className="text-sm text-gray-800">
@@ -660,6 +727,21 @@ export function AskInputPopup({
                                                 )
                                             }
                                         />
+                                    ) : activeItem.kind === "publish" ? (
+                                        <PublishRequestField
+                                            item={activeItem}
+                                            published={published[activeItem.id]}
+                                            disabled={
+                                                submitted ||
+                                                skipped.has(activeItem.id)
+                                            }
+                                            onPublished={(link) =>
+                                                publicationCreated(
+                                                    activeItem.id,
+                                                    link,
+                                                )
+                                            }
+                                        />
                                     ) : activeItem.kind === "text" ? (
                                         <OpenTextInput
                                             item={activeItem}
@@ -765,9 +847,12 @@ export function AskInputPopup({
                                     >
                                         {skipped.has(activeItem.id)
                                             ? "Unskip"
-                                            : "Skip"}
+                                            : activeItem.kind === "publish"
+                                              ? "Don't publish"
+                                              : "Skip"}
                                     </button>
-                                    {activeItem.kind !== "secret" && (
+                                    {activeItem.kind !== "secret" &&
+                                        activeItem.kind !== "publish" && (
                                     <PillButtonUI
                                         tone="black"
                                         size="xs"

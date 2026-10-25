@@ -3,6 +3,7 @@ import {
     authCallbackUrl,
     authErrorDescription,
     browserAuthCallbackUrl,
+    loginPathFor,
     safeAuthNext,
 } from "./authRedirects";
 
@@ -74,5 +75,19 @@ describe("authErrorDescription", () => {
             authErrorDescription("", "#error_description=Invalid+request"),
         ).toBe("This confirmation link is invalid or has expired.");
         expect(authErrorDescription("", "")).toBeNull();
+    });
+});
+
+describe("loginPathFor", () => {
+    it("remembers a signed-in-only link's landing page with its query", () => {
+        const query = "?p=2f1c0c7e-6a4c-4a57-9d59-0d2f6a1e8b11&r=%2Fa%20b%2Findex.html";
+        const path = loginPathFor("/published", query);
+        expect(path.startsWith("/login?next=")).toBe(true);
+        expect(safeAuthNext(decodeURIComponent(path.slice("/login?next=".length)))).toBe(`/published${query}`);
+    });
+
+    it("sends everyone else to a plain login", () => {
+        expect(loginPathFor("/assistant")).toBe("/login");
+        expect(loginPathFor("/projects/p1", "?x=1")).toBe("/login");
     });
 });

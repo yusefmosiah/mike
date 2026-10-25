@@ -25,6 +25,7 @@ import { ACTIVE_WORD_DOCUMENT_LIVE_FILENAME } from "./wordPrompt";
 import { parseCitations, createCitation } from "./citations";
 import type { AssistantEvent } from "./streaming";
 import { catalogWorkflowId, ensureDefaultWorkflows } from "../../../lib/workflowCatalog";
+import { describeOwnPublication } from "../../publications/publications.service";
 import { describeFromBody, skillName } from "../../../lib/skillFormat";
 
 // ---------------------------------------------------------------------------
@@ -303,13 +304,17 @@ export async function enrichWithPriorEvents(
         unknown
       >[];
       const count = items.filter(
-        (item) => item?.kind !== "approval" && item?.kind !== "secret",
+        (item) => item?.kind !== "approval" && item?.kind !== "secret" && item?.kind !== "publish",
       ).length;
       if (count > 0)
         lines.push(`- asked user for ${count} input${count === 1 ? "" : "s"}`);
       for (const item of items) {
         if (item?.kind === "secret") {
           lines.push(`- asked user to store a credential named ${untrustedRef(item.name)} in their vault`);
+          continue;
+        }
+        if (item?.kind === "publish") {
+          lines.push(`- asked user to publish ${untrustedRef(item.filename)} as a link`);
           continue;
         }
         if (item?.kind !== "approval") continue;
@@ -360,6 +365,10 @@ export async function enrichWithPriorEvents(
       for (const response of responses) {
         if (!response || typeof response !== "object") continue;
         const row = response as Record<string, unknown>;
+        if (row.kind === "publish") {
+          lines.push(publishedLine(row, untrustedRef));
+          continue;
+        }
         if (row.kind === "secret") {
           lines.push(
             row.skipped || typeof row.secret_name !== "string"
@@ -862,9 +871,16 @@ export function parseAskInputsResponsePayload(
           kind !== "text" &&
           kind !== "documents" &&
           kind !== "approval" &&
-          kind !== "secret")
+          kind !== "secret" &&
+          kind !== "publish")
       )
         return null;
+      if (kind === "publish") {
+        // Only the id travels from the client; the server reads the rest.
+        const publicationId = cleanAskInputResponseId(current.publication_id);
+        if (skipped || !publicationId) return { id, kind, skipped: true };
+        return { id, kind, publication_id: publicationId };
+      }
       if (kind === "secret") {
         const name = typeof current.secret_name === "string" ? current.secret_name.trim() : "";
         if (skipped || !SECRET_NAME.test(name)) return { id, kind, skipped: true };
@@ -1001,6 +1017,49 @@ export async function appendAssistantEventsToMessage(
   return true;
 }
 
+/**
+ * A publish answer names a publication by id; what the assistant is told
+ * (the link, who can open it) is read from that publication, which must be
+ * the person's own and of the document they were asked to publish.
+ * Anything else is recorded as not published.
+ */
+async function describePublished(
+  db: Db,
+  userId: string,
+  items: AskInputItem[],
+  canonical: AskInputResponseItem[],
+): Promise<void> {
+  for (const [index, answer] of canonical.entries()) {
+    if (answer.kind !== "publish" || !answer.publication_id) continue;
+    const item = items.find((candidate) => candidate.id === answer.id);
+    const view =
+      item?.kind === "publish"
+        ? await describeOwnPublication(db, userId, answer.publication_id, item.document_id).catch(() => null)
+        : null;
+    canonical[index] = view
+      ? {
+          id: answer.id,
+          kind: "publish",
+          publication_id: view.id,
+          url: view.url ?? undefined,
+          audience: view.audience,
+          require_sign_in: view.require_sign_in,
+          expires_at: view.expires_at,
+        }
+      : { id: answer.id, kind: "publish", skipped: true };
+  }
+}
+
+function publishedLine(row: Record<string, unknown>, untrustedRef: (value: unknown) => string): string {
+  if (row.skipped || typeof row.url !== "string") return "- user did not publish the document";
+  const who = [
+    row.audience === "password" ? "anyone with the link and the password the user set (you do not know it)" : "anyone with the link",
+    ...(row.require_sign_in === true ? ["who is signed in and can open the document"] : []),
+  ].join(", ");
+  const until = typeof row.expires_at === "string" ? `; it expires ${row.expires_at.slice(0, 10)}` : "; it does not expire";
+  return `- user published the document at ${untrustedRef(row.url)}, for ${who}${until}`;
+}
+
 export type AppendAskInputsResponseResult =
   | "appended"
   | "forbidden"
@@ -1042,6 +1101,16 @@ function canonicalAskInputsResponses(
       continue;
     }
     if (answer.kind === "secret" || item.kind === "secret") return null;
+    if (item.kind === "publish" && answer.kind === "publish") {
+      // Checked against the publisher's own publications before it is stored.
+      canonical.push(
+        !answer.skipped && answer.publication_id
+          ? { id: item.id, kind: "publish", publication_id: answer.publication_id }
+          : { id: item.id, kind: "publish", skipped: true },
+      );
+      continue;
+    }
+    if (answer.kind === "publish" || item.kind === "publish") return null;
     if (answer.skipped) {
       canonical.push(
         item.kind === "documents"
@@ -1145,6 +1214,7 @@ export async function appendAskInputsResponseToAssistantMessage(
   }
   const canonical = canonicalAskInputsResponses(askEvent.items, response);
   if (!canonical) return "invalid";
+  await describePublished(db, authorUserId, askEvent.items, canonical);
 
   const storedResponse = {
     type: "ask_inputs_response" as const,
