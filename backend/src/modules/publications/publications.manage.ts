@@ -120,7 +120,6 @@ export async function createPublication(
     if (!built.ok) return { ok: false, code: built.code };
 
     const id = crypto.randomUUID();
-    const token = newToken();
     const copied: string[] = [];
     try {
         const files = [];
@@ -155,24 +154,32 @@ export async function createPublication(
             expiresInDays === null
                 ? null
                 : new Date(Date.now() + (expiresInDays as number) * 86_400_000).toISOString();
-        const { data: row, error } = await db
-            .from("publications")
-            .insert({
-                id,
-                created_by: input.userId,
-                document_id: input.documentId,
-                version_id: version.id,
-                kind: built.bundle.kind,
-                audience,
-                token_hash: hashToken(token),
-                token_sealed: sealToken(token),
-                password_hash: password ? await hashPassword(password) : null,
-                require_sign_in: input.requireSignIn === true,
-                title: built.title,
-                expires_at: expiresAt,
-            })
-            .select(PUBLICATION_COLUMNS)
-            .single();
+        const passwordHash = password ? await hashPassword(password) : null;
+        let row: unknown;
+        let error: { code?: string } | null = null;
+        // A fresh token on the (astronomically unlikely) unique-hash collision.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const token = newToken();
+            ({ data: row, error } = await db
+                .from("publications")
+                .insert({
+                    id,
+                    created_by: input.userId,
+                    document_id: input.documentId,
+                    version_id: version.id,
+                    kind: built.bundle.kind,
+                    audience,
+                    token_hash: hashToken(token),
+                    token_sealed: sealToken(token),
+                    password_hash: passwordHash,
+                    require_sign_in: input.requireSignIn === true,
+                    title: built.title,
+                    expires_at: expiresAt,
+                })
+                .select(PUBLICATION_COLUMNS)
+                .single());
+            if (error?.code !== "23505") break;
+        }
         if (error || !row) throw error ?? new Error("publication insert returned no row");
         const { error: filesError } = await db.from("publication_files").insert(files);
         if (filesError) {

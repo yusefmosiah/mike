@@ -30,9 +30,11 @@ import {
     findPublicationFile,
     grantPublicationAccess,
     listPublications,
+    missThrottle,
     publicationMemberOk,
     publicationUnlocked,
     publishingConfig,
+    recordMiss,
     redeemSignInGrant,
     safeInnerPath,
     signInUrl,
@@ -182,6 +184,11 @@ const unlockPerLink = rateLimit({
     handler: sendTooManyAttempts,
 });
 
+// Guessing link names: an address that has asked for too many names that do
+// not exist is refused everything on this origin for a while, before any
+// lookup (publications.throttle.ts).
+publicationContentRouter.use(missThrottle((res) => sendNotFoundPage(res, 429)));
+
 publicationContentRouter.get("/robots.txt", (_req, res) => {
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
 });
@@ -193,7 +200,7 @@ publicationContentRouter.post(
     express.urlencoded({ extended: false, limit: "4kb" }),
     asyncRoute(async (req, res) => {
         const resolved = await resolveRequest(req);
-        if (!resolved) return void sendNotFound(res);
+        if (!resolved) return void sendMiss(req, res);
         const { row, hit, secure } = resolved;
         if (!publicationMemberOk(row, parseCookies(req.headers.cookie ?? "")[MEMBER_COOKIE]))
             return void res.redirect(303, signInUrl(row.id, ""));
@@ -216,7 +223,7 @@ publicationContentRouter.post(
 // The app's grant for a signed-in visitor, traded for a cookie on this origin.
 publicationContentRouter.get(new RegExp(`/${GRANT_PATH}$`), asyncRoute(async (req, res) => {
     const resolved = await resolveRequest(req);
-    if (!resolved) return void sendNotFound(res);
+    if (!resolved) return void sendMiss(req, res);
     const { row, hit, secure } = resolved;
     const cookie = redeemSignInGrant(row, req.query.g);
     if (!cookie) return void sendNotFound(res);
@@ -237,7 +244,7 @@ publicationContentRouter.get(new RegExp(`/${GRANT_PATH}$`), asyncRoute(async (re
 
 publicationContentRouter.get(/.*/, asyncRoute(async (req, res) => {
     const resolved = await resolveRequest(req);
-    if (!resolved) return void sendNotFound(res);
+    if (!resolved) return void sendMiss(req, res);
     const { row, hit, db } = resolved;
     // A path-style link needs its trailing slash, or the page's relative
     // references resolve one level too high.
@@ -362,9 +369,20 @@ function sendPage(res: Response, status: number, title: string, body: string): v
 `);
 }
 
-// Unknown, revoked and expired links all get this page.
+// Unknown, revoked and expired links all get this page. The throttled answer
+// is the same page with status 429, so it reveals nothing about any name.
+function sendNotFoundPage(res: Response, status: number): void {
+    sendPage(res, status, "Page not found", "<p>This link does not exist, has expired, or was turned off by the person who shared it.</p>");
+}
+
 function sendNotFound(res: Response): void {
-    sendPage(res, 404, "Page not found", "<p>This link does not exist, has expired, or was turned off by the person who shared it.</p>");
+    sendNotFoundPage(res, 404);
+}
+
+/** A request that named no live publication: counted against the address. */
+function sendMiss(req: Request, res: Response): void {
+    recordMiss(req);
+    sendNotFound(res);
 }
 
 function sendPasswordPage(res: Response, prefix: string, wrong: boolean): void {

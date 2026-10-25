@@ -69,9 +69,31 @@ Rules for the content domain:
 - **Not behind a staging gate.** Visitors must reach it without one.
 - **The proxy keeps the `Host` header.** The subdomain carries the token.
 
-Tokens are 128 bits, in lowercase base32, so a token is a valid DNS label.
-The database stores a SHA-256 of each token for lookup, plus a copy sealed
-with the server key.
+### Link names
+
+A link's name (its token) is the only secret of an "anyone with the link"
+page, and in the subdomain style it is a DNS label.
+
+- **Format.** Three words and two numbers joined by hyphens, such as `34-chapeau-shiso-937-calabaza`. The numbers take two of the five places, in any of the ten possible arrangements. Lowercase `a-z` and digits only, at most 40 characters (the limit for a label is 63).
+- **Words.** Drawn uniformly from `backend/src/modules/publications/linkWords.ts`: about 2,900 plain-ASCII words from English, French, Spanish, Italian, Portuguese, German, Dutch, Japanese, Swahili, Hawaiian, Finnish, Turkish, Indonesian and a few other languages. The list has at least 2048 words and may grow; add words only by the rules in that file's header.
+- **Numbers.** Uniform from 0 to 999, written without padding.
+- **Randomness.** Every draw uses `crypto.randomInt`.
+- **Entropy.** `3 * log2(words) + 2 * log2(1000) + log2(10)`: at least 56.3 bits with 2048 words and about 57.8 with the list as shipped (`linkTokenEntropyBits`). That is far below the older names, so guessing is limited by the throttle below rather than by the name alone; use a password for anything that must stay private.
+- **Older links.** Names made before this change are 26 characters of base32 (128 bits). They keep working. The server accepts a name by its structure, not by whether its words are in the list, so the list can grow without breaking links.
+- **Storage.** The database stores a SHA-256 of each token for lookup (unique; a collision makes the insert retry with a new name, up to three times), plus a copy sealed with the server key.
+
+### Guessing limit
+
+A client address that asks the content server for 30 names that do not exist
+within 10 minutes (malformed, unknown, revoked or expired all count alike) gets
+`429` with the same "page not found" page as any other refusal, and no
+database lookup, for the rest of the window. While throttled, an address is
+refused every request on the content server, links that do exist included,
+because answering some of them would reveal which names exist. Requests for real
+links, and for missing files inside them, are not counted. The address is
+`req.ip`, which Express derives from `X-Forwarded-For` as set by Caddy
+(`TRUST_PROXY_HOPS`, default 1), as for the other limiters. The count is kept in
+memory in the backend process, so a restart clears it.
 
 ### Headers on a published page
 

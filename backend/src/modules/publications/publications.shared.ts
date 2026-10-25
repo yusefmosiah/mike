@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { promisify } from "node:util";
 import { isStrictPrivateMode } from "../../lib/privateMode";
 import { authHandoffEncryptionSecret } from "../../lib/runtimeConfig";
+import { LINK_WORDS } from "./linkWords";
 
 export type PublicationAudience = "public" | "password";
 export type PublicationKind = "site" | "file";
@@ -144,12 +145,61 @@ export function tokenFromRequest(
 // Tokens and the server key
 // ---------------------------------------------------------------------------
 
-// 16 random bytes in lowercase base32: 26 characters, 128 bits, and a valid
-// DNS label, so a token can be a subdomain.
+// Link names. The token is the only secret of an "anyone with the link"
+// publication, and it is a DNS label (a subdomain), so it is at most 63
+// characters of a-z, 0-9 and single hyphens.
+//
+// New tokens are three words and two numbers, hyphen-joined in one of ten
+// arrangements (the numbers take two of the five places), such as
+// `34-chapeau-shiso-937-calabaza`:
+//   - each word is drawn uniformly from LINK_WORDS (>= 2048 words, so >= 11
+//     bits each; log2 of the actual size is used below);
+//   - each number is uniform in 0-999 (~9.97 bits each, written without
+//     padding, so 7 and 007 are never both generated);
+//   - the arrangement is uniform over the ten (~3.32 bits).
+// That is >= 3 * 11 + 2 * 9.97 + 3.32 = 56.3 bits with the minimum list, and
+// ~57.6 bits with the list as shipped (see linkTokenEntropyBits). All draws
+// use crypto.randomInt (CSPRNG, unbiased). Guessing is limited by the miss
+// throttle on the content server (publications.throttle.ts), not by the
+// token alone.
+//
+// Tokens made before this change are 16 random bytes in lowercase base32: 26
+// characters, 128 bits. They stay valid; TOKEN_RE accepts both shapes. It
+// checks structure only, not word membership, so LINK_WORDS can grow.
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
-export const TOKEN_RE = /^[a-z2-7]{26}$/;
+const LEGACY_TOKEN = "[a-z2-7]{26}";
+
+/** Where the two numbers sit among the five parts: every choice of two places. */
+const NUMBER_PLACES: readonly (readonly [number, number])[] = [
+    [0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4],
+];
+
+const WORD_PART = "[a-z]{3,10}";
+const NUMBER_PART = "[0-9]{1,3}";
+
+const WORD_TOKEN = NUMBER_PLACES.map(([a, b]) =>
+    Array.from({ length: 5 }, (_, i) => (i === a || i === b ? NUMBER_PART : WORD_PART)).join("-"),
+).join("|");
+
+// 3 words + 2 numbers is at most 3 * 10 + 2 * 3 + 4 hyphens = 40 characters.
+export const TOKEN_RE = new RegExp(`^(?:${LEGACY_TOKEN}|${WORD_TOKEN})$`);
+
+/** Bits of entropy in a word token drawn from `wordCount` words. */
+export function linkTokenEntropyBits(wordCount = LINK_WORDS.length): number {
+    return 3 * Math.log2(wordCount) + 2 * Math.log2(1000) + Math.log2(NUMBER_PLACES.length);
+}
 
 export function newToken(): string {
+    const [a, b] = NUMBER_PLACES[crypto.randomInt(NUMBER_PLACES.length)];
+    return Array.from({ length: 5 }, (_, i) =>
+        i === a || i === b
+            ? String(crypto.randomInt(1000))
+            : LINK_WORDS[crypto.randomInt(LINK_WORDS.length)],
+    ).join("-");
+}
+
+/** The pre-word-link format: 128 random bits in base32. Kept for tests. */
+export function newLegacyToken(): string {
     const bytes = crypto.randomBytes(16);
     let bits = 0;
     let value = 0;

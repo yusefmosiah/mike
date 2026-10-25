@@ -6,6 +6,8 @@
 //   publications.bundle.ts  — the files a publication serves
 //   publications.manage.ts  — make, list and revoke (signed in)
 //   publications.serve.ts   — find a live link, unlock it, find a file (public)
+//   publications.throttle.ts — refuse addresses that keep guessing link names
+//   linkWords.ts            — the words link names are made of
 
 export {
     createPublication,
@@ -41,4 +43,5 @@ export {
     publishingConfig,
     tokenFromRequest,
 } from "./publications.shared";
+export { MISS_LIMIT, MISS_WINDOW_MS, missThrottle, recordMiss, resetMissThrottle } from "./publications.throttle";
 export { escapeHtml } from "./publications.bundle";

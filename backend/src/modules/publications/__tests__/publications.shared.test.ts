@@ -3,6 +3,8 @@ import {
     TOKEN_RE,
     hashPassword,
     hashToken,
+    linkTokenEntropyBits,
+    newLegacyToken,
     newToken,
     publicationUrl,
     publishingConfig,
@@ -91,11 +93,69 @@ describe("links", () => {
         expect(tokenFromRequest(config, "localhost:3002", "/p/NOT-A-TOKEN/")).toBeNull();
     });
 
-    it("makes 128-bit tokens that are valid DNS labels", () => {
-        const tokens = new Set(Array.from({ length: 200 }, () => newToken()));
-        expect(tokens.size).toBe(200);
-        for (const t of tokens) expect(t).toMatch(TOKEN_RE);
+    it("makes word tokens that are valid DNS labels", () => {
+        const tokens = new Set(Array.from({ length: 1000 }, () => newToken()));
+        expect(tokens.size).toBe(1000);
+        const arrangements = new Set<string>();
+        for (const t of tokens) {
+            expect(t).toMatch(TOKEN_RE);
+            expect(t.length).toBeLessThanOrEqual(63);
+            expect(t).toMatch(/^[a-z0-9]+(-[a-z0-9]+){4}$/);
+            const parts = t.split("-");
+            expect(parts.filter((p) => /^[0-9]+$/.test(p))).toHaveLength(2);
+            expect(parts.filter((p) => /^[a-z]+$/.test(p))).toHaveLength(3);
+            for (const p of parts) if (/^[0-9]+$/.test(p)) expect(Number(p)).toBeLessThan(1000);
+            arrangements.add(parts.map((p) => (/^[0-9]/.test(p) ? "n" : "w")).join(""));
+        }
+        expect(arrangements.size).toBe(10);
         expect(hashToken(token)).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("has at least 55 bits of entropy", () => {
+        expect(linkTokenEntropyBits()).toBeGreaterThan(55);
+        expect(linkTokenEntropyBits(2048)).toBeGreaterThan(56);
+    });
+
+    it("accepts old and new tokens and rejects malformed ones", () => {
+        expect(newLegacyToken()).toMatch(TOKEN_RE);
+        expect(newLegacyToken()).toHaveLength(26);
+        for (const ok of [
+            "34-chapeau-shiso-937-calabaza",
+            "chapeau-shiso-calabaza-1-22",
+            "1-2-abc-def-ghi",
+            "abc-1-def-2-ghi",
+            "abc-def-ghi-12-345",
+            "abcdefghij-klmnopqrst-uvwxyzabcd-999-000",
+        ])
+            expect(ok).toMatch(TOKEN_RE);
+        for (const bad of [
+            "",
+            "34-chapeau-shiso-937",
+            "34-chapeau-shiso-937-calabaza-7",
+            "34-chapeau-shiso-937-calabaza-",
+            "-34-chapeau-shiso-937-calabaza",
+            "34--chapeau-shiso-937-calabaza",
+            "chapeau-shiso-calabaza-mango-kiwi",
+            "1-2-3-abc-def",
+            "1234-abc-def-5-ghi",
+            "ab-chapeau-shiso-937-calabaza",
+            "abcdefghijk-chapeau-shiso-937-calabaza",
+            "34-Chapeau-shiso-937-calabaza",
+            "34-chapeau-shiso-937-calabaza.evil",
+            "34_chapeau_shiso_937_calabaza",
+            "34-chapeau-shiso-9é7-calabaza",
+            "abcdefghijklmnopqrstuvwxy",
+            "abcdefghijklmnopqrstuvwxyz1",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        ])
+            expect(bad).not.toMatch(TOKEN_RE);
+    });
+
+    it("finds a word token in a subdomain or a path", () => {
+        const word = "34-chapeau-shiso-937-calabaza";
+        expect(tokenFromRequest(enabled(), `${word}.pub.example.com`, "/x.png")).toMatchObject({ token: word, path: "x.png" });
+        expect(tokenFromRequest(enabled(), `${word}.pub.example.com`, "/")).toMatchObject({ token: word });
+        expect(tokenFromRequest(enabled(), `${word}x.evil.com`, "/")).toBeNull();
     });
 
     it("seals a token so only the server key opens it", () => {

@@ -61,7 +61,11 @@ vi.mock("../../lib/audit", async (original) => ({
 }));
 
 import { app, publicationContentApp } from "../../app";
-import { publishPreflight } from "../../modules/publications/publications.service";
+import {
+    MISS_LIMIT,
+    publishPreflight,
+    resetMissThrottle,
+} from "../../modules/publications/publications.service";
 
 const ARTICLE = `<!doctype html><html><head><title>Field notes</title></head><body>
 <h1>Field notes</h1>
@@ -103,6 +107,7 @@ function hostOf(url: string) {
 }
 
 beforeEach(() => {
+    resetMissThrottle();
     store = memoryDb();
     state.db = store.db;
     state.objects.clear();
@@ -133,7 +138,7 @@ describe("publishing an HTML article", () => {
         expect(res.body.missing_files).toEqual(["missing.jpg"]);
         const { publication } = res.body;
         expect(publication).toMatchObject({ title: "Field notes", kind: "site", audience: "public", file_count: 2 });
-        expect(publication.url).toMatch(/^http:\/\/[a-z2-7]{26}\.pub\.test\/$/);
+        expect(publication.url).toMatch(/^http:\/\/[a-z0-9]+(-[a-z0-9]+){4}\.pub\.test\/$/);
         expect(Date.parse(publication.expires_at)).toBeGreaterThan(Date.now() + 29 * 86_400_000);
 
         const host = hostOf(publication.url);
@@ -368,7 +373,7 @@ describe("other formats and refusals", () => {
         process.env.PUBLICATION_BASE_URL = "http://localhost:3002";
         const { body } = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
         const url = new URL(body.publication.url);
-        expect(url.pathname).toMatch(/^\/[a-z2-7]{26}\/$/);
+        expect(url.pathname).toMatch(/^\/[a-z0-9]+(-[a-z0-9]+){4}\/$/);
         const bare = await request(publicationContentApp).get(url.pathname.slice(0, -1)).set("Host", url.host);
         expect(bare.status).toBe(301);
         expect(bare.headers.location).toBe(url.pathname);
@@ -415,5 +420,42 @@ describe("other formats and refusals", () => {
     it("tells crawlers to stay out", async () => {
         const res = await request(publicationContentApp).get("/robots.txt").set("Host", "pub.test");
         expect(res.text).toBe("User-agent: *\nDisallow: /\n");
+    });
+});
+
+describe("guessing link names", () => {
+    const MISS_HOST = "34-chapeau-shiso-937-calabaza.pub.test";
+
+    it("refuses an address that keeps asking for names that do not exist", async () => {
+        const made = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
+        const host = hostOf(made.body.publication.url);
+        const miss = () => request(publicationContentApp).get("/").set("Host", MISS_HOST);
+        const firstBody = (await miss()).text;
+        for (let i = 1; i < MISS_LIMIT; i++) expect((await miss()).status).toBe(404);
+
+        // The next request is refused with the same page, before any lookup.
+        const refused = await miss();
+        expect(refused.status).toBe(429);
+        expect(refused.text).toBe(firstBody);
+        expect(refused.headers["cache-control"]).toBe("no-store");
+
+        // A real link is refused too: the answer must not tell names apart.
+        expect((await request(publicationContentApp).get("/").set("Host", host)).status).toBe(429);
+        expect((await request(publicationContentApp).get("/robots.txt").set("Host", host)).status).toBe(429);
+    });
+
+    it("does not count requests for real links, or missing files inside them", async () => {
+        const made = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
+        const host = hostOf(made.body.publication.url);
+        for (let i = 0; i < MISS_LIMIT + 5; i++) {
+            expect((await request(publicationContentApp).get("/").set("Host", host)).status).toBe(200);
+            expect((await request(publicationContentApp).get("/nope.png").set("Host", host)).status).toBe(404);
+        }
+    });
+
+    it("counts malformed and revoked names alike", async () => {
+        for (let i = 0; i < MISS_LIMIT; i++)
+            await request(publicationContentApp).get("/").set("Host", i % 2 ? "nonsense.pub.test" : MISS_HOST);
+        expect((await request(publicationContentApp).get("/").set("Host", MISS_HOST)).status).toBe(429);
     });
 });
