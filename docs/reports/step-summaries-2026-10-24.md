@@ -121,6 +121,23 @@ Word add-in tools run through `clientTools.execute`. Those are the only other pl
    - **Per-cell attribution:** before each cell, the kernel sets its proxy address with the cell id as the user name (`http://<cell id>@<gateway>:3128`). Subprocesses inherit it, so every request, `curl` included, is tagged with its cell.
    - **Full URLs and content hashes:** decrypt TLS at the proxy with a per-VM certificate authority trusted inside the guest. This gives every URL, status and response hash, with the option of snapshots. The cost is that tools which pin certificates break, and the proxy becomes sensitive infrastructure. tinyproxy cannot do this, so it would be replaced by a small proxy of our own or mitmproxy.
 
+**Scripts, Python helpers and shell tools.**
+
+- **Anything in the kernel process is covered.** The audit hook is process-wide, so it sees calls from the cell, from a script run in the kernel (`exec`, `import`, `runpy`), and from libraries:
+  - `pathlib.Path.read_text` raises `open`;
+  - `glob`, `os.walk` and `Path.rglob` raise `os.scandir`;
+  - `pandas.read_excel` opens through Python.
+
+  A Python "grep" (a loop over files with `re`) shows up as its opens.
+- **`python script.py` in a subprocess starts a new interpreter.** Install the same hook from a `sitecustomize.py` on the workstation's Python path, which every interpreter loads at startup. It reports to the kernel over a local socket, tagged with `MIKE_CELL_ID`, which the kernel sets in the environment before each cell. Every Python process on the box is then covered.
+- **Native tools need the OS layer.** `grep`, `rg`, `find`, `curl`, `git` and LibreOffice are native programs.
+  - A preloaded libc shim (`LD_PRELOAD` on `open`, `openat`, `connect`, `execve`) covers dynamically linked programs. It misses static binaries and Go programs.
+  - eBPF on the same system calls covers everything, and user code cannot get around it.
+  - For exact attribution, the kernel moves itself into a fresh cgroup at the start of each cell. Every process it spawns during that cell inherits the cgroup, so each file open or connection belongs to exactly one cell, with no time-window guessing.
+  - `execve` gives the command line, so `grep -r indemnif ~/mike` becomes one source event: "searched 412 documents for 'indemnif'", with the per-file list attached.
+
+These events feed the unified activity log in `docs/reports/unified-observability-2026-10-25.md`.
+
 **Labels.** Every source says how it was captured:
 
 - **recorded:** from a tool call;

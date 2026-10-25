@@ -17,6 +17,9 @@
   fork, what we think of it, and how we prepare to give speech back
 - [Program accounting letter](reports/mike-program-accounting-2026-10-07.md) —
   readable explanation of the standing state and proposed course
+- [Unified activity log and observability (proposal)](reports/unified-observability-2026-10-25.md) —
+  one event model for user activity, data sources, agent traces and model
+  calls: a tamper-evident ledger plus operational telemetry
 - [Troubleshooting](troubleshooting.md) — common local and production problems
 - [Safe local testing](safe-local-testing.md) — disposable resources, synthetic
   documents, and secret handling
