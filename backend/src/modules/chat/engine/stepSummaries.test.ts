@@ -88,6 +88,13 @@ describe("acceptSummary", () => {
     expect(acceptSummary("<think>hmm</think>Read the lease.")).toBe("Read the lease.");
   });
 
+  it("drops a named worker so the summary reads as the work itself", () => {
+    expect(acceptSummary("The assistant searched ESPN's scoreboard.")).toBe("Searched ESPN's scoreboard.");
+    expect(acceptSummary("The AI legal assistant will add the rule.")).toBe("Will add the rule.");
+    expect(acceptSummary("This step read the lease.")).toBe("Read the lease.");
+    expect(acceptSummary("The assistant's draft cited two cases.")).toBe("The assistant's draft cited two cases.");
+  });
+
   it("rejects empty, overlong and thinking-aloud output", () => {
     expect(acceptSummary("   ")).toBeNull();
     expect(acceptSummary("x".repeat(1_201))).toBeNull();
