@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Check, FileText } from "lucide-react";
 import type { AskInputItem } from "@mike/contracts";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
@@ -25,28 +25,32 @@ export interface PublishedLink {
 }
 
 /**
- * The assistant's request to publish a document as a link, in the chat. Its
- * choices are only suggestions the person can change; the link is created
- * here, so the password never enters the conversation, and only the
- * publication's id is reported back.
+ * The agent's request to publish a document as a link, in the chat: the file
+ * and the agent's suggested settings, which the person can change. The link
+ * is created here, so the password never enters the conversation, and only
+ * the publication's id is reported back.
  */
 export function PublishRequestField({
     item,
     published,
     disabled,
     onPublished,
+    onDecline,
 }: {
     item: PublishRequestItem;
     /** Set once published: the form is replaced by the link. */
     published?: PublishedLink;
     disabled?: boolean;
     onPublished: (link: PublishedLink) => void;
+    /** Declines the request; shown beside Publish. */
+    onDecline?: () => void;
 }) {
     const [config, setConfig] = useState<PublishingConfig | null>(null);
     const [configFailed, setConfigFailed] = useState(false);
     const [options, setOptions] = useState<PublishOptions | null>(null);
     const [publishing, setPublishing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const formId = useId();
 
     const done = !!published;
     useEffect(() => {
@@ -94,14 +98,11 @@ export function PublishRequestField({
     };
 
     return (
-        <div className="space-y-3 font-sans text-sm">
-            <p className="flex items-start gap-2 text-gray-800">
-                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                <span className="font-medium [overflow-wrap:anywhere]">{item.filename}</span>
+        <div className="space-y-4 font-sans text-sm">
+            <p className="flex items-start gap-2 text-xs text-gray-700">
+                <FileText className="mt-px h-3.5 w-3.5 shrink-0 text-gray-500" aria-hidden />
+                <span className="[overflow-wrap:anywhere]">{item.filename}</span>
             </p>
-            {item.purpose && (
-                <p className="whitespace-pre-wrap text-gray-700 [overflow-wrap:anywhere]">{item.purpose}</p>
-            )}
             {published ? (
                 <section aria-label="Published link" className="space-y-2">
                     <p className="flex items-center gap-1.5 text-gray-700">
@@ -125,16 +126,13 @@ export function PublishRequestField({
                 </div>
             ) : (
                 <form
-                    className="space-y-3"
+                    id={formId}
+                    className="space-y-4"
                     onSubmit={(event) => {
                         event.preventDefault();
                         void publish();
                     }}
                 >
-                    <p className="text-xs text-gray-600">
-                        This publishes this version as a frozen copy. The password, if any, is not shared with the
-                        agent.
-                    </p>
                     <PublishOptionsForm
                         value={options}
                         onChange={setOptions}
@@ -146,17 +144,34 @@ export function PublishRequestField({
                             {error}
                         </p>
                     )}
-                    <PillButtonUI
-                        tone="black"
-                        size="xs"
-                        type="submit"
-                        disabled={!ready}
-                        loading={publishing}
-                        className="max-w-full font-sans"
-                    >
-                        Publish
-                    </PillButtonUI>
                 </form>
+            )}
+            {!published && (
+                <div className="flex items-center justify-end gap-3">
+                    {onDecline && (
+                        <button
+                            type="button"
+                            onClick={onDecline}
+                            disabled={disabled || publishing}
+                            className="rounded px-1 font-sans text-xs text-gray-500 transition-colors hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 disabled:opacity-40"
+                        >
+                            Don&apos;t publish
+                        </button>
+                    )}
+                    {available && options && (
+                        <PillButtonUI
+                            tone="black"
+                            size="xs"
+                            type="submit"
+                            form={formId}
+                            disabled={!ready}
+                            loading={publishing}
+                            className="max-w-full font-sans"
+                        >
+                            Publish
+                        </PillButtonUI>
+                    )}
+                </div>
             )}
         </div>
     );

@@ -46,13 +46,13 @@ beforeEach(() => {
 });
 
 describe("AskInputPopup publish requests", () => {
-    it("shows the filename and the purpose as plain text, with the suggestions filled in", async () => {
+    it("shows the filename, not the agent's reason, with the suggestions filled in", async () => {
         render(<AskInputPopup assistantMessageId="m1" event={request({ require_sign_in: true, expires_in_days: 7 })} onSubmit={vi.fn()} />);
         expect(screen.getByRole("status", { name: "Loading publishing options" })).toBeInTheDocument();
         expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "true");
         expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
         expect(screen.getByText("plan.html")).toBeInTheDocument();
-        expect(screen.getByText("Share the plan with the client <b>now</b>")).toBeInTheDocument();
+        expect(screen.queryByText(/Share the plan/)).toBeNull();
         expect(screen.getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
     });
 
@@ -179,11 +179,5 @@ describe("AskInputPopup publish requests", () => {
             { id: "pub", kind: "publish", publication_id: "pub-1" },
             { id: "q", kind: "text", question: "Which client?", answer: "Acme" },
         ]);
-    });
-
-    it("omits the purpose when the assistant gave none", async () => {
-        render(<AskInputPopup assistantMessageId="m1" event={request({ purpose: "" })} onSubmit={vi.fn()} />);
-        await screen.findByRole("switch");
-        expect(screen.queryByText("Share the plan with the client <b>now</b>")).toBeNull();
     });
 });

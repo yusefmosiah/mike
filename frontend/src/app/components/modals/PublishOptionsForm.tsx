@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { Globe, RefreshCw } from "lucide-react";
+import { Globe, Lock, RefreshCw } from "lucide-react";
 import { ModalSegmentedToggle } from "./ModalSegmentedToggle";
 import { FieldLabel, FormTextInput } from "@/app/components/ui/form-field";
 import { TextButtonUI } from "@/shared/ui/TextButtonUI";
@@ -28,6 +28,12 @@ export interface PublishOptions {
 export const AUDIENCE_LABEL: Record<PublicationAudience, string> = {
     public: "Anyone with the link",
     password: "Anyone with the link and a password",
+};
+
+/** The audience choices: short enough to sit side by side on a phone. */
+const AUDIENCE_OPTION: Record<PublicationAudience, { label: string; icon: typeof Globe }> = {
+    public: { label: "Anyone with the link", icon: Globe },
+    password: { label: "With a password", icon: Lock },
 };
 
 /** Options to start from; a suggestion the install cannot honour is dropped. */
@@ -95,7 +101,7 @@ export function PublishOptionsForm({
     const set = (patch: Partial<PublishOptions>) => onChange({ ...value, ...patch });
 
     return (
-        <div className="space-y-5">
+        <div className="space-y-4">
             <div role="group" aria-labelledby={audienceLabelId}>
                 <FieldLabel as="p" id={audienceLabelId}>
                     Who can open it
@@ -105,11 +111,10 @@ export function PublishOptionsForm({
                     onChange={(audience) => set({ audience })}
                     options={audiences.map((audience) => ({
                         value: audience,
-                        label: AUDIENCE_LABEL[audience],
-                        icon: Globe,
+                        ...AUDIENCE_OPTION[audience],
                     }))}
                     disabled={disabled}
-                    className="max-w-full"
+                    className="w-full"
                 />
             </div>
 
@@ -138,7 +143,7 @@ export function PublishOptionsForm({
                         </TextButtonUI>
                     </div>
                     <p className="mt-1.5 text-xs text-gray-500">
-                        At least {MIN_PASSWORD_LENGTH} characters. Send the password separately from the link.
+                        At least {MIN_PASSWORD_LENGTH} characters. Send it separately from the link.
                     </p>
                 </div>
             )}
@@ -149,11 +154,10 @@ export function PublishOptionsForm({
                     disabled={disabled}
                     onCheckedChange={(requireSignIn) => set({ requireSignIn })}
                 >
-                    Only people signed in who can open this document
+                    Signed-in members only
                 </ToggleSwitchUI>
                 <p className="mt-1.5 text-xs text-gray-500">
-                    Visitors will be asked to sign in, and can read it only if their account can open the original
-                    document.
+                    Visitors sign in and need access to this document.
                 </p>
             </div>
 
@@ -167,6 +171,7 @@ export function PublishOptionsForm({
                     options={EXPIRY_OPTIONS.map(({ value: v, label }) => ({ value: v, label }))}
                     disabled={disabled}
                     size="sm"
+                    className="w-full"
                 />
             </div>
         </div>

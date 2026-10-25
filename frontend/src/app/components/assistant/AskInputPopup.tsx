@@ -597,10 +597,7 @@ export function AskInputPopup({
                                             </p>
                                         ) : activeItem.kind === "publish" ? (
                                             <p className="text-sm text-gray-800">
-                                                The agent suggests
-                                                publishing a document as a
-                                                link. Nothing is published
-                                                until you choose to.
+                                                Publish this as a link?
                                             </p>
                                         ) : (
                                             <p className="text-sm text-gray-800">
@@ -741,6 +738,9 @@ export function AskInputPopup({
                                                     link,
                                                 )
                                             }
+                                            onDecline={() =>
+                                                setSkippedFor(activeItem.id)
+                                            }
                                         />
                                     ) : activeItem.kind === "text" ? (
                                         <OpenTextInput
@@ -833,7 +833,12 @@ export function AskInputPopup({
                                     </PillButtonUI>
                                 </div>
                             )}
-                            {!submitted && activeItem.kind !== "approval" && (
+                            {!submitted &&
+                                activeItem.kind !== "approval" &&
+                                // A publish card has Don't publish beside
+                                // Publish, until it is declined.
+                                (activeItem.kind !== "publish" ||
+                                    skipped.has(activeItem.id)) && (
                                 <div className="mt-auto flex items-center justify-end gap-2 pt-3">
                                     <button
                                         type="button"

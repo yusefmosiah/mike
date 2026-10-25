@@ -68,7 +68,7 @@ describe("PublishModal", () => {
     it("sends a password link with a generated passphrase and the chosen expiry", async () => {
         api.createPublication.mockResolvedValue({ publication: pub({ audience: "password" }), missing_files: ["img/a.png"] });
         open();
-        await userEvent.click(screen.getByRole("button", { name: /and a password/ }));
+        await userEvent.click(screen.getByRole("button", { name: /With a password/ }));
         const publish = screen.getByRole("button", { name: "Publish" });
         expect(publish).toBeDisabled();
         await userEvent.type(screen.getByLabelText("Password"), "short");
@@ -77,7 +77,7 @@ describe("PublishModal", () => {
         await userEvent.click(screen.getByRole("button", { name: "Generate" }));
         const password = (screen.getByLabelText("Password") as HTMLInputElement).value;
         expect(password.length).toBeGreaterThanOrEqual(12);
-        expect(screen.getByText(/Send the password separately/)).toBeInTheDocument();
+        expect(screen.getByText(/Send it separately/)).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "Never" }));
         await userEvent.click(publish);
         expect(api.createPublication).toHaveBeenCalledWith({
@@ -215,9 +215,9 @@ describe("PublishModal signed-in-only links", () => {
     it("sends require_sign_in when the toggle is on and explains it", async () => {
         api.createPublication.mockResolvedValue({ publication: pub({ require_sign_in: true }), missing_files: [] });
         open();
-        const toggle = screen.getByRole("switch", { name: /signed in who can open this document/ });
+        const toggle = screen.getByRole("switch", { name: /Signed-in members only/ });
         expect(toggle).toHaveAttribute("aria-checked", "false");
-        expect(screen.getByText(/asked to sign in/)).toBeInTheDocument();
+        expect(screen.getByText(/Visitors sign in/)).toBeInTheDocument();
         await userEvent.click(toggle);
         expect(toggle).toHaveAttribute("aria-checked", "true");
         expect(screen.getByText(/Only people signed in to this app/)).toBeInTheDocument();

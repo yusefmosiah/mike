@@ -68,7 +68,7 @@ function Harness({ disabled }: { disabled?: boolean }) {
 describe("PublishOptionsForm", () => {
     it("edits every option", async () => {
         render(<Harness />);
-        await userEvent.click(screen.getByRole("button", { name: /and a password/ }));
+        await userEvent.click(screen.getByRole("button", { name: /With a password/ }));
         await userEvent.click(screen.getByRole("button", { name: "Generate" }));
         await userEvent.click(screen.getByRole("switch"));
         await userEvent.click(screen.getByRole("button", { name: "7 days" }));
