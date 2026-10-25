@@ -138,7 +138,7 @@ describe("publishing an HTML article", () => {
         expect(res.body.missing_files).toEqual(["missing.jpg"]);
         const { publication } = res.body;
         expect(publication).toMatchObject({ title: "Field notes", kind: "site", audience: "public", file_count: 2 });
-        expect(publication.url).toMatch(/^http:\/\/[a-z0-9]+(-[a-z0-9]+){4}\.pub\.test\/$/);
+        expect(publication.url).toMatch(/^http:\/\/[a-z0-9]+(-[a-z0-9]+){7}\.pub\.test\/$/);
         expect(Date.parse(publication.expires_at)).toBeGreaterThan(Date.now() + 29 * 86_400_000);
 
         const host = hostOf(publication.url);
@@ -373,7 +373,7 @@ describe("other formats and refusals", () => {
         process.env.PUBLICATION_BASE_URL = "http://localhost:3002";
         const { body } = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
         const url = new URL(body.publication.url);
-        expect(url.pathname).toMatch(/^\/[a-z0-9]+(-[a-z0-9]+){4}\/$/);
+        expect(url.pathname).toMatch(/^\/[a-z0-9]+(-[a-z0-9]+){7}\/$/);
         const bare = await request(publicationContentApp).get(url.pathname.slice(0, -1)).set("Host", url.host);
         expect(bare.status).toBe(301);
         expect(bare.headers.location).toBe(url.pathname);

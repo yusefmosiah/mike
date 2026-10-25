@@ -149,51 +149,66 @@ export function tokenFromRequest(
 // publication, and it is a DNS label (a subdomain), so it is at most 63
 // characters of a-z, 0-9 and single hyphens.
 //
-// New tokens are three words and two numbers, hyphen-joined in one of ten
-// arrangements (the numbers take two of the five places), such as
-// `34-chapeau-shiso-937-calabaza`:
+// New tokens are four words and four numbers, hyphen-joined in any of the
+// 70 arrangements (the numbers take four of the eight places), such as
+// `34-chapeau-1207-shiso-calabaza-3981-mango-602`:
 //   - each word is drawn uniformly from LINK_WORDS (>= 2048 words, so >= 11
 //     bits each; log2 of the actual size is used below);
-//   - each number is uniform in 0-999 (~9.97 bits each, written without
-//     padding, so 7 and 007 are never both generated);
-//   - the arrangement is uniform over the ten (~3.32 bits).
-// That is >= 3 * 11 + 2 * 9.97 + 3.32 = 56.3 bits with the minimum list, and
-// ~57.6 bits with the list as shipped (see linkTokenEntropyBits). All draws
-// use crypto.randomInt (CSPRNG, unbiased). Guessing is limited by the miss
-// throttle on the content server (publications.throttle.ts), not by the
-// token alone.
+//   - each number is uniform in 0-4095: exactly 12 bits, 3.73 digits on
+//     average, written without padding, so 7 and 0007 are never both made;
+//   - the arrangement is uniform over the 70 (~6.13 bits).
+// That is >= 4 * 11 + 4 * 12 + 6.13 = 98.1 bits with the minimum list, and
+// ~100.2 bits with the list as shipped (see linkTokenEntropyBits). All draws
+// use crypto.randomInt (CSPRNG, unbiased). The miss throttle on the content
+// server (publications.throttle.ts) slows guessing further.
 //
-// Tokens made before this change are 16 random bytes in lowercase base32: 26
-// characters, 128 bits. They stay valid; TOKEN_RE accepts both shapes. It
-// checks structure only, not word membership, so LINK_WORDS can grow.
+// Two older shapes stay valid, and TOKEN_RE accepts all three. It checks
+// structure only, not word membership, so LINK_WORDS can grow:
+//   - 16 random bytes in lowercase base32: 26 characters, 128 bits;
+//   - three words and two numbers (0-999), the first word links (~57.6 bits).
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
 const LEGACY_TOKEN = "[a-z2-7]{26}";
 
-/** Where the two numbers sit among the five parts: every choice of two places. */
-const NUMBER_PLACES: readonly (readonly [number, number])[] = [
-    [0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4],
-];
-
 const WORD_PART = "[a-z]{3,10}";
-const NUMBER_PART = "[0-9]{1,3}";
 
-const WORD_TOKEN = NUMBER_PLACES.map(([a, b]) =>
-    Array.from({ length: 5 }, (_, i) => (i === a || i === b ? NUMBER_PART : WORD_PART)).join("-"),
-).join("|");
+/** Every way to choose `count` of `size` places, as sorted index lists. */
+function placements(size: number, count: number): number[][] {
+    if (count === 0) return [[]];
+    if (size < count) return [];
+    const without = placements(size - 1, count);
+    const withLast = placements(size - 1, count - 1).map((places) => [...places, size - 1]);
+    return [...without, ...withLast];
+}
 
-// 3 words + 2 numbers is at most 3 * 10 + 2 * 3 + 4 hyphens = 40 characters.
-export const TOKEN_RE = new RegExp(`^(?:${LEGACY_TOKEN}|${WORD_TOKEN})$`);
+/** Where the four numbers sit among the eight parts: all 70 choices. */
+const NUMBER_PLACES = placements(8, 4);
+const NUMBER_LIMIT = 4096;
+
+function shapes(size: number, places: number[][], numberPart: string): string {
+    return places
+        .map((numbers) =>
+            Array.from({ length: size }, (_, i) => (numbers.includes(i) ? numberPart : WORD_PART)).join("-"),
+        )
+        .join("|");
+}
+
+const WORD_TOKEN = shapes(8, NUMBER_PLACES, "[0-9]{1,4}");
+const FIRST_WORD_TOKEN = shapes(5, placements(5, 2), "[0-9]{1,3}");
+
+// 4 words + 4 numbers is at most 4 * 10 + 4 * 4 + 7 hyphens = 63 characters,
+// exactly the limit for a DNS label.
+export const TOKEN_RE = new RegExp(`^(?:${LEGACY_TOKEN}|${WORD_TOKEN}|${FIRST_WORD_TOKEN})$`);
 
 /** Bits of entropy in a word token drawn from `wordCount` words. */
 export function linkTokenEntropyBits(wordCount = LINK_WORDS.length): number {
-    return 3 * Math.log2(wordCount) + 2 * Math.log2(1000) + Math.log2(NUMBER_PLACES.length);
+    return 4 * Math.log2(wordCount) + 4 * Math.log2(NUMBER_LIMIT) + Math.log2(NUMBER_PLACES.length);
 }
 
 export function newToken(): string {
-    const [a, b] = NUMBER_PLACES[crypto.randomInt(NUMBER_PLACES.length)];
-    return Array.from({ length: 5 }, (_, i) =>
-        i === a || i === b
-            ? String(crypto.randomInt(1000))
+    const numbers = NUMBER_PLACES[crypto.randomInt(NUMBER_PLACES.length)];
+    return Array.from({ length: 8 }, (_, i) =>
+        numbers.includes(i)
+            ? String(crypto.randomInt(NUMBER_LIMIT))
             : LINK_WORDS[crypto.randomInt(LINK_WORDS.length)],
     ).join("-");
 }

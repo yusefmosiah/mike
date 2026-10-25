@@ -74,12 +74,12 @@ Rules for the content domain:
 A link's name (its token) is the only secret of an "anyone with the link"
 page, and in the subdomain style it is a DNS label.
 
-- **Format.** Three words and two numbers joined by hyphens, such as `34-chapeau-shiso-937-calabaza`. The numbers take two of the five places, in any of the ten possible arrangements. Lowercase `a-z` and digits only, at most 40 characters (the limit for a label is 63).
+- **Format.** Four words and four numbers joined by hyphens, such as `34-chapeau-1207-shiso-calabaza-3981-mango-602`. The numbers take four of the eight places, in any of the 70 possible arrangements, and each is 0 to 4095 written without padding (3.73 digits on average). Lowercase `a-z` and digits only, at most 63 characters, the limit for a DNS label.
 - **Words.** Drawn uniformly from `backend/src/modules/publications/linkWords.ts`: about 2,900 plain-ASCII words from English, French, Spanish, Italian, Portuguese, German, Dutch, Japanese, Swahili, Hawaiian, Finnish, Turkish, Indonesian and a few other languages. The list has at least 2048 words and may grow; add words only by the rules in that file's header.
 - **Numbers.** Uniform from 0 to 999, written without padding.
 - **Randomness.** Every draw uses `crypto.randomInt`.
-- **Entropy.** `3 * log2(words) + 2 * log2(1000) + log2(10)`: at least 56.3 bits with 2048 words and about 57.8 with the list as shipped (`linkTokenEntropyBits`). That is far below the older names, so guessing is limited by the throttle below rather than by the name alone; use a password for anything that must stay private.
-- **Older links.** Names made before this change are 26 characters of base32 (128 bits). They keep working. The server accepts a name by its structure, not by whether its words are in the list, so the list can grow without breaking links.
+- **Entropy.** `4 * log2(words) + 4 * 12 + log2(70)`: at least 98.1 bits with 2048 words and about 100.2 with the list as shipped (`linkTokenEntropyBits`). The throttle below slows guessing further; a password is still the right choice for anything that must stay private from someone who sees the link.
+- **Older links.** Names made before word links are 26 characters of base32 (128 bits); the first word links (three words and two numbers, about 58 bits) were made on 2026-10-25. Both keep working. The server accepts a name by its structure, not by whether its words are in the list, so the list can grow without breaking links.
 - **Storage.** The database stores a SHA-256 of each token for lookup (unique; a collision makes the insert retry with a new name, up to three times), plus a copy sealed with the server key.
 
 ### Guessing limit
