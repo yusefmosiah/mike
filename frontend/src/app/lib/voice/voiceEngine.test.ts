@@ -21,6 +21,7 @@ import {
     voiceMicrophoneModesSupported,
     voiceRemove,
     voiceSpeak,
+    voiceSpeakStep,
     voiceStart,
     voiceStatus,
     voiceStop,
@@ -195,6 +196,14 @@ describe("voiceStart and the answer methods", () => {
         ]);
         nativePromise.mockRejectedValue({ code: "failed" });
         voiceSpeak("t1", 2, "x");
+        // A step is a clause marked for the engine; it never rejects either.
+        voiceSpeakStep("t1", 3, "Reading the lease.");
+        expect(nativePromise).toHaveBeenLastCalledWith("MikeSpeech", "voiceSpeak", {
+            turnId: "t1",
+            clauseId: 3,
+            text: "Reading the lease.",
+            kind: "step",
+        });
         voiceEndAnswer("t1");
         await expect(voiceCancelAnswer("t1")).resolves.toBeUndefined();
         await expect(voiceStop()).resolves.toBeUndefined();

@@ -310,7 +310,8 @@ describe("useVoiceChat", () => {
             // The answer's words go first; the step waits until they have played.
             expect(spoken()).toEqual([{ turnId: "t1", clauseId: 0, text: "Let me check the lease." }]);
             emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
-            expect(spoken()[1]).toEqual({ turnId: "t1", clauseId: 1, text: "Reading the lease." });
+            // Marked as a step, so the engine can cue it and let the answer cut it short.
+            expect(spoken()[1]).toEqual({ turnId: "t1", clauseId: 1, text: "Reading the lease.", kind: "step" });
             emit({ type: "clausePlayed", turnId: "t1", clauseId: 1 });
 
             // Two more steps inside the gap: only the newest is said, when it is over.
@@ -319,7 +320,7 @@ describe("useVoiceChat", () => {
             await act(async () => {
                 vi.advanceTimersByTime(6_000);
             });
-            expect(spoken()[2]).toEqual({ turnId: "t1", clauseId: 2, text: "Checking notice." });
+            expect(spoken()[2]).toEqual({ turnId: "t1", clauseId: 2, text: "Checking notice.", kind: "step" });
 
             // The answer's text carries on with the next clause id; what was heard leaves the steps out.
             setEvents(view, [

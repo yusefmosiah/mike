@@ -29,6 +29,7 @@ import {
     voiceInstall,
     voicePrewarm,
     voiceSpeak,
+    voiceSpeakStep,
     voiceStart,
     voiceStatus,
     voiceStop,
@@ -760,7 +761,7 @@ export function useVoiceChat({
         const id = turn.cutter.reserveId();
         turn.stepClauses.push(id);
         turn.lastStepAt = Date.now();
-        voiceSpeak(turn.turnId, id, spokenStep(fresh[fresh.length - 1].text));
+        voiceSpeakStep(turn.turnId, id, spokenStep(fresh[fresh.length - 1].text));
     }, [messages, isResponseLoading, flushHeard, stepCheck]);
 
     // While voice mode is on, read-aloud stays silent.

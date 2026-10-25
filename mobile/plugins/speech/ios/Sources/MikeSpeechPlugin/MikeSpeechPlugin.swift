@@ -432,7 +432,9 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Queues one clause of the current answer. Resolves at once.
+    /// Queues one clause of the current answer, or with `kind: "step"` a step
+    /// said while the answer works (it sounds different and gives way to the
+    /// answer). Resolves at once.
     @objc func voiceSpeak(_ call: CAPPluginCall) {
         guard let turnId = call.getString("turnId"), let clauseId = call.getInt("clauseId"), clauseId >= 0,
               let text = call.getString("text") else {
@@ -442,7 +444,8 @@ public class MikeSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve()
         #if canImport(FluidAudio) && canImport(PhononTTS)
         if #available(iOS 18.0, *) {
-            voiceCalls.yield { await VoiceEngine.shared.speak(turnId: turnId, clauseId: clauseId, text: text) }
+            let step = call.getString("kind") == "step"
+            voiceCalls.yield { await VoiceEngine.shared.speak(turnId: turnId, clauseId: clauseId, text: text, step: step) }
         }
         #endif
     }

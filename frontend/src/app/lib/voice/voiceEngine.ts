@@ -324,6 +324,16 @@ export function voiceSpeak(turnId: string, clauseId: number, text: string, final
     call("voiceSpeak", { turnId, clauseId, text, ...(final ? { final: true } : {}) }).catch(() => undefined);
 }
 
+/**
+ * Queues a step said while the answer works (spokenSteps.ts): a clause of the
+ * turn that the engine marks with a soft cue, says a little quieter, and fades
+ * out when the answer's next clause arrives. An engine without steps speaks
+ * it as an ordinary clause.
+ */
+export function voiceSpeakStep(turnId: string, clauseId: number, text: string): void {
+    call("voiceSpeak", { turnId, clauseId, text, kind: "step" }).catch(() => undefined);
+}
+
 /** No more clauses for this turn; the engine listens again once the last one has played. */
 export function voiceEndAnswer(turnId: string): void {
     call("voiceEndAnswer", { turnId }).catch(() => undefined);

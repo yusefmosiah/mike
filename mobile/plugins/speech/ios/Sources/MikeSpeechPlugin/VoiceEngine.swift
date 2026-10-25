@@ -523,6 +523,9 @@ actor VoiceEngine {
     private var emit: Emit?
     private var policy = TurnPolicy()
     private var queue = ClauseQueue()
+    /// Each step's samples as scheduled and where they start on the timeline,
+    /// so the answer can fade a playing step out from where it is.
+    private var stepAudio: [Int: (start: Int, samples: [Float])] = [:]
     private var audio: VoiceAudioEngine?
     private var phonon: Phonon?
     private var fluidDirectory: URL?
@@ -764,6 +767,7 @@ actor VoiceEngine {
             graphEpoch = epoch
             cancelSynthesis()
             queue.rewind()
+            stepAudio = [:]
             pumpSpeech()
         case let .ended(reason):
             await stop(reason: reason)
@@ -1029,11 +1033,43 @@ actor VoiceEngine {
     // MARK: - Speaking
 
     /// Queues a clause of the current answer (ignored for any other turn).
-    func speak(turnId: String, clauseId: Int, text: String) {
+    func speak(turnId: String, clauseId: Int, text: String, step: Bool = false) {
         guard running, turnId == policy.answerTurnId else { return }
-        if queue.turnId != turnId { queue.begin(turnId: turnId) }
-        queue.accept(turnId: turnId, clauseId: clauseId, text: text)
+        if queue.turnId != turnId {
+            queue.begin(turnId: turnId)
+            stepAudio = [:]
+        }
+        if !step { yieldToAnswer(turnId: turnId) }
+        queue.accept(turnId: turnId, clauseId: clauseId, text: text, step: step)
         pumpSpeech()
+    }
+
+    /// The answer has more to say: a step still playing fades out from where
+    /// it is, a pause follows, and the answer goes next; steps not yet heard
+    /// are dropped. Each ended step is reported as played.
+    private func yieldToAnswer(turnId: String) {
+        guard queue.hasUnplayedStep else { return }
+        let played = audio?.playedSample() ?? 0
+        let rendered = audio?.renderedSample() ?? played
+        guard let yielded = queue.yieldSteps(playedSample: played) else { return }
+        for ended in yielded.ended {
+            if !ended.wasStarted { send(.clauseStarted(turnId: turnId, clauseId: ended.clauseId)) }
+            send(.clausePlayed(turnId: turnId, clauseId: ended.clauseId))
+        }
+        guard yielded.stopsPlayback else { return }
+        cancelSynthesis()
+        // What has rendered is what is in the speaker now: the fade starts there.
+        let tail = yielded.playing.flatMap { playing in
+            stepAudio[playing.clauseId].map { StepSound.tail(of: $0.samples, from: rendered - $0.start) }
+        } ?? []
+        audio?.stopPlayer()
+        queue.rewind()
+        stepAudio = [:]
+        guard let audio else { return }
+        let at = queue.placement(playedSample: audio.renderedSample() ?? 0, lead: Self.leadSamples)
+        if !tail.isEmpty, audio.schedule(tail, at: at, epoch: graphEpoch) {
+            queue.reserveTimeline(until: at + tail.count + StepSound.yieldGapSamples)
+        }
     }
 
     /// No more clauses: `answerFinished` follows the last one.
@@ -1060,6 +1096,7 @@ actor VoiceEngine {
         let interruption = queue.interrupt(playedSample: played)
         audio?.stopPlayer()
         queue.resetTimeline()
+        stepAudio = [:]
         return interruption
     }
 
@@ -1085,8 +1122,10 @@ actor VoiceEngine {
                 for try await chunk in phonon.stream(clause.text) {
                     if Task.isCancelled { break }
                     if var previous = held {
-                        if first { Fade.fadeIn(&previous); first = false }
-                        self.place(previous, clauseId: clause.id, token: token)
+                        if first { Fade.fadeIn(&previous) }
+                        if clause.step { previous = first ? StepSound.first(previous) : StepSound.later(previous) }
+                        first = false
+                        self.place(previous, clauseId: clause.id, token: token, step: clause.step)
                     }
                     held = chunk
                 }
@@ -1096,19 +1135,28 @@ actor VoiceEngine {
             if !Task.isCancelled, var last = held {
                 if first { Fade.fadeIn(&last) }
                 Fade.fadeOut(&last)
-                self.place(last, clauseId: clause.id, token: token)
+                if clause.step { last = first ? StepSound.first(last) : StepSound.later(last) }
+                self.place(last, clauseId: clause.id, token: token, step: clause.step)
             }
             self.prepared(clauseId: clause.id, token: token)
         }
     }
 
-    private func place(_ samples: [Float], clauseId: Int, token: Int) {
+    private func place(_ samples: [Float], clauseId: Int, token: Int, step: Bool = false) {
         guard let audio, queue.isCurrent(token) else { return }
         let at = queue.placement(playedSample: audio.renderedSample() ?? 0, lead: Self.leadSamples)
         // A rebuild this actor has not handled yet: drop the chunk; the
         // clause is spoken again from its start once it is handled.
         guard audio.schedule(samples, at: at, epoch: graphEpoch) else { return }
-        queue.scheduled(clauseId: clauseId, startSample: at, count: samples.count, token: token)
+        guard queue.scheduled(clauseId: clauseId, startSample: at, count: samples.count, token: token) else { return }
+        if step {
+            // Chunks follow each other on the timeline, so the samples are contiguous from the first one's start.
+            if let known = stepAudio[clauseId] {
+                stepAudio[clauseId] = (known.start, known.samples + samples)
+            } else {
+                stepAudio[clauseId] = (at, samples)
+            }
+        }
         if var metrics, metrics.turnId == queue.turnId, metrics.stages["firstClauseSynthesis"] == nil, let synthStartedAt {
             metrics.stages["firstClauseSynthesis"] = Self.milliseconds(since: synthStartedAt)
             self.metrics = metrics

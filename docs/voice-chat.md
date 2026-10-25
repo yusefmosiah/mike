@@ -417,11 +417,21 @@ web app says what the assistant is doing, one short line at a time
 - **When:** only once every clause already sent has played, never while the
   answer is mid-sentence, at most one step every 6 seconds, and never after
   the answer has ended.
-- **Clause ids:** a step is sent as a clause of the answer's turn, with the
-  next id from the answer's `ClauseCutter`, since the engine wants ids that
-  increase within a turn. It is not part of the answer: it is left out of
-  what was heard, and a barge-in during a step records only the answer's
-  clauses that played.
+- **Clause ids:** a step is sent as a clause of the answer's turn
+  (`voiceSpeak` with `kind: "step"`), with the next id from the answer's
+  `ClauseCutter`, since the engine wants ids that increase within a turn. It
+  is not part of the answer: it is left out of what was heard, and a barge-in
+  during a step records only the answer's clauses that played.
+- **Sounding like a step:** the engine plays a soft two-note cue (a fifth
+  apart, 55 ms each) before each step and says the words at three quarters of
+  the answer's level (`StepSound` in `VoiceSupport.swift`). The cue is the
+  signpost: no words like "Step:" are added, which would wear thin by the
+  third step.
+- **The answer takes over:** when the answer's next clause arrives while a
+  step plays, the step fades out over 150 ms from where it is, 250 ms of
+  silence follows, and the answer starts; steps not yet heard are dropped
+  (`ClauseQueue.yieldSteps`, `VoiceEngine.yieldToAnswer`). An engine without
+  steps plays a step to its end before the answer, as before.
 - **Setting:** Settings → Voice, "While it works": say what it is doing (the
   default) or stay quiet (`speakSteps` in the voice preferences).
 

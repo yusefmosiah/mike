@@ -13,6 +13,27 @@ struct ClauseQueue {
     struct Clause: Equatable {
         let id: Int
         let text: String
+        /// A step said while the answer works (`kind: "step"`), not the answer.
+        var step = false
+    }
+
+    /// What `yieldSteps` took off the queue so the answer can go first.
+    struct Yield: Equatable {
+        struct Ended: Equatable {
+            let clauseId: Int
+            let wasStarted: Bool
+        }
+        struct Playing: Equatable {
+            let clauseId: Int
+            let playedSamples: Int
+        }
+        /// The steps it ended, in order.
+        let ended: [Ended]
+        /// The step that was playing and how many of its samples had played.
+        let playing: Playing?
+        /// A step had audio on the timeline or in synthesis: the player and
+        /// any synthesis must be stopped and the timeline rewound.
+        let stopsPlayback: Bool
     }
 
     enum Event: Equatable {
@@ -43,6 +64,7 @@ struct ClauseQueue {
     private struct Record {
         let id: Int
         let text: String
+        var step = false
         var preparation: Preparation = .queued
         var chunks: [Chunk] = []
         var started = false
@@ -75,11 +97,45 @@ struct ClauseQueue {
     /// Queues a clause of the current answer. Refuses another turn's clause, a
     /// clause after `voiceEndAnswer`, and an id that does not increase.
     @discardableResult
-    mutating func accept(turnId: String, clauseId: Int, text: String) -> Bool {
+    mutating func accept(turnId: String, clauseId: Int, text: String, step: Bool = false) -> Bool {
         guard turnId == self.turnId, !endRequested, clauseId >= 0 else { return false }
         if let last = records.last, clauseId <= last.id { return false }
-        records.append(Record(id: clauseId, text: text))
+        records.append(Record(id: clauseId, text: text, step: step))
         return true
+    }
+
+    /// A step is waiting, preparing or playing.
+    var hasUnplayedStep: Bool { records.contains { $0.step && !$0.played } }
+
+    func isStep(_ clauseId: Int) -> Bool { records.first { $0.id == clauseId }?.step ?? false }
+
+    /// The answer's next clause has arrived: every step not yet played ends
+    /// now, so the answer is not kept waiting behind it. Each is marked
+    /// started and played (the caller reports them). Nil when there was none.
+    mutating func yieldSteps(playedSample: Int) -> Yield? {
+        var ended: [Yield.Ended] = []
+        var playing: Yield.Playing?
+        var stopsPlayback = false
+        for index in records.indices where records[index].step && !records[index].played {
+            let record = records[index]
+            if !record.chunks.isEmpty || record.preparation == .preparing { stopsPlayback = true }
+            if record.started, playing == nil {
+                playing = Yield.Playing(clauseId: record.id, playedSamples: record.playedSamples(at: playedSample))
+            }
+            ended.append(Yield.Ended(clauseId: record.id, wasStarted: record.started))
+            records[index].started = true
+            records[index].played = true
+            records[index].preparation = .ready
+            records[index].chunks = []
+        }
+        guard !ended.isEmpty else { return nil }
+        return Yield(ended: ended, playing: playing, stopsPlayback: stopsPlayback)
+    }
+
+    /// Keeps the timeline clear until `sample`: a step's faded tail and the
+    /// pause after it, before the answer's first clause.
+    mutating func reserveTimeline(until sample: Int) {
+        timelineEnd = max(timelineEnd, sample)
     }
 
     /// No more clauses for this answer.
@@ -105,7 +161,7 @@ struct ClauseQueue {
         guard !records.contains(where: { $0.preparation == .ready && !$0.started && !$0.chunks.isEmpty }) else { return nil }
         guard let index = records.firstIndex(where: { $0.preparation == .queued }) else { return nil }
         records[index].preparation = .preparing
-        return Clause(id: records[index].id, text: records[index].text)
+        return Clause(id: records[index].id, text: records[index].text, step: records[index].step)
     }
 
     /// A chunk of `clauseId` was placed on the timeline at `startSample`.

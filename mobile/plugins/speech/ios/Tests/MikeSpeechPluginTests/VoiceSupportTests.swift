@@ -113,4 +113,25 @@ final class VoiceSupportTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertTrue(messages.all.isEmpty)
     }
+
+    func testAStepStartsWithASoftCueAndIsQuieter() {
+        let words: [Float] = [0.5, -0.5, 0.25]
+        let first = StepSound.first(words)
+        XCTAssertEqual(first.count, StepSound.cue.count + words.count)
+        XCTAssertLessThanOrEqual(StepSound.cue.map(abs).max() ?? 0, 0.13, "the cue is soft")
+        XCTAssertEqual(StepSound.cue.suffix(100).map(abs).max(), 0, "and ends in silence before the words")
+        XCTAssertEqual(Array(first.suffix(3)), words.map { $0 * StepSound.gain })
+        XCTAssertEqual(StepSound.later(words), words.map { $0 * StepSound.gain })
+    }
+
+    func testTheAnswerFadesAStepOutFromWhereItIs() {
+        let samples = [Float](repeating: 1, count: 10_000)
+        let tail = StepSound.tail(of: samples, from: 2_000)
+        XCTAssertEqual(tail.count, StepSound.yieldFadeSamples)
+        XCTAssertEqual(tail.first ?? 0, 1, accuracy: 0.001)
+        XCTAssertEqual(tail.last, 0)
+        XCTAssertEqual(StepSound.tail(of: samples, from: 9_000).count, 1_000, "what is left, when less than the fade")
+        XCTAssertTrue(StepSound.tail(of: samples, from: 20_000).isEmpty)
+        XCTAssertEqual(StepSound.tail(of: samples, from: -50).count, StepSound.yieldFadeSamples)
+    }
 }

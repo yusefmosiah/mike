@@ -243,4 +243,66 @@ final class ClauseQueueTests: XCTestCase {
         Fade.fadeIn(&empty)
         XCTAssertEqual(empty, [])
     }
+
+    func testAStepPlayingGivesWayToTheAnswer() {
+        var queue = ClauseQueue()
+        queue.begin(turnId: "t1")
+        queue.accept(turnId: "t1", clauseId: 0, text: "Reading the lease.", step: true)
+        XCTAssertEqual(queue.nextToPrepare(), ClauseQueue.Clause(id: 0, text: "Reading the lease.", step: true))
+        let token = queue.token
+        queue.scheduled(clauseId: 0, startSample: 0, count: 4800, token: token)
+        queue.prepared(clauseId: 0, token: token)
+        XCTAssertEqual(queue.advance(playedSample: 100), [.started(clauseId: 0)])
+        XCTAssertTrue(queue.hasUnplayedStep)
+        XCTAssertTrue(queue.isStep(0))
+
+        let yielded = queue.yieldSteps(playedSample: 1200)
+        XCTAssertEqual(
+            yielded,
+            ClauseQueue.Yield(
+                ended: [.init(clauseId: 0, wasStarted: true)],
+                playing: .init(clauseId: 0, playedSamples: 1200),
+                stopsPlayback: true))
+        XCTAssertFalse(queue.hasUnplayedStep)
+
+        // The engine stops the player, rewinds, and keeps the faded tail's room clear.
+        queue.rewind()
+        queue.reserveTimeline(until: 9000)
+        queue.accept(turnId: "t1", clauseId: 1, text: "Ninety days.")
+        XCTAssertEqual(queue.nextToPrepare()?.id, 1)
+        XCTAssertEqual(queue.placement(playedSample: 0, lead: 720), 9000)
+        XCTAssertNil(queue.yieldSteps(playedSample: 0), "nothing left to give way")
+    }
+
+    func testStepsNotYetHeardAreDroppedWithoutStoppingPlayback() {
+        var queue = ClauseQueue()
+        queue.begin(turnId: "t1")
+        queue.accept(turnId: "t1", clauseId: 0, text: "Reading.", step: true)
+        queue.accept(turnId: "t1", clauseId: 1, text: "Counting.", step: true)
+        let yielded = queue.yieldSteps(playedSample: 0)
+        XCTAssertEqual(
+            yielded,
+            ClauseQueue.Yield(
+                ended: [.init(clauseId: 0, wasStarted: false), .init(clauseId: 1, wasStarted: false)],
+                playing: nil,
+                stopsPlayback: false))
+        // Ended steps count as played: an answer clause after them is next, and the end follows it.
+        queue.accept(turnId: "t1", clauseId: 2, text: "The answer.")
+        queue.end(turnId: "t1")
+        XCTAssertEqual(queue.nextToPrepare()?.id, 2)
+        let token = queue.token
+        queue.scheduled(clauseId: 2, startSample: 0, count: 100, token: token)
+        queue.prepared(clauseId: 2, token: token)
+        XCTAssertEqual(queue.advance(playedSample: 100), [.started(clauseId: 2), .played(clauseId: 2), .finished])
+    }
+
+    func testAStepInSynthesisStopsIt() {
+        var queue = ClauseQueue()
+        queue.begin(turnId: "t1")
+        queue.accept(turnId: "t1", clauseId: 0, text: "Reading.", step: true)
+        _ = queue.nextToPrepare()
+        XCTAssertEqual(queue.yieldSteps(playedSample: 0)?.stopsPlayback, true)
+        // The synthesis's late chunks are refused.
+        XCTAssertFalse(queue.scheduled(clauseId: 0, startSample: 0, count: 100, token: queue.token))
+    }
 }

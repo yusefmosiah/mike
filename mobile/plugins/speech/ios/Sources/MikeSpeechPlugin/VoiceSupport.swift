@@ -59,6 +59,46 @@ enum Fade {
     }
 }
 
+/// How a step said while the answer works (`kind: "step"`) sounds different
+/// from the answer: a soft two-note cue before it, the words a little quieter,
+/// and, when the answer arrives mid-step, a short fade and a pause before the
+/// answer begins (docs/voice-chat.md, "Speaking while it works").
+enum StepSound {
+    static let rate = 24_000.0
+    /// The words of a step, relative to the answer's.
+    static let gain: Float = 0.75
+    /// The fade when the answer takes over: 150 ms.
+    static let yieldFadeSamples = 3_600
+    /// Silence between the faded step and the answer: 250 ms.
+    static let yieldGapSamples = 6_000
+
+    /// Two short, soft sine notes (a fifth apart, 55 ms each with a smooth
+    /// envelope), then 80 ms of silence before the words.
+    static let cue: [Float] = {
+        func note(_ frequency: Double, _ length: Int) -> [Float] {
+            (0..<length).map { index in
+                let envelope = sin(Double.pi * Double(index) / Double(length))
+                return Float(0.12 * envelope * envelope * sin(2 * Double.pi * frequency * Double(index) / rate))
+            }
+        }
+        let length = Int(rate * 0.055)
+        return note(660, length) + note(990, length) + [Float](repeating: 0, count: Int(rate * 0.08))
+    }()
+
+    /// The step's first chunk: the cue, then the words at the step's gain.
+    static func first(_ chunk: [Float]) -> [Float] { cue + chunk.map { $0 * gain } }
+
+    static func later(_ chunk: [Float]) -> [Float] { chunk.map { $0 * gain } }
+
+    /// What is left of a step from `offset`, faded out over `yieldFadeSamples`.
+    static func tail(of samples: [Float], from offset: Int) -> [Float] {
+        let start = min(max(0, offset), samples.count)
+        var tail = Array(samples[start..<min(samples.count, start + yieldFadeSamples)])
+        Fade.fadeOut(&tail, length: tail.count)
+        return tail
+    }
+}
+
 /// The audio the final pass transcribes for a committed turn: the VAD bounds,
 /// widened a little because VAD frames are coarse and words trail off.
 enum UtteranceBounds {
