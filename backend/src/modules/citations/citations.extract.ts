@@ -27,7 +27,7 @@ export type Complete = (args: { systemPrompt: string; user: string; maxTokens?: 
 const WINDOW_CHARS = 24_000;
 const KINDS: readonly CitationKind[] = ["case", "legislation", "web", "secondary", "other"];
 
-const EXTRACT_SYSTEM = `You find the citations in a legal document so each can be checked against its source.
+const EXTRACT_SYSTEM = `You find the citations in a document so each can be checked against its source.
 
 List every reference to an external authority the document relies on: cases, legislation and regulations, court rules, treaties, articles, books, reports, guidance and web pages. Do not list cross-references to the document's own clauses, schedules or defined terms, and do not list parties or people.
 

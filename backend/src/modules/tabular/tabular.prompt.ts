@@ -91,7 +91,7 @@ export async function draftColumnPrompt(
         docNote +
         `\nExpected response format: ${formatHint}` +
         tagsNote +
-        `\n\nWrite the best extraction prompt for a legal tabular review column with this title. ` +
+        `\n\nWrite the best extraction prompt for a tabular review column with this title. ` +
         `Do NOT include any instruction about the response format in the prompt — ` +
         `format handling is applied separately and must not be duplicated inside the prompt text.`;
 
@@ -109,7 +109,7 @@ export async function draftColumnPrompt(
         const raw = await completeText({
             model: promptModel,
             systemPrompt:
-                'You write high-quality column prompts for legal tabular review workflows. Return only valid JSON with a single field: {"prompt": string}. The prompt you write must focus solely on what to extract — never on how to format the response.',
+                'You write high-quality column prompts for tabular review workflows. Return only valid JSON with a single field: {"prompt": string}. The prompt you write must focus solely on what to extract — never on how to format the response.',
             user: userMessage,
             maxTokens: 512,
             apiKeys: api_keys,

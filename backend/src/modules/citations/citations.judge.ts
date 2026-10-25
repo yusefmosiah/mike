@@ -65,7 +65,7 @@ export function relevantPassages(source: string, about: string, budget = PASSAGE
         .join("\n[...]\n");
 }
 
-const JUDGE_SYSTEM = `You check whether a legal document cites its sources honestly. You are given one citation from the document, the sentence or paragraph that uses it, what the document says it establishes, and text retrieved from a candidate source.
+const JUDGE_SYSTEM = `You check whether a document cites its sources honestly. You are given one citation from the document, the sentence or paragraph that uses it, what the document says it establishes, and text retrieved from a candidate source.
 
 Decide:
 - "identified": true if the retrieved text is the cited authority (the same case, provision, article or page), false if it is something else.
