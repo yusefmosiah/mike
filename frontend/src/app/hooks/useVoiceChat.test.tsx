@@ -376,6 +376,42 @@ describe("useVoiceChat", () => {
         expect(view.cancelResponse).toHaveBeenCalledTimes(1);
     });
 
+    it("tap to interrupt stops the answer like a barge-in, from where the engine says speech stopped", async () => {
+        const view = await started();
+        emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+        view.stream(ANSWER.slice(0, 120));
+        emit({ type: "clauseStarted", turnId: "t1", clauseId: 0 });
+        emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+        emit({ type: "clauseStarted", turnId: "t1", clauseId: 1 });
+        act(() => view.result.current.voice.interrupt?.());
+        expect(view.cancelResponse).toHaveBeenCalledTimes(1);
+        expect(calls("voiceCancelAnswer")).toEqual([{ turnId: "t1" }]);
+        expect(recordMock).not.toHaveBeenCalled();
+        emit({ type: "interrupted", turnId: "t1", clauseId: 1, fraction: 0.7 });
+        expect(recordMock).toHaveBeenCalledWith("chat-1", "a1", "Under the lease, the tenant must give **ninety days'** written");
+        // A second tap does nothing more.
+        act(() => view.result.current.voice.interrupt?.());
+        expect(calls("voiceCancelAnswer")).toHaveLength(1);
+    });
+
+    it("tap to interrupt while nothing plays records the clauses heard at once", async () => {
+        const view = await started();
+        emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+        view.stream(ANSWER.slice(0, 120));
+        emit({ type: "clauseStarted", turnId: "t1", clauseId: 0 });
+        emit({ type: "clausePlayed", turnId: "t1", clauseId: 0 });
+        act(() => view.result.current.voice.interrupt?.());
+        expect(recordMock).toHaveBeenCalledWith("chat-1", "a1", "Under the lease, the tenant must give");
+    });
+
+    it("says voice mode is not available on the phone; the app's engine sends no reason of its own", async () => {
+        status = { available: false, missing: [], downloadBytes: 0, unavailableMessage: "Allow the speech server first." };
+        const view = renderVoiceChat();
+        await act(() => view.result.current.voice.start());
+        expect(view.result.current.voice.phase).toBe("off");
+        expect(view.result.current.voice.error).toBe(VOICE_UNAVAILABLE_MESSAGE);
+    });
+
     it("records the clauses heard when a barge-in comes between clauses", async () => {
         const view = await started();
         emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
