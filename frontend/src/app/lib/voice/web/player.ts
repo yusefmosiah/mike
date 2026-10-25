@@ -11,6 +11,9 @@
  */
 
 import type { ClausePlayback, ClausePlayer, RenderedClause } from "./clauseQueue";
+import { SILENT_WAV } from "./silentWav";
+
+export { SILENT_WAV };
 
 /** The parts of an `<audio>` element this module uses. */
 export interface AudioLike {
@@ -50,10 +53,6 @@ export interface PlayerDeps {
     createObjectURL?: (blob: Blob) => string;
     revokeObjectURL?: (url: string) => void;
 }
-
-/** 10 ms of 16 kHz silence as a WAV data URL: what `prime()` plays. */
-export const SILENT_WAV =
-    "data:audio/wav;base64,UklGRmQBAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YUABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 
 /** Steps said while the answer works are a little quieter than the answer. */
 export const STEP_VOLUME = 0.75;

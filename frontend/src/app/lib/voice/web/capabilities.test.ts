@@ -6,6 +6,7 @@ import {
     planWebVoice,
     probeVoiceCapabilities,
     probeWebGpu,
+    type GpuAdapterLike,
     type VoiceCapabilities,
 } from "./capabilities";
 import { webVoiceSupported } from "./support";
@@ -20,7 +21,7 @@ const adapter = (overrides: Record<string, unknown> = {}) => ({
     requestDevice: vi.fn(async () => ({ destroy: vi.fn() })),
     ...overrides,
 });
-const gpuWith = (found: unknown) => ({ requestAdapter: vi.fn(async () => found) });
+const gpuWith = (found: unknown) => ({ requestAdapter: vi.fn(async () => found as GpuAdapterLike | null) });
 
 describe("webVoiceSupported", () => {
     const full = {

@@ -69,7 +69,7 @@ export function modelBytes(model: WebVoiceModel, webkit: boolean): number {
     }
 }
 
-interface GpuAdapterLike {
+export interface GpuAdapterLike {
     isFallbackAdapter?: boolean;
     info?: { isFallbackAdapter?: boolean };
     limits?: { maxBufferSize?: number; maxStorageBufferBindingSize?: number };

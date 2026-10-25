@@ -47,9 +47,10 @@ type Utterance = {
 function setup() {
     const audios: FakeAudio[] = [];
     const spoken: Utterance[] = [];
-    const synth: SynthLike & { cancel: ReturnType<typeof vi.fn> } = {
+    const cancel = vi.fn();
+    const synth: SynthLike = {
         speak: (utterance) => spoken.push(utterance as Utterance),
-        cancel: vi.fn(),
+        cancel,
         getVoices: () => [{ voiceURI: "Samantha" }],
     };
     let urls = 0;
@@ -65,7 +66,7 @@ function setup() {
         createObjectURL: () => `blob:${++urls}`,
         revokeObjectURL: (url) => revoked.push(url),
     });
-    return { player, audios, spoken, synth, revoked };
+    return { player, audios, spoken, synth, cancel, revoked };
 }
 
 const wav = () => new Blob([new Uint8Array(4)], { type: "audio/wav" });
@@ -115,7 +116,7 @@ describe("WebClausePlayer", () => {
     });
 
     it("reads text with the system's voice, with the share spoken from word boundaries", async () => {
-        const { player, spoken, synth } = setup();
+        const { player, spoken, cancel } = setup();
         player.voiceURI = "Samantha";
         player.rate = 1.2;
         const text = "Clause four says the rent is due.";
@@ -126,7 +127,7 @@ describe("WebClausePlayer", () => {
         expect(utterance.rate).toBe(1.2);
         utterance.onboundary?.({ charIndex: 11 });
         expect(playing.stop()).toBeCloseTo(11 / text.length);
-        expect(synth.cancel).toHaveBeenCalled();
+        expect(cancel).toHaveBeenCalled();
 
         const next = player.play({ kind: "utterance", text: "Done." }, { step: true });
         expect(spoken[1].volume).toBe(STEP_VOLUME);

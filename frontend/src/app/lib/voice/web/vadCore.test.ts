@@ -50,8 +50,8 @@ describe("SileroDetector", () => {
         await detector.probability(ramp(1000, 512));
         const [first, second] = feeds;
         expect(first.input.dims).toEqual([1, 576]);
-        expect(Array.from(first.input.data.slice(0, 64))).toEqual(new Array(64).fill(0));
-        expect(Array.from(second.input.data.slice(0, 64))).toEqual(Array.from(ramp(448, 64)));
+        expect(Array.from((first.input.data as Float32Array).slice(0, 64))).toEqual(new Array(64).fill(0));
+        expect(Array.from((second.input.data as Float32Array).slice(0, 64))).toEqual(Array.from(ramp(448, 64)));
         expect(second.input.data[64]).toBe(1000);
         expect(first.state.dims).toEqual([2, 1, 128]);
         expect(second.state.data[0]).toBe(1);
