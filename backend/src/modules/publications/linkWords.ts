@@ -247,7 +247,7 @@ export const LINK_WORDS: readonly string[] = Object.freeze([
     "wasser", "weide", "wiese", "wind", "winter", "wolke", "wurzel", "zaun", "zebra", "ziege",
     "zimt", "zitrone", "zwiebel", "zwetschge",
     // Dutch
-    "aardbei", "aardappel", "abrikoos", "akker", "appel", "bakker", "banaan", "beekje", 
+    "aardbei", "aardappel", "abrikoos", "akker", "appel", "bakker", "banaan", "beekje",
     "bij", "bloem", "boerderij", "boom", "bosbes", "brug", "bruin", "buizerd", "citroen", "dijk",
     "donder", "drop", "duif", "eekhoorn", "eend", "eiland", "ekster", "fiets", "fluit", "fontein",
     "geit", "gordijn", "haring", "havik", "hazelnoot", "herfst", "heuvel", "hommel", "hooi",
