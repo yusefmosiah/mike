@@ -241,6 +241,8 @@ describe("ChatView document panel gestures", () => {
         swipeLeft(screen.getByText("Chat input"));
         const panel = await screen.findByTestId("panel");
         await waitFor(() => expect(panel.parentElement).toHaveClass("translate-x-0"));
+        // Focus moves in after the swipe watchers attach: the panel is ready.
+        await waitFor(() => expect(panel.parentElement).toHaveFocus());
 
         panel.style.overflowX = "auto";
         Object.defineProperties(panel, {
