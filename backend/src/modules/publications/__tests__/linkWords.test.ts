@@ -13,7 +13,7 @@ const DENY = new Set(
     church mosque pope jesus allah god satan devil
     trump biden putin
     puta pene culo mierda polla verga cazzo figa merda caralho buceta kut lul hoer arsch scheisse fotze hure
-    merde bite pute sik kuso baka unko vittu paska pillu kontol memek`.split(/\s+/),
+    merde bite pute sik kuso baka unko vittu paska pillu kontol memek pau beer`.split(/\s+/),
 );
 
 // Substrings that no word may contain, in any language.

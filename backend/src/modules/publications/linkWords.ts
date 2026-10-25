@@ -247,7 +247,7 @@ export const LINK_WORDS: readonly string[] = Object.freeze([
     "wasser", "weide", "wiese", "wind", "winter", "wolke", "wurzel", "zaun", "zebra", "ziege",
     "zimt", "zitrone", "zwiebel", "zwetschge",
     // Dutch
-    "aardbei", "aardappel", "abrikoos", "akker", "appel", "bakker", "banaan", "beekje", "beer",
+    "aardbei", "aardappel", "abrikoos", "akker", "appel", "bakker", "banaan", "beekje", 
     "bij", "bloem", "boerderij", "boom", "bosbes", "brug", "bruin", "buizerd", "citroen", "dijk",
     "donder", "drop", "duif", "eekhoorn", "eend", "eiland", "ekster", "fiets", "fluit", "fontein",
     "geit", "gordijn", "haring", "havik", "hazelnoot", "herfst", "heuvel", "hommel", "hooi",
@@ -298,7 +298,7 @@ export const LINK_WORDS: readonly string[] = Object.freeze([
     // Hawaiian
     "aloha", "ahi", "akala", "alii", "hale", "hula", "huli", "iiwi", "kalo", "kapa", "kukui",
     "lani", "lehua", "lei", "limu", "mahalo", "makai", "mauka", "mele", "moana", "nene", "noni",
-    "ohana", "ohia", "olu", "opihi", "pahu", "paniolo", "pau", "poi", "pua", "pueo", "tutu", "uku",
+    "ohana", "ohia", "olu", "opihi", "pahu", "paniolo", "poi", "pua", "pueo", "tutu", "uku",
     "wahine", "wiliwili", "honu", "humu", "ipu", "kahili", "kai", "kapuna", "kilo", "koa", "koae",
     "kou", "kula", "kumu", "laau", "lau", "lauhala", "lanai", "loko", "lomi", "luau", "mahimahi",
     "malolo", "manu", "maile", "malie", "mea", "nalu", "nui", "paka", "pali", "peahi", "puna",
