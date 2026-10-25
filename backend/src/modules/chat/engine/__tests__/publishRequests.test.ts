@@ -155,14 +155,14 @@ describe("publish answers", () => {
       );
       return assistant.content ?? "";
     };
-    const published = await replay({ id: "publish-1", kind: "publish", ...view, publication_id: "pub-1" });
+    const published = await replay({ ...view, id: "publish-1", kind: "publish", publication_id: "pub-1" });
     expect(published).toMatch(/asked user to publish .*Field notes\.html.* as a link/s);
     expect(published).toMatch(/user published the document at .*abc\.pub\.example/s);
     expect(published).toContain("the password the user set (you do not know it)");
     expect(published).toContain("who is signed in and can open the document; it expires 2026-11-23");
     expect(published).not.toContain("asked user for");
 
-    const open = await replay({ id: "publish-1", kind: "publish", ...view, audience: "public", require_sign_in: false, expires_at: null });
+    const open = await replay({ ...view, id: "publish-1", kind: "publish", audience: "public", require_sign_in: false, expires_at: null });
     expect(open).toContain("for anyone with the link; it does not expire");
 
     expect(await replay({ id: "publish-1", kind: "publish", skipped: true })).toContain("user did not publish the document");
