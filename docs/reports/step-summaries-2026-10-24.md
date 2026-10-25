@@ -95,12 +95,39 @@ Word add-in tools run through `clientTools.execute`. Those are the only other pl
 6. **Summaries reference sources by id.** The summariser receives the step's sources with short ids and writes "[s2]"-style references. These become links. A reference to an id the step never recorded is rejected, which is the faithfulness check described above.
 7. **Citations are cross-linked.** An answer citation whose document version or URL matches a step source links to it, so a reader can go from a claim to the step that read its source.
 
-**What tool hooks cannot see.** Code in the workstation can bypass tools in two ways:
+**Below the tools: file reads and network access.** Code in a cell can bypass tools in two ways: it can open the synced copies in `~/mike` with plain `open()`, or reach the network through `requests` or a shell command. There are three layers for capturing these. The first two capture what is actually accessed, not an estimate.
 
-- **Files:** it can read the synced copies in `~/mike` with plain `open()`. Capturing that needs an audit inside the VM, either an fanotify watcher on `~/mike` reporting over the existing vsock, or a mount that reports opens.
-- **Network:** it can reach the network through the egress proxy. Tinyproxy already logs every request per VM (`infra/node-a/workstations.nix`), so requests made during a cell can be attributed to it by VM and time. For HTTPS that gives only the host, not the URL.
+1. **Inside the kernel: Python audit hooks (PEP 578).** We run our own kernel (`backend/src/lib/codemode/kernel/mike_kernel/`), so it can call `sys.addaudithook` at startup, before any model code runs. A hook cannot be removed once added. It already knows the current cell (`_current_cell` in `repl.py`), and it can batch what it sees into a new per-cell `access` event on the existing kernel protocol. Events to watch:
+   - files: `open` (path and mode), `os.listdir` and `os.scandir`, `shutil.copyfile`;
+   - network: `urllib.Request` (full URL and method), `http.client.connect` (host and port), `http.client.send`, `socket.connect` (address);
+   - processes: `subprocess.Popen` (the command line).
 
-Both should be shown as "observed" rather than "recorded", so the precision is honest. Recorded sources say what a tool touched. Neither kind proves the model relied on a source: that is what citations claim, and what the citation checker verifies.
+   `http.client.send` carries the request line before TLS encrypts it, so `requests`, `urllib3` and `urllib` give the full URL (path and query) even over HTTPS, with no proxy changes. A path under `~/mike` resolves to an exact document version through the sync's `.manifest.json` (path to version id, `lib/workstation/files.ts`). It becomes a `document` source with `access: read`, the same as a `read_document` call.
+
+   Checked on 2026-10-25 with Python's own hooks and no Mike code: one hook recorded `open('sample.txt', 'r')`, `os.listdir`, `urllib.Request https://example.com/some/path?q=1 GET`, the connect, `GET /some/path?q=1 HTTP/1.1`, and `Popen ['echo', 'hi']`.
+
+   Limits:
+   - libraries that do their own native I/O (pyarrow, polars) bypass `open`;
+   - for a subprocess (`curl`, a shell pipeline), only its command line is visible, not what it then opens;
+   - code that goes out of its way can evade the hook (via `ctypes`).
+
+   So this layer is for oversight of a cooperating model, not a security boundary. The VM and the proxy remain the boundary.
+2. **Inside the VM: the operating system as a backstop.** We build the workstation image (NixOS microVMs, `infra/node-a/workstations.nix`). There are two options:
+   - an fanotify watcher on `~/mike` reports every open of a synced document, with the process id, over the existing vsock;
+   - eBPF on `openat` and `connect` covers the whole VM.
+
+   Either one catches native I/O and subprocesses, and attributes accesses to a cell by the kernel's process tree and the cell's time window. fanotify on one folder is the cheaper start.
+3. **At the network edge: the egress proxy.** The VM has no route out except the host's proxy, which already logs every request (`journalctl -u tinyproxy`). For HTTPS that log shows only the host, because the URL is encrypted. Two upgrades are possible:
+   - **Per-cell attribution:** before each cell, the kernel sets its proxy address with the cell id as the user name (`http://<cell id>@<gateway>:3128`). Subprocesses inherit it, so every request, `curl` included, is tagged with its cell.
+   - **Full URLs and content hashes:** decrypt TLS at the proxy with a per-VM certificate authority trusted inside the guest. This gives every URL, status and response hash, with the option of snapshots. The cost is that tools which pin certificates break, and the proxy becomes sensitive infrastructure. tinyproxy cannot do this, so it would be replaced by a small proxy of our own or mitmproxy.
+
+**Labels.** Every source says how it was captured:
+
+- **recorded:** from a tool call;
+- **observed in code:** from the audit hook; exact path or URL;
+- **observed by the system:** from fanotify, eBPF or the proxy; complete coverage, with coarser attribution.
+
+None of these proves the model relied on a source. That is what citations claim, and what the citation checker verifies.
 
 **Order of work.**
 
@@ -110,7 +137,8 @@ Both should be shown as "observed" rather than "recorded", so the precision is h
 4. Source lists on the code-cell row and the run line.
 5. MCP resource URIs and the Workspace extractors.
 6. Subagent roll-up.
-7. Workstation file and network observation.
+7. Audit hooks in the kernel (files, URLs, subprocesses), with `~/mike` paths resolved through the manifest.
+7b. Per-cell proxy attribution, then fanotify on `~/mike`. TLS interception only if full URLs from subprocesses turn out to matter.
 
 Then, for subagents:
 
