@@ -229,12 +229,12 @@ for (const [name, viewport] of [
         });
 
         test("shows the newest reasoning in the collapsed thought process while it streams", async ({ page }) => {
-            // A thought opens in full unless the reader collapsed the last
-            // one (shared/hooks/disclosurePreference.ts): start collapsed.
-            await page.addInitScript(() => localStorage.setItem("mike.disclosure.reasoning", "0"));
             await stubBackend(page, { reasoning: true });
             await openChat(page);
             await send(page, "Think it through.");
+            // A thought starts closed; opened while it streams, it shows the
+            // collapsed window.
+            await page.getByRole("button", { name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\./ }).click();
             await expect(page.getByText("Thought 40 weighs the clause.")).toBeAttached({ timeout: 30_000 });
             const result = await page.evaluate(() => new Promise<{ frames: number; hidden: string[] }>((resolve) => {
                 const newestThought = () =>

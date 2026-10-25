@@ -1,10 +1,6 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import {
-    disclosurePreference,
-    rememberDisclosure,
-} from "@/shared/hooks/disclosurePreference";
 import type { AssistantEvent } from "@/app/components/shared/types";
 import { TextSlabUI } from "@/shared/ui/TextSlabUI";
 import { EventBlock } from "./EventBlocks";
@@ -35,8 +31,8 @@ function detailText(event: CodeCellEvent): string | null {
  * the cell does (its summary, else that the assistant is computing) and,
  * once done, how many calls it made. Under it, always visible, are the
  * sources those calls touched: documents read, searches, pages, cases.
- * Opening it shows the code and what came back, for anyone who wants to
- * check the work; the next cell then opens too, until the reader closes one.
+ * It starts closed; opening it shows the code and what came back, for
+ * anyone who wants to check the work.
  */
 export function CodeCellBlock({
     event,
@@ -48,12 +44,8 @@ export function CodeCellBlock({
     /** The sources the cell's calls touched, rendered under its line. */
     sources?: ReactNode;
 }) {
-    // Opens the way the reader left the last cell (disclosurePreference.ts).
-    const [open, setOpen] = useState(() => disclosurePreference("code-cell"));
-    const toggle = () => {
-        setOpen(!open);
-        rememberDisclosure("code-cell", !open);
-    };
+    const [open, setOpen] = useState(false);
+    const toggle = () => setOpen(!open);
     const running = event.status === "running";
     const detail = running ? null : detailText(event);
     const summary = event.summary?.text.trim();

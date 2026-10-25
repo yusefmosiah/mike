@@ -11,10 +11,3 @@ import { Blob as NodeBlob } from "node:buffer";
 // `node:buffer`) keeps `response.blob()` usable the same way on every
 // supported Node version. See #361.
 globalThis.Blob = NodeBlob as unknown as typeof Blob;
-
-// Collapsible blocks remember the reader's last choice
-// (src/shared/hooks/disclosurePreference.ts). Start every test from the
-// defaults rather than whatever an earlier test chose.
-import { beforeEach } from "vitest";
-import { resetDisclosurePreferencesForTests } from "./src/shared/hooks/disclosurePreference";
-beforeEach(() => resetDisclosurePreferencesForTests());

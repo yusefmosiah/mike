@@ -66,8 +66,10 @@ describe("AssistantMessage timeline", () => {
         });
         expect(toggles).toHaveLength(1);
 
-        // Thinking opens in full by default.
-        expect(toggles[0]).toHaveAttribute("aria-expanded", "true");
+        // Thinking starts closed; opened, all of it shows.
+        expect(toggles[0]).toHaveAttribute("aria-expanded", "false");
+        expect(screen.queryByText(/First I check the parties/)).toBeNull();
+        fireEvent.click(toggles[0]);
         expect(screen.getByText(/First I check the parties/)).toBeVisible();
         expect(screen.getByText(/Then the termination clause/)).toBeVisible();
         expect(screen.getByText(/Finally the governing law/)).toBeVisible();

@@ -647,28 +647,29 @@ test("a reasoning delta replaces Thinking with a live reasoning trace", async ({
   await expect(
     assistant.getByText("Thinking...", { exact: true }),
   ).toBeVisible();
+  // The thought starts closed while it streams; the reader opens it.
+  const liveReasoningToggle = assistant.getByRole("button", {
+    name: "Thinking...",
+  });
+  await expect(liveReasoningToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    assistant.getByText("I should inspect the agreement first.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await liveReasoningToggle.click();
+  await expect(liveReasoningToggle).toHaveAttribute("aria-expanded", "true");
   await expect(
     assistant.getByText("I should inspect the agreement first.", {
       exact: true,
     }),
   ).toBeVisible();
-  const liveReasoningToggle = assistant.getByRole("button", {
-    name: "Thinking...",
-  });
-  await expect(liveReasoningToggle).toHaveAttribute("aria-expanded", "true");
   await liveReasoningToggle.click();
   await expect(
     assistant.getByText("I should inspect the agreement first.", {
       exact: true,
     }),
   ).toHaveCount(0);
-  await expect(liveReasoningToggle).toHaveAttribute("aria-expanded", "false");
-  await liveReasoningToggle.click();
-  await expect(
-    assistant.getByText("I should inspect the agreement first.", {
-      exact: true,
-    }),
-  ).toBeVisible();
 
   await page.evaluate(() => {
     (
