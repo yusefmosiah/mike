@@ -190,7 +190,7 @@ lists what is sent.
 | `backend/` | Express API, document processing, database access and model calls |
 | `word-addin/` | Microsoft Word task-pane add-in (beta) |
 | `mobile/` | iPhone and Android apps (Capacitor) and the on-device speech plugin |
-| `desktop/` | Mac app (Electron) |
+| `desktop/` | Mac app (Electron), being replaced by the Catalyst build of `mobile/` ([docs/mac-app.md](docs/mac-app.md)) |
 | `packages/` | Shared code: `brand` (the product name), `contracts` (wire types), `pdf-text-order` |
 | `skills/` | Skills kept in the repository |
 | `infra/` | NixOS hosting: staging, workstation VMs, the vault, egress |

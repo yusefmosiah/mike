@@ -5,6 +5,11 @@ hosted web app) and leave upstream's self-contained local mode for later. The
 plan is [`docs/mac-app.md`](../docs/mac-app.md); the app is in
 [`desktop/`](../desktop/README.md).
 
+Owner direction, 2026-10-25: "Use Mac Catalyst and retire the Electron." The
+Mac app becomes the iPhone app (`mobile/`) built with Mac Catalyst, for parity
+with the iPhone, voice mode above all. See "Mac Catalyst" at the end; the
+sections before it are the Electron app's history.
+
 ## Built (2026-10-10), not accepted
 
 - **The wrapper from upstream.** `desktop/` holds upstream's Electron shell
@@ -202,3 +207,70 @@ loaded its connect page from `app.asar` and nothing listened on 9341.
   has none: `security find-identity -v -p codesigning` printed "0 valid
   identities found" (2026-10-11), and Xcode has no Apple account signed in.
 - **CI:** no job builds the app yet; a macOS runner job is a cost decision.
+
+## Mac Catalyst (2026-10-25), not accepted
+
+How it is built, what works and what is left: [`docs/mac-app.md`](../docs/mac-app.md).
+Toolchain: Xcode 27.1, macOS 27.2, Capacitor 8.5.3.
+
+Two binary dependencies have no Catalyst slice. The first build failed with
+"While building for Mac Catalyst, no library for this platform was found" in
+`Capacitor.xcframework`, `Cordova.xcframework` and xn-ptts's
+`PhononCore.xcframework`. `npm run mac:deps` builds the Catalyst slices from
+source (Capacitor unchanged; Phonon's Rust core for `aarch64-apple-ios-macabi`)
+into local packages that override the remote ones. Then the link failed with a
+duplicate `_rust_eh_personality` (two Rust static libraries, each with std);
+dead-code stripping, on by default for iOS but not for the Mac's Debug build,
+fixed it. A Release build failed on x86_64 (Phonon has no Intel slice); the
+Mac build is Apple silicon only. No Swift source needed a Catalyst guard to
+compile.
+
+```text
+$ npm run mac:build                       # Debug, ad hoc
+** BUILD SUCCEEDED **
+$ scripts/build-mac.sh Release
+** BUILD SUCCEEDED **
+$ lipo -info .../Release-maccatalyst/App.app/Contents/MacOS/App
+Non-fat file: ... is architecture: arm64
+$ du -sh .../Release-maccatalyst/App.app
+270M
+iOS, same project with the local packages:
+  iPhone 18 Pro simulator  ** BUILD SUCCEEDED **
+  generic/platform=iOS     ** BUILD SUCCEEDED **  (Capacitor binary: the release's SHA-256)
+```
+
+The app, launched sandboxed under another bundle identifier (the first launch
+as `com.firm.mike` waited in sandbox setup for macOS's prompt about an
+existing container from a differently signed build), loading a local harness
+page that calls the plugins through the bridge:
+
+```text
+headers   CapacitorHttp, Console, WebView, CapacitorCookies, SystemBars, Browser, App, Camera, MikeSpeech, Preferences, MikeFiles
+status    en-US       {"state":"available","engine":"speech-transcriber","locale":"en-US"}
+status    fluid-mini  {"live":true,"state":"available","engine":"fluid-mini","locale":"en"}
+voices    185
+speak     audio/wav, 75584 base64 chars
+transcribe fluid-mini  "Please draft a short letter to opposing counsel and confirm the deposition date."  67540 ms (first: Core ML compile)
+transcribe apple       "Please draft a short letter to opposing counsel and confirm the deposition date."  834 ms
+voiceInstall  {"available":true}  44601 ms
+voicePrewarm  ready: eou, fluid-mini, phonon, smart-turn, speaker, vad
+speak phonon  audio/wav, 179260 base64 chars, 301 ms
+voiceRemove, remove phonon: models deleted
+```
+
+(`Browser` is `@capacitor/browser` 8.0.5, installed for this check only; it
+compiles under Catalyst.) Before the fix to the model lookup
+(`Bundle.resourceURL`), Fluid Speech Mini reported `unavailable` on the Mac:
+macOS keeps a resource bundle's files in `Contents/Resources`.
+
+The speech plugin's tests under Catalyst (a workspace with the plugin and the
+local packages): `Executed 154 tests, with 7 tests skipped and 0 failures`
+(the 7 are the model integration tests, which need downloaded models).
+
+### Not done
+
+- By hand: the microphone prompt, live dictation and a voice session with
+  echo cancellation, the camera, the window's look (no Screen Recording
+  permission here).
+- Connector sign-in popups, menus and shortcuts, signing and notarization,
+  and the rest of "Retiring desktop/" in `docs/mac-app.md`.

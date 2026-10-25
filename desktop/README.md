@@ -1,9 +1,14 @@
 # Mike for Mac
 
+> **Being retired.** The owner decided on 2026-10-25 to make the Mac app the
+> iPhone app (`mobile/`) built with Mac Catalyst, which brings voice mode and
+> the other native plugins to the Mac. This Electron app stays until the
+> Catalyst app covers what it does; the list is in
+> [`docs/mac-app.md`](../docs/mac-app.md), "Retiring desktop/".
+
 A native macOS window around the Mike web app, adapted from upstream's
 Electron shell (`open-legal-products/mike` commit `89dc8323`, `desktop/`),
-without upstream's local mode. The plan and the decisions behind it are in
-[`docs/mac-app.md`](../docs/mac-app.md); progress is in
+without upstream's local mode. Progress is in
 [`goals/mission-18-mac-app.md`](../goals/mission-18-mac-app.md).
 
 The app loads a deployed Mike server, by default ours

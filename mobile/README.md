@@ -58,7 +58,8 @@ App identity `com.firm.mike` · display name "Mike" · deep-link scheme `mike://
 ## How the pieces fit
 
 - The web view loads the firm's Mike server, so every web change reaches the
-  app without a new build, as in the Mac app (`desktop/`). A static export of
+  app without a new build. The Mac app is this same app, built with Mac
+  Catalyst (`docs/mac-app.md`). A static export of
   the frontend is not possible: it uses server routes and middleware.
 - The web view fills the screen (`contentInset: "never"`): the page pads
   itself with `env(safe-area-inset-*)`, blurs text scrolling under the status
@@ -127,6 +128,19 @@ in the web view, or else the composer's place at the bottom of the screen. If
 no keyboard appears, the simulator has a hardware keyboard connected (I/O >
 Keyboard > Connect Hardware Keyboard, or
 `defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`).
+
+## Build and run (Mac)
+
+The Mac app is this app built with Mac Catalyst ("Optimize for Mac"); the
+Electron app in `desktop/` is being retired. After `npm run ios:add` (or
+`sync` and `ios:configure`):
+
+```bash
+npm run mac:deps     # Catalyst slices of Capacitor and Phonon's core (needs rustup)
+npm run mac:build    # ad-hoc signed Debug build in ios/App/build-mac/
+```
+
+How it works, what runs on the Mac and what is left: `docs/mac-app.md`.
 
 ## Build and run (Android)
 
@@ -204,6 +218,8 @@ to Logcat (`loggingBehavior: "none"`).
 | `ios:add` | `www` + `cap add ios` + `ios:configure` | Generate the iOS project. |
 | `ios:configure` | `scripts/configure-ios.mjs` | Apply the hardening to the generated project. |
 | `build:ios` | `cap build ios` | Signed iOS artifact (signing per firm profiles). |
+| `mac:deps` | `scripts/build-mac-catalyst.mjs` + `ios:configure` | Build the Mac Catalyst slices that capacitor-swift-pm and xn-ptts do not publish, into local packages under `ios/App/MacCatalyst/` that the project then uses; every download checked against its pinned SHA-256; a no-op when current (`docs/mac-app.md`). |
+| `mac:build` | `scripts/build-mac.sh` | Build the Mac app (Catalyst), signed ad hoc; `scripts/build-mac.sh Release` for a release build. |
 | `android:add` | `www` + `cap add android` + `android:configure` | Generate the Android project. |
 | `android:configure` | `scripts/configure-android.mjs` | Apply the hardening to the generated project, and keep only arm64 native libraries (`MIKE_ANDROID_ABIS` widens it). |
 | `phonon:android` | `scripts/build-phonon-android.mjs` | Build Phonon's `libptts_ffi.so` (arm64) from xn-ptts at its pinned commit into the speech plugin (gitignored); a no-op when current. |
