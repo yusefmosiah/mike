@@ -1410,7 +1410,7 @@ export function ChatView({
                     <div
                         aria-hidden="true"
                         data-swipe-edge="document-panel"
-                        className="absolute inset-y-0 left-0 top-16 z-50 w-6 md:hidden"
+                        className="absolute bottom-0 left-0 top-16 z-50 w-6 md:hidden"
                     />
                     <AssistantSidePanel
                         tabs={tabs}
