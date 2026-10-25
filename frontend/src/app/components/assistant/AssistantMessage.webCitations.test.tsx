@@ -13,7 +13,19 @@ const web: Citation = {
     quotes: [{ quote: "Houston won 135-117" }],
 };
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+    vi.restoreAllMocks();
+    delete (globalThis as { Capacitor?: unknown }).Capacitor;
+});
+
+function installNativeBrowser() {
+    const nativePromise = vi.fn().mockResolvedValue(undefined);
+    (globalThis as { Capacitor?: unknown }).Capacitor = {
+        PluginHeaders: [{ name: "Browser", methods: [{ name: "open" }] }],
+        nativePromise,
+    };
+    return nativePromise;
+}
 
 describe("AssistantMessage web citations", () => {
     it("opens a cited page in the host's panel, not on its site", () => {
@@ -57,5 +69,61 @@ describe("AssistantMessage web citations", () => {
         );
         fireEvent.click(screen.getAllByRole("button", { name: /Citation 1/ })[0]);
         expect(open).not.toHaveBeenCalled();
+    });
+
+    describe("in the native app", () => {
+        it("opens the live page in the Safari view, not the panel", () => {
+            const call = installNativeBrowser();
+            const onCitationClick = vi.fn();
+            render(
+                <AssistantMessage
+                    events={[{ type: "content", text: "Houston won by 18.[1]" }]}
+                    citations={[web]}
+                    onCitationClick={onCitationClick}
+                />,
+            );
+            fireEvent.click(screen.getAllByRole("button", { name: /Citation 1/ })[0]);
+            expect(call).toHaveBeenCalledWith("Browser", "open", {
+                url: "https://www.rocketswire.com/game#:~:text=Houston%20won%20135%2D117",
+            });
+            expect(onCitationClick).not.toHaveBeenCalled();
+        });
+
+        it("offers the saved copy, which opens the panel", () => {
+            const call = installNativeBrowser();
+            const onCitationClick = vi.fn();
+            render(
+                <AssistantMessage
+                    events={[{ type: "content", text: "Houston won by 18.[1]" }]}
+                    citations={[web]}
+                    onCitationClick={onCitationClick}
+                />,
+            );
+            fireEvent.click(screen.getByRole("button", { name: /Saved copy of/ }));
+            expect(onCitationClick).toHaveBeenCalledWith(web);
+            expect(call).not.toHaveBeenCalled();
+        });
+
+        it("does not offer the saved copy in a browser", () => {
+            render(
+                <AssistantMessage
+                    events={[{ type: "content", text: "Houston won by 18.[1]" }]}
+                    citations={[web]}
+                    onCitationClick={vi.fn()}
+                />,
+            );
+            expect(screen.queryByRole("button", { name: /Saved copy of/ })).toBeNull();
+        });
+
+        it("opens a link in the answer in the Safari view", () => {
+            const call = installNativeBrowser();
+            render(
+                <AssistantMessage
+                    events={[{ type: "content", text: "See [the docs](https://example.com/docs)." }]}
+                />,
+            );
+            fireEvent.click(screen.getByRole("link", { name: "the docs" }));
+            expect(call).toHaveBeenCalledWith("Browser", "open", { url: "https://example.com/docs" });
+        });
     });
 });

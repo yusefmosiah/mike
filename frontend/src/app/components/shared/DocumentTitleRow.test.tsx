@@ -77,3 +77,43 @@ it("reports a save failure in a warning popup that returns if a retry fails agai
         "Your changes could not be saved.",
     );
 });
+
+const webPage = {
+    document_id: "web:chat-1:11111111-1111-1111-1111-111111111111",
+    title: "Ruling",
+    type: "web",
+    metadata: [],
+    actions: [
+        { type: "link", url: "https://example.com/ruling", label: "Open original", title: "Open original page on its site" },
+    ],
+    quotes: [],
+} as unknown as PanelDocument;
+
+function webRow() {
+    return <DocumentTitleRow document={webPage} isReloading={false} compactActions={false} />;
+}
+
+it("keeps Open original as a plain link in a browser", () => {
+    render(webRow());
+    expect(screen.getByRole("link", { name: "Open original page on its site" })).toHaveAttribute(
+        "href",
+        "https://example.com/ruling",
+    );
+    expect(screen.queryByText("Live page")).toBeNull();
+});
+
+it("offers Live page in the native app, opening the Safari view", () => {
+    const nativePromise = vi.fn().mockResolvedValue(undefined);
+    (globalThis as { Capacitor?: unknown }).Capacitor = {
+        PluginHeaders: [{ name: "Browser", methods: [{ name: "open" }] }],
+        nativePromise,
+    };
+    try {
+        render(webRow());
+        fireEvent.click(screen.getByRole("link", { name: "Open the live page in Safari" }));
+        expect(screen.getByText("Live page")).toBeVisible();
+        expect(nativePromise).toHaveBeenCalledWith("Browser", "open", { url: "https://example.com/ruling" });
+    } finally {
+        delete (globalThis as { Capacitor?: unknown }).Capacitor;
+    }
+});

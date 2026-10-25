@@ -1,9 +1,11 @@
 import Image from "next/image";
-import { Globe, Loader2 } from "lucide-react";
+import { FileText, Globe, Loader2 } from "lucide-react";
 import { FileTypeIcon } from "../../shared/FileTypeIcon";
 import { displayCitationQuote, formatCitationPage } from "../../shared/types";
 import type { Citation } from "../../shared/types";
 import { CitationPillUI } from "@/shared/ui/CitationPillUI";
+import { TextButtonUI } from "@/shared/ui/TextButtonUI";
+import { nativeBrowserSupported } from "@/app/lib/nativeBrowser";
 import { RESPONSE_GLASS_SURFACE } from "./messageStyles";
 import {
     citationAriaLabel,
@@ -142,6 +144,7 @@ export function CitationsBlock({
     activeCitation,
     onCitationClick,
     onOpenSource,
+    onOpenSavedCopy,
     canOpenSource,
     showWhenEmpty = false,
     isLoading = false,
@@ -150,11 +153,14 @@ export function CitationsBlock({
     activeCitation?: Citation | null;
     onCitationClick?: (citation: Citation) => void;
     onOpenSource?: (citation: Citation) => void;
+    /** Opens a web page's saved copy in the panel; offered only in the native app, where the source opens live. */
+    onOpenSavedCopy?: (citation: Citation) => void;
     canOpenSource?: (citation: Citation) => boolean;
     showWhenEmpty?: boolean;
     isLoading?: boolean;
 }) {
     const rows = buildCitationSourceRows(citations);
+    const live = !!onOpenSavedCopy && nativeBrowserSupported();
     if (rows.length === 0 && !showWhenEmpty) return null;
 
     return (
@@ -196,6 +202,23 @@ export function CitationsBlock({
                                         {row.label}
                                     </span>
                                 </button>
+                                {live && row.source.kind === "web" && (
+                                    <TextButtonUI
+                                        type="button"
+                                        size="sm"
+                                        className="shrink-0"
+                                        title="Read the copy saved with this answer"
+                                        aria-label={`Saved copy of ${row.label}`}
+                                        onClick={() =>
+                                            onOpenSavedCopy?.(
+                                                row.entries[0]?.annotation ?? row.source,
+                                            )
+                                        }
+                                    >
+                                        <FileText aria-hidden="true" className="h-3.5 w-3.5" />
+                                        Saved copy
+                                    </TextButtonUI>
+                                )}
                                 {/* Only as wide as its pills, up to 60% of the
                                     row; beyond that the pills wrap, so every
                                     pill shows and the name keeps 40%. */}

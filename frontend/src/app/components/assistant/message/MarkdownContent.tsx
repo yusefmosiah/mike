@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { MouseEvent, RefObject } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -16,6 +16,21 @@ import {
     citationAriaLabel,
 } from "./citationVerification";
 import { internalCaseHref } from "./citationUtils";
+import { nativeBrowserSupported, openInNativeBrowser } from "@/app/lib/nativeBrowser";
+
+/**
+ * In the native app a link in the answer opens in the in-app Safari view
+ * rather than leaving Mike; in a browser (or if that view cannot open) it is
+ * the ordinary new-tab link.
+ */
+function openLinkInNativeBrowser(event: MouseEvent<HTMLAnchorElement>) {
+    if (!nativeBrowserSupported()) return;
+    const href = event.currentTarget.href;
+    event.preventDefault();
+    void openInNativeBrowser(href).then((opened) => {
+        if (!opened) window.open(href, "_blank", "noopener,noreferrer");
+    });
+}
 
 export function MarkdownContent({
     text,
@@ -257,6 +272,7 @@ export function MarkdownContent({
                                         className="text-blue-600 hover:text-blue-700 underline"
                                         target="_blank"
                                         rel="noopener noreferrer"
+                                        onClick={openLinkInNativeBrowser}
                                     >
                                         {children}
                                     </a>
@@ -276,6 +292,7 @@ export function MarkdownContent({
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     {...anchorProps}
+                                    onClick={openLinkInNativeBrowser}
                                 >
                                     {children}
                                 </a>

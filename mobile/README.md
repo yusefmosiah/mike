@@ -580,6 +580,7 @@ the backend speech proxy:
 | `@capacitor/app` | declared | background/foreground listener, deep-link events. |
 | `@capacitor/preferences` | declared | non-secret settings only. |
 | `@capacitor/camera` | declared | scanner input. |
+| `@capacitor/browser` | declared | opens a cited web page or chat link in the in-app Safari view (`SFSafariViewController`) instead of leaving the app; the web side is `frontend/src/app/lib/nativeBrowser.ts`. SafariServices is available to Mac Catalyst apps and the plugin has no Catalyst-specific code, so on the Mac it should present the same view as a sheet (not yet verified on a Mac). If `open` rejects, the web side returns false and the link opens as before (`window.open` goes out through `allowNavigation`, to the default browser). |
 | `@mike/speech` (`plugins/speech/`) | installed, iOS and Android (no voice mode on Android) | dictation with Fluid Speech Mini or Apple's on-device recognition; read-aloud with Phonon or the phone's voices. |
 | `@mike/files` (`plugins/files/`) | installed, iOS; Android registered without methods | downloads through the share sheet. |
 | `@aparajita/capacitor-biometric-auth` | required before ship, not installed | biometric unlock. |

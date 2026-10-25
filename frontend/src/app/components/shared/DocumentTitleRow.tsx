@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, Globe } from "lucide-react";
+import { nativeBrowserSupported, openInNativeBrowser } from "@/app/lib/nativeBrowser";
 import { downloadDocumentFile } from "@/app/lib/downloadDocument";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import { TextButtonUI } from "@/shared/ui/TextButtonUI";
@@ -137,6 +138,7 @@ export function DocumentTitleRow({
                                     title: action.title ?? action.label,
                                 }}
                                 compact={compactActions}
+                                live={document.type === "web"}
                             />
                         ),
                     )}
@@ -234,25 +236,43 @@ function UrlDownloadButton({
 function ExternalSourceLinkButton({
     link,
     compact,
+    live = false,
 }: {
     link: ExternalSourceLink;
     compact: boolean;
+    /** A saved web page's link to the page itself: "Live page" in the native app. */
+    live?: boolean;
 }) {
+    // In the native app the page opens in the in-app Safari view; elsewhere,
+    // and if that view cannot open, the link works as a plain link.
+    const native = nativeBrowserSupported();
+    const asLive = live && native;
+    const label = asLive ? "Live page" : link.label;
+    const title = asLive ? "Open the live page in Safari" : link.title;
+    const Icon = asLive ? Globe : ExternalLink;
     return (
         <a
             href={link.href}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={link.title}
-            title={link.title}
+            aria-label={title}
+            title={title}
+            onClick={
+                native
+                    ? (event) => {
+                          event.preventDefault();
+                          void openInNativeBrowser(link.href).then((opened) => {
+                              if (!opened) window.open(link.href, "_blank", "noopener,noreferrer");
+                          });
+                      }
+                    : undefined
+            }
             className={textButtonUIClassName({
                 size: compact ? "icon-xs" : "sm",
             })}
         >
-            <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
-            <span className={compact ? "sr-only" : undefined}>
-                {link.label}
-            </span>
+            <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+            <span className={compact ? "sr-only" : undefined}>{label}</span>
         </a>
     );
 }

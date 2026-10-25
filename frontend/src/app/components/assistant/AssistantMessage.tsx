@@ -22,7 +22,7 @@ import { CodeCellBlock } from "./message/CodeCellBlock";
 import { WebFetchBlock, WebSearchBlock } from "./message/WebSourceBlocks";
 import { mergedReasoningSummary, nestCellSources, sourceSummary } from "@/app/lib/stepSources";
 import { CitationCheckStatus } from "./message/CitationCheckStatus";
-import { openWebCitation } from "../shared/types";
+import { openWebCitation, openWebCitationLive } from "../shared/types";
 import { ResponseStatus, type StatusState } from "./message/ResponseStatus";
 import { eventErrorMessage, toolCallLabel } from "./message/eventUtils";
 import { preprocessCitations, internalCaseHref } from "./message/citationUtils";
@@ -314,7 +314,12 @@ export function AssistantMessage({
             );
         }
     }
+    // The saved copy, in the host's panel: what a web citation opens in a
+    // browser, and what "Saved copy" opens in the native app.
+    const savedCopyHandler = onCitationClick ?? onOpenCitationSource;
     const handleOpenCitationSource = (citation: Citation) => {
+        // The native app shows the live page in its Safari view by default.
+        if (citation.kind === "web" && openWebCitationLive(citation)) return;
         // Without a panel to read it in, a web page opens on its site.
         if (citation.kind === "web" && !onOpenCitationSource) {
             openWebCitation(citation);
@@ -339,13 +344,21 @@ export function AssistantMessage({
     // Every citation opens in the host's panel; a web citation opens the
     // saved page in the reader there, which links on to the live site.
     // Without a panel, a web page opens on its site.
-    const handleCitationClick =
+    // In the native app a web citation shows the live page instead; the
+    // citations block offers "Saved copy" for the panel.
+    const hostCitationClick =
         onCitationClick ??
         (citations.some((citation) => citation.kind === "web")
             ? (citation: Citation) => {
                   if (citation.kind === "web") openWebCitation(citation);
               }
             : undefined);
+    const handleCitationClick = hostCitationClick
+        ? (citation: Citation) => {
+              if (citation.kind === "web" && openWebCitationLive(citation)) return;
+              hostCitationClick(citation);
+          }
+        : undefined;
     const showCitationBlock =
         !!citationStatus || (!isStreaming && citations.length > 0);
     const handleCopy = async () => {
@@ -557,8 +570,8 @@ export function AssistantMessage({
                                       versionNumber:
                                           event.version_number ?? null,
                                   })
-                            : !event.isStreaming && ann && onCitationClick
-                              ? () => onCitationClick(ann)
+                            : !event.isStreaming && ann && handleCitationClick
+                              ? () => handleCitationClick(ann)
                               : undefined
                     }
                     showConnector={showConnector}
@@ -1316,6 +1329,7 @@ export function AssistantMessage({
                         activeCitation={activeCitation}
                         onCitationClick={handleCitationClick}
                         onOpenSource={handleOpenCitationSource}
+                        onOpenSavedCopy={savedCopyHandler}
                         canOpenSource={canOpenCitationSource}
                         showWhenEmpty={!!citationStatus}
                         isLoading={

@@ -1,5 +1,6 @@
 import type { AssistantEvent as WireAssistantEvent } from "@mike/contracts";
 import { isImageFilename } from "@/app/lib/documentUploadValidation";
+import { nativeBrowserSupported, openInNativeBrowser } from "@/app/lib/nativeBrowser";
 // Shared TypeScript types for the Mike web app
 
 import type {
@@ -597,6 +598,22 @@ export function openWebCitation(citation: WebCitation): void {
   const url = webCitationOriginalUrl(citation);
   if (!url) return;
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * In the native app, shows a cited web page live in the in-app Safari view
+ * (at the quote, where the browser supports it). False outside the app, so
+ * the caller shows the saved copy or opens the site as before. If the view
+ * cannot open, the page opens on its site instead.
+ */
+export function openWebCitationLive(citation: WebCitation): boolean {
+  if (!nativeBrowserSupported()) return false;
+  const url = webCitationOriginalUrl(citation);
+  if (!url) return false;
+  void openInNativeBrowser(url).then((opened) => {
+    if (!opened) window.open(url, "_blank", "noopener,noreferrer");
+  });
+  return true;
 }
 
 const WEB_PAGE_ID = /^web:([^:]+):([0-9a-f-]{36})$/i;
