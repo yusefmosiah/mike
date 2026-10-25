@@ -440,4 +440,21 @@ describe("FileDirectory", () => {
             "library-folder-1",
         );
     });
+    it("focuses its search on mount unless told not to", () => {
+        const directory = (autoFocusSearch?: boolean) => (
+            <FileDirectory
+                documents={[]}
+                selectedDocuments={[]}
+                onChange={vi.fn()}
+                showTabs={false}
+                {...(autoFocusSearch === undefined ? {} : { autoFocusSearch })}
+            />
+        );
+        const focused = render(directory());
+        expect(screen.getByPlaceholderText("Search...")).toHaveFocus();
+        focused.unmount();
+
+        render(directory(false));
+        expect(screen.getByPlaceholderText("Search...")).not.toHaveFocus();
+    });
 });

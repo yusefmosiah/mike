@@ -152,6 +152,10 @@ interface FileDirectoryProps {
    * is picked, but nothing can be added or removed. For callers whose target
    * has stopped accepting a changed document set. */
   selectionDisabled?: boolean;
+  /** Focus the search field on mount. Off where the directory appears
+   * without being asked for (a panel opened by a swipe): focus would raise a
+   * phone's keyboard over it. */
+  autoFocusSearch?: boolean;
 }
 
 export function FileDirectory({
@@ -177,6 +181,7 @@ export function FileDirectory({
   onLoadMoreRootDocuments,
   disabledDocumentIds,
   selectionDisabled = false,
+  autoFocusSearch = true,
 }: FileDirectoryProps) {
   const autoLoadTriggeredRef = useRef(false);
     const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
@@ -851,7 +856,7 @@ export function FileDirectory({
                     value={search}
                     onValueChange={setSearch}
                     placeholder="Search..."
-                    autoFocus
+                    autoFocus={autoFocusSearch}
                     wrapperClassName={showTabs ? "mb-4" : "mb-3"}
                 />
                 {(showTabs || selectedIds.size > 0) && (
@@ -903,7 +908,7 @@ export function FileDirectory({
                     value={search}
                     onValueChange={setSearch}
                     placeholder="Search..."
-                    autoFocus
+                    autoFocus={autoFocusSearch}
                     wrapperClassName={showTabs ? "mb-4" : "mb-3"}
                 />
                 {(showTabs || selectedIds.size > 0) && (
@@ -930,7 +935,7 @@ export function FileDirectory({
                 value={search}
                 onValueChange={setSearch}
                 placeholder="Search..."
-                autoFocus
+                autoFocus={autoFocusSearch}
                 wrapperClassName={showTabs ? "mb-4" : "mb-3"}
             />
             {(showTabs || selectedIds.size > 0) && (

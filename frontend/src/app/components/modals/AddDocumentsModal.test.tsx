@@ -23,12 +23,14 @@ vi.mock("../shared/FileDirectory", () => ({
         documents,
         uploadingFilenames,
         onChange,
+        autoFocusSearch,
     }: {
         documents: Array<{ filename: string }>;
         uploadingFilenames: string[];
         onChange: (documents: unknown[]) => void;
+        autoFocusSearch?: boolean;
     }) => (
-        <div>
+        <div data-testid="directory" data-autofocus={String(autoFocusSearch ?? true)}>
             <button
                 type="button"
                 onClick={() => onChange([{ id: "pick-1", filename: "picked.pdf", project_id: null }])}
@@ -295,5 +297,31 @@ describe("AddDocumentsModal inline", () => {
             undefined,
         );
         expect(onClose).toHaveBeenCalled();
+    });
+
+    it("does not focus the search, so opening the panel raises no keyboard", () => {
+        const { rerender } = render(
+            <AddDocumentsModal
+                inline
+                open
+                onClose={vi.fn()}
+                onSelect={vi.fn()}
+                breadcrumb={["Assistant", "Open Documents"]}
+                uploadStateId="inline-focus"
+            />,
+        );
+        expect(screen.getByTestId("directory")).toHaveAttribute("data-autofocus", "false");
+
+        // The modal, opened on purpose, still focuses it.
+        rerender(
+            <AddDocumentsModal
+                open
+                onClose={vi.fn()}
+                onSelect={vi.fn()}
+                breadcrumb={["Assistant", "Open Documents"]}
+                uploadStateId="inline-focus"
+            />,
+        );
+        expect(screen.getByTestId("directory")).toHaveAttribute("data-autofocus", "true");
     });
 });

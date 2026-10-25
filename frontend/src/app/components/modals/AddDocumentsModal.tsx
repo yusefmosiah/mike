@@ -422,6 +422,7 @@ export function AddDocumentsModal({
 
             <div className="flex min-h-0 flex-1 flex-col">
                 <FileDirectory
+                    autoFocusSearch={!inline}
                     documents={directoryDocuments}
                     folders={projectDocumentsOnly ? projectFolders : undefined}
                     loading={projectDirectoryLoading}
