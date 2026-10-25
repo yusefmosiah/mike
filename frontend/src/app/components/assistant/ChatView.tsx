@@ -1402,8 +1402,16 @@ export function ChatView({
                     ref={attachPanelElement}
                     tabIndex={-1}
                     data-swipe-scope="document-panel"
-                    className={`fixed inset-0 z-40 flex justify-center outline-none p-3 max-md:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
+                    className={`fixed inset-0 z-40 flex justify-center outline-none p-3 max-md:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none md:relative md:inset-auto md:z-auto md:block md:h-full md:min-w-0 md:flex-shrink-0 md:p-0 ${panelVisible ? "translate-x-0" : "translate-x-full"}`}
                 >
+                    {/* Always starts the swipe-to-close, even over a document
+                        or an iframe, which never report touches to the page.
+                        Invisible, phone-only, and below the panel header. */}
+                    <div
+                        aria-hidden="true"
+                        data-swipe-edge="document-panel"
+                        className="absolute inset-y-0 left-0 top-16 z-50 w-6 md:hidden"
+                    />
                     <AssistantSidePanel
                         tabs={tabs}
                         canEdit={canWrite}

@@ -80,8 +80,8 @@ interface AppSidebarProps {
 
 /** Below this width (Tailwind's md) the sidebar opens over the page. */
 const MOBILE_BREAKPOINT_PX = 768;
-/** How long the sidebar takes to slide away on a phone. */
-const DISMISS_MS = 250;
+/** Matches the document panel's slide (ChatView: duration-500). */
+const SLIDE_MS = 500;
 
 export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     const { user, signOut } = useAuth();
@@ -111,30 +111,32 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     } = useAssistantHistoryStatuses({ activeChatId: routeChatId, chatIds });
     const [shouldAnimate, setShouldAnimate] = useState(false);
     const { setSidebarOpen } = useSidebar();
-    // On a phone the open sidebar lies over the page, so once a destination
-    // is chosen it slides away: `dismissing` moves it off-screen, then it
-    // closes. Desktop keeps it where the user put it.
-    const [dismissing, setDismissing] = useState(false);
-    const dismissTimer = useRef<number | null>(null);
-    useEffect(
-        () => () => {
-            if (dismissTimer.current !== null) window.clearTimeout(dismissTimer.current);
-        },
-        [],
-    );
+    // On a phone the open sidebar lies over the page and slides in and out
+    // like the document panel. Once `isOpen` turns false the panel is already
+    // travelling off-screen, so the open layout lingers until it has gone
+    // rather than swapping to the collapsed rail mid-slide.
+    const [closing, setClosing] = useState(false);
+    const [wasOpen, setWasOpen] = useState(isOpen);
+    if (wasOpen !== isOpen) {
+        setWasOpen(isOpen);
+        setClosing(
+            wasOpen &&
+                !isOpen &&
+                typeof window !== "undefined" &&
+                window.innerWidth < MOBILE_BREAKPOINT_PX &&
+                !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+        );
+    }
+    useEffect(() => {
+        if (!closing) return;
+        const timer = window.setTimeout(() => setClosing(false), SLIDE_MS);
+        return () => window.clearTimeout(timer);
+    }, [closing]);
+    const open = isOpen || closing;
     const dismissOnPhone = useCallback(() => {
-        if (!isOpen || window.innerWidth >= MOBILE_BREAKPOINT_PX) return;
-        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        if (isOpen && window.innerWidth < MOBILE_BREAKPOINT_PX) {
             setSidebarOpen(false);
-            return;
         }
-        setDismissing(true);
-        if (dismissTimer.current !== null) window.clearTimeout(dismissTimer.current);
-        dismissTimer.current = window.setTimeout(() => {
-            dismissTimer.current = null;
-            setDismissing(false);
-            setSidebarOpen(false);
-        }, DISMISS_MS);
     }, [isOpen, setSidebarOpen]);
     const go = useCallback(
         (href: string) => {
@@ -303,27 +305,31 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
             {/* Mobile: tapping outside the expanded sidebar closes it. The
                 sidebar (z-[99]) sits above this scrim (z-[98]); md+ is
                 unaffected since the sidebar is part of the layout there. */}
-            {isOpen && (
-                <div
-                    className={cn(
-                        "fixed inset-0 z-[98] bg-gray-300/20 transition-opacity duration-300 motion-reduce:transition-none md:hidden",
-                        dismissing && "opacity-0",
-                    )}
-                    onClick={handleToggle}
-                    aria-hidden="true"
-                />
-            )}
             <div
                 className={cn(
-                    isOpen
+                    "fixed inset-0 z-[98] bg-gray-300/20 transition-opacity duration-500 motion-reduce:transition-none md:hidden",
+                    !isOpen && "pointer-events-none opacity-0",
+                )}
+                onClick={handleToggle}
+                aria-hidden="true"
+                data-testid="sidebar-scrim"
+            />
+            {/* On a phone the sidebar always has its open size and slides in
+                from the left with the document panel's motion; closed, it is
+                off-screen and `invisible`, so out of the tab order and the
+                accessibility tree once the slide ends. md+ keeps the rail. */}
+            <div
+                className={cn(
+                    open
                         ? "w-64 h-[calc(100dvh-1rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-1.5rem)]"
-                        : "max-md:hidden w-[46px] md:h-[calc(100dvh-1.5rem)] h-auto pointer-events-none md:pointer-events-auto",
+                        : "w-[46px] md:h-[calc(100dvh-1.5rem)] max-md:w-64 max-md:h-[calc(100dvh-1rem-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px))]",
+                    !isOpen &&
+                        "max-md:pointer-events-none max-md:invisible max-md:-translate-x-[calc(100%+1rem)]",
                     "my-2 ml-2 mr-0 md:my-3 md:ml-3 md:mr-0 rounded-2xl backdrop-blur-2xl overflow-visible",
                     LIQUID_GLASS_FLOAT_CLASS,
-                    "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 max-md:fixed max-md:top-[env(safe-area-inset-top,0px)] md:relative",
-                    dismissing && "max-md:pointer-events-none max-md:-translate-x-[calc(100%+1rem)]",
+                    "absolute z-[99] flex shrink-0 flex-col transition-all duration-300 max-md:duration-500 max-md:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none max-md:fixed max-md:top-[env(safe-area-inset-top,0px)] md:relative",
                 )}
-                data-dismissing={dismissing || undefined}
+                data-open={isOpen || undefined}
             >
                 {/* Room for the Mac app's inset traffic lights, and a
                     handle to drag its window by: desktop/src/main.js sets
@@ -338,10 +344,10 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 {/* Toggle + Logo */}
                 <div
                     className={`h-11 shrink-0 items-center justify-between px-1.5 ${
-                        !isOpen ? "hidden md:flex" : "flex"
+                        !open ? "hidden md:flex" : "flex"
                     }`}
                 >
-                    {isOpen && (
+                    {open && (
                         <div className="px-1.5">
                             <Link
                                 href="/assistant"
@@ -362,13 +368,13 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                     <button
                         type="button"
                         onClick={handleToggle}
-                        aria-label={isOpen ? "Close sidebar" : "Open sidebar"}
+                        aria-label={open ? "Close sidebar" : "Open sidebar"}
                         className={cn(
                             "flex h-8 w-8 shrink-0 items-center p-2 transition-colors",
                             "rounded-md",
                             LIQUID_GLASS_HOVER_CLASS,
                         )}
-                        title={isOpen ? "Close sidebar" : "Open sidebar"}
+                        title={open ? "Close sidebar" : "Open sidebar"}
                     >
                         <PanelLeft className="h-4 w-4 shrink-0" />
                     </button>
@@ -388,13 +394,13 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                             <div key={href} className="px-1.5 py-0.5">
                                 <button
                                     onClick={() => go(href)}
-                                    title={!isOpen ? label : ""}
+                                    title={!open ? label : ""}
                                     className={cn(
                                         "w-full h-8 flex items-center gap-3 px-2 py-2 rounded-md transition-colors text-left",
                                         isActive
                                             ? `${LIQUID_GLASS_SELECTED_CLASS} text-gray-900`
                                             : `text-gray-700 ${LIQUID_GLASS_HOVER_CLASS}`,
-                                        !isOpen ? "hidden md:flex" : "flex",
+                                        !open ? "hidden md:flex" : "flex",
                                     )}
                                 >
                                     <Icon
@@ -404,7 +410,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                                 : "text-black"
                                         }`}
                                     />
-                                    {isOpen && (
+                                    {open && (
                                         <span
                                             className={`text-sm font-medium ${
                                                 shouldAnimate
@@ -421,7 +427,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                     })}
                 </div>
 
-                {isOpen && (
+                {open && (
                     <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4">
                         {/* Recent Projects */}
                         <div>
@@ -645,19 +651,19 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                 }
                                 className={cn(
                                     "flex h-12 w-full shrink-0 items-center rounded-xl px-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2",
-                                    !isOpen ? "hidden md:flex" : "",
+                                    !open ? "hidden md:flex" : "",
                                     pathname.startsWith("/settings") ||
                                         pathname === "/history" ||
                                         isDropdownOpen
                                         ? LIQUID_GLASS_SELECTED_CLASS
                                         : LIQUID_GLASS_HOVER_CLASS,
                                 )}
-                                title={!isOpen ? user.email : undefined}
+                                title={!open ? user.email : undefined}
                             >
                                 <div className="h-6 w-6 flex-shrink-0 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium font-serif">
                                     {getUserInitials(user.email)}
                                 </div>
-                                {isOpen && (
+                                {open && (
                                     <div
                                         className={`text-left flex-1 min-w-0 pl-3 flex items-center justify-between gap-2 ${
                                             shouldAnimate
@@ -683,7 +689,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                     id="account-dropdown"
                                     className={cn(
                                         "absolute bottom-full left-0 z-50 mb-1 p-1 whitespace-nowrap",
-                                        isOpen ? "right-0" : "w-56",
+                                        open ? "right-0" : "w-56",
                                         `${LIQUID_GLASS_FLOAT_CLASS} rounded-xl backdrop-blur-xl`,
                                     )}
                                 >

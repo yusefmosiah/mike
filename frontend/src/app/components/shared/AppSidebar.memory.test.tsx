@@ -241,12 +241,13 @@ describe("AppSidebar account dropdown", () => {
 
 describe("AppSidebar on a phone", () => {
   const setSidebarOpen = vi.fn();
-  const renderOpen = () =>
-    render(
-      <SidebarContext.Provider value={{ setSidebarOpen }}>
-        <AppSidebar isOpen onToggle={vi.fn()} />
-      </SidebarContext.Provider>,
-    );
+  const tree = (isOpen: boolean) => (
+    <SidebarContext.Provider value={{ setSidebarOpen }}>
+      <AppSidebar isOpen={isOpen} onToggle={vi.fn()} />
+    </SidebarContext.Provider>
+  );
+  const renderOpen = () => render(tree(true));
+  const panel = () => document.querySelector("[data-open], .max-md\\:fixed");
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -262,18 +263,14 @@ describe("AppSidebar on a phone", () => {
     window.innerWidth = 1024;
   });
 
-  it("slides away after a destination is chosen", () => {
+  it("asks to close once a destination is chosen", () => {
     window.innerWidth = 390;
     renderOpen();
 
     fireEvent.click(screen.getByRole("button", { name: "IDE" }));
 
     expect(state.push).toHaveBeenCalledWith("/ide");
-    expect(document.querySelector("[data-dismissing]")).toHaveClass("max-md:-translate-x-[calc(100%+1rem)]");
-    expect(setSidebarOpen).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(250));
     expect(setSidebarOpen).toHaveBeenCalledWith(false);
-    expect(document.querySelector("[data-dismissing]")).toBeNull();
   });
 
   it("closes from the account menu and the logo too", () => {
@@ -283,23 +280,10 @@ describe("AppSidebar on a phone", () => {
     fireEvent.click(screen.getByText("Alice").closest("button")!);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(state.push).toHaveBeenCalledWith("/settings");
-    act(() => vi.advanceTimersByTime(250));
     expect(setSidebarOpen).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("link", { name: /mike/i }));
-    act(() => vi.advanceTimersByTime(250));
     expect(setSidebarOpen).toHaveBeenCalledTimes(2);
-  });
-
-  it("closes at once when motion is reduced", () => {
-    window.innerWidth = 390;
-    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
-    renderOpen();
-
-    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
-
-    expect(setSidebarOpen).toHaveBeenCalledWith(false);
-    expect(document.querySelector("[data-dismissing]")).toBeNull();
   });
 
   it("stays open on a wider screen", () => {
@@ -307,21 +291,47 @@ describe("AppSidebar on a phone", () => {
     renderOpen();
 
     fireEvent.click(screen.getByRole("button", { name: "IDE" }));
-    act(() => vi.advanceTimersByTime(1000));
 
     expect(state.push).toHaveBeenCalledWith("/ide");
     expect(setSidebarOpen).not.toHaveBeenCalled();
   });
 
-  it("does not close after it has unmounted", () => {
+  it("rests off-screen and out of reach while closed, and slides in when open", () => {
     window.innerWidth = 390;
-    const view = renderOpen();
+    const view = render(tree(false));
+    const closedClasses = [
+      "max-md:invisible",
+      "max-md:pointer-events-none",
+      "max-md:-translate-x-[calc(100%+1rem)]",
+    ];
+    expect(panel()).toHaveClass(...closedClasses, "max-md:duration-500", "motion-reduce:transition-none");
+    expect(screen.getByTestId("sidebar-scrim")).toHaveClass("opacity-0", "pointer-events-none");
 
-    fireEvent.click(screen.getByRole("button", { name: "IDE" }));
-    fireEvent.click(screen.getByRole("button", { name: "Library" }));
-    view.unmount();
-    act(() => vi.advanceTimersByTime(250));
+    view.rerender(tree(true));
+    expect(panel()).not.toHaveClass("max-md:invisible");
+    expect(panel()).not.toHaveClass("max-md:-translate-x-[calc(100%+1rem)]");
+    expect(screen.getByTestId("sidebar-scrim")).not.toHaveClass("opacity-0");
+  });
 
-    expect(setSidebarOpen).not.toHaveBeenCalled();
+  it("keeps its open layout while it slides away, then settles into the rail", () => {
+    window.innerWidth = 390;
+    const view = render(tree(true));
+
+    view.rerender(tree(false));
+    expect(panel()).toHaveClass("max-md:-translate-x-[calc(100%+1rem)]");
+    expect(screen.getByRole("button", { name: "Close sidebar" })).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.getByRole("button", { name: "Open sidebar" })).toBeInTheDocument();
+  });
+
+  it("does not linger when motion is reduced", () => {
+    window.innerWidth = 390;
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
+    const view = render(tree(true));
+
+    view.rerender(tree(false));
+
+    expect(screen.getByRole("button", { name: "Open sidebar" })).toBeInTheDocument();
   });
 });

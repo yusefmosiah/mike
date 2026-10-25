@@ -235,4 +235,24 @@ describe("ChatView document panel gestures", () => {
         swipeLeft(screen.getByText("Chat input"));
         await waitFor(() => expect(screen.getByTestId("panel")).toHaveTextContent("d1,d2"));
     });
+
+    it("closes on a swipe that starts in the left edge zone, over a sideways scroller", async () => {
+        renderView(withDocuments);
+        swipeLeft(screen.getByText("Chat input"));
+        const panel = await screen.findByTestId("panel");
+        await waitFor(() => expect(panel.parentElement).toHaveClass("translate-x-0"));
+
+        panel.style.overflowX = "auto";
+        Object.defineProperties(panel, {
+            scrollWidth: { value: 900 },
+            clientWidth: { value: 300 },
+            scrollLeft: { value: 200 },
+        });
+        swipeRight(panel);
+        expect(panel.parentElement).toHaveClass("translate-x-0");
+
+        const edge = panel.parentElement!.querySelector("[data-swipe-edge]")!;
+        swipeRight(edge);
+        expect(panel.parentElement).toHaveClass("translate-x-full");
+    });
 });

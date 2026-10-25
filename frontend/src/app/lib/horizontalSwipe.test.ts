@@ -85,7 +85,11 @@ describe("watchHorizontalSwipe", () => {
         const field = document.createElement("textarea");
         const wide = document.createElement("div");
         wide.style.overflowX = "auto";
-        Object.defineProperties(wide, { scrollWidth: { value: 900 }, clientWidth: { value: 300 } });
+        Object.defineProperties(wide, {
+            scrollWidth: { value: 900 },
+            clientWidth: { value: 300 },
+            scrollLeft: { value: 200 },
+        });
         const cell = document.createElement("span");
         wide.appendChild(cell);
         const fits = document.createElement("div");
@@ -130,5 +134,70 @@ describe("watchHorizontalSwipe", () => {
 
         expect(page_).not.toHaveBeenCalled();
         expect(owner).toHaveBeenCalledTimes(1);
+    });
+
+    describe("sideways scrollers", () => {
+        const scroller = (scrollLeft: number) => {
+            const wide = document.createElement("div");
+            wide.style.overflowX = "auto";
+            Object.defineProperties(wide, {
+                scrollWidth: { value: 900 },
+                clientWidth: { value: 300 },
+                scrollLeft: { value: scrollLeft },
+            });
+            const cell = document.createElement("span");
+            wide.appendChild(cell);
+            page().appendChild(wide);
+            return cell;
+        };
+
+        it("lets a right swipe through a scroller resting at its start", () => {
+            const onSwipe = vi.fn();
+            watchHorizontalSwipe(document.body, { direction: "right", onSwipe });
+
+            swipe(scroller(0), [[20, 300], [140, 300]]);
+            expect(onSwipe).toHaveBeenCalledTimes(1);
+
+            swipe(scroller(50), [[20, 300], [140, 300]]);
+            expect(onSwipe).toHaveBeenCalledTimes(1);
+        });
+
+        it("lets a left swipe through a scroller resting at its end", () => {
+            const onSwipe = vi.fn();
+            watchHorizontalSwipe(document.body, { direction: "left", onSwipe });
+
+            swipe(scroller(600), [[200, 300], [80, 300]]);
+            expect(onSwipe).toHaveBeenCalledTimes(1);
+
+            swipe(scroller(100), [[200, 300], [80, 300]]);
+            expect(onSwipe).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it("always starts from an edge zone of its own scope, over fields and scrollers", () => {
+        const panel = page();
+        panel.setAttribute("data-swipe-scope", "panel");
+        panel.style.overflowX = "auto";
+        Object.defineProperties(panel, {
+            scrollWidth: { value: 900 },
+            clientWidth: { value: 300 },
+            scrollLeft: { value: 200 },
+        });
+        const edge = document.createElement("div");
+        edge.setAttribute("data-swipe-edge", "panel");
+        const body = document.createElement("textarea");
+        panel.append(edge, body);
+        const owner = vi.fn();
+        const other = vi.fn();
+        watchHorizontalSwipe(panel, { direction: "right", onSwipe: owner, scope: "panel" });
+        watchHorizontalSwipe(document.body, { direction: "right", onSwipe: other });
+
+        swipe(body, [[20, 300], [140, 300]]);
+        expect(owner).not.toHaveBeenCalled();
+
+        swipe(edge, [[20, 300], [140, 300]]);
+        expect(owner).toHaveBeenCalledTimes(1);
+        // Another scope's watcher still treats the zone as the panel's.
+        expect(other).not.toHaveBeenCalled();
     });
 });
