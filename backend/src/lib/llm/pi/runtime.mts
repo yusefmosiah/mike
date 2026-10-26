@@ -106,7 +106,9 @@ import type {
   UserApiKeys,
 } from "../types.js";
 
-const SCHEMA = process.env.PI_DURABLE_SCHEMA ?? "pi_durable";
+// An empty value means the default: `.env.example` ships `PI_DURABLE_SCHEMA=`,
+// and `??` would have kept the empty string and failed `CREATE SCHEMA ""`.
+const SCHEMA = process.env.PI_DURABLE_SCHEMA?.trim() || "pi_durable";
 
 /** Where a stored Mike message lives in Pi: its conversation and entry. */
 type MessagePlace = { conversation: number; entry: number };
