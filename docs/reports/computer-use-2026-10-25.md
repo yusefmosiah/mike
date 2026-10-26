@@ -324,6 +324,24 @@ Models to try first, all of them through the same evaluation suite:
 
 Check each license on its model card before shipping.
 
+### Using only Phala's attested models (catalog read October 26)
+
+Phala lists 25 attested models. Its pages state image support for none of
+them, so send one real screenshot through the attested gateway before relying
+on any model's vision.
+
+| Role | Model | Price per M tokens (in / out) | Why |
+|---|---|---|---|
+| Actor (sees, decides, writes the action code) | **Qwen3.8 27B**, standard (`qwen/qwen3.8-27b`, not configured yet) | $0.20 / $2.50 | The best open computer-use score (84.3 OSWorld-Verified, vendor). Prefer it to the "uncensored" fine-tune we configured, which may have lost GUI skills. |
+| Planner over the accessibility tree (text only) | **GLM 5.3** (configured) | $1.40 / $4.40 | Strong reasoning; the plan needs no pixels. |
+| Hard tasks, reference runs | **Kimi K3** (not configured) | $3.00 / $15.00 | Has an open, documented OSWorld harness. Slow. |
+| Chooser (System 1) over listed elements | **Kev 4B** (`jaredpalmer/kev-4b`, not configured) | $0.042 / free | An Apache-2.0 decision model on the Jev API (`/v1/systemone`), which our Auto Mode gate client already speaks. Text only, 8K context, weak against prompt injection, so it gets no say in risky actions. |
+| Fallback when the tree is missing (canvas apps, some web views) | **Qwen3-VL 30B A3B** (not configured) | $0.20 / $0.70 | About 60 on ScreenSpot-Pro (aggregator figure): finds an element from a description. About 30 on OSWorld alone, so it locates; it doesn't act. |
+| Fast screen check ("did the dialog close?") | **Qwen3.6 35B A3B** (not configured) or **Gemma 4 26B A4B** (configured) | $0.20 / $1.27, $0.15 / $0.70 | 3–4B active parameters, so quick. Qwen3.6 35B A3B is Holo4-35B-A3B's base, but without Holo's training it is much weaker at operating software (13.1 against 31.7 on AutomationBench). |
+| Alternative grounder | **Kimi K2.6** (not configured) | $1.09 / $4.60 | Best click accuracy in NVIDIA's Desktop-Delta Bench (secondhand). |
+
+Phala doesn't serve Holo4 or UI-Venus, the computer-use specialists.
+
 ## Order of work
 
 1. **A Mac evaluation suite and trace logging.** Twenty or so real tasks, run
