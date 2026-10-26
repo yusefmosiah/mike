@@ -189,6 +189,15 @@ describe("kernel session", () => {
     expect(cellResultContent(outcome)).toMatch(/output was cut in the middle/);
   });
 
+  it("never prints a fence marker that arrives after its wait timed out", async () => {
+    const session = await startSession();
+    const outcome = await session.execute(
+      "import os\nos.write(1, b'a\\x00mike-fence-' + b'f' * 32 + b'\\x00b\\n')",
+      { timeoutMs: 5_000, onHostRequest: echo },
+    );
+    expect(outcome.stdout).toBe("ab\n");
+  });
+
   it("warns about a tool call that was never awaited", async () => {
     const session = await startSession();
     const onHostRequest = vi.fn(echo);

@@ -56,6 +56,19 @@ describe("DbClient", () => {
     expect(JSON.parse(statements[0].params[0] as string)).toEqual([{ id: "m1", content: [{ type: "content", text: "hi" }] }]);
   });
 
+  it("drops NUL characters, which Postgres text and jsonb cannot store, from every value", async () => {
+    const { db, statements } = recording();
+    await db.from("chat_messages").update({ content: [{ type: "content", text: "a\u0000b" }], title: "t\u0000" }).eq("id", "m\u00001");
+    await db.from("chat_messages").insert({ id: "m2", content: [{ type: "tool", output: { log: "\u0000x" } }] });
+    await db.from("chats").select("id").in("id", ["c\u00001"]).eq("meta", { note: "n\u0000" });
+    const sent = JSON.stringify(statements.map((statement) => statement.params));
+    expect(sent).not.toContain("\\u0000");
+    expect(JSON.parse(statements[0].params[1] as string)).toEqual({ content: [{ type: "content", text: "ab" }], title: "t" });
+    expect(statements[0].params[0]).toBe("m1");
+    expect(JSON.parse(statements[1].params[0] as string)).toEqual([{ id: "m2", content: [{ type: "tool", output: { log: "x" } }] }]);
+    expect(statements[2].params).toEqual([["c1"], JSON.stringify({ note: "n" })]);
+  });
+
   it("shapes single and maybeSingle as postgrest-js does", async () => {
     const none = recording([{ data: [] }]).db;
     expect((await none.from("chats").select("id").single()).error).toMatchObject({ code: "PGRST116" });

@@ -1447,10 +1447,19 @@ describe("POST /chat — streaming endpoint", () => {
             .send(VALID_BODY);
 
         expect(res.status).toBe(200);
-        expect(dbControl.terminalUpdateAttempts).toBe(3);
-        expect(
-            dbUpdates.filter(({ table }) => table === "chat_messages"),
-        ).toHaveLength(3);
+        // Three tries at the answer, then the reason stored in its place, so
+        // a reload on any device shows why the answer is missing.
+        expect(dbControl.terminalUpdateAttempts).toBe(4);
+        const messageUpdates = dbUpdates.filter(({ table }) => table === "chat_messages");
+        expect(messageUpdates).toHaveLength(4);
+        expect(messageUpdates[3].value).toMatchObject({
+            content: [
+                {
+                    type: "error",
+                    message: "The response was generated but could not be saved.",
+                },
+            ],
+        });
 
         const errorIndex = res.text.indexOf(
             "The response was generated but could not be saved",

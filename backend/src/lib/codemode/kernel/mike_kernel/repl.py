@@ -26,6 +26,7 @@ import json
 import linecache
 import os
 import platform
+import re
 import signal
 import sys
 import threading
@@ -42,6 +43,8 @@ _STREAM_CHUNK = 64 * 1024
 _TEXT_CAP = 1_000_000
 _PAYLOAD_CAP = 8 * 1024 * 1024
 _FENCE_TIMEOUT_S = 2.0
+# A fence marker that arrives after its wait timed out: dropped, never printed.
+_STALE_FENCE = re.compile(rb"\x00mike-fence-[0-9a-f]{32}\x00")
 
 DEFAULT_SNAPSHOT_MAX_BYTES = 256 * 1024 * 1024
 DEFAULT_SNAPSHOT_MAX_VARIABLE_BYTES = 32 * 1024 * 1024
@@ -200,9 +203,10 @@ class _Pump:
                 for marker, seen in list(self._fences.items()):
                     index = self._buffer.find(marker)
                     if index != -1:
-                        self._emit(self._buffer[:index])
+                        self._emit(_STALE_FENCE.sub(b"", self._buffer[:index]))
                         self._buffer = self._buffer[index + len(marker):]
                         seen.set()
+            self._buffer = _STALE_FENCE.sub(b"", self._buffer)
             # Keep a short tail back in case a fence marker is split across reads.
             keep = 64 if b"\x00" in self._buffer[-64:] else 0
             ready, self._buffer = (self._buffer[:-keep], self._buffer[-keep:]) if keep else (self._buffer, b"")

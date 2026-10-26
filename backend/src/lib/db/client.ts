@@ -94,11 +94,25 @@ function selectList(columns: string, qualifier = ""): string {
     .join(", ");
 }
 
+/**
+ * Postgres text and jsonb cannot hold U+0000, and one NUL anywhere fails the
+ * whole statement (22P05). Model output, fetched pages and code-cell output can
+ * all carry one, so every value is written without it.
+ */
+const withoutNul = (text: string) => (text.includes("\u0000") ? text.replaceAll("\u0000", "") : text);
+
+/** JSON text for a jsonb value or a write's rows, with NUL characters dropped. */
+function storableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => (typeof item === "string" ? withoutNul(item) : item));
+}
+
 /** A value bound as a parameter: objects (jsonb) as JSON text, the rest as pg serializes them. */
 function bindable(value: unknown): unknown {
   if (value === undefined) return null;
-  if (value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) {
-    return JSON.stringify(value);
+  if (typeof value === "string") return withoutNul(value);
+  if (Array.isArray(value)) return value.map((item) => (typeof item === "string" ? withoutNul(item) : item));
+  if (value !== null && typeof value === "object" && !(value instanceof Date)) {
+    return storableJson(value);
   }
   return value;
 }
@@ -496,7 +510,7 @@ export class QueryBuilder<Data = any[]> implements PromiseLike<DbResult<Data>> {
       const patch = this.write.values;
       const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
       if (keys.length === 0) throw new UnsupportedQuery("update() needs at least one column");
-      const values = param(JSON.stringify(patch));
+      const values = param(storableJson(patch));
       statement = `UPDATE ${table} SET ${keys.map((key) => `${ident(key)} = _v.${ident(key)}`).join(", ")} FROM json_populate_record(NULL::${table}, ${values}::json) AS _v${where}${returning}`;
     } else {
       const rows = this.write.rows;
@@ -504,7 +518,7 @@ export class QueryBuilder<Data = any[]> implements PromiseLike<DbResult<Data>> {
       const keys = [...new Set(rows.flatMap((row) => Object.keys(row).filter((key) => row[key] !== undefined)))];
       if (keys.length === 0) throw new UnsupportedQuery("insert() needs at least one column");
       const list = keys.map(ident).join(", ");
-      const values = param(JSON.stringify(rows));
+      const values = param(storableJson(rows));
       statement = `INSERT INTO ${table} (${list}) SELECT ${list} FROM json_populate_recordset(NULL::${table}, ${values}::json)`;
       if (this.write.kind === "upsert") {
         const target = this.write.onConflict
@@ -595,7 +609,7 @@ export class RpcBuilder implements PromiseLike<DbResult> {
           const type = info.args.get(argName);
           if (!type) throw new UnsupportedQuery(`public.${this.name} has no argument ${argName}`);
           const json = type === "json" || type === "jsonb";
-          params.push(value === null ? null : json ? JSON.stringify(value) : bindable(value));
+          params.push(value === null ? null : json ? storableJson(value) : bindable(value));
           return `${ident(argName)} => $${params.length}::${type}`;
         });
       const call = `public.${ident(this.name)}(${named.join(", ")})`;

@@ -417,13 +417,17 @@ export async function driveChatTurn(
                         "[chat/stream] failed to save assistant response",
                         saveError,
                     );
-                    write(
-                        `data: ${JSON.stringify({
-                            type: "error",
-                            message:
-                                "The response was generated but could not be saved.",
-                        })}\n\n`,
-                    );
+                    const unsaved = {
+                        type: "error" as const,
+                        message: "The response was generated but could not be saved.",
+                    };
+                    // Whoever opens the chat later, here or on another device,
+                    // sees why the answer is missing instead of nothing.
+                    const noteError = await updateReservedAssistantMessage([unsaved], null);
+                    if (noteError) {
+                        console.error("[chat/stream] failed to store the save failure", safeError(noteError));
+                    }
+                    write(`data: ${JSON.stringify(unsaved)}\n\n`);
                     write("data: [DONE]\n\n");
                     return { ok: true };
                 }
