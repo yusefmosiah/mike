@@ -124,6 +124,13 @@ The usual causes, and what the suites now do about them:
   .toBeInTheDocument()` passes before anything renders; first wait for
   something that proves the render happened.
 
+Frontend test files run in a fresh VM context inside a reused worker thread
+(the `unit` project in `frontend/vitest.config.mts`), which is about five
+times faster than a process per file. A file that redefines `window`,
+`document` or `location`, or loads native tooling, fails there with "Cannot
+redefine property" or a module-hook error; add it to `VM_UNSAFE_TESTS` in
+that config so it gets its own process.
+
 Playwright retries failed tests twice on CI (`playwright.config.ts`); a test
 listed as `flaky` in the report passed only on a retry and needs the same
 fix.
