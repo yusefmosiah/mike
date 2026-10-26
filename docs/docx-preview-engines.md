@@ -84,7 +84,7 @@ warning. Existing Mike edit cards still resolve through the backend.
 ## Version and behavior
 
 `@docx-editor.dev/react`, `@docx-editor.dev/core`, and
-`@docx-editor.dev/fonts` are pinned to **2.21.1**. The editor uses packaged,
+`@docx-editor.dev/fonts` are pinned to **2.32.0**. The editor uses packaged,
 metric-compatible fonts and fits the page width to the panel. Rendering happens
 in the browser; the existing authenticated document fetch and shared byte cache
 supply the file. The editor is loaded lazily. Failed font loads show a dismissible warning while

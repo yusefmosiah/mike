@@ -1,6 +1,6 @@
 @reference "../../../globals.css";
 
-/* EigenPal 2.21.1 has no title-row or frame-border option. Scope these
+/* EigenPal has no title-row or frame-border option. Scope these
    overrides to its packaged chrome; Mike owns the filename and file actions. */
 .host {
     --mike-docx-comment-width: 240px;

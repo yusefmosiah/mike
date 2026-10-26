@@ -281,6 +281,12 @@ function Divider({ onDrag }: { onDrag: (dx: number) => void }) {
         return () => {
             window.removeEventListener("mousemove", onMouseMove);
             window.removeEventListener("mouseup", onMouseUp);
+            // A divider that unmounts mid-drag must not leave selection locked.
+            if (dragging.current) {
+                dragging.current = false;
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+            }
         };
     }, [onDrag]);
 

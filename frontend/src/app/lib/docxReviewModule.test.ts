@@ -35,9 +35,15 @@ describe("Mike DOCX review module using the public core", () => {
         expect(xml).toContain("<w:ins");
         const reopened = new TreeDocumentStore(parse(xml));
         const items = changes(reopened.part);
-        expect(items).toHaveLength(1);
-        expect(items[0]).toMatchObject({ revisionKind: "replace", text: "sixty", replacedText: "thirty", author: revision.author, date: revision.date, readOnly: false });
-        expect(items[0].addresses).toHaveLength(2);
+        // A typed-over word is two sites: the struck run and its replacement.
+        // The editor's review query pairs them into one card; the store-level
+        // derivation lists both halves.
+        expect(items).toHaveLength(2);
+        expect(items).toEqual(expect.arrayContaining([
+            expect.objectContaining({ revisionKind: "delete", text: "thirty", author: revision.author, date: revision.date, readOnly: false }),
+            expect.objectContaining({ revisionKind: "insert", text: "sixty", author: revision.author, date: revision.date, readOnly: false }),
+        ]));
+        expect(items.flatMap((item) => item.addresses)).toHaveLength(2);
         expect(review.revisionItemsOfParagraph(reopened.part, [...paragraphOrderOfPart(reopened.part).keys()][0])).toEqual(items);
         apply(reopened, { op });
         expect(changes(reopened.part)).toHaveLength(0);
@@ -45,7 +51,7 @@ describe("Mike DOCX review module using the public core", () => {
         expect(resolved).toContain(op === "acceptAllRevisions" ? "sixty" : "thirty");
         expect(resolved).not.toContain(op === "acceptAllRevisions" ? "thirty" : "sixty");
         expect(reopened.undo()).not.toBeNull();
-        expect(changes(reopened.part)).toHaveLength(1);
+        expect(changes(reopened.part)).toHaveLength(2);
         expect(reopened.redo()).not.toBeNull();
         expect(changes(reopened.part)).toHaveLength(0);
     });
