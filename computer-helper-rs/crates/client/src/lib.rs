@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use computer_core::policy::{self, Decision, HelperConfig};
 use computer_core::protocol::{
-    ActResult, Action, Capabilities, Command, CommandResult, Heartbeat, Observation, Platform,
+    ActResult, Action, ActionOutcome, Capabilities, Command, CommandResult, Heartbeat, Observation,
+    Platform,
 };
 pub use transport::{Transport, TransportError};
 
@@ -138,6 +139,74 @@ pub fn handle(backend: &mut dyn Backend, command: &Command, control: &Control) -
             CommandResult::act(backend.act(actions, control))
         }
     }
+}
+
+/// Run a checked batch one action at a time, the same way on every platform:
+/// stop when [`Control::interrupted`] says so (between actions and during
+/// waits), clamp waits to the policy, and stop at the first failure.
+/// `perform` runs every action but `wait`.
+pub fn run_batch(
+    actions: &[Action],
+    control: &Control,
+    mut perform: impl FnMut(&Action) -> Result<(), String>,
+) -> ActResult {
+    let mut outcomes = Vec::new();
+    let mut waited = 0;
+    let stopped = |outcomes: Vec<ActionOutcome>, reason: String| ActResult {
+        outcomes,
+        stopped_reason: Some(reason),
+    };
+    for (index, action) in actions.iter().enumerate() {
+        if let Some(reason) = control.interrupted() {
+            return stopped(outcomes, reason.into());
+        }
+        let result = match action {
+            Action::Wait { ms } => {
+                let allowed = policy::clamped_wait(*ms, waited);
+                waited += allowed;
+                interruptible_sleep(control, Duration::from_millis(allowed as u64))
+            }
+            _ => perform(action),
+        };
+        match result {
+            Ok(()) => outcomes.push(ActionOutcome {
+                index,
+                ok: true,
+                error: None,
+            }),
+            Err(error) => {
+                outcomes.push(ActionOutcome {
+                    index,
+                    ok: false,
+                    error: Some(error.clone()),
+                });
+                return stopped(outcomes, format!("action {index} failed: {error}"));
+            }
+        }
+        // Let the app react before the next action.
+        thread::sleep(Duration::from_millis(60));
+    }
+    if let Some(reason) = control.interrupted() {
+        return stopped(outcomes, reason.into());
+    }
+    ActResult {
+        outcomes,
+        stopped_reason: None,
+    }
+}
+
+fn interruptible_sleep(control: &Control, total: Duration) -> Result<(), String> {
+    let step = Duration::from_millis(50);
+    let mut slept = Duration::ZERO;
+    while slept < total {
+        if let Some(reason) = control.interrupted() {
+            return Err(reason.into());
+        }
+        let next = step.min(total - slept);
+        thread::sleep(next);
+        slept += next;
+    }
+    Ok(())
 }
 
 fn sleep_unless_quit(control: &Control, total: Duration) {

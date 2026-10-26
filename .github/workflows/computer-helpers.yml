@@ -1,6 +1,7 @@
 # CI: the Rust computer helpers (computer-helper-rs/), on Linux and Windows,
 # against the protocol fixtures they share with the Swift macOS helper
-# (packages/contracts/fixtures/computers). The helpers are not deployed, so
+# (packages/contracts/fixtures/computers), and the sandbox desktop image end
+# to end (computer-helper-rs/sandbox). The helpers are not deployed, so
 # this does not gate the staging deploy; it runs when their files change.
 # See docs/ci.md.
 name: Computer helpers
@@ -48,3 +49,17 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --locked
+
+  sandbox:
+    name: Sandbox desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: computer-helper-rs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the image
+        run: docker build -f sandbox/Dockerfile -t computer-sandbox .
+      - name: Drive it end to end
+        run: python3 sandbox/smoke.py --out "$RUNNER_TEMP/sandbox-smoke"

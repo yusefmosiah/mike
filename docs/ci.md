@@ -53,7 +53,7 @@ deploys only a green run.
 | `word-addin.yml` | `word-addin/` changes, and nightly | the run itself / `nightly` |
 | `e2e.yml` | pull requests, and nightly | the run itself / `nightly` |
 | `gitleaks.yml` | every push | the run itself |
-| `computer-helpers.yml`: the Rust computer helpers on Linux and Windows | `computer-helper-rs/` or the shared protocol fixtures change | the run itself |
+| `computer-helpers.yml`: the Rust computer helpers on Linux and Windows, and the sandbox desktop image driven end to end | `computer-helper-rs/` or the shared protocol fixtures change | the run itself |
 
 A scheduled failure opens one issue with its label, comments on it on later
 failures, and closes it when a run is green again
