@@ -227,8 +227,10 @@ describe("ChatView document panel gestures", () => {
         await waitFor(() => expect(panel.parentElement).toHaveClass("translate-x-0"));
         expect(panel.parentElement).toHaveFocus();
 
-        swipeRight(panel);
-        expect(panel.parentElement).toHaveClass("translate-x-full");
+        await waitFor(() => {
+            swipeRight(panel);
+            expect(panel.parentElement).toHaveClass("translate-x-full");
+        });
         await waitFor(() => expect(screen.queryByTestId("panel")).not.toBeInTheDocument());
 
         listDocumentVersions.mockClear();
@@ -253,8 +255,12 @@ describe("ChatView document panel gestures", () => {
         swipeRight(panel);
         expect(panel.parentElement).toHaveClass("translate-x-0");
 
+        // The edge strip's watcher attaches in its own effect; a swipe before
+        // that is lost, so swipe until it lands (a closed panel ignores more).
         const edge = panel.parentElement!.querySelector("[data-swipe-edge]")!;
-        swipeRight(edge);
-        expect(panel.parentElement).toHaveClass("translate-x-full");
+        await waitFor(() => {
+            swipeRight(edge);
+            expect(panel.parentElement).toHaveClass("translate-x-full");
+        });
     });
 });

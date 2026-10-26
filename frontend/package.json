@@ -15,6 +15,7 @@
         "catalog:build": "ladle build",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
+        "test:dormant": "MIKE_TEST_GROUP=dormant vitest run",
         "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
         "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
         "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",

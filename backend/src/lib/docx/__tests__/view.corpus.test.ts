@@ -1,14 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import mammoth from "mammoth";
 import { corpusFiles, readCorpusFile } from "../../../__tests__/helpers/docxCorpus";
 import { DocxDocument, type Block, type Inline } from "../view";
+import { expectWithinBudget } from "../../../__tests__/helpers/perfBudget";
 import { MAIN_DOCUMENT_PART } from "../package";
 import { documentElement, firstChild, type XmlElement } from "../xmlSource";
 
 // Whole-document oracle checks on real contracts (one 12,600-paragraph
 // schedule among them) take up to ~8 s a test alone and timed out under the
 // full parallel run's CPU contention at the 20 s default. Speed is guarded
-// separately (blockIds.test.ts "aligns ... quickly"); here only correctness is.
+// by budgets checked under MIKE_PERF=1 (helpers/perfBudget.ts).
 vi.setConfig({ testTimeout: 60_000 });
 
 const PROPERTY_PARENTS = new Set(["w:rPr", "w:pPr", "w:trPr", "w:tcPr", "w:tblPr", "w:sectPr", "w:numPr"]);
@@ -94,48 +95,51 @@ const MAMMOTH_DIFFERENCES: Record<string, string> = {
 };
 
 describe("DocxDocument view on the Word-authored corpus", () => {
-  const files = corpusFiles();
+  // Each document is read and parsed once for all four checks; parsing the
+  // 150-odd files once per check made this the slowest file in the suite.
+  describe.each(corpusFiles())("%s", (file) => {
+    let bytes!: Buffer;
+    let doc!: DocxDocument;
+    beforeAll(async () => {
+      bytes = readCorpusFile(file);
+      doc = await DocxDocument.load(bytes);
+    });
 
-  it.each(files)("%s: surfaces every note, link, revision, object and paragraph", async (file) => {
-    const doc = await DocxDocument.load(readCorpusFile(file));
-    const body = firstChild(documentElement(doc.source(MAIN_DOCUMENT_PART)), "w:body")!;
-    expect(countView(doc.blocks)).toEqual(countXml(body));
-  });
+    it("surfaces every note, link, revision, object and paragraph", () => {
+      const body = firstChild(documentElement(doc.source(MAIN_DOCUMENT_PART)), "w:body")!;
+      expect(countView(doc.blocks)).toEqual(countXml(body));
+    });
 
-  it.each(files)("%s: block ids are unique and resolve", async (file) => {
-    const doc = await DocxDocument.load(readCorpusFile(file));
-    const ids = doc.paragraphs.map((p) => p.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const p of doc.paragraphs) expect(doc.byId.get(p.id)).toBe(p);
-  });
+    it("block ids are unique and resolve", () => {
+      const ids = doc.paragraphs.map((p) => p.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const p of doc.paragraphs) expect(doc.byId.get(p.id)).toBe(p);
+    });
 
-  it.each(files)("%s: field instructions never leak into text", async (file) => {
-    const doc = await DocxDocument.load(readCorpusFile(file));
-    for (const p of doc.paragraphs) {
-      expect(p.text).not.toMatch(/\\\* MERGEFORMAT|\bREF _Ref|\bPAGEREF _Toc|\bHYPERLINK \\l/);
-    }
-  });
+    it("field instructions never leak into text", () => {
+      for (const p of doc.paragraphs) {
+        expect(p.text).not.toMatch(/\\\* MERGEFORMAT|\bREF _Ref|\bPAGEREF _Toc|\bHYPERLINK \\l/);
+      }
+    });
 
-  it.each(files)("%s: text agrees with mammoth (independent extraction)", async (file) => {
-    const bytes = readCorpusFile(file);
-    const doc = await DocxDocument.load(bytes);
-    const ours = normalize(plainForComparison(doc.blocks));
-    const theirs = normalize((await mammoth.extractRawText({ buffer: bytes })).value);
-    if (MAMMOTH_DIFFERENCES[file]) {
-      expect(ours, "listed as a known difference; remove it from the list").not.toBe(theirs);
-      expect(Math.abs(ours.length - theirs.length)).toBeLessThanOrEqual(4);
-    } else {
-      expect(ours).toBe(theirs);
-    }
+    it("text agrees with mammoth (independent extraction)", async () => {
+      const ours = normalize(plainForComparison(doc.blocks));
+      const theirs = normalize((await mammoth.extractRawText({ buffer: bytes })).value);
+      if (MAMMOTH_DIFFERENCES[file]) {
+        expect(ours, "listed as a known difference; remove it from the list").not.toBe(theirs);
+        expect(Math.abs(ours.length - theirs.length)).toBeLessThanOrEqual(4);
+      } else {
+        expect(ours).toBe(theirs);
+      }
+    });
   });
 
   it("loads the 12,600-paragraph MSC Schedules quickly", async () => {
     const bytes = readCorpusFile("public-legal/uk-msc-consolidated-schedules-v2.2a.docx");
     const start = performance.now();
     const doc = await DocxDocument.load(bytes);
-    const elapsed = performance.now() - start;
+    expectWithinBudget(performance.now() - start, 5_000, "loading the schedules");
     expect(doc.paragraphs.length).toBeGreaterThan(12_000);
-    expect(elapsed).toBeLessThan(5_000);
   });
 
   it("maps a symbol-font section sign to §", async () => {

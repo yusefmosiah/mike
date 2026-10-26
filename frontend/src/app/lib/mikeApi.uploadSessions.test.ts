@@ -1125,6 +1125,11 @@ describe("direct upload sessions", () => {
 });
 
 describe("upload session polling", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.stubGlobal("fetch", fetchMock);
+    });
+
     it("backs off status checks and caps the interval at five seconds", () => {
         expect(
             Array.from({ length: 9 }, (_, index) =>

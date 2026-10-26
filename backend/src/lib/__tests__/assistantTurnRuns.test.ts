@@ -30,9 +30,8 @@ describe("waiting for assistant turns at shutdown", () => {
     it("resolves as soon as the last turn finishes", async () => {
         const run = turn("a");
         setTimeout(() => run.finish(), 30);
-        const started = Date.now();
-        expect(await waitForAssistantTurns(5_000, 10)).toBe(0);
-        expect(Date.now() - started).toBeLessThan(2_000);
+        // A deadline past the test's own time limit: only finishing ends it.
+        expect(await waitForAssistantTurns(60_000, 10)).toBe(0);
     });
 
     it("gives up at the deadline and reports what is left", async () => {

@@ -58,6 +58,9 @@ beforeAll(async () => {
     stylesheet = document.createElement("style");
     stylesheet.textContent = css.toString();
     document.head.append(stylesheet);
+});
+// Stubbed per test: globals are unstubbed after each one (vitest.config.mts).
+beforeEach(() => {
     vi.stubGlobal(
         "ResizeObserver",
         class {
@@ -68,7 +71,6 @@ beforeAll(async () => {
 });
 afterAll(() => {
     stylesheet?.remove();
-    vi.unstubAllGlobals();
 });
 afterEach(() => document.documentElement.classList.remove("dark"));
 

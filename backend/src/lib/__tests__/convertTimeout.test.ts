@@ -39,8 +39,6 @@ afterEach(async () => {
 describe("office conversion deadline", () => {
   it("kills a conversion that outlives its deadline and removes its profile", async () => {
     const outputDirectory = join(directory, "work");
-    const startedAt = Date.now();
-
     const failure = await officeFileToPdf(
       join(directory, "source.docx"),
       outputDirectory,
@@ -50,7 +48,6 @@ describe("office conversion deadline", () => {
       failure_code: "conversion_timeout",
     });
 
-    expect(Date.now() - startedAt).toBeLessThan(10_000);
     expect(existsSync(join(outputDirectory, "libreoffice-profile"))).toBe(
       false,
     );

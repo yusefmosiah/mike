@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:stack": "bash scripts/test-stack.sh",
     "test:coverage": "vitest run --coverage",
+    "test:dormant": "MIKE_TEST_GROUP=dormant vitest run",
+    "test:perf": "MIKE_PERF=1 vitest run src/lib/docx/__tests__/view.corpus.test.ts src/lib/docx/__tests__/blockIds.test.ts",
     "test:mutation": "stryker run"
   },
   "dependencies": {

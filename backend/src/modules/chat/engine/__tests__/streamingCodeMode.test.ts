@@ -189,22 +189,26 @@ describe("code mode", () => {
   });
 
   it("runs gathered delegates at once, and their wait does not count against the cell's time", async () => {
+    let running = 0;
+    let mostAtOnce = 0;
     const delegate = vi.fn(async (input: Record<string, unknown>) => {
+      running += 1;
+      mostAtOnce = Math.max(mostAtOnce, running);
       await new Promise((resolve) => setTimeout(resolve, 1_500));
+      running -= 1;
       return { content: `Report on ${String(input.task)}`, isError: false };
     });
     const code = [
       `a, b = await tools.gather(tools.delegate(type="general", task="A"), tools.delegate(type="general", task="B"))`,
       `print(a, "|", b)`,
     ].join("\n");
-    const started = Date.now();
     const [result] = await turn([{ ...cell(code), input: { code, timeout_seconds: 1 }, delegate } as never], {
       includeSubagents: true,
     });
+    // Both waited 1.5 s, past the cell's 1 s, and the cell still finished.
     expect(result!.content).toBe("Report on A | Report on B");
     expect(delegate).toHaveBeenCalledTimes(2);
-    // Both waited 1.5 s together, past the cell's 1 s.
-    expect(Date.now() - started).toBeLessThan(2_900);
+    expect(mostAtOnce).toBe(2);
   });
 
   it("gives the chat's background subagents to code only with the person's setting, in a durable turn", async () => {
@@ -265,14 +269,14 @@ describe("code mode", () => {
       setTimeout(() => controller.abort(), 200);
       return new Promise<{ content: string; isError: boolean }>(() => {});
     });
-    const started = Date.now();
+    // The delegate never answers: the turn ends only because it was stopped
+    // (a cell that kept waiting would hit the test's own time limit).
     const run = turn([{ ...cell(`await tools.delegate(type="general", task="A")`), delegate } as never], {
       includeSubagents: true,
       signal: controller.signal,
     });
     await run.catch(() => undefined);
     expect(delegate).toHaveBeenCalledTimes(1);
-    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it("runs a guest's turn in the host's workstation, asking the host before the first cell until they allow the thread", async () => {

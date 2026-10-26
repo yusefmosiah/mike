@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readCorpusFile } from "../../../__tests__/helpers/docxCorpus";
+import { expectWithinBudget } from "../../../__tests__/helpers/perfBudget";
 import { blockIds, carryBlockIds, idSlots } from "../blockIds";
 import { applyEdits, type EditOp } from "../edit";
 import { resolveRevisions } from "../revisions";
@@ -109,7 +110,7 @@ describe("block ids across versions", () => {
     const b = await DocxDocument.load(edited.bytes);
     const start = performance.now();
     const ids = carryBlockIds(a, b);
-    expect(performance.now() - start).toBeLessThan(3_000);
+    expectWithinBudget(performance.now() - start, 3_000, "aligning the schedules");
     expect(ids.filter((id) => id.includes("+"))).toEqual([`${a.paragraphs[500].id}+1`]);
   });
 

@@ -54,8 +54,9 @@ checks nor changes timeouts or workers to suppress the failures.
 ## Ratchet policy
 
 `backend/vitest.config.mts` enforces global coverage **floors** (currently
-statements 60 / branches 51 / functions 64 / lines 63). They are a
-no-regression ratchet, not a target:
+statements 74 / branches 65 / functions 76 / lines 77, measured without the
+dormant features listed in `backend/vitest.groups.mts`; see `docs/ci.md`).
+They are a no-regression ratchet, not a target:
 
 `.github/workflows/ci.yml` defines the coverage check. A workflow definition does
 not prove that this fork has run it or configured required branch checks; verify

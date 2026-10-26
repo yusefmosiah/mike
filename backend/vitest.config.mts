@@ -1,12 +1,17 @@
 import { defineConfig } from "vitest/config";
+import { DORMANT_SOURCES, DORMANT_TESTS, testGroup } from "./vitest.groups.mjs";
+
+const group = testGroup();
+const ALL_TESTS = ["src/**/*.test.ts", "src/**/*.test.mts", "scripts/replay/**/*.test.mts"];
 
 export default defineConfig({
   test: {
     environment: "node",
     // scripts/replay is the thread replay simulator (a CLI, not part of the
     // server build); its pure parts are unit-tested with the server's suite.
-    include: ["src/**/*.test.ts", "src/**/*.test.mts", "scripts/replay/**/*.test.mts"],
-    exclude: ["dist/**", "node_modules/**"],
+    // Dormant features' tests run nightly, not in CI: vitest.groups.mts.
+    include: group === "dormant" ? DORMANT_TESTS : ALL_TESTS,
+    exclude: ["dist/**", "node_modules/**", ...(group === "core" ? DORMANT_TESTS : [])],
     // Generous timeouts so cold-start module transform/import latency
     // can't cause spurious timeout failures on a cold CI runner. Warm
     // tests finish in ~1s; this only guards the pathological cold case —
@@ -25,7 +30,10 @@ export default defineConfig({
       // Test files and their fixtures are the measuring instrument, not
       // the thing measured. (Spelled out rather than left to vitest's
       // defaults because setting `exclude` at all replaces them.)
-      exclude: ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.mts", "**/*.d.ts"],
+      // Dormant features' sources leave with their tests (vitest.groups.mts).
+      // Non-code files under src/ (the kernel's Markdown) only made the
+      // report print parse errors beside the real output.
+      exclude: ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.mts", "**/*.d.ts", "**/*.md", "**/*.py", ...DORMANT_SOURCES],
       // No-regression RATCHET floor, not a target. The measured scope
       // spans well-tested libs (access, storage keys/dispositions,
       // downloadTokens, api-key provider/env checks, chat doc
@@ -37,20 +45,18 @@ export default defineConfig({
       // chat tool dispatch, llm providers, spreadsheet handling) — so
       // the global number stays modest.
       //
-      // Measured on THIS tree with the widened src/** scope: 60.59%
-      // statements, 51.98% branches, 64.77% functions, 63.18% lines —
-      // slightly under the src/lib + src/modules numbers (61.34 / 52.31
-      // / 66.28 / 63.97), because the workers, jobs and app wiring the
-      // widening pulled in are covered only by the stack suites.
-      // The floors below sit just under that, so CI fails on a real
-      // *drop* rather than on measurement noise. Floors only go up: when
-      // you add tests, raise them in the same PR. Backlog + per-area
-      // status: docs/testing-coverage.md.
+      // Measured 2026-10-26 without the dormant features (vitest.groups.mts):
+      // 74.79% statements, 66.01% branches, 76.99% functions, 77.5% lines.
+      // The floors sit just under that, so CI fails on a real *drop* rather
+      // than on measurement noise. They had sat 15 points low, where a large
+      // regression passed. Floors only go up: when you add tests, raise
+      // them in the same change. Backlog + per-area status:
+      // docs/testing-coverage.md.
       thresholds: {
-        statements: 60,
-        branches: 51,
-        functions: 64,
-        lines: 63,
+        statements: 74,
+        branches: 65,
+        functions: 76,
+        lines: 77,
       },
     },
   },

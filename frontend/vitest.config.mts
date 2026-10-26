@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { DORMANT_SOURCES, DORMANT_TESTS, testGroup } from "./vitest.groups.mjs";
+
+const group = testGroup();
 
 const resolvePath = (relative: string) =>
     fileURLToPath(new URL(relative, import.meta.url));
@@ -56,11 +59,22 @@ export default defineConfig({
         // and enabled by this (there harmless) flag on 22.0–22.11.
         execArgv: ["--experimental-require-module"],
         // Unit tests only. Keep any Playwright e2e specs (*.spec.ts) out.
-        include: ["src/**/*.test.{ts,tsx}"],
-        exclude: ["node_modules/**", "e2e/**", "**/*.spec.ts"],
+        // Dormant features' tests run nightly, not in CI: vitest.groups.mts.
+        include: group === "dormant" ? DORMANT_TESTS : ["src/**/*.test.{ts,tsx}"],
+        exclude: [
+            "node_modules/**",
+            "e2e/**",
+            "**/*.spec.ts",
+            ...(group === "core" ? DORMANT_TESTS : []),
+        ],
         // Generous timeouts to absorb cold-start jsdom + transform latency on CI.
         testTimeout: 20000,
         hookTimeout: 20000,
+        // Undo every spy, stubbed global and stubbed env var after each test,
+        // so no test depends on another one's leftovers.
+        restoreMocks: true,
+        unstubGlobals: true,
+        unstubEnvs: true,
         coverage: {
             provider: "v8",
             reporter: ["text", "lcov"],
@@ -71,7 +85,8 @@ export default defineConfig({
             // frontend half of the SSE contract), upload validation, model
             // availability, utils, and the cookie-session auth wrapper.
             include: ["src/app/lib/**"],
-            exclude: ["src/app/lib/**/*.test.*"],
+            // Dormant features' sources leave with their tests.
+            exclude: ["src/app/lib/**/*.test.*", ...DORMANT_SOURCES],
             // No-regression RATCHET floor, not a target. The lib layer is
             // effectively fully tested: every mikeApi endpoint wrapper has a
             // route/method/body assertion, and the remaining gap is only the

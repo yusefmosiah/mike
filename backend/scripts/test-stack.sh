@@ -62,4 +62,5 @@ export PI_SPIKE_DATABASE_URL="$DATABASE_TEST_URL"
 
 echo "Running stack integration tests against $AUTH_TEST_URL and $DATABASE_TEST_URL"
 cd "$BACKEND_DIR"
-exec npx vitest run src/__tests__/integration/*.stack.test.ts src/durable/spike/conformance.test.mts src/durable/spike/retireDoc.test.mts "$@"
+# Every stack test, dormant features included (vitest.groups.mts).
+MIKE_TEST_GROUP=all exec npx vitest run src/__tests__/integration/*.stack.test.ts src/durable/spike/conformance.test.mts src/durable/spike/retireDoc.test.mts "$@"

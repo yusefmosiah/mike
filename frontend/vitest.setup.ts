@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { Blob as NodeBlob } from "node:buffer";
 
 // Vitest's jsdom environment always overrides `globalThis.Blob` with jsdom's
@@ -11,3 +12,9 @@ import { Blob as NodeBlob } from "node:buffer";
 // `node:buffer`) keeps `response.blob()` usable the same way on every
 // supported Node version. See #361.
 globalThis.Blob = NodeBlob as unknown as typeof Blob;
+
+// findBy* and waitFor give up after 1 s by default. A heavy component's first
+// render (a lazy import, the React Compiler transform) can take longer than
+// that on a busy CI runner, which failed tests that were not broken. The
+// per-test limit (testTimeout in vitest.config.mts) still catches a real hang.
+configure({ asyncUtilTimeout: 5000 });
