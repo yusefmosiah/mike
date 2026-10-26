@@ -148,9 +148,10 @@ test("a chat thread scrolls the page on a phone, under a composer that stays put
     expect(sidebar!.y).toBeLessThan(scroll.screen / 2);
 });
 
-// An iPad in portrait sits just above the phone layout: the sidebar is a
-// column and leaves the chat about 500px. A long model name once held the
-// composer at its full width there, so the send button ran off the screen.
+// An iPad in portrait sits just above the phone layout. The sidebar starts
+// as the icon rail there; opened, it is a column that leaves the chat about
+// 500px. A long model name once held the composer at its full width there,
+// so the send button ran off the screen.
 for (const [width, height] of [[768, 1024], [834, 1194]] as const) {
     test(`the composer fits beside the open sidebar at ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height });
@@ -176,8 +177,55 @@ for (const [width, height] of [[768, 1024], [834, 1194]] as const) {
 
         await page.goto("/assistant/chat/mobile-chat");
         await expect(page.getByPlaceholder("How can I help?")).toBeVisible();
+        // The rail, even though the sidebar was last left open at a wider size.
+        await page.getByRole("button", { name: "Open sidebar" }).click();
         await expect(page.getByRole("button", { name: "Close sidebar" })).toBeVisible();
 
+        const send = await page.getByRole("button", { name: /^Send/ }).boundingBox();
+        expect(send, "the send button is on screen").not.toBeNull();
+        expect(send!.x + send!.width).toBeLessThanOrEqual(width);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+}
+
+// Crossing 1024px is what opens or rails the sidebar; resizing within a
+// range (Stage Manager, Split View, unfolding) leaves it as it is.
+test("the sidebar is a rail from 768 to 1023px and open from 1024px", async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 820 });
+    await mockApi(page);
+    await page.goto("/assistant/chat/mobile-chat");
+    const close = page.getByRole("button", { name: "Close sidebar" });
+    const open = page.getByRole("button", { name: "Open sidebar" });
+    await expect(close).toBeVisible();
+    await page.setViewportSize({ width: 1100, height: 820 });
+    await expect(close).toBeVisible();
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await expect(open).toBeVisible();
+    await open.click();
+    await expect(close).toBeVisible();
+    await page.setViewportSize({ width: 900, height: 1180 });
+    await expect(close).toBeVisible();
+    await page.setViewportSize({ width: 1180, height: 820 });
+    await expect(close).toBeVisible();
+});
+
+// iPad and folding-phone screen sizes in points: iPad mini and 11-inch iPad
+// in both orientations, and the folding iPhone's outer screen and inner
+// screen held either way (third-party measurements of the latter two).
+for (const [label, width, height] of [
+    ["folding phone, outer screen", 466, 678],
+    ["folding phone, inner screen", 669, 951],
+    ["folding phone, inner screen sideways", 951, 669],
+    ["iPad mini portrait", 744, 1133],
+    ["iPad mini landscape", 1133, 744],
+    ["11-inch iPad portrait", 820, 1180],
+    ["11-inch iPad landscape", 1180, 820],
+] as const) {
+    test(`the composer fits on a ${label} (${width}x${height})`, async ({ page }) => {
+        await page.setViewportSize({ width, height });
+        await mockApi(page);
+        await page.goto("/assistant/chat/mobile-chat");
+        await expect(page.getByPlaceholder("How can I help?")).toBeVisible();
         const send = await page.getByRole("button", { name: /^Send/ }).boundingBox();
         expect(send, "the send button is on screen").not.toBeNull();
         expect(send!.x + send!.width).toBeLessThanOrEqual(width);

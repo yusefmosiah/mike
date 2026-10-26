@@ -15,6 +15,10 @@ import { cn } from "@/app/lib/utils";
 import { watchDisplayEdge } from "@/app/lib/displayEdge";
 import { watchNativeKeyboard } from "@/app/lib/nativeKeyboard";
 import { watchHorizontalSwipe } from "@/app/lib/horizontalSwipe";
+import {
+    sidebarWidthClass,
+    watchSidebarWidthClass,
+} from "@/app/lib/sidebarWidth";
 
 export default function MikeLayout({
     children,
@@ -50,12 +54,13 @@ export default function MikeLayout({
         return true;
     });
 
-    const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-        if (typeof window !== "undefined" && window.innerWidth < 768) {
-            return false;
-        }
-        return true;
-    });
+    // Below 768 px the sidebar is an overlay; from 768 to 1024 px (an iPad in
+    // portrait or Split View, a folding phone open sideways) it starts as the
+    // icon rail, because a full column leaves the chat too narrow; wider, it
+    // starts open.
+    const [isSidebarOpen, setIsSidebarOpen] = useState(
+        () => sidebarWidthClass() === "wide",
+    );
 
     // Persist what is actually on screen. The mount initializer above reads
     // this key back but `isSidebarOpen` starts open on desktop regardless, so
@@ -64,30 +69,27 @@ export default function MikeLayout({
     // them. Remembering a collapsed sidebar across reloads needs the mount
     // path to apply the stored value too — a separate change.
     useEffect(() => {
-        if (typeof window !== "undefined" && window.innerWidth >= 768) {
+        if (sidebarWidthClass() === "wide") {
             localStorage.setItem("sidebarOpen", isSidebarOpen.toString());
         }
     }, [isSidebarOpenDesktop]);
 
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const handleResize = () => {
-            const isSmall = window.innerWidth < 768;
-            if (isSmall && isSidebarOpen) setIsSidebarOpen(false);
-            else if (!isSmall && !isSidebarOpen)
-                setIsSidebarOpen(isSidebarOpenDesktop);
-        };
-        window.addEventListener("resize", handleResize);
-        return () => window.removeEventListener("resize", handleResize);
-    }, [isSidebarOpen, isSidebarOpenDesktop]);
+    // Only crossing a breakpoint changes the sidebar, so resizing a window
+    // (Stage Manager, Split View, unfolding) within a range leaves it alone.
+    useEffect(
+        () =>
+            watchSidebarWidthClass((widthClass) =>
+                setIsSidebarOpen(
+                    widthClass === "wide" ? isSidebarOpenDesktop : false,
+                ),
+            ),
+        [isSidebarOpenDesktop],
+    );
 
     const handleSidebarToggle = () => {
-        if (window.innerWidth >= 768) {
-            setIsSidebarOpenDesktop(!isSidebarOpenDesktop);
-            setIsSidebarOpen(!isSidebarOpenDesktop);
-        } else {
-            setIsSidebarOpen(!isSidebarOpen);
-        }
+        const open = !isSidebarOpen;
+        setIsSidebarOpen(open);
+        if (sidebarWidthClass() === "wide") setIsSidebarOpenDesktop(open);
     };
 
     // On a phone, a swipe right across the page reveals the sidebar and a
@@ -97,7 +99,7 @@ export default function MikeLayout({
         if (!mainElement || isSidebarOpen) return;
         return watchHorizontalSwipe(mainElement, {
             direction: "right",
-            enabled: () => window.innerWidth < 768,
+            enabled: () => sidebarWidthClass() === "narrow",
             onSwipe: () => setIsSidebarOpen(true),
         });
     }, [mainElement, isSidebarOpen]);
@@ -105,7 +107,7 @@ export default function MikeLayout({
         if (!isSidebarOpen) return;
         return watchHorizontalSwipe(window, {
             direction: "left",
-            enabled: () => window.innerWidth < 768,
+            enabled: () => sidebarWidthClass() === "narrow",
             onSwipe: () => setIsSidebarOpen(false),
         });
     }, [isSidebarOpen]);
@@ -118,14 +120,13 @@ export default function MikeLayout({
     );
 
     const setSidebarOpen = useCallback((open: boolean) => {
-        const isSmall =
-            typeof window !== "undefined" && window.innerWidth < 768;
-        if (isSmall) {
+        const widthClass = sidebarWidthClass();
+        if (widthClass === "narrow") {
             if (!open) setIsSidebarOpen(false);
             return;
         }
         setIsSidebarOpen(open);
-        setIsSidebarOpenDesktop(open);
+        if (widthClass === "wide") setIsSidebarOpenDesktop(open);
     }, []);
 
     const pageChromeValue = useMemo(
