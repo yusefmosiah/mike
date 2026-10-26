@@ -27,6 +27,13 @@ What runs, when, what it blocks, and what to do when it is red.
 | Browser spec types | `npm run typecheck:e2e` (root): the Playwright specs, which run only nightly | `npm run verify` |
 | Docker images | builds the frontend, backend and add-in images (`docker-images.yml`) | `npm run verify -- --full` |
 
+The repository ruleset "main: CI must pass" requires these jobs, by name, on
+pull requests into `main` (admins push directly). Renaming or adding a job
+here means updating the ruleset too, or a pull request waits forever on a
+check that never reports:
+`gh api repos/yusefmosiah/mike/rulesets` lists it, and a `PUT` to its id
+replaces `required_status_checks`.
+
 Pushes that change only documentation (`docs/**`, `*.md`) skip `CI` and
 therefore do not deploy; the next code change deploys them.
 
