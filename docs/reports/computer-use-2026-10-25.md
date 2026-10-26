@@ -1,6 +1,6 @@
 # Computer use: research and a first design
 
-October 25, 2026. Five research passes, each at least three rounds deep. Their
+October 25, 2026. Seven research passes, each at least three rounds deep. Their
 notes, with every source linked and dated, are in
 [`computer-use-2026-10-25/`](computer-use-2026-10-25/):
 
@@ -11,6 +11,8 @@ notes, with every source linked and dated, are in
 | [`system1.md`](computer-use-2026-10-25/system1.md) | Jev, the System 1 (decision model) category, and its open clones |
 | [`openclaw-vm.md`](computer-use-2026-10-25/openclaw-vm.md) | OpenClaw; a Linux VM inside the desktop app that acts on the host |
 | [`networking.md`](computer-use-2026-10-25/networking.md) | Raw WireGuard, embedding it in our apps, and the transport |
+| [`named-models.md`](computer-use-2026-10-25/named-models.md) | Kimi, DeepSeek and GLM in real computer use; where each model can run, and how fast |
+| [`human-input.md`](computer-use-2026-10-25/human-input.md) | Moving the mouse and typing at a human pace, with human variation |
 
 The notes mark each claim as verified (the source was read) or reported
 (secondhand). Read every benchmark figure below as the vendor's own claim, run
@@ -41,14 +43,34 @@ the best closed result is about 21%, and Agent S4 with Qwen3.8-27B reaches
 21.3%. The real gap is keeping track of a long task and checking its own work,
 not clicking the right spot.
 
-The three models you named are not computer-use leaders:
+**People do use Kimi, DeepSeek and GLM for computer use, in different
+ways:**
 
-- **DeepSeek V4.1 Flash** sees images but makes no GUI claims.
-- **GLM 5.3 Flash** claims computer use but publishes no scores.
-- **Kimi K3** is strong but far too large for us to host cheaply.
+- **Kimi** has the only documented, runnable setup of the three.
+  - **Harness:** the official OSWorld repository has gained a Kimi agent
+    "built for Kimi k3" (August 21). It works from screenshots only, writing
+    one pyautogui action per turn with a 100-step budget, and is probably how
+    K3 scored 84.8.
+  - **Independent tests:** they score Kimi below Claude. K2.6 reached 30.1
+    against Opus 4.7's 42.8 on SaaS-Bench, using about 50% more steps.
+    It was also the best at click accuracy in NVIDIA's Desktop-Delta Bench.
+  - **Other work built on it:** Microsoft's OpenForge-RL reuses the harness.
+  - **Kimi's own product:** Kimi Work drives a real Chrome or Edge.
+  - **Known problems in third-party harnesses:** opencode rejects K3's tool
+    schemas, and K3 needs its reasoning echoed back on each turn.
+- **DeepSeek V4.1 Flash** accepts images, but publishes no GUI scores. Its
+  real use is text-only: rtrvr.ai gives V4 Flash a compressed page DOM, and
+  the model writes a single JavaScript plan. Nobody has published a DeepSeek
+  planner paired with a separate grounding model.
+- **GLM 5.3 Flash** documents a "computer use" example. Z.ai's ZCode browser
+  hands screenshots to Flash, because GLM 5.3 itself reads text only. No
+  success rates are published. The older AutoGLM-OS agent, which reads the
+  accessibility tree, is in the OSWorld repository.
 
-No benchmark covers Mac apps in 2026 (macOSWorld has had no update), so we
-will need our own Mac task suite.
+No test has run all three on the same GUI benchmark, and no one has
+independently reproduced any headline OSWorld number. No benchmark covers Mac
+apps in 2026 either (macOSWorld has had no update). Our own Mac task suite is
+the only comparison we'll be able to trust.
 
 **How Macs get driven.** The approach everyone converged on in 2026 is the
 accessibility tree plus a screenshot with numbered marks on elements. Clicking
@@ -91,6 +113,34 @@ Avoid:
 - **No approval per action.** Once computer use is enabled, nothing asks
   before an action runs.
 
+**The model can run in the cloud, at home, or both.** Nothing requires
+computer use to run on the computer being controlled.
+
+- **Encrypted cloud (Phala, which our backend already uses with attestation),
+  per million input/output tokens:**
+  - Kimi K3: $3.00 / $15.00
+  - GLM 5.3 Flash: $0.15 / $0.50
+  - DeepSeek V4.1 Flash: $0.75 / $1.60
+  - Qwen3.8-27B: $0.20 / $2.50
+
+  All four have a 1M-token context. OpenRouter says all four accept images.
+  Phala's pages don't say, so the first test is one real screenshot through
+  the attested gateway. Holo4 is served only by H Company's own API.
+- **A box at home, measured by the community:**
+  - **Qwen3.8-27B on one RTX 5090:** about 90–100 tokens/s, and an image
+    turn under 2 s.
+  - **GLM 5.3 Flash on two linked DGX Sparks:** 26 tokens/s, with 2.5–4.4 s
+    to read each screenshot.
+  - **DeepSeek V4.1 Flash on two Sparks:** fits only at a heavy 2.9-bit
+    quantization (73 tokens/s); image input there is unverified.
+  - **Qwen3.8-27B on a Mac Studio:** 31 tokens/s on an M3 Ultra, 48 on an
+    M5 Ultra.
+  - **Kimi K3:** about 1.5 TB of weights, so it fits on none of these.
+  - **Holo4:** no local numbers published.
+- **Time per step (screenshot, think, act), estimated:** about 4–12 s for
+  the Flash models hosted, 5–9 s for Qwen3.8-27B on a 5090, and 10–30 s for
+  K3. A 30-step task takes from about 1.5 to 15 minutes.
+
 **System 1 / decision models are real and early.** Jev, from TypeSafe
 (September 2026), answers with a typed choice and a confidence instead of
 text. It is fast (about 0.1–0.5 s) and cheap. Its multimodal version,
@@ -117,7 +167,48 @@ Open multimodal clones exist but are weeks old:
 That project reports about 1.5 s against 5.5 s per step. Independent results
 suggest 1.5–6 times faster and cheaper on routine steps, not the 75–200 times
 in the marketing. Decision models don't fix perception, a bad list of options,
-or long-horizon planning.
+or long-horizon planning. We already run decision models in the Auto Mode
+gate ([`docs/decision-models.md`](../decision-models.md)), so the client,
+calibration and evaluation code exist.
+
+**Human-paced input is a solved problem in one place: Peekaboo.** Peekaboo
+(MIT, Swift, v4.9.7, October 23) has an opt-in human profile:
+
+- **Mouse:** a curved path with minimum-jerk timing (smooth acceleration and
+  deceleration), a 20% overshoot only on moves over 120 px, and jitter under
+  half a pixel. The random generator is seeded, so a run can be replayed in a
+  test, and the last event always lands exactly on the target.
+- **Typing:** delays drawn from a lognormal distribution, longer after spaces
+  and punctuation, and a pause every dozen words.
+
+None of the other agents we checked does this. Those are the Anthropic
+reference demo, UI-TARS desktop and Agent S3, plus Cua Driver from secondhand
+sources. They move the cursor instantly or in a straight line, and type at a
+fixed rate (12 ms per key in Anthropic's demo).
+
+The numbers to model come from the Aalto study of 136 million keystrokes:
+
+- 52 words a minute on average;
+- 238 ms between keypresses on average, with a long tail;
+- keys held down for about 116 ms, about the same for slow and fast typists,
+  so speed comes from the gaps;
+- 6% of keystrokes are corrections;
+- keys often overlap.
+
+For the mouse, Fitts's law gives the time a move should take, from its
+distance and the target's size.
+
+Every platform marks injected input:
+
+- **macOS:** a source state, a process ID, and a free 64-bit user-data field
+  on each event.
+- **Windows:** an "injected" flag.
+- **Linux:** libei.
+
+On a Mac, each move also needs its relative motion fields set, or apps that
+read motion will see none. Learned motion generators exist, such as DMTG and
+MIME-mouse, but they're built to beat bot detectors and miss on outside data.
+A parametric model is simpler and easier to test.
 
 **A Linux VM inside the desktop app has a precedent.** Claude Cowork runs its
 tools in a Linux VM on Apple's Virtualization framework, and controls the host
@@ -199,9 +290,39 @@ The decisions it rests on:
    home address. That is the part that needs a real tunnel and not an RPC
    channel.
 
-Starting models: Qwen3.8-27B (Apache-2.0) self-hosted as the planner, with
-Kimi K3 as an optional hosted planner. Holo4-35B-A3B or UI-Venus-1.5 as the
-grounder. Check each license on its model card before shipping.
+7. **Input at a human pace, honestly labelled.** The host helper plans each
+   mouse move and keystroke run as timestamped events from a seeded model:
+   - moves follow Fitts's law and a curved, minimum-jerk path, with one event
+     per display frame;
+   - keystroke timing is lognormal at a chosen speed, with longer gaps at word
+     boundaries and keys held about 110 ms;
+   - typos are opt-in, and never in passwords, code or URLs.
+
+   There are three speeds: instant, light and full, chosen by whether you or
+   an app could be watching, plus a speed multiplier. Touching the mouse or
+   keyboard cancels the agent at once. Peekaboo's profile is the starting
+   point. Each event carries an agent marker in its user-data field, so the
+   machine's own software can tell agent input from yours.
+8. **The model's location is a setting.** Every model goes through the
+   existing model layer (`backend/src/lib/llm/`), so the same agent can use:
+   - Phala's attested cloud (the default for privacy);
+   - a box at home over the tunnel, such as a 5090, two Sparks or a Mac
+     Studio;
+   - an ordinary host.
+
+Models to try first, all of them through the same evaluation suite:
+
+- **Planner and actor:** Qwen3.8-27B (Apache-2.0). It's on Phala, and it
+  runs on a single 5090 at home.
+- **Cheaper planner:** GLM 5.3 Flash, the cheapest on Phala and runnable on
+  two Sparks.
+- **Strongest open planner:** Kimi K3 on Phala, run with its OSWorld harness
+  as the reference.
+- **DeepSeek V4.1 Flash:** a text-only planner over the accessibility tree.
+- **Grounder:** Holo4-35B-A3B (Apache-2.0) or UI-Venus-1.5, for when the
+  accessibility tree isn't enough.
+
+Check each license on its model card before shipping.
 
 ## Order of work
 
@@ -216,7 +337,8 @@ grounder. Check each license on its model card before shipping.
    - approvals on the phone;
    - a kill switch.
 3. **Driver choice.** Prototype on Peekaboo and on Cua Driver, and keep one.
-   Weigh Cua's private APIs and license split against its background input.
+   Weigh Cua's private APIs and license split against its background input,
+   and Peekaboo's human input profile against the work of building our own.
 4. **Grounding and choosing.** Self-host the grounder. Shadow-test decision
    models on the traces.
 5. **The Linux VM inside the app,** with the vsock broker.
@@ -230,8 +352,9 @@ grounder. Check each license on its model card before shipping.
 - Is the Mac App Store needed at all? Its sandbox likely rules out vsock,
   Cua's private APIs and some input paths. Developer ID distribution avoids
   all three.
-- Which planner do we host, and on what? Qwen3.8-27B fits one GPU, and the
-  OVH nodes have none today.
+- Cloud, home, or both? Phala covers the cloud today, with no hardware to
+  buy. A box at home (a 5090 for Qwen3.8-27B, or two Sparks for GLM 5.3 Flash)
+  keeps screens off any third party, at about the same speed per step.
 - How far does "look like a normal person" go? Using your own browser, cookies
   and address is just operating your machine for you. We shouldn't build
   anything that evades a site's bot defences beyond that.
