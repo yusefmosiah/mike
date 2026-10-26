@@ -45,7 +45,8 @@ function readBody(req) {
 }
 
 const server = createServer(async (req, res) => {
-    if (req.method === "GET" && req.url === "/health") {
+    // HEAD too: wait-on, which CI uses to wait for this server, probes with it.
+    if ((req.method === "GET" || req.method === "HEAD") && req.url === "/health") {
         res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
         return;
     }
