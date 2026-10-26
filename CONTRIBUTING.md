@@ -109,6 +109,9 @@ npm run build --prefix frontend
 
 ## Testing
 
+Before pushing, run what CI runs: `npm run verify` from the repository root
+(see `docs/ci.md`). While iterating:
+
 ```bash
 npm test --prefix backend            # backend unit + route integration tests (vitest)
 npm test --prefix frontend           # frontend component/hook tests (vitest + jsdom)
@@ -119,9 +122,10 @@ npm run test:stack --prefix backend  # gated: real Postgres + GoTrue auth/access
 - New features and bug fixes should come with a test at the lowest layer that
   can catch the regression: unit first, then route-level integration, then
   end-to-end only for flows a browser is genuinely needed to prove.
-- CI runs the build and unit/integration tests on every PR
-  (`.github/workflows/ci.yml`), and the Playwright suite in a full local stack
-  (`.github/workflows/e2e.yml`). The CI workflow will also run the optional
-  offline eval harness if `evals/run.mjs` is added to the tree.
+- CI (`.github/workflows/ci.yml`) runs the types, lint, builds, unit and
+  integration tests with their coverage floors, and the Docker images, and a
+  green run on `main` deploys staging. The Playwright suite runs on pull
+  requests and nightly (`.github/workflows/e2e.yml`, `nightly.yml`).
+  `docs/ci.md` lists every workflow and when it runs.
 - Tests that need a live database, auth server, or LLM key are env-gated and skip cleanly
   when the environment is absent — a plain `npm test` should always be green.

@@ -61,6 +61,9 @@ export default defineConfig({
     expect: { timeout: 10_000 },
     /* Stress failures must remain failures even if their timing is intermittent. */
     retries: process.env.REACT_STRESS === "1" ? 0 : process.env.CI ? 2 : 0,
+    /* The nightly run (E2E_FAIL_ON_FLAKY) fails on a test that passed only on
+       a retry, so it is reported instead of hidden; see docs/ci.md. */
+    failOnFlakyTests: process.env.E2E_FAIL_ON_FLAKY === "1",
     /* Reporter. On CI, "github" alone would REPLACE Playwright's default html
        reporter, so playwright-report/ would never be written and the workflow's
        artifact upload (docs/e2e-ci.md, "Failure artifacts") would have nothing

@@ -1,7 +1,8 @@
 # End-to-end tests in CI
 
 The Playwright suite (`e2e/`) runs on every pull request through
-`.github/workflows/e2e.yml`. This document covers the one repository secret it
+`.github/workflows/e2e.yml`, and nightly through `nightly.yml` (production
+renderer only; failures go to the issue labelled `nightly`, see `docs/ci.md`). This document covers the one repository secret it
 needs and the **branch-protection step that turns a red run into a blocked
 merge** — the workflow reports pass/fail on its own, but only branch protection
 makes that check *required*.
@@ -81,7 +82,7 @@ Development stress (chromium + webkit)`** (~18-24 min). They were the last check
 to finish on every slow PR, so they are off the default PR path. They run:
 
 - on manual dispatch;
-- on every push to `main` (Word add-in only);
+- nightly (Word add-in only);
 - on any PR carrying the **`stress`** label.
 
 Add `stress` to PRs that touch streaming, render loops or effect dependencies.

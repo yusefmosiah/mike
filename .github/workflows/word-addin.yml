@@ -11,22 +11,25 @@
 # under webkit — a chromium-only run would silently pass with the scroll fix
 # reverted.
 #
-# Every PR runs this gate: shared UI, auth and API changes can affect the add-in.
-# Pushes to main retain a path filter to avoid unrelated post-merge runs.
+# The add-in is an inherited feature not in active use, so this does not
+# gate the staging deploy. It runs when the add-in's own files change, and
+# nightly (nightly.yml calls it), where a failure is reported to the standing
+# issue instead of turning anyone's push red. A change to shared code that
+# breaks the add-in shows up overnight. See docs/ci.md.
 name: Word add-in
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - "word-addin/**"
-      - "frontend/src/shared/**"
-      - "frontend/public/icons/**"
-      - "packages/**"
       - ".github/workflows/word-addin.yml"
-  # Run on every PR, including stacked auth/API changes consumed by Word.
   pull_request:
+    paths:
+      - "word-addin/**"
+      - ".github/workflows/word-addin.yml"
 
 # Don't pile up runs on rapid pushes to the same PR; pushes to main each get
 # their own group (keyed by sha) and are never cancelled.
@@ -37,11 +40,13 @@ concurrency:
 jobs:
   streaming-development:
     name: Development stress (chromium + webkit)
-    # ~18-24 min against ~8 for the production job, so it stays off the PR
-    # path: it runs on push to main, on manual dispatch, and on PRs
-    # labelled `stress` (takes effect on the next push; see e2e.yml for why
-    # there is no `labeled` trigger).
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')
+    # ~18-24 min against ~8 for the production job, so it runs only nightly,
+    # on manual dispatch, and on PRs labelled `stress` (takes effect on the
+    # next push; see e2e.yml for why there is no `labeled` trigger).
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'stress'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:

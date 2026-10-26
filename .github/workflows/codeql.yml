@@ -7,9 +7,12 @@
 # Findings land in the Security tab (code scanning), not as CI noise.
 name: CodeQL
 
+# Weekly: findings go to the Security tab, not to anyone's push, so a run per
+# commit only spent five runner minutes each time.
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
   pull_request:
     branches: [main]
 

@@ -635,9 +635,10 @@ Each image reads only what its Dockerfile copies: the frontend image contains
 and `frontend/public/icons`, which its bundle includes. In the frontend image
 `next build` type-checks `frontend/tsconfig.build.json`, which excludes test
 files, so test fixtures and sibling applications never become build inputs. CI builds all three
-images on every pull request (`.github/workflows/docker-images.yml`), so a
-source change that reaches outside a build context fails before merge instead
-of on the next fresh install.
+images on every pull request and every push to `main`
+(`.github/workflows/docker-images.yml`, called from `ci.yml`), and a failed
+image blocks the staging deploy, so a source change that reaches outside a
+build context fails before it ships instead of on the next fresh install.
 
 ## Deployment safety
 

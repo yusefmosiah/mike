@@ -209,77 +209,76 @@ for the fresh-versus-upgraded schema check.
 
 ## Verification
 
-Choose the smallest verification that can catch the regression, and expand it
-for cross-cutting or high-risk changes. A build is not required after every
-small edit, but relevant tests are required for risky behavior changes and
-when specifically requested.
+`docs/ci.md` is the source of truth for what CI runs, what gates the staging
+deploy, the dormant features, flaky tests and coverage. Read it before
+changing a workflow, a test configuration or a coverage floor.
 
-Common commands from the repository root:
+Before pushing to `main`, run what the gating `CI` workflow runs:
 
 ```bash
-npm test --prefix backend
-npm run build --prefix backend
+npm run verify                  # backend and frontend: types, lint, builds, tests with coverage floors
+npm run verify -- frontend      # one package
+npm run verify -- --workers 2   # on a machine shared with other work
+npm run verify -- --full        # also the Docker images
+```
 
-npm test --prefix frontend
-npm run test:coverage --prefix frontend
-npm run lint --prefix frontend
-npm run typecheck --prefix frontend
-npm run build --prefix frontend
+A red `CI` on `main` skips the staging deploy. Judge every check by its exit
+code: a coverage run fails on its floors after every test passes, and the
+`ERROR: Coverage for ...` lines name the gap.
 
+While iterating, choose the smallest verification that can catch the
+regression, for example one Vitest file:
+
+```bash
+npm test --prefix backend -- src/__tests__/integration/chat.routes.test.ts
+npm test --prefix frontend -- src/app/components/ui/button.test.tsx
+```
+
+Other suites, run when the change calls for them (the table in `docs/ci.md`
+says when):
+
+```bash
+npm run test:stack --prefix backend     # needs Docker
+npm run test:dormant --prefix backend   # tabular reviews, Google Workspace, Word chat
+npm run test:dormant --prefix frontend
+npm run test:perf --prefix backend      # speed budgets
 npm run typecheck --prefix word-addin
-npm run build --prefix word-addin
 npm run test:e2e --prefix word-addin
-
-npm run test:e2e
+npm run test:e2e                        # browser suite
 npm run test:e2e:local
-npm run test:stack --prefix backend
 ```
 
 A change to a Dockerfile, a `.dockerignore`, a tsconfig, or an import that
 crosses an application boundary must be verified by building the affected
-image from the repository root, for example
-`docker build -f frontend/Dockerfile .`. The host-side build cannot catch a
+image from the repository root (`npm run verify -- --full`, or for example
+`docker build -f frontend/Dockerfile .`). The host-side build cannot catch a
 missing build-context file because every sibling directory exists on the
-host; `.github/workflows/docker-images.yml` builds all three images on every
-pull request for the same reason.
-
-Use targeted Vitest files while iterating, for example:
-
-```bash
-npm test --prefix backend -- src/__tests__/integration/tabular.routes.test.ts
-npm test --prefix frontend -- src/app/components/ui/button.test.tsx
-```
+host.
 
 The stack and browser suites require their documented local services. Consult
 `docs/frontend-testing.md`, `docs/e2e-ci.md`, and `docs/safe-local-testing.md`
 before running them. New behavior should normally have a regression test at
 the lowest useful layer: unit first, route integration second, and Playwright
-only when a real browser flow is necessary.
-
-`npm run test:coverage --prefix frontend` enforces coverage thresholds (100%
-statements, functions and lines) after the tests pass. Judge it by its exit
-code or by the `ERROR: Coverage for ...` lines, not by the test counts alone:
-every test can pass and the run still fail CI.
+only when a real browser flow is necessary. Tests must not time the code or
+depend on another test's setup; `docs/ci.md` ("Flaky tests") lists the rules.
 
 ### Watching CI and the staging deploy
 
-A push to `main` runs `CI`, and a green `CI` triggers `Deploy staging`
-(`.github/workflows/deploy-staging.yml`) for the same commit; a red one skips
-the deploy. Watch both with the authenticated `gh` CLI, never unauthenticated
-`curl` against the GitHub API, which is limited to 60 requests an hour and
-fails partway through a poll loop:
+A push to `main` runs `CI`, and a green `CI` triggers `Deploy staging` for
+the same commit. Watch both with the authenticated `gh` CLI, never
+unauthenticated `curl` against the GitHub API, which is limited to 60
+requests an hour:
 
 ```bash
 sha=$(git rev-parse HEAD)
-gh run list --commit "$sha" --json name,status,conclusion,databaseId
 gh run watch "$(gh run list --commit "$sha" --workflow CI --json databaseId --jq '.[0].databaseId')" --exit-status
 gh run list --commit "$sha" --workflow "Deploy staging" --json status,conclusion
 gh run view <run id> --log-failed   # why a run failed
 ```
 
-A run appears a few seconds after the push, and `Deploy staging` only after
-`CI` completes. A deploy that is `skipped` means `CI` did not pass; it is not
-a deploy failure.
+A `skipped` deploy means `CI` did not pass. Scheduled checks report to
+standing issues labelled `nightly` and `security`; look at them when starting
+work.
 
 When changing dependencies, update the `package-lock.json` belonging to the
 affected package. Before handing off work, run `git diff --check`, inspect the

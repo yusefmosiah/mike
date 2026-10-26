@@ -1,9 +1,25 @@
 name: security
 
+# Daily, and whenever a lockfile changes. A new advisory published against an
+# unchanged dependency is news, not a broken commit, so it no longer turns
+# every push red; the daily run reports it (docs/ci.md).
 on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "scripts/audit-gate*"
+      - ".github/workflows/security.yml"
   pull_request:
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "scripts/audit-gate*"
+      - ".github/workflows/security.yml"
 
 # Don't pile up runs on rapid pushes to the same PR: a new push cancels the
 # superseded run so it stops holding job slots (the org's concurrent-job cap is
@@ -87,3 +103,21 @@ jobs:
           node-version: 22
       - name: Dependency security audit
         run: node "$GITHUB_WORKSPACE/scripts/audit-gate.mjs"
+
+  # The daily run's outcome goes to one standing issue labelled `security`
+  # (scripts/ci/report-scheduled-run.sh): opened once, closed when green.
+  report:
+    name: Report
+    needs: [audit-gate-tests, dependency-audit]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Update the standing issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/ci/report-scheduled-run.sh security "A dependency has a new security advisory"

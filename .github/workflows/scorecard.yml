@@ -1,16 +1,17 @@
 # OpenSSF Scorecard: automated checks of this repo's own security posture
 # (branch protection, token permissions, pinned dependencies, ...).
 #
-# Runs on pushes to main — Scorecard rates the repo, not
-# a PR's diff, so there is no pull_request trigger. publish_results: true
+# Runs weekly — Scorecard rates the repo's settings, not a commit, so a
+# run per push measured the same thing again; there is no pull_request trigger. publish_results: true
 # sends the score to the OpenSSF public API (which enables the README badge
 # and is what other tools query); that upload is signed via OIDC, hence
 # id-token: write. Results also land in the Security tab as SARIF.
 name: Scorecard
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
 
 permissions: read-all
 

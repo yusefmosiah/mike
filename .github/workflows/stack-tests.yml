@@ -14,11 +14,22 @@
 # The keys used are the compose file's well-known local demo values.
 name: Stack tests
 
+# Only when the backend, the shared packages or the stack definition change.
 on:
   push:
     branches: [main]
+    paths:
+      - "backend/**"
+      - "packages/**"
+      - "docker-compose.yml"
+      - ".github/workflows/stack-tests.yml"
   # Include stacked PRs whose base is another feature branch.
   pull_request:
+    paths:
+      - "backend/**"
+      - "packages/**"
+      - "docker-compose.yml"
+      - ".github/workflows/stack-tests.yml"
   workflow_dispatch:
 
 # Booting the stack is one of the slower jobs in the repo, so cancel runs

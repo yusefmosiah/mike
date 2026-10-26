@@ -1,0 +1,79 @@
+# Nightly: the checks that do not gate the staging deploy.
+#
+# - Inherited features not in active use: the Word add-in, Google Workspace
+#   connections and tabular reviews. Their checks also run when their own
+#   files change, but a change to shared code that breaks one of them is
+#   found here, overnight, instead of blocking an unrelated deploy.
+# - The browser end-to-end suite (e2e.yml), which needs a full stack and
+#   runs only on pull requests otherwise.
+#
+# The outcome goes to one standing issue labelled `nightly`: opened (or
+# commented on) when anything fails, closed when a night is green again, so a
+# failure is reported once instead of on every push. See docs/ci.md.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  word-addin:
+    name: Word add-in
+    uses: ./.github/workflows/word-addin.yml
+
+  e2e:
+    name: End-to-end
+    uses: ./.github/workflows/e2e.yml
+
+  google-workspace-db:
+    name: Google Workspace approval database guarantees
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: bash backend/scripts/test-google-workspace-db.sh
+
+  dormant-tests:
+    name: Dormant feature unit tests (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+      - run: npm ci
+      - run: npm run test:dormant
+
+  report:
+    name: Report
+    needs: [word-addin, e2e, google-workspace-db, dormant-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Update the standing issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/ci/report-scheduled-run.sh nightly "Nightly checks are failing"

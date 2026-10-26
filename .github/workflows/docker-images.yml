@@ -14,19 +14,16 @@
 # apt layers are paid once per lockfile change, not once per run.
 name: Docker images
 
+# Called by ci.yml, so the images gate the staging deploy, and runnable by
+# hand. It has no concurrency group of its own: ci.yml's groups each run by
+# commit on main, where a branch-wide group here cancelled one push's builds
+# whenever the next push arrived.
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches: [main]
-  # Include stacked PRs whose base is another feature branch.
-  pull_request:
 
 permissions:
   contents: read
-
-concurrency:
-  group: docker-images-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:

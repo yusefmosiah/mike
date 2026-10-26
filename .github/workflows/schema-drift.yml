@@ -33,11 +33,25 @@
 # Everything runs on the runner: no secrets, no external services.
 name: Schema drift
 
+# Only when the schema, the migrations or the scripts that check them change:
+# nothing else can make them drift.
 on:
   push:
     branches: [main]
+    paths:
+      - "backend/schema.sql"
+      - "backend/migrations/**"
+      - "backend/scripts/**"
+      - "docker-compose.yml"
+      - ".github/workflows/schema-drift.yml"
   # Include stacked PRs whose base is another feature branch.
   pull_request:
+    paths:
+      - "backend/schema.sql"
+      - "backend/migrations/**"
+      - "backend/scripts/**"
+      - "docker-compose.yml"
+      - ".github/workflows/schema-drift.yml"
   workflow_dispatch:
 
 concurrency:

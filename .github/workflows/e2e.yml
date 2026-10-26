@@ -19,7 +19,11 @@
 # auth.setup.ts creates only the isolated logout account. No login secret is needed.
 name: e2e
 
+# Nobody opens pull requests here today (changes are pushed to main), so the
+# suite also runs nightly through nightly.yml, production renderer only;
+# a failure there is reported to the standing issue (docs/ci.md).
 on:
+  workflow_call:
   workflow_dispatch:
   # Include stacked PRs whose base is another feature branch.
   pull_request:
@@ -32,7 +36,7 @@ concurrency:
 # Development stress (the `next dev` renderer) is 3-4x slower than the
 # production suite — ~25-35 min against ~7 — and was the last check to finish
 # on every slow PR. It runs on manual dispatch and on any PR carrying
-# the `stress` label; ordinary PR pushes run only the production suite. Add the
+# the `stress` label (not nightly); ordinary PR pushes run only the production suite. Add the
 # label to PRs that touch streaming, render loops or effect dependencies; it
 # takes effect on the next push (or close + reopen the PR). There is deliberately
 # no `labeled` trigger: a run started by an unrelated label would report every
@@ -57,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        renderer: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
+        renderer: ${{ fromJSON((github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
         group: [assistant, project, rest]
     runs-on: ubuntu-latest
     env:
@@ -65,6 +69,9 @@ jobs:
       SENTRY_DISABLED: "true"
       NEXT_PUBLIC_SENTRY_DISABLED: "true"
       E2E_WORKERS: "2"
+      # Nightly only: a test that passes only on a retry fails the run, so it
+      # reaches the `nightly` issue instead of hiding behind a green check.
+      E2E_FAIL_ON_FLAKY: ${{ github.event_name == 'schedule' && '1' || '' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -130,7 +137,7 @@ jobs:
       fail-fast: false
       matrix:
         # The development leg only exists when stress is opted in (see above).
-        renderer: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
+        renderer: ${{ fromJSON((github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
     runs-on: ubuntu-latest
     env:
       # Login credentials come from e2e/users.ts; pin only the browser origin.
@@ -139,6 +146,7 @@ jobs:
       # Parallel Playwright workers, each with its own account (e2e/users.ts).
       # The runner has 4 vCPUs shared with Postgres, the API and Next.
       E2E_WORKERS: "3"
+      E2E_FAIL_ON_FLAKY: ${{ github.event_name == 'schedule' && '1' || '' }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -166,10 +174,7 @@ jobs:
       # Playwright transpiles TypeScript without typechecking. Keep missing
       # helpers and stale fixture signatures from hiding in gated browser flows.
       - name: Typecheck browser specs
-        run: >-
-          npx tsc --ignoreConfig --noEmit --module nodenext
-          --moduleResolution nodenext --target es2022 --skipLibCheck
-          --esModuleInterop --types node e2e/*.ts playwright.config.ts
+        run: npm run typecheck:e2e
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
