@@ -241,12 +241,6 @@ for (const [name, viewport] of [
             await expect(page.getByText("Thought 0 weighs the clause.")).toBeVisible();
             await expect(page.getByRole("button", { name: /show (more|less)|thought process/i })).toHaveCount(0);
         });
-                observer.observe(content);
-                setTimeout(() => { observer.disconnect(); resolve({ frames, hidden }); }, 1_500);
-            }));
-            expect(result.frames, "the thought kept growing").toBeGreaterThan(10);
-            expect(result.hidden, "frames painted with the newest thought outside the window").toEqual([]);
-        });
 
         test("Enter starts a new line and Cmd/Ctrl+Enter sends", async ({ page }) => {
             await stubBackend(page);
