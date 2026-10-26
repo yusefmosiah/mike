@@ -115,7 +115,6 @@ describe("upload-session rate-limit configuration", () => {
       mutationMax: 300,
       pollingWindowMinutes: 15,
       pollingMax: 3_000,
-      sessionCreationMaxPerHour: 50,
     });
   });
 
@@ -126,23 +125,13 @@ describe("upload-session rate-limit configuration", () => {
         RATE_LIMIT_UPLOAD_SESSION_MUTATION_MAX: "900",
         RATE_LIMIT_UPLOAD_SESSION_POLL_WINDOW_MINUTES: "20",
         RATE_LIMIT_UPLOAD_SESSION_POLL_MAX: "6000",
-        RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_PER_HOUR: "250",
       }),
     ).toEqual({
       mutationWindowMinutes: 10,
       mutationMax: 900,
       pollingWindowMinutes: 20,
       pollingMax: 6_000,
-      sessionCreationMaxPerHour: 250,
     });
-  });
-
-  it("clamps an hourly creation limit the database cannot represent", () => {
-    expect(
-      uploadSessionRateLimitConfiguration({
-        RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_PER_HOUR: "9999999999",
-      }).sessionCreationMaxPerHour,
-    ).toBe(1_000_000);
   });
 });
 

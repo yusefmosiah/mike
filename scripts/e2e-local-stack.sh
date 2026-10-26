@@ -80,12 +80,9 @@ export MIKE_MODEL_CONFIG_JSON="${MIKE_MODEL_CONFIG_JSON:-$E2E_MODEL_CONFIG}"
 # The suite fires more uploads and logins in one run than the default
 # upload-session and auth caps allow; once tripped those calls 429 and waits
 # time out. Same overrides CI uses — e2e is not testing throttling.
-for cap in UPLOAD_SESSION_MUTATION UPLOAD_SESSION_POLL UPLOAD_SESSION_CREATE_MAX_PER_HOUR AUTH_LOGIN AUTH_ACCOUNT \
+for cap in UPLOAD_SESSION_MUTATION UPLOAD_SESSION_POLL AUTH_LOGIN AUTH_ACCOUNT \
     AUTH_EMAIL AUTH_FLOW AUTH_MFA; do
-    case "$cap" in
-    *_PER_HOUR) export "RATE_LIMIT_${cap}=100000" ;;
-    *) export "RATE_LIMIT_${cap}_MAX=100000" ;;
-    esac
+    export "RATE_LIMIT_${cap}_MAX=100000"
 done
 
 # Production runs the catalog sync as a release job before the backend starts;

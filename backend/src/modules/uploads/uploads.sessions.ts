@@ -380,9 +380,7 @@ export async function sealStagedFiles(
 // ---------------------------------------------------------------------------
 
 /**
- * Create the session row and return the signed URLs for its manifest. The
- * hourly ceiling is enforced inside the RPC (one transaction with the insert),
- * so the caller passes its configured limit rather than counting rows first.
+ * Create the session row and return the signed URLs for its manifest.
  */
 export async function createUploadSession(
   db: Db,
@@ -390,7 +388,6 @@ export async function createUploadSession(
     sessionId: string;
     userId: string;
     manifest: ParsedUploadSessionRequest;
-    hourlySessionLimit: number;
   },
 ): Promise<UploadResult<Record<string, unknown>>> {
   const { sessionId, userId, manifest } = args;
@@ -402,15 +399,8 @@ export async function createUploadSession(
     target_destination: manifest.destination,
     target_expires_at: expiresAt,
     target_files: manifest.files,
-    target_hourly_session_limit: args.hourlySessionLimit,
   });
   if (error) {
-    if (error.message?.includes("upload_session_rate_limit_exceeded")) {
-      return failure(429, {
-        code: "upload_session_rate_limit_exceeded",
-        detail: "Too many upload sessions. Please try again later.",
-      });
-    }
     if (error.message?.includes("upload_target_busy")) {
       return failure(409, {
         code: "upload_target_busy",

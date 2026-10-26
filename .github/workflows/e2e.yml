@@ -289,7 +289,6 @@ jobs:
             # one serial run's needs.
             echo "RATE_LIMIT_UPLOAD_SESSION_MUTATION_MAX=100000"
             echo "RATE_LIMIT_UPLOAD_SESSION_POLL_MAX=100000"
-            echo "RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_PER_HOUR=100000"
             echo "RATE_LIMIT_AUTH_LOGIN_MAX=100000"
             echo "RATE_LIMIT_AUTH_ACCOUNT_MAX=100000"
             echo "RATE_LIMIT_AUTH_EMAIL_MAX=100000"

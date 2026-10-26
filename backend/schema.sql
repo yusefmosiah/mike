@@ -4412,8 +4412,7 @@ create or replace function public.create_upload_session(
   target_purpose text,
   target_destination jsonb,
   target_expires_at timestamptz,
-  target_files jsonb,
-  target_hourly_session_limit integer default 50
+  target_files jsonb
 )
 returns void
 language plpgsql
@@ -4423,7 +4422,6 @@ as $$
 declare
   manifest_file_count integer;
   manifest_total_bytes bigint;
-  recent_session_count integer;
 begin
   if jsonb_typeof(target_files) <> 'array' then
     raise exception using errcode = '22023', message = 'invalid_upload_manifest';
@@ -4433,9 +4431,6 @@ begin
   if target_expires_at <= now()
      or target_expires_at > now() + interval '31 minutes' then
     raise exception using errcode = '22023', message = 'invalid_upload_session_expiry';
-  end if;
-  if target_hourly_session_limit not between 1 and 1000000 then
-    raise exception using errcode = '22023', message = 'invalid_upload_session_rate_limit';
   end if;
 
   select count(*), coalesce(sum(file_row.expected_size_bytes), 0)
@@ -4534,16 +4529,6 @@ begin
       and status in ('pending_upload', 'verifying', 'uploaded', 'processing')
   ) then
     raise exception using errcode = 'P0001', message = 'upload_target_busy';
-  end if;
-
-  select count(*)
-    into recent_session_count
-  from public.upload_sessions
-  where user_id = target_user_id
-    and created_at > now() - interval '1 hour';
-
-  if recent_session_count >= target_hourly_session_limit then
-    raise exception using errcode = 'P0001', message = 'upload_session_rate_limit_exceeded';
   end if;
 
   insert into public.upload_sessions (
@@ -7408,7 +7393,7 @@ revoke all on function public.renew_tabular_review_generation(uuid, uuid, intege
   from public, anon, authenticated;
 revoke all on function public.finish_tabular_review_generation(uuid, uuid)
   from public, anon, authenticated;
-revoke all on function public.create_upload_session(uuid, uuid, text, jsonb, timestamptz, jsonb, integer)
+revoke all on function public.create_upload_session(uuid, uuid, text, jsonb, timestamptz, jsonb)
   from public, anon, authenticated;
 revoke all on function public.extend_upload_session_expiry(uuid, integer, integer)
   from public, anon, authenticated;
@@ -7511,7 +7496,7 @@ grant execute
 grant execute on function public.refresh_memory_file_status(uuid, bigint, uuid, text, text)
   to service_role;
 grant execute
-  on function public.create_upload_session(uuid, uuid, text, jsonb, timestamptz, jsonb, integer)
+  on function public.create_upload_session(uuid, uuid, text, jsonb, timestamptz, jsonb)
   to service_role;
 grant execute
   on function public.extend_upload_session_expiry(uuid, integer, integer)
@@ -8435,5 +8420,6 @@ insert into public.schema_migrations (filename) values
   ('20261025_01_dark_mode_follows_system.sql'),
   ('20261026_01_computer_devices.sql'),
   ('20261026_02_computer_device_platform.sql'),
-  ('20261026_03_media_upload_types.sql')
+  ('20261026_03_media_upload_types.sql'),
+  ('20261026_04_remove_upload_session_limit.sql')
 on conflict (filename) do nothing;

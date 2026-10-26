@@ -274,9 +274,10 @@ session, whose status is derived from its file rows; there is no separate
 session-wide completion request.
 
 Upload sessions accept at most 50 supported files, 100 MB per file, and 2 GB
-in total. Users may run multiple independent upload sessions concurrently and,
-by default, may create at most 50 sessions per hour. Upload-session mutation,
-polling, and hourly creation limits can be overridden with the
+in total. Users may run multiple independent upload sessions concurrently. Sessions
+have no hourly cap of their own, because every save in the editor is one;
+creating them counts against the upload-session request limit instead.
+Upload-session mutation and polling limits can be overridden with the
 `RATE_LIMIT_UPLOAD_SESSION_*` environment variables documented in
 `backend/.env.example`; missing or invalid values use the documented defaults.
 Sessions that update the same mutable document version remain mutually

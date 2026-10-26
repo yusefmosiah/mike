@@ -102,9 +102,9 @@ describe("upload session routes", () => {
       headers: { "Content-Type": "application/pdf" },
     });
     expect(mocks.rpc).toHaveBeenCalledOnce();
-    expect(mocks.rpc).toHaveBeenCalledWith(
-      "create_upload_session",
-      expect.objectContaining({ target_hourly_session_limit: 50 }),
+    // Sessions have no hourly cap: every editor save is one.
+    expect(mocks.rpc.mock.calls[0][1]).not.toHaveProperty(
+      "target_hourly_session_limit",
     );
     expect(mocks.getSignedUploadUrl).toHaveBeenCalledTimes(2);
     // The declared byte count is signed into the URL; the browser supplies the
@@ -170,21 +170,6 @@ describe("upload session routes", () => {
 
     expect(response.status).toBe(409);
     expect(response.body.code).toBe("upload_target_busy");
-    expect(mocks.getSignedUploadUrl).not.toHaveBeenCalled();
-  });
-
-  it("applies the upload rate limit to sessions instead of individual files", async () => {
-    mocks.rpc.mockResolvedValue({
-      error: { message: "upload_session_rate_limit_exceeded" },
-    });
-
-    const response = await request(app)
-      .post("/upload-sessions")
-      .send(manifest(50));
-
-    expect(response.status).toBe(429);
-    expect(response.body.code).toBe("upload_session_rate_limit_exceeded");
-    expect(mocks.rpc).toHaveBeenCalledOnce();
     expect(mocks.getSignedUploadUrl).not.toHaveBeenCalled();
   });
 

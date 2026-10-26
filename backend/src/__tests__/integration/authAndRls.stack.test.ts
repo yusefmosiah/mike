@@ -161,7 +161,6 @@ maybeDescribe("auth contract + RLS deny-all firewall", () => {
         target_purpose: "document_create",
         target_destination: { scope: "standalone" },
         target_expires_at: new Date(Date.now() + 20 * 60_000).toISOString(),
-        target_hourly_session_limit: 50,
         target_files: [
           {
             id: fileId,
@@ -220,7 +219,6 @@ maybeDescribe("auth contract + RLS deny-all firewall", () => {
         target_purpose: "document_create",
         target_destination: { scope: "standalone" },
         target_expires_at: new Date(Date.now() + 20 * 60_000).toISOString(),
-        target_hourly_session_limit: 50,
         target_files: files,
       });
       expect(created.error).toBeNull();

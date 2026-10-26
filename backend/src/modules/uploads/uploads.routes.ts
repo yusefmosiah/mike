@@ -135,7 +135,6 @@ uploadSessionsRouter.post(
       sessionId,
       userId,
       manifest,
-      hourlySessionLimit: uploadRateLimits.sessionCreationMaxPerHour,
     });
     if (!created.ok) return void sendUploadFailure(res, created);
     res.status(201).json(created.data);

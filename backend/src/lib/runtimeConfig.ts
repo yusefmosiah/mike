@@ -26,11 +26,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-// The hourly session ceiling is passed straight into a PostgreSQL integer
-// argument, so an oversized override would turn every session create into a
-// numeric-overflow failure rather than a looser limit.
-const MAX_UPLOAD_SESSIONS_PER_HOUR = 1_000_000;
-
 export function uploadSessionRateLimitConfiguration(
   env: NodeJS.ProcessEnv = process.env,
 ) {
@@ -47,11 +42,6 @@ export function uploadSessionRateLimitConfiguration(
       env,
     ),
     pollingMax: envInt("RATE_LIMIT_UPLOAD_SESSION_POLL_MAX", 3_000, env),
-    sessionCreationMaxPerHour: clamp(
-      envInt("RATE_LIMIT_UPLOAD_SESSION_CREATE_MAX_PER_HOUR", 50, env),
-      1,
-      MAX_UPLOAD_SESSIONS_PER_HOUR,
-    ),
   };
 }
 
