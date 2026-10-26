@@ -35,11 +35,24 @@ export const CLAUDE_MODEL_LABEL = "Claude Sonnet 4.6";
  * includes the selection even in compact, icon-only project composers.
  */
 export async function selectClaudeModel(page: Page) {
+    await selectModel(page, CLAUDE_MODEL_LABEL, "Anthropic");
+}
+
+/**
+ * Picks a model in ModelToggle. The menu lists models under collapsible
+ * provider groups and opens only the selected model's group, so the model's
+ * own group (a declared model's defaults to "Configured") is expanded first
+ * when its item is hidden.
+ */
+export async function selectModel(page: Page, label: string, group: string) {
     const trigger = page.getByRole("button", { name: "Choose model", exact: true });
     await expect(trigger).toBeVisible({ timeout: 10_000 });
     await trigger.click();
-    await page.getByRole("menuitem", { name: CLAUDE_MODEL_LABEL }).click();
-    await expect(trigger).toHaveAttribute("title", `Choose model — ${CLAUDE_MODEL_LABEL}`, {
+    const groupItem = page.getByRole("menuitem", { name: group, exact: true });
+    await expect(groupItem).toBeVisible();
+    if ((await groupItem.getAttribute("aria-expanded")) !== "true") await groupItem.click();
+    await page.getByRole("menuitem", { name: label }).click();
+    await expect(trigger).toHaveAttribute("title", `Choose model — ${label}`, {
         timeout: 5_000,
     });
 }

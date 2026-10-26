@@ -22,6 +22,7 @@
 import type { Browser, BrowserContext, Response } from "@playwright/test";
 import { test, expect, type Page } from "./fixtures";
 import { completeOnboardingIfRequired } from "./onboarding";
+import { selectModel } from "./helpers";
 import { ensureUser, type E2eAccount } from "./users";
 
 const STUB_MODEL_LABEL = "E2E placeholder";
@@ -122,12 +123,7 @@ test.describe("firm thread handoff", () => {
             await page.goto("/assistant");
             const firstInput = page.getByPlaceholder("How can I help?");
             await expect(firstInput).toBeVisible();
-            const modelTrigger = page.getByRole("button", {
-                name: "Choose model",
-                exact: true,
-            });
-            await modelTrigger.click();
-            await page.getByRole("menuitem", { name: STUB_MODEL_LABEL }).click();
+            await selectModel(page, STUB_MODEL_LABEL, "Configured");
             await firstInput.fill(opening);
             await firstInput.press("ControlOrMeta+Enter");
             await page.waitForURL(/\/assistant\/chat\/[^/]+$/, { timeout: 45_000 });

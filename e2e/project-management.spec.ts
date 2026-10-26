@@ -190,14 +190,15 @@ test("create a folder inside a project", async ({ page }) => {
 
 // ─── Test 4: File upload type validation (wrong type rejected) ────────────────
 
-test("file upload type validation — .txt file is rejected", async ({ page }) => {
+test("file upload type validation — a shell script is rejected", async ({ page }) => {
     const projectName = `E2E Proj ${Date.now()}`;
     await createProject(page, projectName);
 
     /*
      * After createProject we are on the project's Documents tab.
-     * The "Add Documents" button opens AddDocumentsModal which has a
-     * hidden file input with accept=".pdf,.docx,.doc".
+     * The "Add Documents" button opens AddDocumentsModal, which accepts
+     * documents, images and plain text (.txt, .md, .csv, .html upload since
+     * ec855a58), so a shell script stands in for an unsupported type.
      *
      * Validation is now two layers, and this test covers both:
      *   (a) UI: AddDocumentsModal filters unsupported files client-side
@@ -235,9 +236,9 @@ test("file upload type validation — .txt file is rejected", async ({ page }) =
                 },
                 files: [
                     {
-                        client_id: "unsupported-text-file",
-                        filename: "test.txt",
-                        size_bytes: 52,
+                        client_id: "unsupported-script-file",
+                        filename: "install.sh",
+                        size_bytes: 21,
                     },
                 ],
             }),
@@ -248,10 +249,10 @@ test("file upload type validation — .txt file is rejected", async ({ page }) =
         body.append(
             "file",
             new Blob(
-                ["This is a plain text file that should be rejected."],
-                { type: "text/plain" },
+                ["echo not a document\n"],
+                { type: "application/x-sh" },
             ),
-            "test.txt",
+            "install.sh",
         );
         const legacyResponse = await fetch(`/api/projects/${id}/documents`, {
             method: "POST",
@@ -274,7 +275,7 @@ test("file upload type validation — .txt file is rejected", async ({ page }) =
         code: "invalid_upload_session",
     });
     expect(uploadResponses.session.body.detail).toContain(
-        "Unsupported file type: txt",
+        "Unsupported file type: sh",
     );
     expect(uploadResponses.legacy).toEqual({
         status: 410,
@@ -302,19 +303,19 @@ test("file upload type validation — .txt file is rejected", async ({ page }) =
      * logic (not the accept attribute) is what's under test.
      */
     await fileChooser.setFiles({
-        name: "test.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("This is a plain text file that should be rejected."),
+        name: "install.sh",
+        mimeType: "application/x-sh",
+        buffer: Buffer.from("echo not a document\n"),
     });
 
     // REGRESSION: fails if the visible unsupported-type warning is removed
-    // (UNSUPPORTED_DOCUMENT_WARNING_MESSAGE in documentUploadValidation.ts).
+    // (UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE in documentUploadValidation.ts),
+    // which names the file it left out.
     await expect(
-        page.getByText(
-            "Unsupported file type. Only PDF, Word, Excel, and PowerPoint files can be uploaded.",
-        ),
+        page.getByText(/^Unsupported file type\. .* Not added: install\.sh\.$/),
     ).toBeVisible({ timeout: 10_000 });
 
-    /* The .txt file must not appear in the modal's document list */
-    await expect(page.getByText("test.txt")).not.toBeVisible();
+    /* The script must not appear in the modal's document list (exact match,
+       so the warning that names it does not count). */
+    await expect(page.getByText("install.sh", { exact: true })).not.toBeVisible();
 });

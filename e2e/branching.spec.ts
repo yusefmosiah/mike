@@ -16,16 +16,12 @@
  * Auth: runs signed in as this worker's account (e2e/fixtures.ts).
  */
 import { test, expect, type Page } from "./fixtures";
-import { createProject } from "./helpers";
+import { createProject, selectModel } from "./helpers";
 
 const STUB_MODEL_LABEL = "E2E placeholder";
 
 async function selectStubModel(page: Page) {
-    const trigger = page.getByRole("button", { name: "Choose model", exact: true });
-    await expect(trigger).toBeVisible();
-    await trigger.click();
-    await page.getByRole("menuitem", { name: STUB_MODEL_LABEL }).click();
-    await expect(trigger).toHaveAttribute("title", `Choose model — ${STUB_MODEL_LABEL}`);
+    await selectModel(page, STUB_MODEL_LABEL, "Configured");
 }
 
 /** The answer to `prompt`, matched by the stub's "Stub answer N to: ..." text. */
