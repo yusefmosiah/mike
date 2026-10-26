@@ -81,7 +81,8 @@ describe("AuthProvider", () => {
         await waitFor(() =>
             expect(screen.getByTestId("user")).toHaveTextContent("signed-out"),
         );
-        expect(resetDictationVocabulary).toHaveBeenCalledTimes(1);
+        // An effect after the signed-out render does the reset.
+        await waitFor(() => expect(resetDictationVocabulary).toHaveBeenCalledTimes(1));
     });
 
     it("surfaces an initial session failure without leaving loading stuck", async () => {
