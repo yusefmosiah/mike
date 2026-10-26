@@ -101,13 +101,72 @@ entries.**
    - which window or document;
    - whether input was active or idle;
    - which matter, from our app's context.
-2. **Agent runs:** what the agent did, for how long, and at what cost. These
-   are never converted into billable hours by default.
+2. **Machine work:** what our computers did, with the same matter, work-type
+   and evidence fields as human activity. It is never converted into billable
+   hours by default.
 3. **Time entries:** what the lawyer approved, each with its matter, hours,
    task code and narrative, and a link back to the activity behind it.
 
-Keeping agent runs separate is what lets us follow Opinion 512. It also lets
-a firm show a client exactly where human time ended and machine work began.
+Keeping machine work separate is what lets us follow Opinion 512. It also
+lets a firm show a client exactly where human time ended and machine work
+began.
+
+### Machine work: measure computers, not agents
+
+"Agent" is not a stable unit. The same job can run as one agent for ten
+minutes or as five sub-agents for two minutes each. So the record describes
+machines working, not agents.
+
+**One span is one machine doing one kind of work on one matter.** Machines
+include:
+
+- a model call;
+- a tool or code-mode run;
+- a computer-use session on a user's Mac;
+- a document-processing job.
+
+**Each span records:**
+
+- the matter, through the chat, project or document it serves;
+- the work type, from what it did: research, drafting, review, extraction,
+  comparison, operating an app, filing, and so on;
+- start and end;
+- the resources it used:
+  - model tokens and cost;
+  - tool and code run time;
+  - computer-use actions;
+  - pages processed;
+- what it produced: documents, edits, citations checked;
+- the request that caused it, which ties it back to the person who asked.
+
+**Totals per matter and work type:**
+
+| Measure | How it adds up | Answers |
+|---|---|---|
+| Elapsed machine time | The union of span intervals, so parallel work counts once | "How long was something working on this?" |
+| Machine effort | The sum of span durations, so five parallel sub-agents count five times | "How much work was done?" |
+| Concurrency | Effort divided by elapsed | "How parallel was it?" |
+| Cost and resources | Sums | "What did it cost?" |
+| Output | Counts | "What came out of it?" |
+
+These totals are the same whether the work ran as one agent or many, so
+changing the orchestration doesn't change the books.
+
+**Computer use fits the same spans.** A computer-use session on a user's
+Mac is machine work with a device. Its spans record:
+
+- the apps and windows it operated, attributed to matters with the same
+  rules as human desktop activity;
+- the actions it took.
+
+Through the attribution rules, human desktop time and computer-use time on
+the same Mac land on the same matters. A firm can then compare person and
+machine directly: "on the Acme matter this week: 6.2 hours of lawyer time,
+41 minutes of machine time, 3 hours 10 minutes of machine effort, $4.80".
+
+**Build it on what exists.** Turn runs (`assistantTurnRuns`) and model costs
+(`docs/model-costs.md`) already record some of this. Matter and work type are
+the new fields.
 
 ### Phone sessions (the central case)
 
@@ -211,7 +270,7 @@ The humanizer reads the profile locally on the same machine.
    - App: a review screen.
 
    This needs no new permissions and covers the central case.
-2. **The agent-run ledger,** shown alongside, never as hours.
+2. **The machine-work ledger** (spans per matter and work type, elapsed vs effort), shown alongside human time, never as hours.
 3. **Desktop activity** from idle time, the frontmost app and window titles,
    matter rules, and the unassigned tray.
 4. **Billing export** and client-guideline checks.
