@@ -53,8 +53,18 @@ describe("resolveDocumentViewType", () => {
     expect(resolveDocumentViewType({ filename: "Report.HTML" })).toBe("html");
   });
 
+  it("plays audio and video in the media player, by type, MIME or filename", () => {
+    expect(resolveDocumentViewType({ fileType: "mp3" })).toBe("audio");
+    expect(resolveDocumentViewType({ fileType: "audio/mp4" })).toBe("audio");
+    expect(resolveDocumentViewType({ filename: "Interview.WAV" })).toBe("audio");
+    expect(resolveDocumentViewType({ fileType: "video/quicktime" })).toBe("video");
+    expect(resolveDocumentViewType({ filename: "tour.webm", fileType: "media" })).toBe("video");
+  });
+
   it("names the panel type for a viewer, folding HTML into text", () => {
     expect(panelTypeForViewType("html")).toBe("text");
+    expect(panelTypeForViewType("audio")).toBe("media");
+    expect(panelTypeForViewType("video")).toBe("media");
     expect(panelTypeForViewType("docx")).toBe("docx");
   });
 

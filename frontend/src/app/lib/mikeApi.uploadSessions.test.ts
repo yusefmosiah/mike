@@ -14,7 +14,7 @@ import {
     uploadStandaloneDocuments,
     uploadWorkflowAsset,
 } from "./mikeApi";
-import { uploadProcessingPollDelayMs } from "@/shared/api/uploadSessionClient";
+import { putTimeoutMs, uploadProcessingPollDelayMs } from "@/shared/api/uploadSessionClient";
 
 const fetchMock = vi.fn();
 const API_URL = "/api";
@@ -1196,5 +1196,12 @@ describe("upload session polling", () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe("putTimeoutMs", () => {
+    it("allows two minutes, or longer for a large file on a slow link", () => {
+        expect(putTimeoutMs(1024)).toBe(120_000);
+        expect(putTimeoutMs(100 * 1024 * 1024)).toBe(400_000);
     });
 });

@@ -37,6 +37,11 @@ describe("fileTypeKind", () => {
         expect(fileTypeKind("page.html")).toBe("html");
     });
 
+    it("knows audio and video", () => {
+        expect(["mp3", "talk.M4A", "wav", "ogg"].map(fileTypeKind)).toEqual(["audio", "audio", "audio", "audio"]);
+        expect(["mp4", "tour.mov", "webm"].map(fileTypeKind)).toEqual(["video", "video", "video"]);
+    });
+
     it("falls back to other for unknown, empty, or nullish input", () => {
         expect(fileTypeKind("sh")).toBe("other");
         expect(fileTypeKind("")).toBe("other");
@@ -59,6 +64,14 @@ describe("FileTypeIcon", () => {
         const { container } = render(<FileTypeIcon fileType="page.html" />);
         expect(imgOf(container)).toBeNull();
         expect(svgOf(container)).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("renders decorative icons for audio and video", () => {
+        for (const fileType of ["talk.mp3", "tour.mp4"]) {
+            const { container } = render(<FileTypeIcon fileType={fileType} />);
+            expect(imgOf(container)).toBeNull();
+            expect(svgOf(container)).toHaveAttribute("aria-hidden", "true");
+        }
     });
 
     it("renders the PDF icon image", () => {

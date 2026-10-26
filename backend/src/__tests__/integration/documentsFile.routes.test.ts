@@ -90,8 +90,13 @@ describe("GET /single-documents/:documentId/file", () => {
       contentType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    mocks.createFileReadStream.mockImplementation(() =>
-      Readable.from([Buffer.from([0x50, 0x4b, 0x03])]),
+    mocks.createFileReadStream.mockImplementation(
+      (_key: string, range?: { start: number; end: number }) => {
+        const bytes = Buffer.from([0x50, 0x4b, 0x03]);
+        return Readable.from([
+          range ? bytes.subarray(range.start, range.end + 1) : bytes,
+        ]);
+      },
     );
   });
 
@@ -121,6 +126,33 @@ describe("GET /single-documents/:documentId/file", () => {
       "documents/user-1/document-1/source.xlsx",
     );
     expect(mocks.downloadFile).not.toHaveBeenCalled();
+  });
+
+  it("serves a byte range, so a player can seek", async () => {
+    const response = await request(app)
+      .get("/single-documents/document-1/file")
+      .set("Authorization", "Bearer test")
+      .set("Range", "bytes=1-");
+
+    expect(response.status).toBe(206);
+    expect(response.headers["accept-ranges"]).toBe("bytes");
+    expect(response.headers["content-range"]).toBe("bytes 1-2/3");
+    expect(response.headers["content-length"]).toBe("2");
+    expect(mocks.createFileReadStream).toHaveBeenCalledWith(
+      "documents/user-1/document-1/source.xlsx",
+      { start: 1, end: 2 },
+    );
+  });
+
+  it("refuses a range past the end without opening a stream", async () => {
+    const response = await request(app)
+      .get("/single-documents/document-1/file")
+      .set("Authorization", "Bearer test")
+      .set("Range", "bytes=9-");
+
+    expect(response.status).toBe(416);
+    expect(response.headers["content-range"]).toBe("bytes */3");
+    expect(mocks.createFileReadStream).not.toHaveBeenCalled();
   });
 
   it("does not read storage when the caller cannot access the document", async () => {

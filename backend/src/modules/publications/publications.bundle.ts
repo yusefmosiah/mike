@@ -2,14 +2,17 @@
 // it is made. An HTML page becomes index.html plus the files it refers to by
 // relative path, found by name among the documents beside it (the same
 // project, or the publisher's library); Markdown, plain text and images get a
-// small page of their own; a PDF, or an Office file's PDF rendition, is served
+// small page of their own, as does audio and video (with the browser's
+// player); a PDF, or an Office file's PDF rendition, is served
 // as itself.
 
 import type { Db } from "../../lib/db";
 import { downloadFile } from "../../lib/storage";
 import {
+    isAudioFileType,
     isImageFileType,
     isPresentationDocumentType,
+    isVideoFileType,
     isWordDocumentType,
 } from "../../lib/documentTypes";
 import { contentTypeForPath, type PublicationKind } from "./publications.shared";
@@ -46,7 +49,8 @@ export type BundleResult =
     | { ok: false; code: "unsupported_type" | "no_rendition" | "too_large" | "unreadable" };
 
 export const MAX_BUNDLE_FILES = 200;
-export const MAX_BUNDLE_BYTES = 200 * 1024 * 1024;
+// Room for a page with a few videos; each file is a server-side copy.
+export const MAX_BUNDLE_BYTES = 500 * 1024 * 1024;
 
 export async function buildBundle(db: Db, source: BundleSource): Promise<BundleResult> {
     const { version } = source;
@@ -76,6 +80,27 @@ export async function buildBundle(db: Db, source: BundleSource): Promise<BundleR
             path: imagePath,
             storagePath: version.storage_path,
             contentType: contentTypeForPath(imagePath),
+            size: version.size_bytes ?? 0,
+        });
+        return { ok: true, title, bundle };
+    }
+
+    if (isAudioFileType(fileType) || isVideoFileType(fileType)) {
+        // A page with the browser's own player; the file is served beside
+        // it with byte ranges, so it streams and seeks.
+        const mediaPath = safeFilename(filename);
+        const src = escapeHtml(encodeURI(mediaPath));
+        const player = isVideoFileType(fileType)
+            ? `<video controls playsinline preload="metadata" src="${src}"></video>`
+            : `<audio controls preload="metadata" src="${src}"></audio>`;
+        const bundle = page(
+            title,
+            `<figure>${player}<figcaption>${escapeHtml(title)}</figcaption></figure>`,
+        );
+        bundle.files.push({
+            path: mediaPath,
+            storagePath: version.storage_path,
+            contentType: contentTypeForPath(mediaPath),
             size: version.size_bytes ?? 0,
         });
         return { ok: true, title, bundle };
@@ -283,6 +308,7 @@ main{max-width:46rem;margin:0 auto;padding:3rem 1rem 4rem;overflow-wrap:anywhere
 h1,h2,h3{line-height:1.25}
 a{color:inherit}
 img,video{max-width:100%;height:auto}
+audio{width:100%}
 figure{margin:0;text-align:center}
 pre{white-space:pre-wrap;background:var(--code);padding:1rem;border-radius:8px;font-size:15px}
 code{background:var(--code);padding:.1em .3em;border-radius:4px}

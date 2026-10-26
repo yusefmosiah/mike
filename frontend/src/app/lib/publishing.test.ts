@@ -17,7 +17,7 @@ const pub = (over: Partial<Publication> = {}): Publication => ({
 
 describe("isPublishable", () => {
     it("accepts the publishable types by name or type, and refuses the rest", () => {
-        for (const name of ["a.HTML", "a.pdf", "a.png", "a.jpeg", "a.md", "a.txt", "a.docx", "a.ppt"]) {
+        for (const name of ["a.HTML", "a.pdf", "a.png", "a.jpeg", "a.md", "a.txt", "a.docx", "a.ppt", "a.mp3", "a.MOV"]) {
             expect(isPublishable(name)).toBe(true);
         }
         expect(isPublishable("data", "pdf")).toBe(true);

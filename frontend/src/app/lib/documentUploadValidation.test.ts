@@ -5,7 +5,9 @@ import {
     MAX_IMAGE_UPLOAD_BYTES,
     SUPPORTED_ATTACHMENT_ACCEPT,
     UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE,
+    isAudioFilename,
     isImageFilename,
+    isVideoFilename,
     SUPPORTED_DOCUMENT_ACCEPT,
     UNSUPPORTED_DOCUMENT_WARNING_MESSAGE,
     incomingFiles,
@@ -153,6 +155,19 @@ describe("attachments: documents, images and text", () => {
         expect(formatUnsupportedDocumentWarning([file("run.sh")], { text: true })).toBe(
             `${UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE} Not added: run.sh.`,
         );
+    });
+
+    it("accepts audio and video only where attachments are, and names them by type", () => {
+        for (const name of ["talk.mp3", "memo.M4A", "take.wav", "loop.ogg", "tour.mp4", "clip.webm", "phone.MOV"]) {
+            expect(isSupportedDocumentFile(file(name), ATTACHMENTS)).toBe(true);
+            expect(isSupportedDocumentFile(file(name))).toBe(false);
+        }
+        expect(isSupportedDocumentFile(file("tour.mp4"), { images: true, text: true })).toBe(false);
+        expect(isAudioFilename("talk.MP3")).toBe(true);
+        expect(isVideoFilename("phone.mov")).toBe(true);
+        expect(isVideoFilename("talk.mp3")).toBe(false);
+        const recording = new File(["x"], "Recording", { type: "video/quicktime" });
+        expect(withTypedName(recording).name).toBe("Recording.mov");
     });
 
     it("refuses an SVG and an image over 20 MB, saying which", () => {

@@ -43,6 +43,7 @@ import {
 import {
   contentTypeForDocumentType,
   isImageFileType,
+  isMediaFileType,
   isPresentationDocumentType,
   isSpreadsheetDocumentType,
   isWordDocumentType,
@@ -56,6 +57,11 @@ import { BRAND } from "../../../../lib/brand";
 /** What reading an image as text answers: images reach the model as images. */
 function imageNotText(docLabel: string): string {
   return `${docLabel} is an image, not a text document. An image attached to a message is shown to you in that message; read_document and docs read text.`;
+}
+
+/** What reading audio or video as text answers: there is no text to read. */
+function mediaNotText(docLabel: string): string {
+  return `${docLabel} is an audio or video file, not a text document, so it has no text to read. It plays in the viewer; to show it on a page, refer to its filename in generate_html (<audio controls src="..."> or <video controls src="...">).`;
 }
 
 export function citationReminder(
@@ -2075,6 +2081,10 @@ export async function readDocumentContent(
       emitDocRead();
       return imageNotText(docLabel);
     }
+    if (isMediaFileType(docInfo.file_type)) {
+      emitDocRead();
+      return mediaNotText(docLabel);
+    }
     const loaded = await loadDocumentBytes({ docInfo, documentId, db, versionId });
     if (!loaded) {
       devLog(
@@ -2577,6 +2587,7 @@ export async function documentModelFor(params: {
     return { ok: false, error: `${docLabel} is the document open in Word; read it with tools.read_document.` };
   }
   if (isImageFileType(docInfo.file_type)) return { ok: false, error: imageNotText(docLabel) };
+  if (isMediaFileType(docInfo.file_type)) return { ok: false, error: mediaNotText(docLabel) };
   const documentId = docIndex?.[docLabel]?.document_id;
   const readIdentity = await getTurnReadIdentity({ docLabel, docStore, docIndex, db });
   const versionId = readIdentity?.versionId ?? docIndex?.[docLabel]?.version_id ?? null;

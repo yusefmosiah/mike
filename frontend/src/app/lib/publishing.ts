@@ -5,6 +5,7 @@ import type { Publication } from "@/app/components/shared/types";
 const PUBLISHABLE_EXTENSIONS = new Set([
     "html", "pdf", "png", "jpg", "jpeg", "webp", "gif", "md", "txt",
     "docx", "doc", "pptx", "ppt",
+    "mp3", "m4a", "wav", "ogg", "mp4", "webm", "mov",
 ]);
 
 export const MIN_PASSWORD_LENGTH = 12;

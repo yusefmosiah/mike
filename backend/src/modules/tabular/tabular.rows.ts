@@ -10,6 +10,7 @@ import { downloadFile } from "../../lib/storage";
 import { attachActiveVersionPaths } from "../../lib/documentVersions";
 import { filterAccessibleDocumentIds } from "../../lib/access";
 import { extractDocumentMarkdown } from "./tabular.extract";
+import { isMediaFileType } from "../../lib/documentTypes";
 import { type Db } from "./tabular.shared";
 
 export type ReviewRow = {
@@ -153,7 +154,8 @@ export async function loadRowDocumentText(
         const storagePath = (doc as SourceDocument & { storage_path?: string })
             .storage_path;
         let markdown = "";
-        if (storagePath) {
+        // Audio and video have no text; skip downloading them.
+        if (storagePath && !isMediaFileType(doc.file_type)) {
             const buf = await downloadFile(storagePath);
             if (buf) {
                 try {

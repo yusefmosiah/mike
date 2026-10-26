@@ -1,7 +1,8 @@
 import Image from "next/image";
-import { File, FileCode, FileImage, FileText } from "lucide-react";
+import { File, FileCode, FileImage, FileMusic, FileText, FileVideoCamera } from "lucide-react";
 
-export type FileTypeKind = "pdf" | "word" | "excel" | "ppt" | "image" | "text" | "html" | "other";
+export type FileTypeKind =
+    "pdf" | "word" | "excel" | "ppt" | "image" | "text" | "html" | "audio" | "video" | "other";
 
 /**
  * Normalize a file_type value (e.g. "pdf") or a filename (e.g. "deck.pptx")
@@ -19,6 +20,8 @@ export function fileTypeKind(value: string | null | undefined): FileTypeKind {
     if (["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
     if (ext === "html") return "html";
     if (ext === "txt" || ext === "md" || ext === "csv") return "text";
+    if (["mp3", "m4a", "wav", "ogg"].includes(ext)) return "audio";
+    if (["mp4", "webm", "mov"].includes(ext)) return "video";
     return "other";
 }
 
@@ -118,6 +121,10 @@ export function FileTypeIcon({
             return <FileText aria-hidden="true" className={`${cls} text-gray-500`} />;
         case "html":
             return <FileCode aria-hidden="true" className={`${cls} text-gray-500`} />;
+        case "audio":
+            return <FileMusic aria-hidden="true" className={`${cls} text-gray-500`} />;
+        case "video":
+            return <FileVideoCamera aria-hidden="true" className={`${cls} text-gray-500`} />;
         default:
             return <File className={`${cls} text-gray-500`} />;
     }

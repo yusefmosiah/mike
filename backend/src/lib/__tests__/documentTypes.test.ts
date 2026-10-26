@@ -3,6 +3,9 @@ import {
     ALLOWED_DOCUMENT_TYPES,
     ALLOWED_DOCUMENT_TYPES_LABEL,
     contentTypeForDocumentType,
+    isAudioFileType,
+    isMediaFileType,
+    isVideoFileType,
     isPresentationDocumentType,
     isSpreadsheetDocumentType,
     isWordDocumentType,
@@ -101,6 +104,13 @@ describe("contentTypeForDocumentType", () => {
             csv: "text/csv; charset=utf-8",
             // Plain text on purpose: the app never serves HTML it would run.
             html: "text/plain; charset=utf-8",
+            mp3: "audio/mpeg",
+            m4a: "audio/mp4",
+            wav: "audio/wav",
+            ogg: "audio/ogg",
+            mp4: "video/mp4",
+            webm: "video/webm",
+            mov: "video/quicktime",
         };
         for (const type of ALLOWED_DOCUMENT_TYPES) {
             expect(contentTypeForDocumentType(type)).toBe(expected[type]);
@@ -118,5 +128,16 @@ describe("contentTypeForDocumentType", () => {
         expect(contentTypeForDocumentType(undefined)).toBe(
             "application/octet-stream",
         );
+    });
+});
+
+describe("media file types", () => {
+    it("tells audio from video, case-insensitively", () => {
+        expect(isAudioFileType("MP3")).toBe(true);
+        expect(isAudioFileType("mp4")).toBe(false);
+        expect(isVideoFileType("mov")).toBe(true);
+        expect(isMediaFileType("m4a")).toBe(true);
+        expect(isMediaFileType("pdf")).toBe(false);
+        expect(isMediaFileType(null)).toBe(false);
     });
 });

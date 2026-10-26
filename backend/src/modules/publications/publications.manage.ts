@@ -361,7 +361,10 @@ export type PublishPreflight =
     | { ok: true; documentId: string; versionId: string; filename: string }
     | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" };
 
-const PUBLISHABLE = new Set(["html", "md", "txt", "pdf", "png", "jpg", "jpeg", "webp", "gif", "docx", "doc", "pptx", "ppt"]);
+const PUBLISHABLE = new Set([
+    "html", "md", "txt", "pdf", "png", "jpg", "jpeg", "webp", "gif", "docx", "doc", "pptx", "ppt",
+    "mp3", "m4a", "wav", "ogg", "mp4", "webm", "mov",
+]);
 const NEEDS_RENDITION = new Set(["docx", "doc", "pptx", "ppt"]);
 
 /**

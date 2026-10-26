@@ -453,6 +453,7 @@ const CONTENT_TYPES: Record<string, string> = {
     ogg: "audio/ogg",
     mp4: "video/mp4",
     webm: "video/webm",
+    mov: "video/quicktime",
     woff: "font/woff",
     woff2: "font/woff2",
     ttf: "font/ttf",

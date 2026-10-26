@@ -353,6 +353,43 @@ describe("other formats and refusals", () => {
         expect(bad.status).toBe(416);
     });
 
+    it("publishes a video as a player page, and streams the video beside it", async () => {
+        seedDocument("tour", "Site tour.mp4", "mp4", Buffer.from("....ftypisom-video-bytes"));
+        const res = await publish({ document_id: "tour", audience: "public", expires_in_days: 30 });
+        expect(res.status).toBe(201);
+        const host = hostOf(res.body.publication.url);
+        const page = await request(publicationContentApp).get("/").set("Host", host);
+        expect(page.text).toContain('<video controls playsinline preload="metadata" src="Site%20tour.mp4"></video>');
+        expect(page.text).toContain("<title>Site tour</title>");
+        const part = await request(publicationContentApp).get("/Site%20tour.mp4").set("Host", host).set("Range", "bytes=4-7");
+        expect(part.status).toBe(206);
+        expect(part.headers["content-type"]).toBe("video/mp4");
+        expect(Buffer.from(part.body).toString()).toBe("ftyp");
+
+        seedDocument("talk", "Talk.m4a", "m4a", Buffer.from("....ftypM4A "));
+        const audio = await publish({ document_id: "talk", audience: "public", expires_in_days: 30 });
+        const audioPage = await request(publicationContentApp).get("/").set("Host", hostOf(audio.body.publication.url));
+        expect(audioPage.text).toContain('<audio controls preload="metadata" src="Talk.m4a"></audio>');
+    });
+
+    it("publishes the audio and video a page embeds", async () => {
+        seedDocument("clip", "clip.webm", "webm", Buffer.from("WEBM"));
+        seedDocument("song", "theme.mp3", "mp3", Buffer.from("ID3"));
+        seedDocument(
+            "show",
+            "Show.html",
+            "html",
+            Buffer.from('<video controls><source src="clip.webm" type="video/webm"></video><audio controls src="theme.mp3"></audio>'),
+        );
+        const res = await publish({ document_id: "show", audience: "public", expires_in_days: 30 });
+        expect(res.status).toBe(201);
+        const host = hostOf(res.body.publication.url);
+        const clip = await request(publicationContentApp).get("/clip.webm").set("Host", host);
+        expect(clip.headers["content-type"]).toBe("video/webm");
+        const song = await request(publicationContentApp).get("/theme.mp3").set("Host", host);
+        expect(song.headers["content-type"]).toBe("audio/mpeg");
+    });
+
     it("publishes a Word file as its PDF rendition, and refuses one without", async () => {
         seedDocument("memo", "Memo.docx", "docx", Buffer.from("DOCX"));
         const none = await publish({ document_id: "memo", audience: "public", expires_in_days: 30 });

@@ -15,6 +15,7 @@ import { sendInternalError } from "../../lib/httpError";
 import { buildContentDisposition, createFileReadStream } from "../../lib/storage";
 import { sendDocumentDisplay } from "../../lib/documentDisplay";
 import { contentTypeForDocumentType } from "../../lib/documentTypes";
+import { parseRange } from "../../lib/httpRange";
 import { uniqueArchiveFilename } from "../../lib/zipExport";
 import {
     listSingleDocuments,
@@ -131,12 +132,27 @@ documentsRouter.get("/:documentId/file", requireAuth, asyncRoute(async (req, res
         return void res.status(404).json({ detail: result.detail });
 
     res.setHeader("Content-Type", contentTypeForDocumentType(result.fileType));
-    res.setHeader("Content-Length", result.size);
     res.setHeader(
         "Content-Disposition",
         buildContentDisposition("inline", result.filename),
     );
-    const source = createFileReadStream(result.storagePath);
+    // Byte ranges let the in-app player seek in audio and video.
+    res.setHeader("Accept-Ranges", "bytes");
+    const range = parseRange(req.headers.range, result.size);
+    if (range === "unsatisfiable") {
+        res.setHeader("Content-Range", `bytes */${result.size}`);
+        return void res.status(416).end();
+    }
+    if (range) {
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${result.size}`);
+        res.setHeader("Content-Length", range.end - range.start + 1);
+    } else {
+        res.setHeader("Content-Length", result.size);
+    }
+    const source = range
+        ? createFileReadStream(result.storagePath, range)
+        : createFileReadStream(result.storagePath);
     try {
         await pipeline(source, res);
     } catch (error) {

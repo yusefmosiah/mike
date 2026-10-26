@@ -343,7 +343,7 @@ export const WORKSTATION_TOOLS = [
     function: {
       name: "save_to_mike",
       description:
-        "Save a file from the workstation into the user's documents: as a new document in this chat's project (or the library), or, with replace, as a new version of a document under ~/mike. This is the only way a workstation file reaches the user's documents. Documents can be PDF, Word, Excel, PowerPoint, images (PNG, JPEG, WebP, GIF), plain text (.txt, .md, .csv) and HTML pages (.html), which open in the viewer and can be published as a link.",
+        "Save a file from the workstation into the user's documents: as a new document in this chat's project (or the library), or, with replace, as a new version of a document under ~/mike. This is the only way a workstation file reaches the user's documents. Documents can be PDF, Word, Excel, PowerPoint, images (PNG, JPEG, WebP, GIF), plain text (.txt, .md, .csv), HTML pages (.html), audio (.mp3, .m4a, .wav, .ogg) and video (.mp4, .webm, .mov), which open in the viewer and can be published as a link.",
       parameters: {
         type: "object",
         properties: {
@@ -935,7 +935,7 @@ export const TOOLS = [
     function: {
       name: "generate_html",
       description:
-        "Create an HTML page: an article, report or briefing that mixes prose, tables, images, embedded video and audio, and links. Use when the person wants something to read in a browser or to publish as a link; Word stays the default for drafts the person will edit. Write one complete, self-contained document (<!doctype html>, <title>, inline <style>, readable on a phone). Media and fonts may load over https. Embed YouTube with https://www.youtube-nocookie.com/embed/<id> in an <iframe>, Vimeo with https://player.vimeo.com/video/<id>; use <audio controls> and <video controls> for files. Refer to the person's images and other documents in the same project by their filename as a relative path (e.g. <img src=\"site-plan.png\">); they are published with the page. Forms do not work on a published page. Returns {\"doc_id\", ...}; the person gets its card automatically; to share it as a link, use publish_document when you have it.",
+        "Create an HTML page: an article, report or briefing that mixes prose, tables, images, embedded video and audio, and links. Use when the person wants something to read in a browser or to publish as a link; Word stays the default for drafts the person will edit. Write one complete, self-contained document (<!doctype html>, <title>, inline <style>, readable on a phone). Media and fonts may load over https. Embed YouTube with https://www.youtube-nocookie.com/embed/<id> in an <iframe>, Vimeo with https://player.vimeo.com/video/<id>; use <audio controls> and <video controls> for files. Refer to the person's images and other documents in the same project by their filename as a relative path (e.g. <img src=\"site-plan.png\">, <video controls src=\"walkthrough.mp4\">, <audio controls src=\"interview.mp3\">); they are published with the page. Forms do not work on a published page. Returns {\"doc_id\", ...}; the person gets its card automatically; to share it as a link, use publish_document when you have it.",
       parameters: {
         type: "object",
         properties: {

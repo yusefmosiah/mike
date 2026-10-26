@@ -13,6 +13,7 @@ import express, { Router, type Request, type Response } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { parse as parseCookies, serialize as serializeCookie } from "cookie";
 import { requireAuth } from "../../middleware/auth";
+import { parseRange } from "../../lib/httpRange";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
@@ -307,29 +308,6 @@ async function resolveRequest(req: Request): Promise<{
     const row = await findLivePublication(db, hit.token);
     if (!row) return null;
     return { row, hit, db, secure: config.baseUrl.protocol === "https:" };
-}
-
-/** One satisfiable `bytes=start-end` range, "unsatisfiable", or null for the whole file. */
-export function parseRange(
-    header: string | undefined,
-    size: number,
-): { start: number; end: number } | "unsatisfiable" | null {
-    if (!header || size <= 0) return null;
-    const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
-    if (!match || (match[1] === "" && match[2] === "")) return null;
-    let start: number;
-    let end: number;
-    if (match[1] === "") {
-        const suffix = Number(match[2]);
-        if (suffix === 0) return "unsatisfiable";
-        start = Math.max(0, size - suffix);
-        end = size - 1;
-    } else {
-        start = Number(match[1]);
-        end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
-    }
-    if (start >= size || start > end) return "unsatisfiable";
-    return { start, end };
 }
 
 const PAGE_STYLE = `

@@ -22,6 +22,8 @@ import { SpreadsheetView } from "@/app/components/shared/views/SpreadsheetView";
 import { ImageView } from "@/app/components/shared/views/ImageView";
 import { TextView } from "@/app/components/shared/views/TextView";
 import { HtmlView } from "@/app/components/shared/views/HtmlView";
+import { MediaView } from "@/app/components/shared/views/MediaView";
+import { MEDIA_EXTENSIONS } from "@/app/lib/documentUploadValidation";
 import { CloseButton } from "@/shared/ui/CloseButton";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
@@ -283,7 +285,11 @@ export function DocumentSidePanel({
         ? fileTypeForVersion(replaceTargetVersion, selectedFileType)
         : selectedFileType;
     const replaceVersionAccept =
-        replaceFileType === "pdf" ? ".pdf" : ".docx,.doc";
+        replaceFileType === "pdf"
+            ? ".pdf"
+            : MEDIA_EXTENSIONS.has((replaceFileType ?? "").toLowerCase())
+              ? `.${(replaceFileType ?? "").toLowerCase()}`
+              : ".docx,.doc";
     const ownerLabel =
         doc.owner_display_name?.trim() || doc.owner_email?.trim() || "—";
 
@@ -574,6 +580,15 @@ export function DocumentSidePanel({
                                 documentId={doc.id}
                                 versionId={selectedVersionId}
                                 filename={selectedFilename}
+                            />
+                        ) : selectedViewType === "audio" || selectedViewType === "video" ? (
+                            <MediaView
+                                rounded="top-right"
+                                key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
+                                documentId={doc.id}
+                                versionId={selectedVersionId}
+                                filename={selectedFilename}
+                                kind={selectedViewType}
                             />
                         ) : selectedViewType === "html" ? (
                             <HtmlView

@@ -6,6 +6,7 @@ import { DocxView } from "./views/DocxView";
 import type { DocxCloseGuard, DocxSaveState } from "./views/DocxRenderer.types";
 import { SpreadsheetView } from "./views/SpreadsheetView";
 import { ImageView } from "@/app/components/shared/views/ImageView";
+import { MediaView } from "@/app/components/shared/views/MediaView";
 import { TextView } from "@/app/components/shared/views/TextView";
 import { HtmlView } from "@/app/components/shared/views/HtmlView";
 import { WebPageView } from "@/app/components/shared/views/WebPageView";
@@ -370,6 +371,15 @@ export function DocumentContent({
                         documentId={documentId}
                         versionId={versionId}
                         filename={resolvedDocument.title}
+                        refetchKey={refetchKey}
+                        rounded={false}
+                    />
+                ) : viewType === "audio" || viewType === "video" ? (
+                    <MediaView
+                        documentId={documentId}
+                        versionId={versionId}
+                        filename={resolvedDocument.title}
+                        kind={viewType}
                         refetchKey={refetchKey}
                         rounded={false}
                     />

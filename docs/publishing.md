@@ -13,13 +13,15 @@ page is how it works and how to run it.
 | HTML (`.html`, uploaded or written by the assistant's `generate_html` tool) | The page itself, as a normal web page: scripts run, YouTube, Vimeo, Spotify and SoundCloud players embed, media, fonts and styles load over https. Files the page refers to by a relative path (`<img src="site-plan.png">`, `<a href="part-2.html">`) are found by filename among the documents beside it, in the same project or, for a library document, the publisher's library, and published with it. Linked HTML pages are followed the same way. |
 | Markdown, plain text | A readable article page. |
 | PNG, JPEG, WebP, GIF | A page showing the image. |
+| Audio (MP3, M4A, WAV, OGG), video (MP4, WebM, MOV) | A page with the browser's own player. The file is served beside it with byte ranges, so it streams and seeks. |
 | PDF | The PDF, in the browser's own viewer. |
 | Word, PowerPoint | Their PDF rendition. A file without one cannot be published yet. |
 | Spreadsheets, CSV | Not publishable yet. |
 
 - **The link shows a frozen copy.** Publishing copies the version's files to `publications/{id}/` in object storage. A later edit is shared only by publishing again.
 - **Missing files.** References the server could not find are listed after publishing, so the publisher can add the files and publish again.
-- **Limits.** A page and its files are limited to 200 files and 200 MB.
+- **Limits.** A page and its files are limited to 200 files and 500 MB.
+- **Audio and video in a page.** A page embeds them as it does images, by filename: `<video controls src="walkthrough.mp4">`, `<audio controls src="interview.mp3">`, or a `<source>` inside either. The files are uploaded as documents beside the page.
 - **Assistant-written HTML.** The assistant writes the page with `generate_html`.
 
 ## Asking the assistant to publish
@@ -146,6 +148,7 @@ Before anyone other than the owner can publish, submit the content domain to the
 
 - **Policy settings and admin view.** Organisation policy, and a view of every link in the organisation for admins.
 - **Content scan.** The Office scan for tracked changes, comments and metadata, with a clean copy by default. Until it exists, Word files publish only their PDF rendition, so check that rendition before publishing.
-- **Video and audio uploads.** A page can embed media by URL, but media files cannot be uploaded as documents yet.
+- **Larger video.** Audio and video upload as documents up to the 100 MB every upload is held to, which is also what Cloudflare's free plan lets one request carry. Longer video needs multipart uploads, which send a file in parts.
+- **Transcoding and poster frames.** Media is stored and played as uploaded. A format the visitor's browser cannot play (some MOV files outside Safari, OGG in older Safari) shows the player's own error.
 - **View counts.**
 - **Removing stored copies when a document is deleted.** Deleting a document deletes its publications' rows, so its links stop working, but the copied files stay in storage until they are cleaned up.

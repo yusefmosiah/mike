@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagnosticErrorTags } from "../../../lib/observability/sentryPrivacy";
 import { ImageRejectedError } from "../../../lib/images";
 import { TextRejectedError } from "../../../lib/textFiles";
+import { MediaRejectedError } from "../../../lib/mediaFiles";
 
 const mocks = vi.hoisted(() => ({
   deleteFile: vi.fn(),
@@ -426,6 +427,39 @@ describe("upload processing", () => {
     const file = { ...baseFile, filename: "notes.txt", file_type: "txt", expected_size_bytes: binary.byteLength };
 
     await expect(processUploadFile(fakeDb({}) as never, baseSession, file)).rejects.toBeInstanceOf(TextRejectedError);
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+    expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
+  });
+
+  it("stores a video as uploaded, without a PDF rendition", async () => {
+    const video = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from("ftypisom"), Buffer.alloc(24)]);
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([video]));
+    const file = {
+      ...baseFile,
+      filename: "walkthrough.mp4",
+      file_type: "mp4",
+      content_type: "video/mp4",
+      expected_size_bytes: video.byteLength,
+    };
+    const db = fakeDb({
+      documents: [{ data: { id: file.resource_id, user_id: baseSession.user_id }, error: null }],
+    });
+
+    await processUploadFile(db as never, baseSession, file);
+
+    expect(mocks.officeFileToPdf).not.toHaveBeenCalled();
+    expect(db.rpc).toHaveBeenCalledWith(
+      "create_document_version",
+      expect.objectContaining({ p_version: expect.objectContaining({ file_type: "mp4" }) }),
+    );
+  });
+
+  it("refuses a file named as audio that is not, storing nothing", async () => {
+    const html = Buffer.from("<html><script>alert(1)</script></html>");
+    mocks.createFileReadStream.mockImplementation(() => Readable.from([html]));
+    const file = { ...baseFile, filename: "song.mp3", file_type: "mp3", expected_size_bytes: html.byteLength };
+
+    await expect(processUploadFile(fakeDb({}) as never, baseSession, file)).rejects.toBeInstanceOf(MediaRejectedError);
     expect(mocks.copyFile).not.toHaveBeenCalled();
     expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
   });

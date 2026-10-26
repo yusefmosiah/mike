@@ -16,10 +16,17 @@ export const ALLOWED_DOCUMENT_TYPES = new Set([
   "md",
   "csv",
   "html",
+  "mp3",
+  "m4a",
+  "wav",
+  "ogg",
+  "mp4",
+  "webm",
+  "mov",
 ]);
 
 export const ALLOWED_DOCUMENT_TYPES_LABEL =
-  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif, txt, md, csv, html";
+  "pdf, docx, doc, xlsx, xlsm, xls, pptx, ppt, png, jpg, jpeg, webp, gif, txt, md, csv, html, mp3, m4a, wav, ogg, mp4, webm, mov";
 
 /**
  * Upload extensions handled as images (lib/images cleans them on the way in),
@@ -31,6 +38,34 @@ export const IMAGE_FORMAT_BY_FILE_TYPE: Readonly<
 
 export function isImageFileType(fileType: string | null | undefined): boolean {
   return Object.hasOwn(IMAGE_FORMAT_BY_FILE_TYPE, (fileType ?? "").toLowerCase());
+}
+
+/**
+ * Audio and video documents, and their media types. They are stored and
+ * played as uploaded: no text, no rendition, no transcoding.
+ */
+const AUDIO_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+};
+const VIDEO_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+};
+
+export function isAudioFileType(fileType: string | null | undefined): boolean {
+  return Object.hasOwn(AUDIO_CONTENT_TYPES, (fileType ?? "").toLowerCase());
+}
+
+export function isVideoFileType(fileType: string | null | undefined): boolean {
+  return Object.hasOwn(VIDEO_CONTENT_TYPES, (fileType ?? "").toLowerCase());
+}
+
+export function isMediaFileType(fileType: string | null | undefined): boolean {
+  return isAudioFileType(fileType) || isVideoFileType(fileType);
 }
 
 // The lowercased extension of a filename, or "" when it has none. Three call
@@ -118,7 +153,13 @@ export function contentTypeForDocumentType(fileType: string | null | undefined) 
     // published (modules/publications).
     case "html":
       return "text/plain; charset=utf-8";
-    default:
-      return "application/octet-stream";
+    default: {
+      const type = (fileType ?? "").toLowerCase();
+      return (
+        AUDIO_CONTENT_TYPES[type] ??
+        VIDEO_CONTENT_TYPES[type] ??
+        "application/octet-stream"
+      );
+    }
   }
 }

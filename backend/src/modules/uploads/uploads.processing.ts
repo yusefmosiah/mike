@@ -16,7 +16,7 @@ import { safeError } from "../../lib/safeError";
 
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Transform } from "node:stream";
@@ -33,7 +33,8 @@ import {
   type PollFailureGate,
 } from "../../lib/observability/pollFailureGate";
 import { asReportableError } from "../../lib/httpError";
-import { contentTypeForDocumentType, isImageFileType, shouldConvertToPdf } from "../../lib/documentTypes";
+import { contentTypeForDocumentType, isImageFileType, isMediaFileType, shouldConvertToPdf } from "../../lib/documentTypes";
+import { checkMediaFile, MEDIA_SIGNATURE_BYTES, MediaRejectedError } from "../../lib/mediaFiles";
 import { cleanImage, ImageRejectedError } from "../../lib/images";
 import { decodeTextFile, isTextFileType, TextRejectedError } from "../../lib/textFiles";
 import { uploadJobWallClockMs } from "../../lib/runtimeConfig";
@@ -111,6 +112,8 @@ const TERMINAL_UPLOAD_ERROR_CODES = new Set([
   "image_too_large",
   // A .txt, .md or .csv that is not UTF-8 text.
   "unsupported_text",
+  // An audio or video file whose bytes are not the format its name says.
+  "unsupported_media",
   "size_mismatch",
   "content_type_mismatch",
   // The destination document no longer exists. Retrying cannot make it exist
@@ -315,6 +318,17 @@ export async function cleanupUploadProcessingTempFiles(
   );
 }
 
+async function readHead(filePath: string, length: number): Promise<Uint8Array> {
+  const handle = await open(filePath, "r");
+  try {
+    const head = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(head, 0, length, 0);
+    return head.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function requireSealedFile(
   file: UploadFileRow,
 ): Promise<SealedFileArtifact> {
@@ -354,6 +368,9 @@ async function requireSealedFile(
       return await cleanImageArtifact(artifact, file.file_type);
     }
     if (isTextFileType(file.file_type)) decodeTextFile(await readFile(filePath));
+    if (isMediaFileType(file.file_type)) {
+      checkMediaFile(file.file_type, await readHead(filePath, MEDIA_SIGNATURE_BYTES));
+    }
     return artifact;
   } catch (error) {
     await removeTemporaryArtifact(directory);
@@ -982,7 +999,9 @@ export async function processUploadJob(
             error_code: error instanceof ChangedDocumentError
               ? "document_changed"
               : error instanceof DeletedDocumentError ? "document_deleted"
-              : error instanceof ImageRejectedError || error instanceof TextRejectedError
+              : error instanceof ImageRejectedError ||
+                  error instanceof TextRejectedError ||
+                  error instanceof MediaRejectedError
                 ? error.code
               : "processing_failed",
             updated_at: new Date().toISOString(),

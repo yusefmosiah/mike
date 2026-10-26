@@ -1,5 +1,5 @@
 import type { AssistantEvent as WireAssistantEvent } from "@mike/contracts";
-import { isImageFilename } from "@/app/lib/documentUploadValidation";
+import { isImageFilename, MEDIA_EXTENSIONS } from "@/app/lib/documentUploadValidation";
 import { nativeBrowserSupported, openInNativeBrowser } from "@/app/lib/nativeBrowser";
 // Shared TypeScript types for the Mike web app
 
@@ -641,6 +641,7 @@ export function panelDocumentType(filename: string): PanelDocumentType {
   ) {
     return "text";
   }
+  if (extension && MEDIA_EXTENSIONS.has(extension)) return "media";
   return "pdf";
 }
 

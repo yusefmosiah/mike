@@ -6,6 +6,8 @@ export type SourceDocumentType =
   | "spreadsheet"
   | "image"
   | "text"
+  /** Audio or video; the viewer picks its player by file name. */
+  | "media"
   | "case"
   | "legislation"
   /** A saved copy of a web page a citation cites, shown in the reader view. */

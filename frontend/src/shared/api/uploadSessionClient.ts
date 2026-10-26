@@ -55,8 +55,17 @@ const UPLOAD_PROCESSING_POLL_DELAYS_MS = [
     750, 1_000, 1_500, 2_500, 4_000, 5_000,
 ];
 const UPLOAD_PROCESSING_TIMEOUT_MS = 30 * 60 * 1000;
-/** A single storage PUT that stalls this long is retried, not waited on. */
+/**
+ * A single storage PUT that takes longer than this is retried, not waited
+ * on: two minutes, or longer for a large file (a 100 MB video) so that it
+ * still fits on an upload link of 256 KB a second.
+ */
 const PUT_TIMEOUT_MS = 120 * 1000;
+const PUT_MIN_BYTES_PER_SECOND = 256 * 1024;
+
+export function putTimeoutMs(sizeBytes: number): number {
+    return Math.max(PUT_TIMEOUT_MS, Math.ceil((sizeBytes / PUT_MIN_BYTES_PER_SECOND) * 1000));
+}
 const MAX_UPLOAD_SESSION_FILES = 50;
 const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_UPLOAD_SESSION_BYTES = 2 * 1024 * 1024 * 1024;
@@ -205,9 +214,9 @@ function delay(ms: number, signal?: AbortSignal) {
  * AbortSignal.any/timeout exist in every browser and Office WebView this ships
  * to; the guard only covers older test/runtime hosts.
  */
-function storageAttemptSignal(signal?: AbortSignal): AbortSignal | undefined {
+function storageAttemptSignal(sizeBytes: number, signal?: AbortSignal): AbortSignal | undefined {
     if (typeof AbortSignal?.timeout !== "function") return signal;
-    const timeout = AbortSignal.timeout(PUT_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(putTimeoutMs(sizeBytes));
     if (!signal) return timeout;
     if (typeof AbortSignal.any !== "function") return signal;
     return AbortSignal.any([signal, timeout]);
@@ -469,7 +478,7 @@ async function runUploadSession<T>(args: {
                             method: descriptor.upload.method,
                             headers: descriptor.upload.headers,
                             body: input.file,
-                            signal: storageAttemptSignal(args.signal),
+                            signal: storageAttemptSignal(input.file.size, args.signal),
                         });
                     } catch (error) {
                         // A caller abort ends the batch; the per-attempt

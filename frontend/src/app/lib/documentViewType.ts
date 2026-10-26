@@ -1,4 +1,5 @@
-export type DocumentViewType = "pdf" | "docx" | "spreadsheet" | "image" | "text" | "html";
+export type DocumentViewType =
+  "pdf" | "docx" | "spreadsheet" | "image" | "text" | "html" | "audio" | "video";
 
 type LegacyDocViewType = Extract<DocumentViewType, "pdf" | "docx">;
 
@@ -12,7 +13,17 @@ export interface ResolveDocumentViewTypeOptions {
 }
 
 type DocumentTypeToken =
-  "pdf" | "doc" | "docx" | "spreadsheet" | "presentation" | "image" | "text" | "html" | "other";
+  | "pdf"
+  | "doc"
+  | "docx"
+  | "spreadsheet"
+  | "presentation"
+  | "image"
+  | "text"
+  | "html"
+  | "audio"
+  | "video"
+  | "other";
 
 function documentTypeToken(
   value: string | null | undefined,
@@ -31,6 +42,8 @@ function documentTypeToken(
   if (/^image\/(png|jpeg|webp|gif)$/.test(normalized)) return "image";
   if (/^text\/html(;|$)/.test(normalized)) return "html";
   if (/^text\/(plain|markdown|csv)(;|$)/.test(normalized)) return "text";
+  if (/^audio\/(mpeg|mp4|x-m4a|wav|x-wav|ogg)(;|$)/.test(normalized)) return "audio";
+  if (/^video\/(mp4|webm|quicktime)(;|$)/.test(normalized)) return "video";
 
   const withoutQuery = normalized.split(/[?#]/, 1)[0];
   // The extension, or the whole value when it has no dot.
@@ -46,6 +59,8 @@ function documentTypeToken(
   if (["png", "jpg", "jpeg", "webp", "gif"].includes(token)) return "image";
   if (token === "html") return "html";
   if (["txt", "md", "csv"].includes(token)) return "text";
+  if (["mp3", "m4a", "wav", "ogg"].includes(token)) return "audio";
+  if (["mp4", "webm", "mov"].includes(token)) return "video";
   return "other";
 }
 
@@ -69,6 +84,8 @@ export function resolveDocumentViewType({
   if (fileTypeToken === "image" || filenameToken === "image") return "image";
   if (fileTypeToken === "html" || filenameToken === "html") return "html";
   if (fileTypeToken === "text" || filenameToken === "text") return "text";
+  if (fileTypeToken === "video" || filenameToken === "video") return "video";
+  if (fileTypeToken === "audio" || filenameToken === "audio") return "audio";
 
   const wordToken =
     fileTypeToken === "doc" || fileTypeToken === "docx"
@@ -87,9 +104,12 @@ export function resolveDocumentViewType({
 /**
  * The panel contract's name for a viewer. It has no HTML kind: a page is a
  * "text" source there, and the viewer finds the sandboxed renderer by name.
+ * Audio and video are both "media", told apart by name the same way.
  */
 export function panelTypeForViewType(
   viewType: DocumentViewType,
-): Exclude<DocumentViewType, "html"> {
-  return viewType === "html" ? "text" : viewType;
+): Exclude<DocumentViewType, "html" | "audio" | "video"> | "media" {
+  if (viewType === "html") return "text";
+  if (viewType === "audio" || viewType === "video") return "media";
+  return viewType;
 }

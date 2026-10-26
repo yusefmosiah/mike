@@ -11,17 +11,23 @@ export const UNSUPPORTED_DOCUMENT_WARNING_MESSAGE =
 export const SUPPORTED_IMAGE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif";
 /** Plain text attaches where images do; the backend checks it is UTF-8. */
 export const SUPPORTED_TEXT_ACCEPT = ".txt,.md,.csv,.html";
-export const SUPPORTED_ATTACHMENT_ACCEPT = `${SUPPORTED_DOCUMENT_ACCEPT},${SUPPORTED_IMAGE_ACCEPT},${SUPPORTED_TEXT_ACCEPT}`;
+/**
+ * Audio and video attach where images do. They play in the viewer and can be
+ * published or embedded in a published page; the backend checks each is the
+ * format its name says.
+ */
+export const SUPPORTED_MEDIA_ACCEPT = ".mp3,.m4a,.wav,.ogg,.mp4,.webm,.mov";
+export const SUPPORTED_ATTACHMENT_ACCEPT = `${SUPPORTED_DOCUMENT_ACCEPT},${SUPPORTED_IMAGE_ACCEPT},${SUPPORTED_TEXT_ACCEPT},${SUPPORTED_MEDIA_ACCEPT}`;
 export const UNSUPPORTED_ATTACHMENT_WARNING_MESSAGE =
-    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, text (TXT, Markdown, CSV, HTML) and image (PNG, JPEG, WebP, GIF) files can be uploaded.";
+    "Unsupported file type. Only PDF, Word, Excel, PowerPoint, text (TXT, Markdown, CSV, HTML), image (PNG, JPEG, WebP, GIF), audio (MP3, M4A, WAV, OGG) and video (MP4, WebM, MOV) files can be uploaded.";
 export const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const IMAGE_TOO_LARGE_WARNING_MESSAGE = "Images can be at most 20 MB.";
 
-/** Accept images and plain text as well as documents. */
-export type UploadKinds = { images?: boolean; text?: boolean };
+/** Accept images, plain text, audio and video as well as documents. */
+export type UploadKinds = { images?: boolean; text?: boolean; media?: boolean };
 
-/** What attaches to a chat or a project: documents, images and plain text. */
-export const ATTACHMENTS: UploadKinds = { images: true, text: true };
+/** What attaches to a chat or a project: documents, images, plain text and media. */
+export const ATTACHMENTS: UploadKinds = { images: true, text: true, media: true };
 
 const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
     "pdf",
@@ -36,6 +42,13 @@ const SUPPORTED_DOCUMENT_EXTENSIONS = new Set([
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "csv", "html"]);
+const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "wav", "ogg"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "mov"]);
+/** Audio and video extensions. */
+export const MEDIA_EXTENSIONS: ReadonlySet<string> = new Set([
+    ...AUDIO_EXTENSIONS,
+    ...VIDEO_EXTENSIONS,
+]);
 
 function extensionOf(name: string): string | undefined {
     return name.split(".").pop()?.toLowerCase();
@@ -59,13 +72,23 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
     "text/markdown": "md",
     "text/csv": "csv",
     "text/html": "html",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/ogg": "ogg",
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/quicktime": "mov",
 };
 
 const isKnownExtension = (extension: string | undefined) =>
     !!extension &&
     (SUPPORTED_DOCUMENT_EXTENSIONS.has(extension) ||
         IMAGE_EXTENSIONS.has(extension) ||
-        TEXT_EXTENSIONS.has(extension));
+        TEXT_EXTENSIONS.has(extension) ||
+        MEDIA_EXTENSIONS.has(extension));
 
 /**
  * A file named by its type when its name does not say it. A screenshot
@@ -139,6 +162,16 @@ export function isImageFilename(name: string): boolean {
     return !!extension && IMAGE_EXTENSIONS.has(extension);
 }
 
+export function isAudioFilename(name: string): boolean {
+    const extension = extensionOf(name);
+    return !!extension && AUDIO_EXTENSIONS.has(extension);
+}
+
+export function isVideoFilename(name: string): boolean {
+    const extension = extensionOf(name);
+    return !!extension && VIDEO_EXTENSIONS.has(extension);
+}
+
 const isOversizedImage = (file: File) =>
     isImageFilename(file.name) && file.size > MAX_IMAGE_UPLOAD_BYTES;
 
@@ -147,6 +180,7 @@ export function isSupportedDocumentFile(file: File, kinds: UploadKinds = {}): bo
     if (!extension) return false;
     if (SUPPORTED_DOCUMENT_EXTENSIONS.has(extension)) return true;
     if (kinds.text && TEXT_EXTENSIONS.has(extension)) return true;
+    if (kinds.media && MEDIA_EXTENSIONS.has(extension)) return true;
     return !!kinds.images && IMAGE_EXTENSIONS.has(extension) && !isOversizedImage(file);
 }
 
@@ -175,7 +209,7 @@ export function formatUnsupportedDocumentWarning(
             .slice(0, 3)
             .map((file) => file.name || "an unnamed file")
             .join(", ")}${refused.length > 3 ? ` and ${refused.length - 3} more` : ""}.`;
-    if (!kinds.images && !kinds.text) {
+    if (!kinds.images && !kinds.text && !kinds.media) {
         return named(UNSUPPORTED_DOCUMENT_WARNING_MESSAGE, files);
     }
     const oversized = files.length - wrongType.length;

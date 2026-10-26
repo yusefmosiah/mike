@@ -11,7 +11,8 @@ import path from "node:path";
 import type { Db } from "../../lib/db";
 import { can } from "../../lib/permissions";
 import { checkProjectAccess } from "../../lib/access";
-import { ALLOWED_DOCUMENT_TYPES, ALLOWED_DOCUMENT_TYPES_LABEL, documentSuffix, isImageFileType } from "../../lib/documentTypes";
+import { ALLOWED_DOCUMENT_TYPES, ALLOWED_DOCUMENT_TYPES_LABEL, documentSuffix, isImageFileType, isMediaFileType } from "../../lib/documentTypes";
+import { mediaSignatureMatches } from "../../lib/mediaFiles";
 import { cleanImage, ImageRejectedError } from "../../lib/images";
 import { decodeTextFile, isTextFileType, TextRejectedError } from "../../lib/textFiles";
 import { readWorkstationFile, WORKSPACE_ROOT, type WorkstationTarget } from "../../lib/workstation";
@@ -66,6 +67,7 @@ async function checkedBytes(bytes: Buffer, fileType: string): Promise<{ ok: true
     fileType === "pdf" ? bytes.subarray(0, 5).toString("latin1") === "%PDF-"
     : ["docx", "xlsx", "xlsm", "pptx"].includes(fileType) ? startsWith(bytes, ZIP)
     : ["doc", "xls", "ppt"].includes(fileType) ? startsWith(bytes, OLE)
+    : isMediaFileType(fileType) ? mediaSignatureMatches(fileType, bytes)
     : false;
   return ok ? { ok: true, bytes } : { ok: false, error: `the file is not a ${fileType} file` };
 }
