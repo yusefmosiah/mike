@@ -61,12 +61,14 @@ const server = createServer(async (req, res) => {
         res.writeHead(400).end();
         return;
     }
-    // Mike prefixes each prompt with when it was sent ("[Sent: Fri 9 Oct ...] ");
-    // the answer quotes the prompt without it, and only its start, so specs
-    // can match on what they typed.
+    // Mike puts a <turn-context> block (backend/src/lib/llm/turnContext.ts),
+    // when the prompt was sent ("[Sent: Fri 9 Oct ...] ") and, in a shared
+    // thread, who sent it ("[From: name@example.com] ") ahead of each prompt; the answer quotes the prompt without them, and only its start,
+    // so specs can match on what they typed.
     const prompt = lastUserText(body.messages)
+        .replace(/<turn-context>[\s\S]*?<\/turn-context>/g, "")
         .trim()
-        .replace(/^\[Sent:[^\]]*\]\s*/, "")
+        .replace(/^(?:\[(?:Sent|From):[^\]]*\]\s*)+/, "")
         .replace(/\s+/g, " ")
         .slice(0, 200);
     answers += 1;

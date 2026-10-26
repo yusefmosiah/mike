@@ -54,10 +54,19 @@ async function startAssistantChat(page: Page, prompt: string) {
 
 async function editPrompt(page: Page, from: string, to: string) {
     const prompt = page.getByText(from, { exact: true });
-    await prompt.hover();
-    // The edit control sits in the prompt's own row; with one prompt on the
-    // page there is exactly one.
-    await page.getByRole("button", { name: "Edit prompt" }).click();
+    // With one prompt on the page there is exactly one edit control. A mouse
+    // gets a pencil in the prompt's row; a touch screen gets Edit in the
+    // prompt's press-and-hold menu, which a keyboard opens from its
+    // "Prompt actions" button (UserMessage.tsx).
+    const actions = page.getByRole("button", { name: "Prompt actions" });
+    if (await actions.count()) {
+        await actions.focus();
+        await actions.press("Enter");
+        await page.getByRole("menuitem", { name: "Edit" }).click();
+    } else {
+        await prompt.hover();
+        await page.getByRole("button", { name: "Edit prompt" }).click();
+    }
     // The prompt comes back into the composer, which sends the edit.
     await expect(page.getByText("Editing message")).toBeVisible();
     const composer = page.getByPlaceholder("How can I help?");
