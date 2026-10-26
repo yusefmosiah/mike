@@ -835,10 +835,31 @@ export interface NativeConnectorTool {
 // The helper long-polls GET /computers/device/next (bearer device token) and
 // answers each command with POST /computers/device/results/:id.
 
+export type ComputerPlatform = "macos" | "windows" | "linux" | "sandbox";
+
+/** What a helper can do on its platform; the model is told, so it plans within it. */
+export interface ComputerCapabilities {
+  /** Clicks aimed anywhere on the screenshot, or only at listed elements (Wayland without a window origin). */
+  coordinates: "screen" | "refs_only";
+  /** Whether the helper stops a batch when the person uses the mouse or keyboard. */
+  takeover: "full" | "none";
+  /** Password fields recognised by the system (macOS secure input) or only by their accessibility role. */
+  secure_input: "system" | "best_effort";
+}
+
+/** The body of POST /computers/device/heartbeat. Older helpers send {}. */
+export interface ComputerHeartbeat {
+  platform?: ComputerPlatform;
+  capabilities?: ComputerCapabilities;
+  helper_version?: string;
+}
+
 /** A computer as the settings page lists it. */
 export interface ComputerDevice {
   id: string;
   name: string;
+  /** Null until its helper has said, in a heartbeat. */
+  platform: ComputerPlatform | null;
   created_at: string;
   last_seen_at: string | null;
   /** Seen by the server in the last minute. */
@@ -876,9 +897,40 @@ export interface ComputerActCommand {
 
 export type ComputerCommand = ComputerObserveCommand | ComputerActCommand;
 
+/**
+ * Element roles, shared across platforms; each helper maps its own
+ * accessibility roles onto these and sends anything else as "other".
+ */
+export type ComputerRole =
+  | "button"
+  | "checkbox"
+  | "radio"
+  | "switch"
+  | "textfield"
+  | "textarea"
+  | "searchfield"
+  | "combobox"
+  | "popup"
+  | "menu"
+  | "menuitem"
+  | "link"
+  | "tab"
+  | "list"
+  | "listitem"
+  | "row"
+  | "cell"
+  | "slider"
+  | "text"
+  | "heading"
+  | "image"
+  | "other";
+
 export interface ComputerElement {
   ref: string;
+  /** A ComputerRole; a string so an older or newer helper's value still parses. */
   role: string;
+  /** The platform's own role (AXButton, ControlType.Button, push button), for debugging. */
+  native_role?: string;
   title?: string;
   value?: string;
   description?: string;

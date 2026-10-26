@@ -9,14 +9,20 @@ import {
   ok,
   type ServiceResult,
 } from "../../lib/serviceResult";
-import type { ComputerDevice, CreatedComputerDevice } from "@mike/contracts";
+import type {
+  ComputerCapabilities,
+  ComputerDevice,
+  ComputerHeartbeat,
+  ComputerPlatform,
+  CreatedComputerDevice,
+} from "@mike/contracts";
 
 /** A device counts as online for this long after the server last heard from it. */
 export const ONLINE_WINDOW_MS = 60_000;
 const MAX_DEVICES = 20;
 const MAX_NAME = 80;
 const TOKEN_PREFIX = "cmp_";
-const DEVICE_COLUMNS = "id, user_id, name, created_at, last_seen_at, revoked_at";
+const DEVICE_COLUMNS = "id, user_id, name, created_at, last_seen_at, revoked_at, platform, capabilities";
 
 type DeviceRow = {
   id: string;
@@ -25,7 +31,19 @@ type DeviceRow = {
   created_at: string;
   last_seen_at: string | null;
   revoked_at: string | null;
+  platform: ComputerPlatform | null;
+  capabilities: ComputerCapabilities | null;
 };
+
+/** An online computer, as a chat turn sees it. */
+export type OnlineComputer = {
+  id: string;
+  name: string;
+  platform: ComputerPlatform | null;
+  capabilities: ComputerCapabilities | null;
+};
+
+const PLATFORMS = new Set<ComputerPlatform>(["macos", "windows", "linux", "sandbox"]);
 
 export type AuthenticatedDevice = { id: string; userId: string; name: string };
 
@@ -43,6 +61,7 @@ function toView(row: DeviceRow, now = Date.now()): ComputerDevice {
     name: row.name,
     created_at: row.created_at,
     last_seen_at: row.last_seen_at,
+    platform: row.platform ?? null,
     online: isOnline(row.last_seen_at, now),
   };
 }
@@ -152,25 +171,78 @@ export async function touchDevice(db: Db, deviceId: string): Promise<void> {
     .eq("id", deviceId);
 }
 
-/** The user's most recently seen online device, or null (also when the lookup fails). */
-export async function findOnlineDevice(
+/**
+ * Parse a heartbeat body. Unknown or malformed fields are dropped, so a
+ * helper newer or older than this server still counts as seen.
+ */
+export function parseHeartbeat(body: unknown): {
+  platform: ComputerPlatform | null;
+  capabilities: ComputerCapabilities | null;
+} {
+  const value = (body && typeof body === "object" ? body : {}) as ComputerHeartbeat;
+  const platform = PLATFORMS.has(value.platform as ComputerPlatform)
+    ? (value.platform as ComputerPlatform)
+    : null;
+  const raw = value.capabilities as Partial<ComputerCapabilities> | undefined;
+  const capabilities =
+    raw &&
+    (raw.coordinates === "screen" || raw.coordinates === "refs_only") &&
+    (raw.takeover === "full" || raw.takeover === "none") &&
+    (raw.secure_input === "system" || raw.secure_input === "best_effort")
+      ? { coordinates: raw.coordinates, takeover: raw.takeover, secure_input: raw.secure_input }
+      : null;
+  return { platform, capabilities };
+}
+
+/** Record what a helper says about itself; nothing to record leaves the row alone. */
+export async function recordHeartbeat(
   db: Db,
-  userId: string,
-): Promise<{ id: string; name: string } | null> {
+  deviceId: string,
+  heartbeat: ReturnType<typeof parseHeartbeat>,
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (heartbeat.platform) patch.platform = heartbeat.platform;
+  if (heartbeat.capabilities) patch.capabilities = heartbeat.capabilities;
+  if (Object.keys(patch).length === 0) return;
+  await db.from("computer_devices").update(patch).eq("id", deviceId);
+}
+
+/** The user's online computers, most recently seen first ([] when the lookup fails). */
+export async function listOnlineDevices(db: Db, userId: string): Promise<OnlineComputer[]> {
   const since = new Date(Date.now() - ONLINE_WINDOW_MS).toISOString();
   try {
     const { data, error } = await db
       .from("computer_devices")
-      .select("id, name")
+      .select("id, name, platform, capabilities, last_seen_at")
       .eq("user_id", userId)
       .is("revoked_at", null)
       .gt("last_seen_at", since)
       .order("last_seen_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error || !data) return null;
-    return data as { id: string; name: string };
+      .limit(MAX_DEVICES);
+    if (error || !data) return [];
+    return (data as DeviceRow[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      platform: row.platform ?? null,
+      capabilities: row.capabilities ?? null,
+    }));
   } catch {
-    return null;
+    return [];
   }
+}
+
+/**
+ * The online computer a call means: the one named (case-insensitive), or
+ * the most recently seen one. Null when none is online or the name matches
+ * none.
+ */
+export async function findOnlineDevice(
+  db: Db,
+  userId: string,
+  name?: string | null,
+): Promise<OnlineComputer | null> {
+  const online = await listOnlineDevices(db, userId);
+  if (!name?.trim()) return online[0] ?? null;
+  const wanted = name.trim().toLowerCase();
+  return online.find((device) => device.name.toLowerCase() === wanted) ?? null;
 }

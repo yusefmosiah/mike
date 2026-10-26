@@ -39,7 +39,10 @@ vi.mock("../../../../lib/llm", async () => ({
 vi.mock("../../../../lib/mcpConnectors", () => ({ buildUserMcpTools: vi.fn(async () => []) }));
 vi.mock("../tools/toolDispatcher", () => ({ runToolCalls: (calls: ToolCall[]) => runToolCalls(calls) }));
 vi.mock("../../../computers/computers.service", () => ({
-  findOnlineDevice: async () => (online.value ? { id: "d1", name: "Mac" } : null),
+  listOnlineDevices: async () =>
+    online.value
+      ? [{ id: "d1", name: "Studio Mac", platform: "linux", capabilities: { coordinates: "refs_only", takeover: "none", secure_input: "best_effort" } }]
+      : [],
   takeComputerScreenshot: (callId: string) =>
     callId.endsWith(".1") ? { data: `shot-${callId}`, mimeType: "image/jpeg" } : null,
 }));
@@ -94,7 +97,10 @@ afterAll(() => kernels.closeAll());
 describe("the person's computer in code mode", () => {
   it("is offered only while a helper is connected", async () => {
     await runLLMStream(baseParams() as never);
-    expect(index(streamChatWithTools.mock.calls[0][0])).toContain("- computer_observe(");
+    const offered = index(streamChatWithTools.mock.calls[0][0]);
+    expect(offered).toContain("- computer_observe(");
+    // The model learns each computer's name and limits.
+    expect(offered).toContain("- Studio Mac (Linux): click and scroll by ref only");
     online.value = false;
     await runLLMStream(baseParams() as never);
     expect(index(streamChatWithTools.mock.calls[1][0])).not.toContain("computer_observe");

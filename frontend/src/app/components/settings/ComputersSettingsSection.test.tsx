@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComputersSettingsSection,
   lastSeenText,
+  platformText,
 } from "./ComputersSettingsSection";
 
 const api = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const device = (over: Record<string, unknown> = {}) => ({
   name: "Desk Mac",
   created_at: "2026-01-01T00:00:00Z",
   last_seen_at: null,
+  platform: null,
   online: false,
   ...over,
 });
@@ -31,6 +33,14 @@ beforeEach(() => {
   api.listComputers.mockResolvedValue([]);
 });
 afterEach(() => vi.useRealTimers());
+
+describe("platformText", () => {
+  it("names the platform a helper reported, and nothing before it has", () => {
+    expect(platformText(device({ platform: "windows" }) as never)).toBe("Windows");
+    expect(platformText(device({ platform: "sandbox" }) as never)).toBe("Sandboxed desktop");
+    expect(platformText(device() as never)).toBeNull();
+  });
+});
 
 describe("lastSeenText", () => {
   const now = Date.parse("2026-01-10T12:00:00Z");

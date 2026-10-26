@@ -74,6 +74,56 @@ describe("computers", () => {
         expect(list.body.devices[0].online).toBe(true);
     });
 
+    it("stores the platform and capabilities a heartbeat reports, and ignores junk", async () => {
+        const { token } = await addComputer();
+        const beat = (body: unknown) =>
+            request(app).post("/computers/device/heartbeat").set("Authorization", `Bearer ${token}`).send(body as object);
+        await beat({ platform: "linux", capabilities: { coordinates: "refs_only", takeover: "none", secure_input: "best_effort" } });
+        expect((await request(app).get("/computers")).body.devices[0].platform).toBe("linux");
+        expect(store.rows("computer_devices")[0].capabilities).toEqual({ coordinates: "refs_only", takeover: "none", secure_input: "best_effort" });
+        expect((await beat({ platform: "amiga", capabilities: { coordinates: "everywhere" } })).status).toBe(200);
+        expect(store.rows("computer_devices")[0].platform).toBe("linux");
+    });
+
+    it("sends a call to the computer it names, and says which are connected", async () => {
+        const mac = await addComputer("Studio Mac");
+        const pc = await addComputer("Office PC");
+        for (const { token } of [mac, pc]) {
+            await request(app).post("/computers/device/heartbeat").set("Authorization", `Bearer ${token}`);
+        }
+        const call = runComputerTool({ db: store.db, userId: "u1", callId: "c", name: "computer_observe", args: { computer: "office pc" } });
+        const poll = await request(app).get("/computers/device/next?wait=5").set("Authorization", `Bearer ${pc.token}`);
+        expect(poll.body.type).toBe("observe");
+        await request(app)
+            .post(`/computers/device/results/${poll.body.id}`)
+            .set("Authorization", `Bearer ${pc.token}`)
+            .send({ ok: false, error: "no screen" });
+        expect(JSON.parse(await call).error).toBe("no screen");
+
+        const unknown = JSON.parse(
+            await runComputerTool({ db: store.db, userId: "u1", callId: "c", name: "computer_observe", args: { computer: "Laptop" } }),
+        );
+        expect(unknown.error).toMatch(/No connected computer is named 'Laptop'\. Connected: .*Studio Mac/);
+    });
+
+    it("refuses a coordinate click on a computer that takes refs only", async () => {
+        const { token } = await addComputer();
+        await request(app)
+            .post("/computers/device/heartbeat")
+            .set("Authorization", `Bearer ${token}`)
+            .send({ platform: "linux", capabilities: { coordinates: "refs_only", takeover: "none", secure_input: "best_effort" } });
+        const result = JSON.parse(
+            await runComputerTool({
+                db: store.db,
+                userId: "u1",
+                callId: "c",
+                name: "computer_act",
+                args: { frame_id: "f", actions: [{ type: "click", ref: "e1" }, { type: "click", x: 10, y: 10 }] },
+            }),
+        );
+        expect(result.error).toMatch(/action 1: .* listed elements only/);
+    });
+
     it("answers a poll with 204 when nothing is waiting", async () => {
         const { token } = await addComputer();
         const res = await request(app)

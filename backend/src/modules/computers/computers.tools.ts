@@ -10,7 +10,7 @@ import type {
 } from "@mike/contracts";
 import type { Db } from "../../lib/db";
 import { sendDeviceCommand } from "./computers.bridge";
-import { findOnlineDevice } from "./computers.devices";
+import { findOnlineDevice, listOnlineDevices } from "./computers.devices";
 
 export const COMPUTER_TOOL_NAMES = new Set(["computer_observe", "computer_act"]);
 
@@ -110,8 +110,13 @@ export async function runComputerTool(input: {
   args: Record<string, unknown>;
   signal?: AbortSignal;
 }): Promise<string> {
-  const device = await findOnlineDevice(input.db, input.userId);
+  const named = typeof input.args.computer === "string" ? input.args.computer : null;
+  const device = await findOnlineDevice(input.db, input.userId, named);
   if (!device) {
+    const online = named ? await listOnlineDevices(input.db, input.userId) : [];
+    if (online.length > 0) {
+      return fail(`No connected computer is named '${named}'. Connected: ${online.map((d) => d.name).join(", ")}.`);
+    }
     return fail("No computer is connected. Ask the person to open the helper app on their computer.");
   }
   if (input.name === "computer_observe") {
@@ -141,6 +146,14 @@ export async function runComputerTool(input: {
     if (typeof frameId !== "string" || !frameId) return fail("frame_id is required");
     const parsed = parseActions(input.args.actions);
     if (!parsed.ok) return fail(parsed.error);
+    if (device.capabilities?.coordinates === "refs_only") {
+      const aimed = parsed.actions.findIndex(
+        (action) => (action.type === "click" || action.type === "scroll") && !action.ref && (action.x !== undefined || action.y !== undefined),
+      );
+      if (aimed >= 0) {
+        return fail(`action ${aimed}: ${device.name} takes clicks and scrolls on listed elements only; use a ref from computer_observe.`);
+      }
+    }
     const result = await sendDeviceCommand(
       device.id,
       { type: "act", frame_id: frameId, actions: parsed.actions },

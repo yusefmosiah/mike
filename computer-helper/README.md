@@ -92,11 +92,16 @@ mirrored in `Sources/ComputerHelperCore/Protocol.swift`.
   `{"ok":true,"observation":…}`, `{"ok":true,"act":…}` or
   `{"ok":false,"error":"…"}`.
 - `POST {server_url}/computers/device/heartbeat` every 15 s, independent of the
-  command loop, so a long batch does not make the computer look offline.
+  command loop, so a long batch does not make the computer look offline. Its
+  body says what this helper is and can do (`ComputerHeartbeat`):
+  `{"platform":"macos","capabilities":{"coordinates":"screen","takeover":"full","secure_input":"system"}}`.
+  Chat passes those limits on to the model.
 
 `observe` returns the frontmost app, its focused window's title, and the
 window's visible actionable and text elements, each with a ref, role, label
-and frame in screenshot pixels. With `screenshot: true` it adds a JPEG of the
+and frame in screenshot pixels. Roles are the shared names every helper uses
+(`button`, `textfield`, `menuitem`, ...; `ComputerRole` in the contracts),
+with the macOS role in `native_role`. With `screenshot: true` it adds a JPEG of the
 main display scaled to 1280 px on the long edge, with each ref drawn at its
 element's centre. Without Accessibility or Screen Recording permission the
 observation still arrives, with `elements_note` or `screenshot_note` saying

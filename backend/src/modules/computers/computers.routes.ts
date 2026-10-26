@@ -17,6 +17,8 @@ import {
   listComputerDevices,
   nextDeviceCommand,
   parseDeviceName,
+  parseHeartbeat,
+  recordHeartbeat,
   requeueDeviceCommand,
   revokeComputerDevice,
   submitDeviceResult,
@@ -100,10 +102,13 @@ computersRouter.post("/device/results/:commandId", deviceLimiter, requireDevice,
   res.status(204).end();
 });
 
-// POST /computers/device/heartbeat — still here (requireDevice records it).
-computersRouter.post("/device/heartbeat", deviceLimiter, requireDevice, (_req, res) => {
-  res.json({ name: deviceOf(res).name });
-});
+// POST /computers/device/heartbeat — still here (requireDevice records it),
+// with the helper's platform and capabilities (ComputerHeartbeat).
+computersRouter.post("/device/heartbeat", deviceLimiter, requireDevice, asyncRoute(async (req, res) => {
+  const device = deviceOf(res);
+  await recordHeartbeat(createDb(), device.id, parseHeartbeat(req.body));
+  res.json({ name: device.name });
+}));
 
 // ---------------------------------------------------------------------------
 // Signed in

@@ -37,6 +37,17 @@ export function lastSeenText(device: ComputerDevice, now = Date.now()) {
   return `Last seen ${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+const PLATFORM_LABELS: Record<NonNullable<ComputerDevice["platform"]>, string> = {
+  macos: "macOS",
+  windows: "Windows",
+  linux: "Linux",
+  sandbox: "Sandboxed desktop",
+};
+
+export function platformText(device: ComputerDevice) {
+  return device.platform ? PLATFORM_LABELS[device.platform] : null;
+}
+
 function ComputersSkeleton() {
   return (
     <div
@@ -161,6 +172,9 @@ export function ComputersSettingsSection() {
                 <SettingsLabel>
                   <span className="break-words">{device.name}</span>
                 </SettingsLabel>
+                {platformText(device) && (
+                  <SettingsDescription>{platformText(device)}</SettingsDescription>
+                )}
                 <SettingsDescription>{lastSeenText(device)}</SettingsDescription>
               </div>
               <PillButtonUI

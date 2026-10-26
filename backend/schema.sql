@@ -8264,7 +8264,11 @@ create table if not exists public.computer_devices (
   created_at timestamptz not null default now(),
   last_seen_at timestamptz,
   revoked_at timestamptz,
-  constraint computer_devices_token_hash_key unique (token_hash)
+  platform text,
+  capabilities jsonb,
+  constraint computer_devices_token_hash_key unique (token_hash),
+  constraint computer_devices_platform_check
+    check (platform is null or platform in ('macos', 'windows', 'linux', 'sandbox'))
 );
 create index if not exists computer_devices_user_idx
   on public.computer_devices(user_id, created_at desc);
@@ -8429,5 +8433,6 @@ insert into public.schema_migrations (filename) values
   ('20261024_02_publications.sql'),
   ('20261024_03_publication_sign_in.sql'),
   ('20261025_01_dark_mode_follows_system.sql'),
-  ('20261026_01_computer_devices.sql')
+  ('20261026_01_computer_devices.sql'),
+  ('20261026_02_computer_device_platform.sql')
 on conflict (filename) do nothing;

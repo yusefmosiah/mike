@@ -113,7 +113,9 @@ final class Transport: Sendable {
     }
 
     func heartbeat() async throws {
-        let (_, response) = try await send(request("/computers/device/heartbeat", method: "POST", body: Data("{}".utf8)))
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let body = try JSONEncoder().encode(Heartbeat.macOS(version: version))
+        let (_, response) = try await send(request("/computers/device/heartbeat", method: "POST", body: body))
         if !(200..<300).contains(response.statusCode) { throw TransportError.http(response.statusCode) }
     }
 }

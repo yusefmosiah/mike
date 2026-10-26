@@ -3,6 +3,27 @@ import XCTest
 @testable import ComputerHelperCore
 
 final class ProtocolTests: XCTestCase {
+    func testMapsRolesOntoTheSharedVocabulary() {
+        XCTAssertEqual(Roles.shared("AXButton"), "button")
+        XCTAssertEqual(Roles.shared("AXSecureTextField"), "textfield")
+        XCTAssertEqual(Roles.shared("AXPopUpButton"), "popup")
+        XCTAssertEqual(Roles.shared("AXSomethingNew"), "other")
+    }
+
+    func testEncodesHeartbeatAndElementInTheContractShape() throws {
+        let beat = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Heartbeat.macOS(version: "0.2"))) as! [String: Any]
+        XCTAssertEqual(beat["platform"] as? String, "macos")
+        XCTAssertEqual(beat["helper_version"] as? String, "0.2")
+        let caps = beat["capabilities"] as! [String: String]
+        XCTAssertEqual(caps, ["coordinates": "screen", "takeover": "full", "secure_input": "system"])
+
+        let element = ComputerElement(
+            ref: "e1", role: "button", nativeRole: "AXButton", frame: ElementFrame(x: 1, y: 2, w: 3, h: 4))
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(element)) as! [String: Any]
+        XCTAssertEqual(json["native_role"] as? String, "AXButton")
+        XCTAssertEqual(json["role"] as? String, "button")
+    }
+
     func testDecodesObserve() throws {
         let json = #"{"id":"c1","type":"observe","screenshot":true,"max_elements":80}"#
         let command = try JSONDecoder().decode(ComputerCommand.self, from: Data(json.utf8))

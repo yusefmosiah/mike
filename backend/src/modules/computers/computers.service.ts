@@ -12,10 +12,14 @@ export {
   findOnlineDevice,
   hashDeviceToken,
   listComputerDevices,
+  listOnlineDevices,
+  parseHeartbeat,
+  recordHeartbeat,
   parseDeviceName,
   revokeComputerDevice,
   touchDevice,
   type AuthenticatedDevice,
+  type OnlineComputer,
 } from "./computers.devices";
 export {
   nextDeviceCommand,

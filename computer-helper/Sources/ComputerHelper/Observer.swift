@@ -192,7 +192,7 @@ enum Observer {
             let focused = Observer.copyBool(element, kAXFocusedAttribute)
             elements.append(
                 ComputerElement(
-                    ref: ref, role: role, title: title, value: value, description: description, frame: frame,
+                    ref: ref, role: Roles.shared(role), nativeRole: role, title: title, value: value, description: description, frame: frame,
                     enabled: enabled == false ? false : nil, focused: focused == true ? true : nil))
             refs[ref] = ObservedElement(element: element, role: role, center: CGPoint(x: rect.midX, y: rect.midY))
         }

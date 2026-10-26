@@ -95,6 +95,15 @@ leaves the project's signing settings alone. In Xcode, pick the "My Mac (Mac
 Catalyst)" destination; that needs a development team for the Mac (Xcode
 offers to register the bundle identifier for Mac Catalyst).
 
+**Xcode was open while `ios:configure` (or `mac:deps`) ran:** Xcode keeps the
+package graph it resolved before, so the build fails with "There is no
+XCFramework found at .../capacitor-swift-pm/Capacitor/Capacitor.xcframework"
+or "While building for Mac Catalyst, no library for this platform was found".
+The project on disk is fine. Choose File → Packages → Reset Package Caches,
+then Resolve Package Versions, and build again; if that is not enough, close
+the project, delete its folder under `~/Library/Developer/Xcode/DerivedData/`,
+and reopen it.
+
 The equivalent command, from `mobile/ios/App`, in a clean environment (a Nix
 or Homebrew dev shell's `LD`, `CC` or `SDKROOT` breaks xcodebuild; see
 `mobile/README.md`):

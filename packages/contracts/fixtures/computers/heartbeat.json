@@ -1,0 +1,1 @@
+{"platform": "linux", "capabilities": {"coordinates": "refs_only", "takeover": "none", "secure_input": "best_effort"}, "helper_version": "0.1.0"}

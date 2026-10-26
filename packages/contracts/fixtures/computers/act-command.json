@@ -1,0 +1,15 @@
+{
+  "id": "4f7c2a1e-0000-4000-8000-000000000002",
+  "type": "act",
+  "frame_id": "f1",
+  "actions": [
+    {"type": "click", "ref": "e3"},
+    {"type": "click", "x": 640, "y": 400, "button": "right", "count": 2},
+    {"type": "type", "text": "Hello, world"},
+    {"type": "key", "combo": "cmd+s"},
+    {"type": "scroll", "ref": "e4", "dy": 3},
+    {"type": "open_app", "name": "TextEdit"},
+    {"type": "open_app", "bundle_id": "com.apple.TextEdit"},
+    {"type": "wait", "ms": 500}
+  ]
+}

@@ -45,7 +45,7 @@ import {
   WORKFLOW_TOOLS,
   VAULT_TOOLS,
   PUBLISH_TOOLS,
-  COMPUTER_TOOLS,
+  computerToolsFor,
   WORKSTATION_TOOLS,
   toolName,
   isDocumentMutatingTool,
@@ -87,7 +87,7 @@ import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
 import { publishingConfig } from "../../publications/publications.service";
-import { findOnlineDevice, takeComputerScreenshot, type ComputerImage } from "../../computers/computers.service";
+import { listOnlineDevices, takeComputerScreenshot, type ComputerImage } from "../../computers/computers.service";
 import { endOwnerTurn, startGuestTurn } from "../../../lib/vault/occupancy";
 import {
   cellResultContent,
@@ -615,7 +615,7 @@ export async function runLLMStream(params: {
   const mcpTools = await buildUserMcpTools(userId, db);
   const googleDriveTools = await buildGoogleDriveTools(userId, db);
   // The person's own computer, while its helper app is connected.
-  const computerOnline = !!userId && !!(await findOnlineDevice(db, userId));
+  const computers = userId ? await listOnlineDevices(db, userId) : [];
   // Auto Mode has no one to answer a question, so `ask_inputs` is withheld
   // exactly as it is for surfaces that cannot render it. Enforcement for a
   // call the model emits anyway is in the `runTools` wrapper below.
@@ -662,7 +662,7 @@ export async function runLLMStream(params: {
     // Publishing pauses for the person, like ask_inputs.
     ...(includeAskInputs && !autoMode && !isGuest && publishingConfig().enabled ? PUBLISH_TOOLS : []),
     // Never for a guest: it is the signed-in person's computer.
-    ...(computerOnline && !isGuest && kernelLauncher ? COMPUTER_TOOLS : []),
+    ...(computers.length > 0 && !isGuest && kernelLauncher ? computerToolsFor(computers) : []),
   ];
   const advertisedTools = [
     ...baseTools,

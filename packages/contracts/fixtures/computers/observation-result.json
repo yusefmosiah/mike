@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "observation": {
+    "frame_id": "f1",
+    "app": {"name": "TextEdit", "bundle_id": "com.apple.TextEdit"},
+    "window_title": "Untitled",
+    "elements": [
+      {"ref": "e1", "role": "button", "native_role": "AXButton", "title": "Save", "frame": {"x": 1120, "y": 720, "w": 80, "h": 28}},
+      {"ref": "e2", "role": "textarea", "frame": {"x": 0, "y": 40, "w": 1280, "h": 660}, "focused": true, "enabled": false}
+    ],
+    "screenshot": {"data": "AAAA", "mime_type": "image/jpeg", "width": 1280, "height": 800}
+  }
+}

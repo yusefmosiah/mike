@@ -178,7 +178,9 @@ public struct ElementFrame: Codable, Equatable, Sendable {
 
 public struct ComputerElement: Codable, Equatable, Sendable {
     public var ref: String
+    /// A shared role name (`Roles.shared`); the platform's own is in `nativeRole`.
     public var role: String
+    public var nativeRole: String?
     public var title: String?
     public var value: String?
     public var description: String?
@@ -186,12 +188,18 @@ public struct ComputerElement: Codable, Equatable, Sendable {
     public var enabled: Bool?
     public var focused: Bool?
 
+    enum CodingKeys: String, CodingKey {
+        case ref, role, title, value, description, frame, enabled, focused
+        case nativeRole = "native_role"
+    }
+
     public init(
-        ref: String, role: String, title: String? = nil, value: String? = nil,
+        ref: String, role: String, nativeRole: String? = nil, title: String? = nil, value: String? = nil,
         description: String? = nil, frame: ElementFrame, enabled: Bool? = nil, focused: Bool? = nil
     ) {
         self.ref = ref
         self.role = role
+        self.nativeRole = nativeRole
         self.title = title
         self.value = value
         self.description = description
@@ -199,6 +207,53 @@ public struct ComputerElement: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.focused = focused
     }
+}
+
+/// What the helper says about itself in each heartbeat (`ComputerHeartbeat` in the contracts).
+public struct Heartbeat: Codable, Equatable, Sendable {
+    public struct Capabilities: Codable, Equatable, Sendable {
+        public var coordinates: String
+        public var takeover: String
+        public var secureInput: String
+
+        enum CodingKeys: String, CodingKey {
+            case coordinates, takeover
+            case secureInput = "secure_input"
+        }
+    }
+
+    public var platform: String
+    public var capabilities: Capabilities
+    public var helperVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case platform, capabilities
+        case helperVersion = "helper_version"
+    }
+
+    /// This helper on macOS: clicks anywhere on the screenshot, takeover by tagged events, system secure input.
+    public static func macOS(version: String?) -> Heartbeat {
+        Heartbeat(
+            platform: "macos",
+            capabilities: Capabilities(coordinates: "screen", takeover: "full", secureInput: "system"),
+            helperVersion: version)
+    }
+}
+
+/// macOS accessibility roles mapped onto the roles every helper shares (`ComputerRole`).
+public enum Roles {
+    static let table: [String: String] = [
+        "AXButton": "button", "AXMenuButton": "button", "AXDisclosureTriangle": "button",
+        "AXIncrementor": "button", "AXStepper": "button", "AXColorWell": "button", "AXDockItem": "button",
+        "AXCheckBox": "checkbox", "AXRadioButton": "radio", "AXSwitch": "switch", "AXToggle": "switch",
+        "AXTextField": "textfield", "AXSecureTextField": "textfield", "AXTextArea": "textarea",
+        "AXSearchField": "searchfield", "AXComboBox": "combobox", "AXPopUpButton": "popup",
+        "AXMenu": "menu", "AXMenuItem": "menuitem", "AXMenuBarItem": "menuitem", "AXLink": "link",
+        "AXTab": "tab", "AXSegmentedControl": "tab", "AXList": "list", "AXRow": "row", "AXCell": "cell",
+        "AXSlider": "slider", "AXStaticText": "text", "AXHeading": "heading", "AXImage": "image",
+    ]
+
+    public static func shared(_ axRole: String) -> String { table[axRole] ?? "other" }
 }
 
 public struct ObservedApp: Codable, Equatable, Sendable {
