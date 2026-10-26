@@ -30,6 +30,17 @@ export function scrollsWithPage(container: Element): boolean {
     );
 }
 
+/**
+ * Whether the viewport is stretched past either end, as during a rubber-band
+ * bounce on an Apple device (WebKit reports a negative scrollTop, or one past
+ * the end, while the content is pulled and while it springs back). Writing
+ * scrollTop then cancels the bounce, so automatic scrolling must wait.
+ */
+export function isOverscrolled(viewport: Pick<ScrollViewport, "scrollTop" | "height" | "scrollHeight">): boolean {
+    const end = Math.max(0, viewport.scrollHeight - viewport.height);
+    return viewport.scrollTop < -0.5 || viewport.scrollTop > end + 0.5;
+}
+
 /** Each measurement is read when asked for: reading layout is not free. */
 export function scrollViewportOf(container: HTMLElement): ScrollViewport {
     if (!scrollsWithPage(container)) {

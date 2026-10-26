@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computedPadding, onScrollViewportChange, scrollViewportOf, scrollsWithPage } from "./scrollViewport";
+import { computedPadding, isOverscrolled, onScrollViewportChange, scrollViewportOf, scrollsWithPage } from "./scrollViewport";
 
 function box({ overflowY = "", scrollTop = 0, clientHeight = 0, scrollHeight = 0, top = 0, parent = document.body } = {}) {
     const element = document.createElement("div");
@@ -96,5 +96,25 @@ describe("computedPadding", () => {
         expect(computedPadding(element, "bottom", 116)).toBe(128);
         vi.spyOn(window, "getComputedStyle").mockReturnValue({ paddingTop: "" } as CSSStyleDeclaration);
         expect(computedPadding(box(), "top", 76)).toBe(76);
+    });
+});
+
+describe("isOverscrolled", () => {
+    const area = { height: 400, scrollHeight: 1000 };
+
+    it("is false anywhere inside the scrollable range", () => {
+        expect(isOverscrolled({ ...area, scrollTop: 0 })).toBe(false);
+        expect(isOverscrolled({ ...area, scrollTop: 300 })).toBe(false);
+        expect(isOverscrolled({ ...area, scrollTop: 600 })).toBe(false);
+    });
+
+    it("is true while stretched past the top or the end, as in a rubber-band bounce", () => {
+        expect(isOverscrolled({ ...area, scrollTop: -12 })).toBe(true);
+        expect(isOverscrolled({ ...area, scrollTop: 640 })).toBe(true);
+    });
+
+    it("treats content shorter than the viewport as having no range", () => {
+        expect(isOverscrolled({ height: 400, scrollHeight: 300, scrollTop: 0 })).toBe(false);
+        expect(isOverscrolled({ height: 400, scrollHeight: 300, scrollTop: 25 })).toBe(true);
     });
 });

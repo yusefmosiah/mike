@@ -583,6 +583,50 @@ describe("ChatThread scrolling", () => {
         }
     });
 
+    it("does not write scrollTop while the reader is rubber-banding or touching, then catches up", () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+            frames.push(callback);
+            return frames.length;
+        });
+        vi.stubGlobal("cancelAnimationFrame", vi.fn());
+        const flush = () =>
+            act(() => {
+                while (frames.length) frames.shift()!(0);
+            });
+        renderThread({ variant: "pane", isResponseLoading: true });
+        const scroller = document.querySelector<HTMLElement>(
+            '[data-slot="chat-messages-scroller"]',
+        )!;
+        Object.defineProperty(scroller, "clientHeight", { value: 400 });
+        Object.defineProperty(scroller, "scrollHeight", { value: 1000 });
+        const scrollTo = vi.mocked(Element.prototype.scrollTo);
+        const stream = () =>
+            act(() => resizeCallbacks.forEach((callback) => callback()));
+
+        // Pulled 40px past the end: the native bounce must not be cancelled.
+        scroller.scrollTop = 640;
+        scrollTo.mockClear();
+        stream();
+        expect(scrollTo).not.toHaveBeenCalled();
+
+        // A finger on the screen holds off following, even inside the range.
+        scroller.scrollTop = 590;
+        act(() => {
+            window.dispatchEvent(new Event("touchstart"));
+        });
+        stream();
+        expect(scrollTo).not.toHaveBeenCalled();
+
+        // Released and settled: the deferred follow catches up on the next frame.
+        scroller.scrollTop = 560;
+        act(() => {
+            window.dispatchEvent(new Event("touchend"));
+        });
+        flush();
+        expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: "auto" });
+    });
+
     it("shows the scroll button away from the end and follows back to it", () => {
         const frames: FrameRequestCallback[] = [];
         vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

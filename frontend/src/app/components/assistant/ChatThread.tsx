@@ -15,6 +15,7 @@ import { findPendingAskInput } from "@/app/lib/pendingAskInput";
 import {
     computedPadding,
     onScrollViewportChange,
+    isOverscrolled,
     scrollViewportOf,
     type ScrollViewport,
 } from "@/app/lib/scrollViewport";
@@ -496,10 +497,21 @@ export function ChatThread({
             viewport.height;
         return Math.max(pinned, reach);
     }, []);
+    // Native rubber-banding (iOS, Safari, a Mac trackpad) is cancelled by any
+    // script write to scrollTop. Following the stream therefore waits while a
+    // finger is down or the content is stretched past an end, and catches up
+    // once the bounce has settled (see measure below).
+    const touchingRef = useRef(false);
+    const followDeferredRef = useRef(false);
     const scrollToEnd = useCallback(() => {
         const c = messagesContainerRef.current;
         if (!c) return;
         const viewport = scrollViewportOf(c);
+        if (touchingRef.current || isOverscrolled(viewport)) {
+            followDeferredRef.current = true;
+            return;
+        }
+        followDeferredRef.current = false;
         const end = viewport.scrollHeight - viewport.height;
         const target = Math.max(0, Math.min(end, autoScrollLimit(viewport)));
         if (Math.abs(target - viewport.scrollTop) <= 1) return;
@@ -527,6 +539,13 @@ export function ChatThread({
             const fromEnd = scrollHeight - viewport.scrollTop - height;
             // Back at the end of the thread: follow the answer again.
             if (fromEnd <= FOLLOW_STREAM_THRESHOLD_PX) followRef.current = true;
+            if (
+                followDeferredRef.current &&
+                followStreamRef.current &&
+                followRef.current
+            ) {
+                scrollToEnd();
+            }
             const visible = scrollHeight > height && fromEnd > 10;
             // Avoid dispatching even an unchanged value during a busy stream:
             // React cannot always bail out eagerly while other work is queued.
@@ -560,6 +579,16 @@ export function ChatThread({
         observer.observe(c);
         observer.observe(content);
         const stopListening = onScrollViewportChange(c, onScroll);
+        const onTouchStart = () => {
+            touchingRef.current = true;
+        };
+        const onTouchEnd = () => {
+            touchingRef.current = false;
+            if (followDeferredRef.current) scheduleMeasure();
+        };
+        window.addEventListener("touchstart", onTouchStart, { passive: true });
+        window.addEventListener("touchend", onTouchEnd, { passive: true });
+        window.addEventListener("touchcancel", onTouchEnd, { passive: true });
         // A keyboard opening or closing changes the visible height without
         // resizing the thread: re-check the position the stream is following.
         const onViewportResize = () => {
@@ -570,6 +599,10 @@ export function ChatThread({
         return () => {
             observer.disconnect();
             stopListening();
+            window.removeEventListener("touchstart", onTouchStart);
+            window.removeEventListener("touchend", onTouchEnd);
+            window.removeEventListener("touchcancel", onTouchEnd);
+            touchingRef.current = false;
             window.visualViewport?.removeEventListener("resize", onViewportResize);
             if (frame !== null) cancelAnimationFrame(frame);
         };
