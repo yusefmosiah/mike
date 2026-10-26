@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { configure } from "@testing-library/react";
 import { Blob as NodeBlob } from "node:buffer";
+import * as webStreams from "node:stream/web";
 
 // Vitest's jsdom environment always overrides `globalThis.Blob` with jsdom's
 // own Blob implementation, which never implemented `.text()`/`.arrayBuffer()`/
@@ -18,3 +19,20 @@ globalThis.Blob = NodeBlob as unknown as typeof Blob;
 // that on a busy CI runner, which failed tests that were not broken. The
 // per-test limit (testTimeout in vitest.config.mts) still catches a real hang.
 configure({ asyncUtilTimeout: 5000 });
+
+// Most test files run in their own VM context (the "unit" project in
+// vitest.config.mts), whose jsdom global lacks the WHATWG streams the
+// browser and Node both have. Supply Node's where jsdom has none.
+for (const name of [
+    "ReadableStream",
+    "WritableStream",
+    "TransformStream",
+    "TextEncoderStream",
+    "TextDecoderStream",
+    "ByteLengthQueuingStrategy",
+    "CountQueuingStrategy",
+] as const) {
+    if (!(name in globalThis)) {
+        Object.assign(globalThis, { [name]: webStreams[name] });
+    }
+}

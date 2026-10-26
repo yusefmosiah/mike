@@ -7,6 +7,37 @@ import { DORMANT_SOURCES, DORMANT_TESTS, testGroup } from "./vitest.groups.mjs";
 
 const group = testGroup();
 
+// Unit tests only; Playwright e2e specs (*.spec.ts) stay out. Dormant
+// features' tests run nightly, not in CI: vitest.groups.mts.
+const testFiles =
+    group === "dormant" ? DORMANT_TESTS : ["src/**/*.test.{ts,tsx}"];
+const excludedTests = [
+    "node_modules/**",
+    "e2e/**",
+    "**/*.spec.ts",
+    ...(group === "core" ? DORMANT_TESTS : []),
+];
+
+// Files that cannot run in a VM context (see `projects` below). A new test
+// failing with "Cannot redefine property: window" belongs here.
+const VM_UNSAFE_TESTS = [
+    "src/app/(pages)/published/page.test.tsx",
+    "src/app/components/projects/ProjectDocumentTabs.colors.test.tsx",
+    "src/app/components/shared/views/TextView.test.tsx",
+    "src/app/hooks/useRemountPersistentState.test.tsx",
+    "src/app/lib/authRedirects.test.ts",
+    "src/app/lib/errorReporting.test.ts",
+    "src/app/lib/theme.test.ts",
+    "src/app/lib/voice/browserModels.load.test.ts",
+    "src/app/lib/voice/browserSpeech.test.ts",
+    "src/app/lib/voice/deviceSpeech.test.ts",
+    "src/app/lib/voice/voiceEngine.test.ts",
+    "src/app/lib/voice/web/capabilities.test.ts",
+    "src/app/lib/voice/web/player.test.ts",
+    "src/app/lib/voice/web/prime.test.ts",
+    "src/app/lib/voice/web/webBackend.test.ts",
+];
+
 const resolvePath = (relative: string) =>
     fileURLToPath(new URL(relative, import.meta.url));
 
@@ -58,18 +89,40 @@ export default defineConfig({
         // Instead, let Node itself handle require(esm): default on >=22.12,
         // and enabled by this (there harmless) flag on 22.0–22.11.
         execArgv: ["--experimental-require-module"],
-        // Unit tests only. Keep any Playwright e2e specs (*.spec.ts) out.
-        // Dormant features' tests run nightly, not in CI: vitest.groups.mts.
-        include: group === "dormant" ? DORMANT_TESTS : ["src/**/*.test.{ts,tsx}"],
-        exclude: [
-            "node_modules/**",
-            "e2e/**",
-            "**/*.spec.ts",
-            ...(group === "core" ? DORMANT_TESTS : []),
-        ],
         // Generous timeouts to absorb cold-start jsdom + transform latency on CI.
         testTimeout: 20000,
         hookTimeout: 20000,
+        // Two projects with one configuration. Most files run in "unit": each
+        // in a fresh VM context inside a reused worker thread, instead of a
+        // new process that builds jsdom from scratch, which was ~40% of the
+        // suite's time (the whole suite: 387 s on two workers, 81 s this
+        // way). The files in VM_UNSAFE_TESTS cannot run in a VM context (they
+        // redefine `window`, `document` or `location` to imitate a server
+        // render, or load native tooling), so they keep a process each.
+        projects: [
+            {
+                extends: true,
+                test: {
+                    name: "unit",
+                    pool: "vmThreads",
+                    include: testFiles,
+                    exclude: [...excludedTests, ...VM_UNSAFE_TESTS],
+                },
+            },
+            ...(group === "dormant"
+                ? []
+                : [
+                      {
+                          extends: true,
+                          test: {
+                              name: "unit (own process)",
+                              pool: "forks" as const,
+                              include: VM_UNSAFE_TESTS,
+                              exclude: excludedTests,
+                          },
+                      },
+                  ]),
+        ],
         // Undo every spy, stubbed global and stubbed env var after each test,
         // so no test depends on another one's leftovers.
         restoreMocks: true,
