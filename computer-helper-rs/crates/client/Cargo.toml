@@ -1,0 +1,16 @@
+[package]
+name = "computer-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Talks to the API for a computer helper: long-polls commands, posts results, beats, and runs a platform backend."
+
+[dependencies]
+computer-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tiny_http.workspace = true

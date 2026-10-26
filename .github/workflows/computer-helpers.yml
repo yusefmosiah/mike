@@ -1,0 +1,50 @@
+# CI: the Rust computer helpers (computer-helper-rs/), on Linux and Windows,
+# against the protocol fixtures they share with the Swift macOS helper
+# (packages/contracts/fixtures/computers). The helpers are not deployed, so
+# this does not gate the staging deploy; it runs when their files change.
+# See docs/ci.md.
+name: Computer helpers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "computer-helper-rs/**"
+      - "packages/contracts/fixtures/computers/**"
+      - ".github/workflows/computer-helpers.yml"
+  pull_request:
+    paths:
+      - "computer-helper-rs/**"
+      - "packages/contracts/fixtures/computers/**"
+      - ".github/workflows/computer-helpers.yml"
+
+concurrency:
+  group: computer-helpers-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: computer-helper-rs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --locked
