@@ -100,6 +100,8 @@ export type AgentOps = {
 export type NormalizedToolResult = {
     tool_use_id: string;
     content: string;
+    /** Images the model sees with the result, when it reads images (a computer screenshot). */
+    images?: { data: string; mimeType: string }[];
 };
 
 export type StreamCallbacks = {

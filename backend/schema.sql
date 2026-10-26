@@ -8252,6 +8252,27 @@ revoke all on table public.publication_files from public, anon, authenticated;
 grant select, insert, update, delete on public.publications to service_role;
 grant select, insert, update, delete on public.publication_files to service_role;
 
+-- A person's own computers, driven from chat through a local helper app
+-- (computer-helper/). Each device authenticates with a bearer token shown
+-- once when it is added; only the token's SHA-256 is stored. A revoked
+-- device keeps its row so its history stays readable.
+create table if not exists public.computer_devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  token_hash text not null,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz,
+  revoked_at timestamptz,
+  constraint computer_devices_token_hash_key unique (token_hash)
+);
+create index if not exists computer_devices_user_idx
+  on public.computer_devices(user_id, created_at desc);
+
+alter table public.computer_devices enable row level security;
+revoke all on table public.computer_devices from public, anon, authenticated;
+grant select, insert, update, delete on public.computer_devices to service_role;
+
 -- ---------------------------------------------------------------------------
 -- Migration ledger (backend/migrations/20261010_06_schema_migrations.sql)
 -- ---------------------------------------------------------------------------
@@ -8407,5 +8428,6 @@ insert into public.schema_migrations (filename) values
   ('20261024_01_html_upload_type.sql'),
   ('20261024_02_publications.sql'),
   ('20261024_03_publication_sign_in.sql'),
-  ('20261025_01_dark_mode_follows_system.sql')
+  ('20261025_01_dark_mode_follows_system.sql'),
+  ('20261026_01_computer_devices.sql')
 on conflict (filename) do nothing;

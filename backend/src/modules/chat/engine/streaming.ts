@@ -5,6 +5,7 @@ import {
   type LlmMessage,
   type LlmUserContent,
   type NormalizedToolCall,
+  type NormalizedToolResult,
   type OpenAIToolSchema,
   type StreamChatResult,
 } from "../../../lib/llm";
@@ -44,6 +45,7 @@ import {
   WORKFLOW_TOOLS,
   VAULT_TOOLS,
   PUBLISH_TOOLS,
+  COMPUTER_TOOLS,
   WORKSTATION_TOOLS,
   toolName,
   isDocumentMutatingTool,
@@ -85,6 +87,7 @@ import { attachWebSnapshots } from "./webSnapshots";
 import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
 import { publishingConfig } from "../../publications/publications.service";
+import { findOnlineDevice, takeComputerScreenshot, type ComputerImage } from "../../computers/computers.service";
 import { endOwnerTurn, startGuestTurn } from "../../../lib/vault/occupancy";
 import {
   cellResultContent,
@@ -611,6 +614,8 @@ export async function runLLMStream(params: {
   const researchTools = includeResearchTools ? COURTLISTENER_TOOLS : [];
   const mcpTools = await buildUserMcpTools(userId, db);
   const googleDriveTools = await buildGoogleDriveTools(userId, db);
+  // The person's own computer, while its helper app is connected.
+  const computerOnline = !!userId && !!(await findOnlineDevice(db, userId));
   // Auto Mode has no one to answer a question, so `ask_inputs` is withheld
   // exactly as it is for surfaces that cannot render it. Enforcement for a
   // call the model emits anyway is in the `runTools` wrapper below.
@@ -656,6 +661,8 @@ export async function runLLMStream(params: {
     ...workstationTools,
     // Publishing pauses for the person, like ask_inputs.
     ...(includeAskInputs && !autoMode && !isGuest && publishingConfig().enabled ? PUBLISH_TOOLS : []),
+    // Never for a guest: it is the signed-in person's computer.
+    ...(computerOnline && !isGuest && kernelLauncher ? COMPUTER_TOOLS : []),
   ];
   const advertisedTools = [
     ...baseTools,
@@ -802,6 +809,8 @@ export async function runLLMStream(params: {
   const modelsRead = new Set<string>();
   // A conversation's kernel is keyed by its id; a turn without one gets its own.
   const turnKernelId = crypto.randomUUID();
+  // The screenshot each run_python cell took last, by the cell's call id.
+  const cellImages = new Map<string, ComputerImage>();
   // Suppress repeated full-document reads for the same document/version in
   // one assistant response. The guard is invalidated when edit_document
   // changes that document so a post-edit verification read can still happen.
@@ -1076,9 +1085,9 @@ export async function runLLMStream(params: {
     const runTurnTools = async (
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
-    ): Promise<{ tool_use_id: string; content: string }[]> => {
+    ): Promise<NormalizedToolResult[]> => {
       toolsInFlight += 1;
-      let results: { tool_use_id: string; content: string }[];
+      let results: NormalizedToolResult[];
       try {
         results = await runTurnToolsInOrder(calls, scope);
       } finally {
@@ -1097,11 +1106,11 @@ export async function runLLMStream(params: {
     const runTurnToolsInOrder = async (
       calls: NormalizedToolCall[],
       scope: "parent" | "child",
-    ): Promise<{ tool_use_id: string; content: string }[]> => {
+    ): Promise<NormalizedToolResult[]> => {
       if (calls.some((call) => call.name === RUN_PYTHON_TOOL)) {
         // Cells run in the model's call order with the calls around them,
         // and outside the write queue: their own writes queue there.
-        const results: { tool_use_id: string; content: string }[] = [];
+        const results: NormalizedToolResult[] = [];
         let pending: NormalizedToolCall[] = [];
         for (const call of calls) {
           if (call.name !== RUN_PYTHON_TOOL) {
@@ -1110,7 +1119,10 @@ export async function runLLMStream(params: {
           }
           if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
           pending = [];
-          results.push({ tool_use_id: call.id, content: await runPythonCall(call, scope) });
+          const content = await runPythonCall(call, scope);
+          const image = cellImages.get(call.id);
+          cellImages.delete(call.id);
+          results.push({ tool_use_id: call.id, content, ...(image ? { images: [image] } : {}) });
         }
         if (pending.length) results.push(...(await runTurnToolsInOrder(pending, scope)));
         return results;
@@ -1314,6 +1326,10 @@ export async function runLLMStream(params: {
         const run = () => runTurnToolsNow([inner], scope);
         try {
           const [answer] = isParallelSafeTool(name) ? await run() : await inWriteOrder(run);
+          // A screenshot reaches the model as an image on this cell's
+          // result, never through the kernel; the cell's last one wins.
+          const shot = name === "computer_observe" ? takeComputerScreenshot(inner.id) : null;
+          if (shot && scope === "parent") cellImages.set(call.id, shot);
           return { ok: true, content: answer?.content ?? JSON.stringify({ error: `${name} returned nothing` }) };
         } catch (error) {
           if (isAskInputsPause(error)) {
@@ -1605,6 +1621,7 @@ export async function runLLMStream(params: {
           chatId: conversationId ?? null,
           // Memory is the person's: a delegated subagent does not change it.
           memoryEdit: scope === "parent" ? memoryEditTarget : null,
+          signal,
         },
       );
       throwIfAborted(signal);

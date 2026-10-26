@@ -830,3 +830,95 @@ export interface NativeConnectorTool {
     write: boolean;
     enabled: boolean;
 }
+
+// ── Computers: a person's own Mac, driven by chat through a local helper ──
+// The helper long-polls GET /computers/device/next (bearer device token) and
+// answers each command with POST /computers/device/results/:id.
+
+/** A computer as the settings page lists it. */
+export interface ComputerDevice {
+  id: string;
+  name: string;
+  created_at: string;
+  last_seen_at: string | null;
+  /** Seen by the server in the last minute. */
+  online: boolean;
+}
+
+/** POST /computers answers once with the token; only its hash is stored. */
+export interface CreatedComputerDevice {
+  device: ComputerDevice;
+  token: string;
+}
+
+export interface ComputerObserveCommand {
+  id: string;
+  type: "observe";
+  screenshot: boolean;
+  max_elements: number;
+}
+
+export type ComputerAction =
+  | { type: "click"; ref?: string; x?: number; y?: number; button?: "left" | "right"; count?: number }
+  | { type: "type"; text: string }
+  | { type: "key"; combo: string }
+  | { type: "scroll"; ref?: string; x?: number; y?: number; dx?: number; dy?: number }
+  | { type: "open_app"; name?: string; bundle_id?: string }
+  | { type: "wait"; ms: number };
+
+export interface ComputerActCommand {
+  id: string;
+  type: "act";
+  /** The observation the refs and coordinates come from. */
+  frame_id: string;
+  actions: ComputerAction[];
+}
+
+export type ComputerCommand = ComputerObserveCommand | ComputerActCommand;
+
+export interface ComputerElement {
+  ref: string;
+  role: string;
+  title?: string;
+  value?: string;
+  description?: string;
+  /** Screenshot pixel coordinates of the element's frame. */
+  frame: { x: number; y: number; w: number; h: number };
+  enabled?: boolean;
+  focused?: boolean;
+}
+
+export interface ComputerObservation {
+  frame_id: string;
+  app: { name: string; bundle_id: string | null } | null;
+  window_title: string | null;
+  elements: ComputerElement[];
+  /** Why the element tree is missing or partial (for example, no Accessibility permission). */
+  elements_note?: string;
+  screenshot?: {
+    /** Base64 JPEG with each element's ref drawn at its centre. */
+    data: string;
+    mime_type: "image/jpeg";
+    width: number;
+    height: number;
+  };
+  screenshot_note?: string;
+}
+
+export interface ComputerActionOutcome {
+  index: number;
+  ok: boolean;
+  error?: string;
+}
+
+export interface ComputerActResult {
+  outcomes: ComputerActionOutcome[];
+  /** Set when the batch stopped early: the first failure, or the person took over. */
+  stopped_reason?: string;
+}
+
+/** The body the helper POSTs for a command. */
+export type ComputerCommandResult =
+  | { ok: true; observation: ComputerObservation }
+  | { ok: true; act: ComputerActResult }
+  | { ok: false; error: string };

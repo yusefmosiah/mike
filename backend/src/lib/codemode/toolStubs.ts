@@ -21,6 +21,7 @@ export const TOOL_GROUPS = [
   "Skills",
   "Credentials",
   "Subagents",
+  "The person's computer",
 ] as const;
 
 export type ToolGroup = (typeof TOOL_GROUPS)[number];
@@ -209,6 +210,16 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     group: "Subagents",
     text: "stop a background subagent's current work when it is no longer needed or has gone wrong.",
   },
+
+  // The person's computer
+  computer_observe: {
+    group: "The person's computer",
+    text: "see the person's own computer: the front app's controls with refs, and a screenshot attached to this cell's result.",
+  },
+  computer_act: {
+    group: "The person's computer",
+    text: "click, type, press keys, scroll and open apps on the person's computer, by ref from the latest observe.",
+  },
 };
 
 /**
@@ -216,7 +227,14 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
  * offered: their arguments are nested enough that a call written from the
  * one line alone usually fails.
  */
-export const FULL_DOC_TOOLS: readonly string[] = ["edit_document", "apply_word_edits", "generate_docx", "ask_inputs"];
+export const FULL_DOC_TOOLS: readonly string[] = [
+  "edit_document",
+  "apply_word_edits",
+  "generate_docx",
+  "ask_inputs",
+  "computer_observe",
+  "computer_act",
+];
 
 /** Connectors whose functions share a name prefix, collapsed to one line each. */
 export const CONNECTOR_PREFIXES: readonly { prefix: string; name: string }[] = [

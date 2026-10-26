@@ -25,6 +25,7 @@ import { authRouter } from "./modules/auth/auth.routes";
 import { uploadSessionsRouter } from "./modules/uploads/uploads.routes";
 import { audioRouter } from "./modules/audio/audio.routes";
 import { citationsRouter } from "./modules/citations/citations.routes";
+import { computersRouter } from "./modules/computers/computers.routes";
 import {
   publicationContentRouter,
   publicationsRouter,
@@ -215,6 +216,8 @@ app.post(
 // parser runs before the global one; body-parser skips a request whose body is
 // already parsed, so the smaller limit wins for this path.
 app.post(TOOL_RESULT_PATH, express.json({ limit: "2mb" }));
+// A computer helper's result carries at most one downscaled JPEG screenshot.
+app.post("/computers/device/results/:commandId", express.json({ limit: "8mb" }));
 
 const legacyUploadRemoved = (_req: express.Request, res: express.Response) => {
   res.status(410).json({
@@ -266,6 +269,7 @@ app.use("/upload-sessions", uploadSessionsRouter);
 app.use("/audio", audioRouter);
 app.use("/vault", vaultRouter);
 app.use("/publications", publicationsRouter);
+app.use("/computers", computersRouter);
 // /diligence (RLM deep runs) is not mounted: the work is tabled until its
 // sandbox and model lane are redone (goals/STATUS.md).
 

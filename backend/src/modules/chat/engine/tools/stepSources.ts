@@ -104,6 +104,9 @@ export const TOOL_SOURCES: Record<string, "sources" | "none" | "pending"> = {
   vault_request_secret: "none",
   publish_document: "none",
   vault_lease: "none",
+  // The person's computer: what is on their screen is not a source
+  computer_observe: "none",
+  computer_act: "none",
   // Word add-in (client tools)
   read_active_document: "pending", // the open Word document; no event yet
   apply_word_edits: "sources",

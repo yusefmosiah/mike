@@ -2,7 +2,7 @@
  * A small in-memory stand-in for the query builder, for suites that need
  * real filtering across several calls (insert a row, then find it by a
  * column) rather than a script of answers. It supports the subset the code
- * under test uses: select/insert/update/delete with eq, is, in, order, limit,
+ * under test uses: select/insert/update/delete with eq, is, gt, in, order, limit,
  * single and maybeSingle. Rows are plain objects; inserted rows get an `id`
  * when they have none and a `created_at` when the table's rows carry one.
  */
@@ -92,6 +92,10 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
             },
             is: (column: string, value: unknown) => {
                 filters.push((r) => (r[column] ?? null) === value);
+                return builder;
+            },
+            gt: (column: string, value: unknown) => {
+                filters.push((r) => r[column] != null && String(r[column]) > String(value));
                 return builder;
             },
             in: (column: string, values: unknown[]) => {

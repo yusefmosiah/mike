@@ -44,6 +44,7 @@ import {
 } from "./connectorApprovals";
 import { runVaultTool, VAULT_TOOL_NAMES } from "./vaultTools";
 import { PUBLISH_TOOL_NAME, runPublishTool } from "./publishTools";
+import { COMPUTER_TOOL_NAMES, runComputerTool } from "../../../computers/computers.service";
 import type { MemoryEditTarget } from "../../../memory/memory.service";
 import { parseAskInputs } from "./askInputs";
 import {
@@ -274,6 +275,8 @@ export async function runToolCalls(
     chatId?: string | null;
     /** The memory edit_memory may change here; null refuses every call. */
     memoryEdit?: MemoryEditTarget | null;
+    /** The turn's abort signal: a stopped turn stops waiting on the person's computer. */
+    signal?: AbortSignal;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -490,6 +493,19 @@ export async function runToolCalls(
         );
       }
       toolResults.push({ role: "tool", tool_call_id: tc.id, content: outcome.content });
+      continue;
+    }
+
+    if (COMPUTER_TOOL_NAMES.has(tc.function.name)) {
+      const content = await runComputerTool({
+        db,
+        userId,
+        callId: tc.id,
+        name: tc.function.name,
+        args,
+        signal: options.signal,
+      });
+      toolResults.push({ role: "tool", tool_call_id: tc.id, content });
       continue;
     }
 

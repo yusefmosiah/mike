@@ -63,7 +63,11 @@ import type {
     TabularReviewDetailOut,
 } from "@/app/components/shared/types";
 import type { VoicePrice } from "@/app/lib/voice/pricing";
-import type { MessageOrigin } from "@mike/contracts";
+import type {
+    ComputerDevice,
+    CreatedComputerDevice,
+    MessageOrigin,
+} from "@mike/contracts";
 
 export { UploadBatchError };
 export { failedUploadMessage };
@@ -550,6 +554,29 @@ export async function createProject(
             org_id,
             memory_enabled,
         }),
+    });
+}
+
+export async function listComputers(): Promise<ComputerDevice[]> {
+    const { devices } = await apiRequest<{ devices: ComputerDevice[] }>(
+        "/computers",
+    );
+    return devices;
+}
+
+export async function createComputer(
+    name: string,
+): Promise<CreatedComputerDevice> {
+    return apiRequest<CreatedComputerDevice>("/computers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+    });
+}
+
+export async function revokeComputer(id: string): Promise<void> {
+    return apiRequest<void>(`/computers/${encodeURIComponent(id)}`, {
+        method: "DELETE",
     });
 }
 

@@ -601,7 +601,12 @@ function mikeTool(
         binding.halt(error);
         return { output: [{ type: "text", text: "The turn ended here." }], isError: true, control: { terminate: true } };
       }
-      return { output: [{ type: "text", text: result?.content ?? "" }] };
+      const images: ImageContent[] = (result?.images ?? []).map((image) => ({
+        type: "image",
+        data: image.data,
+        mimeType: image.mimeType,
+      }));
+      return { output: [{ type: "text", text: result?.content ?? "" }, ...images] };
     },
   });
 }

@@ -12,6 +12,7 @@ import { delegateToolSchema } from "../subagents/subagentHost";
 import { COURTLISTENER_TOOLS } from "../tools/courtlistenerTools";
 import {
   AGENT_TOOLS,
+  COMPUTER_TOOLS,
   HISTORY_TOOLS,
   MEMORY_TOOLS,
   PROJECT_EXTRA_TOOLS,
@@ -39,6 +40,7 @@ const ALL_TOOLS: readonly unknown[] = [
   ...COURTLISTENER_TOOLS,
   ...WORD_CLIENT_TOOLS,
   ...AGENT_TOOLS,
+  ...COMPUTER_TOOLS,
 ];
 const specs = pythonToolSpecs(ALL_TOOLS);
 
