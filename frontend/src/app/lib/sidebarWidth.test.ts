@@ -68,4 +68,11 @@ describe("watchSidebarWidthClass", () => {
     stop();
     expect(media.listeners.size).toBe(0);
   });
+
+  it("watches nothing where matchMedia does not exist", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    const onChange = vi.fn();
+    watchSidebarWidthClass(onChange)();
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

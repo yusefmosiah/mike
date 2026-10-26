@@ -256,6 +256,31 @@ before running them. New behavior should normally have a regression test at
 the lowest useful layer: unit first, route integration second, and Playwright
 only when a real browser flow is necessary.
 
+`npm run test:coverage --prefix frontend` enforces coverage thresholds (100%
+statements, functions and lines) after the tests pass. Judge it by its exit
+code or by the `ERROR: Coverage for ...` lines, not by the test counts alone:
+every test can pass and the run still fail CI.
+
+### Watching CI and the staging deploy
+
+A push to `main` runs `CI`, and a green `CI` triggers `Deploy staging`
+(`.github/workflows/deploy-staging.yml`) for the same commit; a red one skips
+the deploy. Watch both with the authenticated `gh` CLI, never unauthenticated
+`curl` against the GitHub API, which is limited to 60 requests an hour and
+fails partway through a poll loop:
+
+```bash
+sha=$(git rev-parse HEAD)
+gh run list --commit "$sha" --json name,status,conclusion,databaseId
+gh run watch "$(gh run list --commit "$sha" --workflow CI --json databaseId --jq '.[0].databaseId')" --exit-status
+gh run list --commit "$sha" --workflow "Deploy staging" --json status,conclusion
+gh run view <run id> --log-failed   # why a run failed
+```
+
+A run appears a few seconds after the push, and `Deploy staging` only after
+`CI` completes. A deploy that is `skipped` means `CI` did not pass; it is not
+a deploy failure.
+
 When changing dependencies, update the `package-lock.json` belonging to the
 affected package. Before handing off work, run `git diff --check`, inspect the
 diff for unrelated changes, and report which verification commands were run.

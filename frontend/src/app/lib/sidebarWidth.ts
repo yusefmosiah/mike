@@ -16,9 +16,10 @@ const canMatch = () =>
 
 /** No `window` (server render): wide. No `matchMedia` (jsdom): by `innerWidth`. */
 export function sidebarWidthClass(): SidebarWidthClass {
-  if (typeof window === "undefined") return "wide";
   const atLeast = (query: string, px: number) =>
-    canMatch() ? window.matchMedia(query).matches : window.innerWidth >= px;
+    canMatch()
+      ? window.matchMedia(query).matches
+      : typeof window === "undefined" || window.innerWidth >= px;
   if (atLeast(WIDE_QUERY, 1024)) return "wide";
   return atLeast(MEDIUM_QUERY, 768) ? "medium" : "narrow";
 }
