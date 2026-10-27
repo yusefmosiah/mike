@@ -209,7 +209,7 @@ describe("GET /single-documents/:documentId/text", () => {
       page_count: null,
     });
     mocks.downloadFile.mockResolvedValue(
-      Buffer.from("Alpha.\n\nBeta line two.").buffer.slice(0),
+      Uint8Array.from(Buffer.from("Alpha.\n\nBeta line two.")).buffer,
     );
   });
 
@@ -252,6 +252,42 @@ describe("GET /single-documents/:documentId/text", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.downloadFile).not.toHaveBeenCalled();
+  });
+
+  it("copies an HTML document's visible text, not its markup", async () => {
+    mocks.loadActiveVersion.mockResolvedValue({
+      id: "version-html",
+      storage_path: "documents/user-1/document-1/page.html",
+      pdf_storage_path: null,
+      version_number: 2,
+      filename: "page.html",
+      source: "user_upload",
+      file_type: "html",
+      size_bytes: 99,
+      page_count: null,
+    });
+    mocks.downloadFile.mockResolvedValue(
+      Uint8Array.from(
+        Buffer.from(
+          '<!doctype html><html><head><title>Hidden title</title>' +
+            "<style>body { color: red; }</style></head>" +
+            "<body><h1>Visible heading</h1><p>Body paragraph.</p>" +
+            "<script>alert(1)</script></body></html>",
+        ),
+      ).buffer,
+    );
+
+    const response = await request(app)
+      .get("/single-documents/document-1/text")
+      .set("Authorization", "Bearer test");
+
+    expect(response.status).toBe(200);
+    expect(response.body.text).toContain("VISIBLE HEADING");
+    expect(response.body.text).toContain("Body paragraph.");
+    expect(response.body.text).not.toContain("Hidden title");
+    expect(response.body.text).not.toContain("<h1");
+    expect(response.body.text).not.toContain("alert(1)");
+    expect(response.body.text).not.toContain("color: red");
   });
 
   it("does not read storage when the caller cannot access the document", async () => {

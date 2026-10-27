@@ -12,6 +12,7 @@ import { isTextFileType, textForModel } from "../../lib/textFiles";
 import { docxToPdf } from "../../lib/convert";
 import { extractPdfPages } from "../../lib/pdfText";
 import { DocxDocument } from "../../lib/docx/view";
+import { convert } from "html-to-text";
 import {
     cachedModel,
     docxToModel,
@@ -83,6 +84,22 @@ export async function getDocumentText(
             if (fileType === "pptx") return presentationToModel(bytes);
             if (fileType === "md" || fileType === "markdown")
                 return markdownToModel(textForModel(bytes.toString("utf8")));
+            if (fileType === "html" || fileType === "htm") {
+                // Ctrl-A copy semantics: the visible text, not the markup.
+                const visible = convert(bytes.toString("utf8"), {
+                    wordwrap: false,
+                    preserveNewlines: true,
+                    selectors: [
+                        { selector: "script", format: "skip" },
+                        { selector: "style", format: "skip" },
+                        { selector: "head", format: "skip" },
+                        { selector: "noscript", format: "skip" },
+                        { selector: "template", format: "skip" },
+                        { selector: "title", format: "skip" },
+                    ],
+                });
+                return textToModel(textForModel(visible));
+            }
             if (isTextFileType(fileType)) return textToModel(textForModel(bytes.toString("utf8")));
             // Legacy Office (.doc, .ppt) and anything else with no direct
             // reader: through the PDF rendition, as reads do.
