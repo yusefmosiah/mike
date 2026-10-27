@@ -16,10 +16,12 @@ export {
     listPublications,
     publishPreflight,
     revokePublication,
+    updatePublication,
     publishingConfigView,
     type PublicationView,
     type PublishFailure,
     type PublishPreflight,
+    type UpdatePublicationInput,
 } from "./publications.manage";
 export {
     findLivePublication,

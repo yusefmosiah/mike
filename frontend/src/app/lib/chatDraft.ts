@@ -83,7 +83,7 @@ function untouch(key: string) {
 }
 
 export function readChatDraft(key: string): ChatDraft | null {
-    if (typeof window === "undefined") return null;
+    if (typeof localStorage === "undefined") return null;
     try {
         const raw = localStorage.getItem(storageKey(key));
         if (!raw) return null;
@@ -108,7 +108,7 @@ export function readChatDraft(key: string): ChatDraft | null {
  * message empties the composer, which is what drops the stored draft.
  */
 export function writeChatDraft(key: string, draft: ChatDraft) {
-    if (typeof window === "undefined") return;
+    if (typeof localStorage === "undefined") return;
     const empty =
         draft.text.length === 0 &&
         draft.docs.length === 0 &&

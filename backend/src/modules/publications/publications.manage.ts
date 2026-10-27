@@ -10,7 +10,7 @@ import { can } from "../../lib/permissions";
 import { copyFile, deleteFilesBestEffort, headFile, uploadFile } from "../../lib/storage";
 import { internalFailure, type ServiceResult } from "../../lib/serviceResult";
 import { ensureDocumentAccess } from "../documents/documents.service";
-import { buildBundle } from "./publications.bundle";
+import { buildBundle, bundleShape, type Bundle } from "./publications.bundle";
 import {
     EXPIRY_DAYS,
     MIN_PASSWORD_LENGTH,
@@ -34,6 +34,7 @@ export type PublicationView = {
     id: string;
     document_id: string | null;
     version_id: string | null;
+    follow_document: boolean;
     title: string;
     kind: PublicationKind;
     audience: PublicationAudience;
@@ -78,6 +79,7 @@ export type CreatePublicationInput = {
     password?: unknown;
     requireSignIn?: unknown;
     expiresInDays?: unknown;
+    followDocument?: unknown;
 };
 
 export async function createPublication(
@@ -111,44 +113,38 @@ export async function createPublication(
     const version = await loadActiveVersion(input.documentId, db, input.versionId ?? null);
     if (!version) return { ok: false, code: "not_found" };
 
-    const built = await buildBundle(db, {
-        documentId: input.documentId,
-        projectId: access.doc.project_id ?? null,
-        userId: input.userId,
-        version,
-    });
-    if (!built.ok) return { ok: false, code: built.code };
+    // New publications follow the document unless the caller asks for a
+    // frozen copy. Existing rows stay frozen at the version they copied.
+    const follow = input.followDocument !== false;
+    const projectId = access.doc.project_id ?? null;
+    let kind: PublicationKind;
+    let title: string;
+    let missingFiles: string[] = [];
+    let bundle: Bundle | null = null;
+    if (follow) {
+        const shape = bundleShape(version);
+        if (!shape.ok) return { ok: false, code: shape.code };
+        kind = shape.kind;
+        title = shape.title;
+    } else {
+        const built = await buildBundle(db, {
+            documentId: input.documentId,
+            projectId,
+            userId: input.userId,
+            version,
+        });
+        if (!built.ok) return { ok: false, code: built.code };
+        kind = built.bundle.kind;
+        title = built.title;
+        missingFiles = built.bundle.missing;
+        bundle = built.bundle;
+    }
 
     const id = crypto.randomUUID();
-    const copied: string[] = [];
+    let copied: string[] = [];
     try {
-        const files = [];
-        for (const file of built.bundle.files) {
-            const storagePath = `publications/${id}/${file.path}`;
-            if ("bytes" in file) {
-                await uploadFile(
-                    storagePath,
-                    file.bytes.buffer.slice(
-                        file.bytes.byteOffset,
-                        file.bytes.byteOffset + file.bytes.byteLength,
-                    ) as ArrayBuffer,
-                    file.contentType,
-                );
-            } else {
-                await copyFile(file.storagePath, storagePath);
-            }
-            copied.push(storagePath);
-            // A copy's size is read back: a rendition's is not recorded
-            // anywhere else, and Range requests need it exact.
-            const size = "bytes" in file ? file.size : ((await headFile(storagePath))?.size ?? file.size);
-            files.push({
-                publication_id: id,
-                path: file.path,
-                storage_path: storagePath,
-                content_type: file.contentType,
-                size_bytes: size,
-            });
-        }
+        const copiedFiles = bundle ? await copyBundleFiles(id, bundle) : { files: [], copied: [] };
+        copied = copiedFiles.copied;
 
         const expiresAt =
             expiresInDays === null
@@ -167,13 +163,14 @@ export async function createPublication(
                     created_by: input.userId,
                     document_id: input.documentId,
                     version_id: version.id,
-                    kind: built.bundle.kind,
+                    follow_document: follow,
+                    kind,
                     audience,
                     token_hash: hashToken(token),
                     token_sealed: sealToken(token),
                     password_hash: passwordHash,
                     require_sign_in: input.requireSignIn === true,
-                    title: built.title,
+                    title,
                     expires_at: expiresAt,
                 })
                 .select(PUBLICATION_COLUMNS)
@@ -181,36 +178,105 @@ export async function createPublication(
             if (error?.code !== "23505") break;
         }
         if (error || !row) throw error ?? new Error("publication insert returned no row");
-        const { error: filesError } = await db.from("publication_files").insert(files);
-        if (filesError) {
-            await db.from("publications").delete().eq("id", id);
-            throw filesError;
+        if (copiedFiles.files.length > 0) {
+            const { error: filesError } = await db.from("publication_files").insert(copiedFiles.files);
+            if (filesError) {
+                await db.from("publications").delete().eq("id", id);
+                throw filesError;
+            }
         }
 
         void recordAudit(db, {
             userId: input.userId,
             userEmail: input.userEmail ?? null,
             action: "publication.created",
-            title: built.title,
+            title,
             documentId: input.documentId,
-            projectId: access.doc.project_id ?? null,
+            projectId,
             detail: {
                 publication_id: id,
                 audience,
                 require_sign_in: input.requireSignIn === true,
+                follow_document: follow,
                 expires_at: expiresAt,
-                files: files.length,
+                files: copiedFiles.files.length,
             },
         });
         return {
             ok: true,
-            publication: toView(row as PublicationRow, config, files.length),
-            missingFiles: built.bundle.missing,
+            publication: toView(row as PublicationRow, config, copiedFiles.files.length),
+            missingFiles,
         };
     } catch (error) {
         deleteFilesBestEffort(copied, "publications/create-rollback");
         return { ok: false, code: "error", error };
     }
+}
+
+type PublicationFileRow = {
+    publication_id: string;
+    path: string;
+    storage_path: string;
+    content_type: string;
+    size_bytes: number;
+};
+
+/**
+ * Copy a bundle under publications/{id}/ and describe its rows. The rows are
+ * inserted after the publication exists; `copied` is every key written, so a
+ * failed insert can remove them.
+ */
+async function copyBundleFiles(
+    publicationId: string,
+    bundle: Bundle,
+): Promise<{ files: PublicationFileRow[]; copied: string[] }> {
+    const files: PublicationFileRow[] = [];
+    const copied: string[] = [];
+    try {
+        for (const file of bundle.files) {
+            const storagePath = `publications/${publicationId}/${file.path}`;
+            if ("bytes" in file) {
+                await uploadFile(
+                    storagePath,
+                    file.bytes.buffer.slice(
+                        file.bytes.byteOffset,
+                        file.bytes.byteOffset + file.bytes.byteLength,
+                    ) as ArrayBuffer,
+                    file.contentType,
+                );
+            } else {
+                await copyFile(file.storagePath, storagePath);
+            }
+            copied.push(storagePath);
+            // A copy's size is read back: a rendition's is not recorded anywhere
+            // else, and Range requests need it exact.
+            const size = "bytes" in file ? file.size : ((await headFile(storagePath))?.size ?? file.size);
+            files.push({
+                publication_id: publicationId,
+                path: file.path,
+                storage_path: storagePath,
+                content_type: file.contentType,
+                size_bytes: size,
+            });
+        }
+    } catch (error) {
+        deleteFilesBestEffort(copied, "publications/copy-rollback");
+        throw error;
+    }
+    return { files, copied };
+}
+
+/** Remove a publication's copied files and their rows, best effort for storage. */
+async function clearPublicationFiles(db: Db, publicationId: string, reason: string): Promise<void> {
+    const { data: files } = await db
+        .from("publication_files")
+        .select("storage_path")
+        .eq("publication_id", publicationId);
+    await db.from("publication_files").delete().eq("publication_id", publicationId);
+    deleteFilesBestEffort(
+        ((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path),
+        reason,
+    );
 }
 
 export async function listPublications(
@@ -264,13 +330,7 @@ export async function revokePublication(
         .single();
     if (error || !updated) return { ok: false, code: "error", error };
 
-    const { data: files } = await db
-        .from("publication_files")
-        .select("storage_path")
-        .eq("publication_id", publicationId);
-    const paths = ((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path);
-    await db.from("publication_files").delete().eq("publication_id", publicationId);
-    deleteFilesBestEffort(paths, "publications/revoke");
+    await clearPublicationFiles(db, publicationId, "publications/revoke");
 
     void recordAudit(db, {
         userId,
@@ -283,12 +343,186 @@ export async function revokePublication(
     return { ok: true, publication: toView(updated as PublicationRow, config, 0) };
 }
 
+export type UpdatePublicationInput = {
+    userId: string;
+    userEmail?: string;
+    publicationId: string;
+    expiresInDays?: unknown;
+    audience?: unknown;
+    password?: unknown;
+    requireSignIn?: unknown;
+    followDocument?: unknown;
+};
+
+/**
+ * The publisher edits a link after making it: its expiry, who can open it,
+ * its password, and whether it follows the document or stays frozen. Only
+ * the publisher may; the owner check is the query filter.
+ */
+export async function updatePublication(
+    db: Db,
+    input: UpdatePublicationInput,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<
+    | { ok: true; publication: PublicationView }
+    | { ok: false; code: PublishFailure }
+    | { ok: false; code: "error"; error: unknown }
+> {
+    const config = publishingConfig(env);
+    if (!config.enabled) return { ok: false, code: "publishing_off" };
+
+    const { data: existing } = await db
+        .from("publications")
+        .select(PUBLICATION_COLUMNS)
+        .eq("id", input.publicationId)
+        .eq("created_by", input.userId)
+        .maybeSingle();
+    if (!existing) return { ok: false, code: "not_found" };
+    const row = existing as PublicationRow;
+
+    const patch: Record<string, unknown> = {};
+    const changed: string[] = [];
+
+    if (input.expiresInDays !== undefined) {
+        const days = input.expiresInDays;
+        if (days !== null && !EXPIRY_DAYS.includes(days as (typeof EXPIRY_DAYS)[number]))
+            return { ok: false, code: "bad_expiry" };
+        patch.expires_at =
+            days === null ? null : new Date(Date.now() + (days as number) * 86_400_000).toISOString();
+        changed.push("expires_in_days");
+    }
+
+    const audience = input.audience ?? row.audience;
+    if (audience !== "public" && audience !== "password") return { ok: false, code: "bad_audience" };
+    if (!config.audiences.includes(audience)) return { ok: false, code: "publishing_off" };
+    if (audience !== row.audience) changed.push("audience");
+    patch.audience = audience;
+
+    const rotatingPassword = input.password !== undefined && input.password !== null;
+    if (rotatingPassword && audience !== "password") return { ok: false, code: "bad_audience" };
+    let passwordHash = row.password_hash;
+    let passwordVersion = row.password_version;
+    if (rotatingPassword) {
+        if (typeof input.password !== "string" || input.password.length < MIN_PASSWORD_LENGTH)
+            return { ok: false, code: "password_too_short" };
+        passwordHash = await hashPassword(input.password);
+        passwordVersion = (row.password_version ?? 0) + 1;
+        changed.push("password");
+    }
+    // The audience check in the schema ties a hash to the password audience.
+    if (audience === "public") passwordHash = null;
+    else if (!passwordHash) return { ok: false, code: "password_too_short" };
+    patch.password_hash = passwordHash;
+    patch.password_version = passwordVersion;
+
+    if (input.requireSignIn !== undefined) {
+        const requireSignIn = input.requireSignIn === true;
+        patch.require_sign_in = requireSignIn;
+        if (requireSignIn !== (row.require_sign_in === true)) changed.push("require_sign_in");
+    }
+
+    // A toggle to frozen copies the document at this moment; a toggle to
+    // follow drops the copy and serves the live version from then on.
+    let dropCopy = false;
+    let freeze = false;
+    const { data: existingFiles } = await db
+        .from("publication_files")
+        .select("path")
+        .eq("publication_id", row.id);
+    let fileCount = ((existingFiles ?? []) as { path: string }[]).length;
+    const targetFollow =
+        input.followDocument === undefined ? row.follow_document === true : input.followDocument === true;
+    if (targetFollow !== (row.follow_document === true)) {
+        changed.push("follow_document");
+        if (targetFollow) {
+            dropCopy = true;
+            patch.follow_document = true;
+        } else {
+            freeze = true;
+            if (!row.document_id) return { ok: false, code: "not_found" };
+            const version = await loadActiveVersion(row.document_id, db, null);
+            if (!version) return { ok: false, code: "not_found" };
+            const { data: document } = await db
+                .from("documents")
+                .select("project_id")
+                .eq("id", row.document_id)
+                .maybeSingle();
+            const built = await buildBundle(db, {
+                documentId: row.document_id,
+                projectId: (document as { project_id: string | null } | null)?.project_id ?? null,
+                userId: input.userId,
+                version,
+            });
+            if (!built.ok) return { ok: false, code: built.code };
+            let copiedFiles: { files: PublicationFileRow[]; copied: string[] } = { files: [], copied: [] };
+            try {
+                copiedFiles = await copyBundleFiles(row.id, built.bundle);
+                const { error: filesError } = await db
+                    .from("publication_files")
+                    .insert(copiedFiles.files);
+                if (filesError) throw filesError;
+            } catch (error) {
+                deleteFilesBestEffort(copiedFiles.copied, "publications/freeze-rollback");
+                return { ok: false, code: "error", error };
+            }
+            // The frozen copy is the current version, and its title is the
+            // one the page now shows.
+            patch.follow_document = false;
+            patch.version_id = version.id;
+            patch.kind = built.bundle.kind;
+            patch.title = built.title;
+            fileCount = copiedFiles.files.length;
+        }
+    }
+
+    let updated: unknown = row;
+    if (Object.keys(patch).length > 0) {
+        const { data, error } = await db
+            .from("publications")
+            .update(patch)
+            .eq("id", row.id)
+            .select(PUBLICATION_COLUMNS)
+            .single();
+        if (error || !data) {
+            // The publication stayed followed; drop the partial freeze.
+            if (freeze) await clearPublicationFiles(db, row.id, "publications/freeze-rollback");
+            return { ok: false, code: "error", error };
+        }
+        updated = data;
+    }
+    if (dropCopy) {
+        await clearPublicationFiles(db, row.id, "publications/follow");
+        fileCount = 0;
+    }
+
+    if (changed.length > 0) {
+        void recordAudit(db, {
+            userId: input.userId,
+            userEmail: input.userEmail ?? null,
+            action: "publication.updated",
+            title: (updated as PublicationRow).title,
+            documentId: row.document_id,
+            detail: { publication_id: row.id, changed },
+        });
+    }
+    return { ok: true, publication: toView(updated as PublicationRow, config, fileCount) };
+}
+
+async function publicationFileCount(db: Db, publicationId: string): Promise<number> {
+    const { data } = await db
+        .from("publication_files")
+        .select("path")
+        .eq("publication_id", publicationId);
+    return ((data ?? []) as { path: string }[]).length;
+}
+
 function toView(row: PublicationRow, config: PublishingConfig, fileCount: number): PublicationView {
     const token = config.enabled && !row.revoked_at ? unsealToken(row.token_sealed) : null;
     return {
         id: row.id,
         document_id: row.document_id,
         version_id: row.version_id,
+        follow_document: row.follow_document === true,
         title: row.title,
         kind: row.kind,
         audience: row.audience,

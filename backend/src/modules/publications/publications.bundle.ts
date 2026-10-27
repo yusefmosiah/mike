@@ -52,11 +52,38 @@ export const MAX_BUNDLE_FILES = 200;
 // Room for a page with a few videos; each file is a server-side copy.
 export const MAX_BUNDLE_BYTES = 500 * 1024 * 1024;
 
-export async function buildBundle(db: Db, source: BundleSource): Promise<BundleResult> {
-    const { version } = source;
+export type BundleShape =
+    | { ok: true; title: string; kind: PublicationKind }
+    | { ok: false; code: "unsupported_type" | "no_rendition" };
+
+/**
+ * What a publication of this version would be, and whether it can be one,
+ * without reading or copying any file. A followed publication records its
+ * kind and title with this; the files are resolved live at serve time.
+ */
+export function bundleShape(version: BundleSource["version"]): BundleShape {
     const fileType = (version.file_type ?? "").toLowerCase();
     const filename = version.filename?.trim() || "Untitled";
     const title = filename.replace(/\.[^.]+$/, "") || filename;
+    if (fileType === "html" || fileType === "md" || fileType === "txt")
+        return { ok: true, title, kind: "site" };
+    if (isImageFileType(fileType) || isAudioFileType(fileType) || isVideoFileType(fileType))
+        return { ok: true, title, kind: "site" };
+    if (fileType === "pdf") return { ok: true, title, kind: "file" };
+    if (isWordDocumentType(fileType) || isPresentationDocumentType(fileType)) {
+        if (!version.pdf_storage_path) return { ok: false, code: "no_rendition" };
+        return { ok: true, title, kind: "file" };
+    }
+    return { ok: false, code: "unsupported_type" };
+}
+
+export async function buildBundle(db: Db, source: BundleSource): Promise<BundleResult> {
+    const { version } = source;
+    const shape = bundleShape(version);
+    if (!shape.ok) return shape;
+    const fileType = (version.file_type ?? "").toLowerCase();
+    const filename = version.filename?.trim() || "Untitled";
+    const title = shape.title;
 
     if (fileType === "html") return htmlBundle(db, source, title);
 

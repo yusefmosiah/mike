@@ -18,6 +18,7 @@ export type PublicationRow = {
     created_by: string | null;
     document_id: string | null;
     version_id: string | null;
+    follow_document: boolean;
     kind: PublicationKind;
     audience: PublicationAudience;
     token_hash: string;
@@ -32,7 +33,7 @@ export type PublicationRow = {
 };
 
 export const PUBLICATION_COLUMNS =
-    "id, created_by, document_id, version_id, kind, audience, token_hash, token_sealed, password_hash, password_version, require_sign_in, title, expires_at, revoked_at, created_at";
+    "id, created_by, document_id, version_id, follow_document, kind, audience, token_hash, token_sealed, password_hash, password_version, require_sign_in, title, expires_at, revoked_at, created_at";
 
 export const MIN_PASSWORD_LENGTH = 12;
 export const EXPIRY_DAYS = [7, 30, 90] as const;

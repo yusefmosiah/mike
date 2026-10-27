@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Document } from "@/app/components/shared/types";
 import { chatDraftKey, readChatDraft, writeChatDraft } from "./chatDraft";
 
@@ -81,6 +81,46 @@ describe("chat drafts", () => {
         expect(readChatDraft("chat-1")?.text).toBe("kept");
         localStorage.setItem("mike.composerDraft.v1:index", JSON.stringify(7));
         expect(readChatDraft("chat-1")?.text).toBe("kept");
+    });
+
+    it("drops non-string entries from a corrupt index", () => {
+        // A partial or old-format index must not poison the MRU order.
+        localStorage.setItem(
+            "mike.composerDraft.v1:index",
+            JSON.stringify([7, null, "chat-1"]),
+        );
+        writeChatDraft("chat-2", { text: "ok", docs: [], workflow: null });
+        writeChatDraft("chat-1", { text: "ok", docs: [], workflow: null });
+        expect(readChatDraft("chat-1")?.text).toBe("ok");
+        expect(readChatDraft("chat-2")?.text).toBe("ok");
+    });
+
+    it("still saves when storage reads throw", () => {
+        const getItem = vi.spyOn(Storage.prototype, "getItem");
+        getItem.mockImplementation(() => {
+            throw new Error("denied");
+        });
+        // Index read throws → empty index; write still lands.
+        writeChatDraft("chat-1", { text: "kept", docs: [], workflow: null });
+        getItem.mockRestore();
+        expect(readChatDraft("chat-1")?.text).toBe("kept");
+    });
+
+    it("is a no-op outside the browser", () => {
+        // Server render: guards return before touching localStorage.
+        const getItem = vi.spyOn(Storage.prototype, "getItem");
+        const setItem = vi.spyOn(Storage.prototype, "setItem");
+        // Simulate SSR by making localStorage reads see undefined through
+        // the typeof guard — vitest's jsdom keeps the global non-configurable.
+        const storage = localStorage;
+        vi.stubGlobal("localStorage", undefined);
+        expect(readChatDraft("chat-1")).toBeNull();
+        expect(() =>
+            writeChatDraft("chat-1", { text: "x", docs: [], workflow: null }),
+        ).not.toThrow();
+        vi.stubGlobal("localStorage", storage);
+        getItem.mockRestore();
+        setItem.mockRestore();
     });
 
     it("evicts the least recently written drafts past the cap", () => {

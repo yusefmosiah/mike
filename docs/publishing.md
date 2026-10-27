@@ -18,8 +18,8 @@ page is how it works and how to run it.
 | Word, PowerPoint | Their PDF rendition. A file without one cannot be published yet. |
 | Spreadsheets, CSV | Not publishable yet. |
 
-- **The link shows a frozen copy.** Publishing copies the version's files to `publications/{id}/` in object storage. A later edit is shared only by publishing again.
-- **Missing files.** References the server could not find are listed after publishing, so the publisher can add the files and publish again.
+- **The link follows the document.** A new link serves the document's current version: editing the document, or replacing its version, changes what visitors see. A followed link stores no copy of the files; the content server builds what it serves on each request, including the files an HTML page refers to. The publisher can freeze a link instead, which copies the current version and leaves the link at it until it is frozen again; existing links made before following was added stay frozen at the version they copied.
+- **Missing files.** References the server could not find when freezing are listed after publishing, so the publisher can add the files and publish again. A followed page resolves them at request time, so a missing file appears as soon as the document beside it exists.
 - **Limits.** A page and its files are limited to 200 files and 500 MB.
 - **Audio and video in a page.** A page embeds them as it does images, by filename: `<video controls src="walkthrough.mp4">`, `<audio controls src="interview.mp3">`, or a `<source>` inside either. The files are uploaded as documents beside the page.
 - **Assistant-written HTML.** The assistant writes the page with `generate_html`.
@@ -43,10 +43,11 @@ assistant only proposes.
   - **Anyone with the link and the password.** The password must be at least 12 characters and is hashed with scrypt. A correct password sets an `HttpOnly` cookie for that one link, which lasts 12 hours.
   - Wrong passwords are limited to 5 a minute from one address and 50 an hour for one link.
   - **Signed in only.** This can be combined with either of the above. A visitor without access is sent to the app (`/published`), signs in if needed, and gets in only if they can open the source document there: the same rule as the app's own sharing. The app then sends them back with a two-minute grant, which the content server exchanges for a cookie on that link's origin. The cookie lasts an hour, so someone who loses access to the document loses the link within the hour. With a password as well, the password is asked after sign-in.
-- **Expiry.** 7, 30 (the default) or 90 days, or never.
-- **Revoking.** The publisher can revoke a link at once. Revoking deletes the copied files.
-- **Refused links.** Unknown, revoked and expired links all show the same "page not found".
-- **Recording.** Making and revoking links are recorded in the activity log (`publication.created`, `publication.revoked`). Views are not tracked.
+- **Expiry.** 7, 30 (the default) or 90 days, or never. The publisher can change it after making the link (including removing it).
+- **Revoking.** The publisher can revoke a link at once. Revoking deletes any copied files.
+- **Editing.** The publisher can change a link's expiry, audience and password, whether it needs a signed-in visitor, and whether it follows the document. Changing the password invalidates every unlock cookie, so visitors must enter the new one.
+- **Refused links.** Unknown, revoked and expired links all show the same "page not found". A followed link whose document was deleted, or whose version can no longer be served, does too.
+- **Recording.** Making, editing and revoking links are recorded in the activity log (`publication.created`, `publication.updated`, `publication.revoked`). Views are not tracked.
 - **In the app.** Publish appears in the document side panel and in a viewer tab's menu, when this install publishes and the file type can be published.
 
 ## Where links are served

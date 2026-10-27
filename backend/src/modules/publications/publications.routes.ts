@@ -43,6 +43,7 @@ import {
     revokePublication,
     tokenFromRequest,
     unlockPublication,
+    updatePublication,
     type LivePublication,
     type PublishFailure,
 } from "./publications.service";
@@ -107,6 +108,7 @@ publicationsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
         password: body.password,
         requireSignIn: body.require_sign_in,
         expiresInDays: body.expires_in_days,
+        followDocument: body.follow_document,
     });
     if (!result.ok) {
         if (result.code === "error") return void sendInternalError(res, result.error);
@@ -115,6 +117,30 @@ publicationsRouter.post("/", requireAuth, asyncRoute(async (req, res) => {
             .json({ code: result.code, detail: FAILURE_DETAIL[result.code] });
     }
     res.status(201).json({ publication: result.publication, missing_files: result.missingFiles });
+}));
+
+// PATCH /publications/:publicationId
+// The publisher edits an existing link: expiry, audience, password,
+// signed-in-only, and whether it follows the document.
+publicationsRouter.patch("/:publicationId", requireAuth, asyncRoute(async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await updatePublication(createDb(), {
+        userId: res.locals.userId as string,
+        userEmail: res.locals.userEmail as string | undefined,
+        publicationId: req.params.publicationId,
+        expiresInDays: body.expires_in_days,
+        audience: body.audience,
+        password: body.password,
+        requireSignIn: body.require_sign_in,
+        followDocument: body.follow_document,
+    });
+    if (!result.ok) {
+        if (result.code === "error") return void sendInternalError(res, result.error);
+        return void res
+            .status(FAILURE_STATUS[result.code])
+            .json({ code: result.code, detail: FAILURE_DETAIL[result.code] });
+    }
+    res.json({ publication: result.publication });
 }));
 
 // POST /publications/:publicationId/revoke
@@ -287,7 +313,11 @@ publicationContentRouter.get(/.*/, asyncRoute(async (req, res) => {
         res.setHeader("Content-Length", String(file.size_bytes));
     }
     if (req.method === "HEAD") return void res.end();
-    const stream = createFileReadStream(file.storage_path, range ?? undefined);
+    if (file.bytes) {
+        res.end(range ? file.bytes.subarray(range.start, range.end + 1) : file.bytes);
+        return;
+    }
+    const stream = createFileReadStream(file.storage_path ?? "", range ?? undefined);
     stream.on("error", () => res.destroy());
     stream.pipe(res);
 }));

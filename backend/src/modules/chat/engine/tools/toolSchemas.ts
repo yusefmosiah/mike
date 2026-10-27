@@ -369,6 +369,15 @@ export const WORKSTATION_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "workstation_capabilities",
+      description:
+        "Report exactly what the workstation can do right now: the accepted save_to_mike formats and each on-demand layer's name, purpose, entry command and whether it is already checked out. Call before picking a layer by name, or when the user asks what the machine can do — this is the machine-queryable form of the capabilities summary in the context.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
 ];
 
 /**

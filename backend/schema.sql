@@ -8186,17 +8186,20 @@ alter table public.chat_code_approvals enable row level security;
 revoke all on table public.chat_code_approvals from public, anon, authenticated;
 grant select, insert, update, delete on public.chat_code_approvals to service_role;
 
--- Published copies of documents (docs/publishing.md). A publication is a
--- frozen copy of one document version, served on the content origin to
--- anyone with its link, or with its link and a password. Its files are
--- copied under publications/{id}/ when it is made, so the content server
--- never reads the document store. The link's token is stored as a SHA-256
--- for lookup and sealed with the server key so its owner can copy it again.
+-- Published links to documents (docs/publishing.md). A publication follows
+-- its document's current version, or is a frozen copy of one version, served
+-- on the content origin to anyone with its link, or with its link and a
+-- password. A frozen publication's files are copied under publications/{id}/
+-- when it is made, so the content server never reads the document store; a
+-- followed one builds its bundle per request. The link's token is stored as
+-- a SHA-256 for lookup and sealed with the server key so its owner can copy
+-- it again.
 create table if not exists public.publications (
   id uuid primary key default gen_random_uuid(),
   created_by uuid references auth.users(id) on delete cascade,
   document_id uuid references public.documents(id) on delete cascade,
   version_id uuid references public.document_versions(id) on delete cascade,
+  follow_document boolean not null default false,
   kind text not null,
   audience text not null,
   token_hash text not null,
@@ -8421,5 +8424,6 @@ insert into public.schema_migrations (filename) values
   ('20261026_01_computer_devices.sql'),
   ('20261026_02_computer_device_platform.sql'),
   ('20261026_03_media_upload_types.sql'),
-  ('20261026_04_remove_upload_session_limit.sql')
+  ('20261026_04_remove_upload_session_limit.sql'),
+  ('20261027_01_publication_follow_document.sql')
 on conflict (filename) do nothing;

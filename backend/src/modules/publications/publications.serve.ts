@@ -3,6 +3,9 @@
 // unknown, revoked or expired link) looks the same to the caller.
 
 import type { Db } from "../../lib/db";
+import { loadActiveVersion } from "../../lib/documentVersions";
+import { headFile } from "../../lib/storage";
+import { buildBundle, type BundleFile } from "./publications.bundle";
 import {
     PUBLICATION_COLUMNS,
     hashToken,
@@ -25,6 +28,8 @@ export type LivePublication = Pick<
     | "password_version"
     | "require_sign_in"
     | "document_id"
+    | "created_by"
+    | "follow_document"
 >;
 
 export async function findLivePublication(
@@ -71,28 +76,33 @@ export async function unlockPublication(
 
 export type PublicationFile = {
     path: string;
-    storage_path: string;
     content_type: string;
     size_bytes: number;
+    /** The copied object of a frozen publication; null when `bytes` is set. */
+    storage_path: string | null;
+    /** A page a followed publication builds in memory. */
+    bytes?: Buffer;
 };
 
 /**
  * The file a request path names. The root is index.html for a page, or the
  * one file of a single-file publication; a directory path gets its
  * index.html.
+ *
+ * A frozen publication reads its copied rows; a followed one builds the
+ * document's current bundle per request, so edits (and the files its pages
+ * refer to) are what visitors see. A followed publication whose document is
+ * gone, or whose bundle no longer builds, has no file: the link 404s.
  */
 export async function findPublicationFile(
     db: Db,
-    row: Pick<LivePublication, "id" | "kind">,
+    row: Pick<LivePublication, "id" | "kind" | "document_id" | "created_by" | "follow_document">,
     rawPath: string,
 ): Promise<PublicationFile | null> {
-    let path: string;
-    try {
-        path = decodeURIComponent(rawPath);
-    } catch {
-        return null;
-    }
-    if (path.split("/").some((segment) => segment === "..")) return null;
+    const path = decodePublicationPath(rawPath);
+    if (path === null) return null;
+    if (row.follow_document === true) return followPublicationFile(db, row, path);
+
     const columns = "path, storage_path, content_type, size_bytes";
     if (path === "" && row.kind === "file") {
         const { data } = await db
@@ -102,12 +112,72 @@ export async function findPublicationFile(
             .limit(1);
         return ((data ?? []) as PublicationFile[])[0] ?? null;
     }
-    if (path === "" || path.endsWith("/")) path += "index.html";
+    const inner = path === "" || path.endsWith("/") ? `${path}index.html` : path;
     const { data } = await db
         .from("publication_files")
         .select(columns)
         .eq("publication_id", row.id)
-        .eq("path", path)
+        .eq("path", inner)
         .maybeSingle();
     return (data as PublicationFile | null) ?? null;
+}
+
+function decodePublicationPath(rawPath: string): string | null {
+    let path: string;
+    try {
+        path = decodeURIComponent(rawPath);
+    } catch {
+        return null;
+    }
+    if (path.split("/").some((segment) => segment === "..")) return null;
+    return path;
+}
+
+async function followPublicationFile(
+    db: Db,
+    row: Pick<LivePublication, "kind" | "document_id" | "created_by">,
+    path: string,
+): Promise<PublicationFile | null> {
+    if (!row.document_id) return null;
+    const version = await loadActiveVersion(row.document_id, db, null);
+    if (!version) return null;
+    const { data: document } = await db
+        .from("documents")
+        .select("project_id")
+        .eq("id", row.document_id)
+        .maybeSingle();
+    const built = await buildBundle(db, {
+        documentId: row.document_id,
+        projectId: (document as { project_id: string | null } | null)?.project_id ?? null,
+        userId: row.created_by ?? "",
+        version,
+    });
+    if (!built.ok) return null;
+
+    let match: BundleFile | undefined;
+    if (path === "" && row.kind === "file") {
+        match = built.bundle.files[0];
+    } else {
+        const inner = path === "" || path.endsWith("/") ? `${path}index.html` : path;
+        match = built.bundle.files.find((file) => file.path === inner);
+    }
+    if (!match) return null;
+    if ("bytes" in match) {
+        return {
+            path: match.path,
+            content_type: match.contentType,
+            size_bytes: match.bytes.length,
+            storage_path: null,
+            bytes: match.bytes,
+        };
+    }
+    // A rendition's size is not recorded on the version; read it back, since
+    // Range requests and Content-Length need it exact.
+    const size = match.size > 0 ? match.size : ((await headFile(match.storagePath))?.size ?? 0);
+    return {
+        path: match.path,
+        content_type: match.contentType,
+        size_bytes: size,
+        storage_path: match.storagePath,
+    };
 }

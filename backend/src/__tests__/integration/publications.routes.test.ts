@@ -133,7 +133,7 @@ describe("publishing an HTML article", () => {
     });
 
     it("serves the page and the images beside it on its own subdomain", async () => {
-        const res = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
+        const res = await publish({ document_id: "article", audience: "public", expires_in_days: 30, follow_document: false });
         expect(res.status).toBe(201);
         expect(res.body.missing_files).toEqual(["missing.jpg"]);
         const { publication } = res.body;
@@ -167,7 +167,7 @@ describe("publishing an HTML article", () => {
     });
 
     it("lists the publisher's links and revokes one, deleting its copy", async () => {
-        const created = await publish({ document_id: "article", audience: "public", expires_in_days: null });
+        const created = await publish({ document_id: "article", audience: "public", expires_in_days: null, follow_document: false });
         const { publication } = created.body;
         expect(publication.expires_at).toBeNull();
 
@@ -197,6 +197,59 @@ describe("publishing an HTML article", () => {
         const bogus = await request(publicationContentApp).get("/").set("Host", "aaaaaaaaaaaaaaaaaaaaaaaaaa.pub.test");
         expect(bogus.status).toBe(404);
         expect(bogus.text).toBe(page.text);
+    });
+
+    it("follows the document's versions, then freezes the current one on request", async () => {
+        const made = await publish({ document_id: "article", audience: "public", expires_in_days: 30 });
+        expect(made.status).toBe(201);
+        expect(made.body.publication).toMatchObject({ follow_document: true, file_count: 0 });
+        expect([...state.objects.keys()].some((key) => key.startsWith("publications/"))).toBe(false);
+        const { publication } = made.body;
+        const host = hostOf(publication.url);
+        expect((await request(publicationContentApp).get("/").set("Host", host)).text).toContain("Field notes");
+
+        // A new document version is what the link serves.
+        const v2 = Buffer.from("<title>Second</title><p>second version</p>");
+        state.objects.set("documents/u1/article/Field notes v2.html", v2);
+        store.rows("document_versions").push({
+            id: "article-v2",
+            document_id: "article",
+            storage_path: "documents/u1/article/Field notes v2.html",
+            pdf_storage_path: null,
+            version_number: 2,
+            filename: "Field notes.html",
+            source: "upload",
+            file_type: "html",
+            size_bytes: v2.length,
+            page_count: null,
+            deleted_at: null,
+        });
+        store.rows("documents").find((d) => d.id === "article")!.current_version_id = "article-v2";
+        expect((await request(publicationContentApp).get("/").set("Host", host)).text).toContain("second version");
+
+        const frozen = await request(app)
+            .patch(`/publications/${publication.id}`)
+            .set("Authorization", "Bearer t")
+            .send({ follow_document: false });
+        expect(frozen.status).toBe(200);
+        expect(frozen.body.publication).toMatchObject({
+            follow_document: false,
+            file_count: 1,
+            version_id: "article-v2",
+        });
+
+        // Frozen: the next version does not reach the link.
+        store.rows("documents").find((d) => d.id === "article")!.current_version_id = "article-v1";
+        expect((await request(publicationContentApp).get("/").set("Host", host)).text).toContain("second version");
+
+        const edited = await request(app)
+            .patch(`/publications/${publication.id}`)
+            .set("Authorization", "Bearer t")
+            .send({ expires_in_days: 7, follow_document: true });
+        expect(edited.status).toBe(200);
+        expect(edited.body.publication.follow_document).toBe(true);
+        expect(edited.body.publication.expires_at).toBeTruthy();
+        expect((await request(publicationContentApp).get("/").set("Host", host)).text).toContain("Field notes");
     });
 });
 
