@@ -74,6 +74,7 @@ import {
     getDocumentFile,
     getDocumentFileUrl,
     getDocumentUrl,
+    fetchDocumentText,
     getConfiguredModels,
     getModelsVision,
     getLibrary,
@@ -2175,6 +2176,22 @@ describe("query and payload defaults", () => {
         await getDocumentUrl("d1", "v 1");
         expect(lastFetchCall().url).toBe(
             "/api/single-documents/d1/url?version_id=v%201",
+        );
+    });
+
+    it("fetchDocumentText appends version_id only when a version is requested", async () => {
+        fetchMock.mockImplementation(() =>
+            Promise.resolve(
+                jsonResponse({ text: "body", chars: 4, format: "text" }),
+            ),
+        );
+
+        await fetchDocumentText("d1");
+        expect(lastFetchCall().url).toBe("/api/single-documents/d1/text");
+
+        await fetchDocumentText("d1", "v 1");
+        expect(lastFetchCall().url).toBe(
+            "/api/single-documents/d1/text?version_id=v%201",
         );
     });
 

@@ -248,15 +248,16 @@ it("keeps edits after a failed export and downloads the edited bytes on retry", 
 });
 
 it("offers a working whole-document copy through onCopyReady", async () => {
-    let copy: (() => Promise<void>) | null = null;
+    let copy: (() => Promise<void>) | null | undefined;
     render(<DocxView documentId="copy-all" cacheBytes={false} defaultMode="edit"
         onCopyReady={(handler) => { copy = handler; }} />);
     await editorReady("EigenPal preview");
     await waitFor(() => expect(copy).toEqual(expect.any(Function)));
-    await act(async () => copy?.());
+    const handler = copy as () => Promise<void>;
+    await act(async () => handler());
     expect(copyAll).toHaveBeenCalledOnce();
     copyAll.mockReturnValueOnce(false);
-    await expect(copy?.()).rejects.toThrow("not ready");
+    await expect(handler()).rejects.toThrow("not ready");
 });
 
 it("leaves native revision painting alone during page repaints and clears it on dismissal", async () => {

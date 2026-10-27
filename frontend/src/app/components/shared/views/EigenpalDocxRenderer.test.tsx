@@ -234,6 +234,37 @@ it("selects across table cells, scrolls to the first cell, and clears the comple
     expect(editor.selectMatch).toHaveBeenLastCalledWith({ ...first, length: 0 });
 });
 
+it("copies the whole document through the engine without moving the caret", () => {
+    const onReady = vi.fn();
+    render(<DocxRenderer bytes={new ArrayBuffer(1)} mode="edit" onReady={onReady} onError={vi.fn()} />);
+    const from = { paraId: "p1", offset: 3 };
+    const to = { paraId: "p2", offset: 9 };
+    const exec = vi.fn((command: { type: string }) =>
+        ({ ok: command.type !== "copy-refuse" }));
+    const editor = {
+        snapshot: () => ({ reviewPaneOpen: false, selection: { from, to } }),
+        on: vi.fn().mockReturnValue(vi.fn()),
+        can: vi.fn().mockReturnValue({ ok: true }),
+        exec,
+    };
+    act(() => (state.props.onReady as (editor: unknown) => void)(editor));
+    const surface = onReady.mock.calls[0][0];
+
+    expect(surface.copyAll()).toBe(true);
+    const calls = exec.mock.calls.map(([c]) => c.type);
+    expect(calls).toEqual(["selectAll", "copy", "setSelection"]);
+    expect(exec).toHaveBeenLastCalledWith({
+        type: "setSelection",
+        range: { from, to },
+    });
+
+    // Copy disabled at the engine level → the caller falls back to plain text.
+    editor.can.mockReturnValue({ ok: false });
+    exec.mockClear();
+    expect(surface.copyAll()).toBe(false);
+    expect(exec).not.toHaveBeenCalled();
+});
+
 it("keeps font failures non-fatal and permits dismissing their warning", () => {
     const props = { bytes: new ArrayBuffer(1), mode: "edit" as const, onReady: vi.fn(), onError: vi.fn() };
     render(<DocxRenderer {...props} />);
