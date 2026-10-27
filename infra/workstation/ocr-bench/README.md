@@ -58,4 +58,6 @@ licence unsettled; skipped unless `INDRA_WHEEL` points at it), `lighton`
 - **Peak RSS** of the engine subprocess (ru_maxrss), and wall ms/page.
 
 Machine note: run on the target profile — 4 vCPU, ~5 GB, no GPU. Numbers
-from a GPU box do not transfer.
+from a GPU box do not transfer. `bench.py` runs on macOS for smoke checks
+(`ru_maxrss` is normalised to KiB), but Darwin binaries differ from the
+VM's Linux ones — treat any mac number as a wiring check, not the result.

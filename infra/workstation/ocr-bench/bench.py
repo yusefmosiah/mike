@@ -132,8 +132,11 @@ def run_engine(engine: str, image: Path, env: dict[str, str]) -> dict:
     proc = subprocess.run(cmd, capture_output=True, text=True)
     ms = (time.perf_counter() - start) * 1000
     peak_kb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    # ru_maxrss is cumulative per-waited child on Linux: report the max so
-    # far as an upper bound — good enough for the comparison this makes.
+    # Linux reports KiB, macOS bytes; normalise so results/ is comparable.
+    if sys.platform == "darwin":
+        peak_kb //= 1024
+    # ru_maxrss is cumulative per-waited child: report the max so far as an
+    # upper bound — good enough for the comparison this makes.
     try:
         line = proc.stdout.strip().splitlines()[-1]
         result = json.loads(line)
