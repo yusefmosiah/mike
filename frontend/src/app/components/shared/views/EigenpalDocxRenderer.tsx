@@ -104,6 +104,39 @@ export default function DocxRenderer({ bytes, mode, toolbarVisible = true, filen
                     // comment column docks at its end, mirroring the pane.
                     setReviewRail(host.current?.querySelector<HTMLElement>(".docx-nav")?.parentElement ?? null);
                     const scroll = host.current?.querySelector<HTMLElement>(".docx-editor__scroll-container");
+                    // iOS "Select All" anchors the DOM selection to the pages
+                    // element — a boundary the engine's selection sync cannot
+                    // map, so the selection collapses and nothing is selected.
+                    // Detect that whole-document element-anchored shape and
+                    // route it through the engine's own select-all command.
+                    let adopting = false;
+                    const onDomSelectionChange = () => {
+                        if (adopting || !content) return;
+                        const sel = content.ownerDocument.getSelection();
+                        if (!sel || sel.rangeCount === 0) return;
+                        const anchor = sel.anchorNode;
+                        if (!(anchor instanceof Element)) return;
+                        if (!anchor.contains(content) && !content.contains(anchor)) return;
+                        const textLen = content.textContent?.length ?? 0;
+                        if (textLen === 0 || sel.toString().length < textLen * 0.85) return;
+                        if (!editor.can({ type: "selectAll" }).ok) return;
+                        adopting = true;
+                        try {
+                            editor.exec({ type: "selectAll" });
+                        } finally {
+                            adopting = false;
+                        }
+                    };
+                    if (content) {
+                        // Capture: the engine's own document-level sync collapses
+                        // this selection shape first; we must see it before that.
+                        content.ownerDocument.addEventListener("selectionchange", onDomSelectionChange, true);
+                        const offError = unsubscribe.current;
+                        unsubscribe.current = () => {
+                            offError?.();
+                            content.ownerDocument.removeEventListener("selectionchange", onDomSelectionChange, true);
+                        };
+                    }
                     if (content && scroll) onReady({
                         content, scroll, exportDocx: () => editor.save(),
                         activateRevision: ({ ins, del }) => {
