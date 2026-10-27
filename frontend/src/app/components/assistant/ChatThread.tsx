@@ -32,6 +32,7 @@ import {
 } from "./ChatInput";
 import { ChatInputPrompt } from "./ChatInputPrompt";
 import type { UseVoiceChatOptions, UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
+import { useVoiceChat } from "@/app/hooks/useVoiceChat";
 import {
     generatingNotice,
     threadHasOtherAuthors,
@@ -107,7 +108,8 @@ export interface ChatThreadProps {
     /**
      * A voice session owned by the page, which outlives this thread's
      * composer (the new-chat screen's voice mode carries on here). Without
-     * it, the composer runs voice mode itself once the thread has an id.
+     * it, the thread runs its own session in a gate above the composer —
+     * including before the chat has an id, which is the new-chat case.
      */
     voiceSession?: UseVoiceChatResult;
     /**
@@ -172,6 +174,41 @@ const COMPOSER_CLEARANCE_PX = 4;
 
 const SHIMMER_CLASS =
     "theme-shimmer bg-[length:200%_100%] animate-[shimmer_2s_ease-in-out_infinite] rounded";
+
+/**
+ * Voice mode for a thread without a page-owned session. The hook sits above
+ * the composer, not inside it: ChatInput remounts on `key` when a new chat
+ * gets its id, which would kill a composer-owned session mid-turn. The hook
+ * itself is built for the null-to-created handoff (useVoiceChat's
+ * awaitingChatRef), so `chatId: null` is voice-ready.
+ */
+function ComposerVoice({
+    chatId,
+    messages,
+    isResponseLoading,
+    onReplaceVoicePrompt,
+    onCancel,
+    chatInputRef,
+    children,
+}: {
+    chatId?: string | null;
+    messages: Message[];
+    isResponseLoading: boolean;
+    onReplaceVoicePrompt?: UseVoiceChatOptions["replacePrompt"];
+    onCancel: () => void;
+    chatInputRef: RefObject<ChatInputHandle | null>;
+    children: (session: UseVoiceChatResult) => ReactNode;
+}) {
+    const session = useVoiceChat({
+        chatId: chatId ?? null,
+        messages,
+        isResponseLoading,
+        send: (text) => chatInputRef.current?.sendVoice(text) ?? false,
+        replacePrompt: onReplaceVoicePrompt,
+        cancelResponse: onCancel,
+    });
+    return children(session);
+}
 
 /** Each variant's layout. Behaviour is the same in both. */
 const LAYOUT: Record<
@@ -863,6 +900,31 @@ export function ChatThread({
         });
     };
 
+    // The composer under whichever voice session is live: the page's when it
+    // provides one, otherwise the ComposerVoice gate's. `session` is always a
+    // real session by the time this runs, so ChatInput never opens its own.
+    const renderInput = (session: UseVoiceChatResult) => (
+        <ChatInput
+            key={chatInputKey}
+            ref={chatInputRef}
+            canSend={canSend}
+            chatLoading={chatLoading}
+            onSubmit={onSubmit}
+            onCancel={onCancel}
+            isLoading={isResponseLoading}
+            canStop={!generatingBy || generatingBy.id === viewerId}
+            chatKey={chatId}
+            chatModel={chatModel}
+            chatReasoningLevel={chatReasoningLevel}
+            onDocumentClick={onDocumentClick}
+            {...chatInputProps}
+            editTarget={editingMessage}
+            onEditSubmit={submitEdit}
+            onEditCancel={() => setEditing(null)}
+            voice={{ session }}
+        />
+    );
+
     return (
         <>
             {/* Scrollable messages */}
@@ -977,36 +1039,20 @@ export function ChatThread({
                                 }}
                                 onCancel={onCancel}
                             >
-                                <ChatInput
-                                    key={chatInputKey}
-                                    ref={chatInputRef}
-                                    canSend={canSend}
-                                    chatLoading={chatLoading}
-                                    onSubmit={onSubmit}
-                                    onCancel={onCancel}
-                                    isLoading={isResponseLoading}
-                                    canStop={
-                                        !generatingBy ||
-                                        generatingBy.id === viewerId
-                                    }
-                                    chatKey={chatId}
-                                    chatModel={chatModel}
-                                    chatReasoningLevel={chatReasoningLevel}
-                                    onDocumentClick={onDocumentClick}
-                                    {...chatInputProps}
-                                    editTarget={editingMessage}
-                                    onEditSubmit={submitEdit}
-                                    onEditCancel={() => setEditing(null)}
-                                    voice={
-                                        voiceSession
-                                            ? { session: voiceSession }
-                                            : {
-                                                  chatId: chatId ?? null,
-                                                  messages,
-                                                  replacePrompt: onReplaceVoicePrompt,
-                                              }
-                                    }
-                                />
+                                {voiceSession ? (
+                                    renderInput(voiceSession)
+                                ) : (
+                                    <ComposerVoice
+                                        chatId={chatId}
+                                        messages={messages}
+                                        isResponseLoading={isResponseLoading}
+                                        onReplaceVoicePrompt={onReplaceVoicePrompt}
+                                        onCancel={onCancel}
+                                        chatInputRef={chatInputRef}
+                                    >
+                                        {renderInput}
+                                    </ComposerVoice>
+                                )}
                             </ChatInputPrompt>
                         </div>
                     </div>

@@ -1893,7 +1893,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
     return (
         <div
             ref={workspaceRef}
-            className="relative my-2 ml-2 mr-3 flex h-[calc(100dvh-1rem)] min-h-0 overflow-hidden md:my-3 md:h-[calc(100dvh-1.5rem)]"
+            className="relative my-2 ml-2 mr-3 flex h-[calc(100dvh-1rem)] min-h-0 overflow-hidden md:my-3 md:h-[calc(100dvh-1.5rem)] max-md:my-1.5 max-md:h-auto max-md:min-h-[calc(100dvh-0.75rem)] max-md:overflow-visible"
             onDragOver={(event) => {
                 if (isExternalFileDrag(event.dataTransfer)) {
                     event.preventDefault();
@@ -2205,7 +2205,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                 style={{ minWidth: DOCUMENT_MIN }}
                 className={cn(
                     "relative flex flex-1 flex-col overflow-hidden rounded-lg",
-                    "max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:min-w-0! max-md:w-full max-md:transition-[transform,visibility] max-md:duration-300 max-md:ease-out",
+                    "max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:min-w-0! max-md:w-full max-md:transition-[transform,visibility] max-md:duration-300 max-md:ease-out",
                     mobilePane === "document"
                         ? "max-md:z-50 max-md:translate-x-0 max-md:visible"
                         : "max-md:z-40 max-md:translate-x-full max-md:invisible",
@@ -2332,7 +2332,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             <div
                 style={{ width: chatWidth }}
                 className={cn(
-                    "relative flex shrink-0 flex-col overflow-hidden rounded-l-lg rounded-r-2xl max-md:w-full! max-md:isolate",
+                    "relative flex shrink-0 flex-col overflow-hidden rounded-l-lg rounded-r-2xl max-md:w-full! max-md:isolate max-md:overflow-visible",
                     LIQUID_GLASS_FLAT_CLASS,
                 )}
                 onDragEnter={(event) => {

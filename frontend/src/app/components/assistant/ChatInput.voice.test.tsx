@@ -58,21 +58,40 @@ function inApp(methods = ["voiceStatus"]) {
 
 const thread: Message[] = [{ id: "u0", role: "user", content: "Hello" }];
 
+/**
+ * A composer with a voice session held above it, like a thread: the session's
+ * `send` is this composer's `sendVoice`.
+ */
+function VoiceComposer(props: Omit<Parameters<typeof ChatInput>[0], "voice">) {
+    const inputRef = useRef<ChatInputHandle>(null);
+    const session = useVoiceChat({
+        chatId: "chat-1",
+        messages: thread,
+        isResponseLoading: !!props.isLoading,
+        send: (text) => inputRef.current?.sendVoice(text) ?? false,
+        cancelResponse: () => props.onCancel?.(),
+    });
+    return <ChatInput ref={inputRef} {...props} voice={{ session }} />;
+}
+
 function renderInput(props: Partial<Parameters<typeof ChatInput>[0]> = {}) {
+    const { voice, ...rest } = props;
     const onSubmit = vi.fn();
-    const view = render(
-        <ChatInput
-            chatKey="chat-1"
-            chatModel="gpt-5.6-luna"
-            chatReasoningLevel="high"
-            onSubmit={onSubmit}
-            onCancel={vi.fn()}
-            isLoading={false}
-            canSend
-            voice={{ chatId: "chat-1", messages: thread }}
-            {...props}
-        />,
-    );
+    const shared = {
+        chatKey: "chat-1",
+        chatModel: "gpt-5.6-luna",
+        chatReasoningLevel: "high" as const,
+        onSubmit,
+        onCancel: vi.fn(),
+        isLoading: false,
+        canSend: true,
+        ...rest,
+    };
+    // `voice: undefined` renders the bare composer — no session anywhere.
+    const view =
+        "voice" in props && !voice
+            ? render(<ChatInput {...shared} />)
+            : render(<VoiceComposer {...shared} />);
     return { ...view, onSubmit };
 }
 
@@ -100,7 +119,7 @@ describe("ChatInput voice mode", () => {
         const { rerender } = renderInput();
         expect(screen.queryByRole("button", { name: "Start voice mode" })).toBeNull();
         inApp(["speak"]);
-        rerender(<ChatInput onSubmit={vi.fn()} onCancel={vi.fn()} isLoading={false} canSend voice={{ chatId: "c", messages: [] }} />);
+        rerender(<ChatInput onSubmit={vi.fn()} onCancel={vi.fn()} isLoading={false} canSend />);
         expect(screen.queryByRole("button", { name: "Start voice mode" })).toBeNull();
     });
 

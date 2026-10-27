@@ -36,8 +36,8 @@ export default function MikeLayout({
     const router = useRouter();
     const pathname = usePathname();
     const isChatPage =
-        /^\/assistant\/chat\/[^/]+\/?$/.test(pathname) ||
-        /^\/projects\/[^/]+\/assistant\/chat\/[^/]+\/?$/.test(pathname);
+        /^\/assistant\/chat(\/[^/]+)?\/?$/.test(pathname) ||
+        /^\/projects\/[^/]+\/assistant\/chat(\/[^/]+)?\/?$/.test(pathname);
     // On a phone these pages scroll the document itself (globals.css), so a
     // tap on the status bar scrolls the thread to the top.
     const scrollsDocument = isChatPage;

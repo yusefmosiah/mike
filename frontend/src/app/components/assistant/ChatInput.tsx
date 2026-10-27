@@ -101,7 +101,7 @@ import {
 import { useConfiguredModels } from "@/app/hooks/useConfiguredModels";
 import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
-import { useVoiceChat, type UseVoiceChatOptions, type UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
+import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { VoiceModePanel } from "./VoiceModePanel";
 
 export interface ChatInputHandle {
@@ -125,15 +125,12 @@ export interface ChatInputHandle {
 }
 
 /**
- * Hands-free voice mode in a composer. Either the composer runs it for a
- * thread (`chatId` and `messages`), or a parent that outlives the composer
- * does (`session`, the parent's `useVoiceChat`, whose `send` is this
- * composer's `sendVoice`): the new-chat screen's composer is replaced by
- * the thread's once the first turn is sent, and voice mode carries on.
+ * Hands-free voice mode in a composer, driven by a parent that outlives it:
+ * `session` is the parent's `useVoiceChat`, whose `send` is this composer's
+ * `sendVoice` — the new-chat screen's composer is replaced by the thread's
+ * once the first turn is sent, and voice mode carries on.
  */
-export type ChatInputVoice =
-    | { chatId: string | null; messages: Message[]; replacePrompt?: UseVoiceChatOptions["replacePrompt"] }
-    | { session: UseVoiceChatResult };
+export type ChatInputVoice = { session: UseVoiceChatResult };
 
 /** A prompt as edited in the composer: its new text and files. */
 export type EditedPrompt = { content: string; files: MessageFile[] };
@@ -246,8 +243,6 @@ function placeholderFor({
     if (!chatLoading) return "How can I help?";
     return isLoading ? "A response is still arriving…" : "Loading this chat…";
 }
-
-const NO_MESSAGES: Message[] = [];
 
 /** Recording length as mm:ss for the dictation indicator. */
 function formatDictationTime(elapsedMs: number): string {
@@ -949,18 +944,8 @@ function ChatInputForChatImpl(
         onSubmit({ role: "user", content: text, model, reasoning: reasoningLevel, voice: true });
         return true;
     };
-    const sharedVoice = voice && "session" in voice ? voice.session : null;
-    const ownVoice = voice && "chatId" in voice ? voice : null;
-    const composerVoice = useVoiceChat({
-        chatId: ownVoice?.chatId,
-        messages: ownVoice?.messages ?? NO_MESSAGES,
-        isResponseLoading: isLoading,
-        send: sendVoice,
-        replacePrompt: ownVoice?.replacePrompt,
-        cancelResponse: onCancel,
-    });
-    const voiceChat = sharedVoice ?? composerVoice;
-    const voiceActive = voiceChat.phase !== "off";
+    const voiceChat = voice?.session ?? null;
+    const voiceActive = !!voiceChat && voiceChat.phase !== "off";
     // Back to the composer when voice mode ends, unless focus went elsewhere.
     const wasVoiceActive = useRef(false);
     useEffect(() => {
@@ -971,7 +956,7 @@ function ChatInputForChatImpl(
         if (!focused || focused === document.body) textareaRef.current?.focus();
     }, [voiceActive]);
     const voiceOffered =
-        !!voice && voiceChat.supported && composerOpen && !editTarget && !dictation.recording;
+        !!voiceChat && voiceChat.supported && composerOpen && !editTarget && !dictation.recording;
 
     const selectSlashWorkflow = (workflow: Workflow) => {
         if (!workflowSlashCommand(workflow)) return;
@@ -1438,7 +1423,7 @@ function ChatInputForChatImpl(
                                     title="Start voice mode"
                                     onClick={() => {
                                         if (phoneAppPromptNeeded()) setVoiceAppPrompt(true);
-                                        else void voiceChat.start();
+                                        else void voiceChat?.start();
                                     }}
                                     disabled={isLoading || dictation.busy}
                                     className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-default disabled:text-gray-300"
@@ -1556,7 +1541,7 @@ function ChatInputForChatImpl(
 
             {/* Only that voice mode began or ended: the live words would talk over the answer. */}
             <span aria-live="polite" className="sr-only">
-                {voiceChat.announcement}
+                {voiceChat?.announcement}
             </span>
             <input
                 ref={localFileInputRef}
@@ -1614,7 +1599,7 @@ function ChatInputForChatImpl(
                     rememberPhoneBrowserChoice();
                     setVoiceAppPrompt(false);
                     // Still inside the tap, which a browser needs to start audio.
-                    void voiceChat.start();
+                    void voiceChat?.start();
                 }}
             />
             <NoModelsWarningPopup
@@ -1633,12 +1618,12 @@ function ChatInputForChatImpl(
                     uploadWarning ??
                     dictation.error ??
                     // Setup shows its own failures in the panel.
-                    (voiceChat.phase === "setup" ? null : voiceChat.error)
+                    (voiceChat?.phase === "setup" ? null : voiceChat?.error)
                 }
                 onWarningClose={() => {
                     setUploadWarning(null);
                     dictation.clearError();
-                    voiceChat.clearError();
+                    voiceChat?.clearError();
                 }}
             />
         </>

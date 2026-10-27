@@ -76,6 +76,37 @@ describe("mobile page header", () => {
         );
     });
 
+    it("marks standalone and project chats as document-scrolling pages", () => {
+        render(
+            <MikeLayout>
+                <div>Chat</div>
+            </MikeLayout>,
+        );
+        expect(
+            document.querySelector("[data-document-scroll]"),
+        ).not.toBeNull();
+
+        navigation.pathname = "/projects/project-1/assistant/chat/chat-1";
+        render(
+            <MikeLayout>
+                <div>Project chat</div>
+            </MikeLayout>,
+        );
+        expect(
+            document.querySelector("[data-document-scroll]"),
+        ).not.toBeNull();
+    });
+
+    it("does not scroll the document outside chat pages", () => {
+        navigation.pathname = "/projects";
+        render(
+            <MikeLayout>
+                <div>Projects</div>
+            </MikeLayout>,
+        );
+        expect(document.querySelector("[data-document-scroll]")).toBeNull();
+    });
+
     it("uses the header-button styling for the sidebar toggle", () => {
         render(
             <MikeLayout>

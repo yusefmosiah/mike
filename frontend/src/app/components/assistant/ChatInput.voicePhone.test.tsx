@@ -1,12 +1,13 @@
+import { useRef } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import type * as MikeApiModule from "@/app/lib/mikeApi";
 import type * as ModelToggleModule from "./ModelToggle";
-import { isModelAvailable } from "@/app/lib/modelAvailability";
 import type { Message } from "../shared/types";
 import { VOICE_PREFERENCES_KEY } from "@/app/lib/voice/preferences";
-import { ChatInput } from "./ChatInput";
+import { useVoiceChat } from "@/app/hooks/useVoiceChat";
+import { ChatInput, type ChatInputHandle } from "./ChatInput";
 
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     ...(await importOriginal<typeof MikeApiModule>()),
@@ -63,9 +64,22 @@ async function tapVoice() {
     });
 }
 
+/** A composer with a voice session held above it, like a thread. */
+function VoiceComposer(props: Omit<Parameters<typeof ChatInput>[0], "voice">) {
+    const inputRef = useRef<ChatInputHandle>(null);
+    const session = useVoiceChat({
+        chatId: "chat-1",
+        messages: thread,
+        isResponseLoading: false,
+        send: (text) => inputRef.current?.sendVoice(text) ?? false,
+        cancelResponse: () => props.onCancel?.(),
+    });
+    return <ChatInput ref={inputRef} {...props} voice={{ session }} />;
+}
+
 function renderInput() {
     return render(
-        <ChatInput
+        <VoiceComposer
             chatKey="chat-1"
             chatModel="gpt-5.6-luna"
             chatReasoningLevel="high"
@@ -73,7 +87,6 @@ function renderInput() {
             onCancel={vi.fn()}
             isLoading={false}
             canSend
-            voice={{ chatId: "chat-1", messages: thread }}
         />,
     );
 }
