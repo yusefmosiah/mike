@@ -132,7 +132,7 @@ export interface ChatInputHandle {
  * the thread's once the first turn is sent, and voice mode carries on.
  */
 export type ChatInputVoice =
-    | { chatId: string; messages: Message[]; replacePrompt?: UseVoiceChatOptions["replacePrompt"] }
+    | { chatId: string | null; messages: Message[]; replacePrompt?: UseVoiceChatOptions["replacePrompt"] }
     | { session: UseVoiceChatResult };
 
 /** A prompt as edited in the composer: its new text and files. */

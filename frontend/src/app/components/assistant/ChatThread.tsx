@@ -1000,9 +1000,11 @@ export function ChatThread({
                                     voice={
                                         voiceSession
                                             ? { session: voiceSession }
-                                            : chatId
-                                              ? { chatId, messages, replacePrompt: onReplaceVoicePrompt }
-                                              : undefined
+                                            : {
+                                                  chatId: chatId ?? null,
+                                                  messages,
+                                                  replacePrompt: onReplaceVoicePrompt,
+                                              }
                                     }
                                 />
                             </ChatInputPrompt>

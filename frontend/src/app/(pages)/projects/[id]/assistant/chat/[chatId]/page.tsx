@@ -102,7 +102,6 @@ import { PermissionDeniedPopup } from "@/app/components/popups/PermissionDeniedP
 import { MikeIcon } from "@/app/components/chat/mike-icon";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useDictationContext } from "@/app/lib/voice/dictationVocabulary";
-import { useVoiceChat } from "@/app/hooks/useVoiceChat";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { HeaderActionsMenu } from "@/app/components/shared/HeaderActionsMenu";
@@ -483,19 +482,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
             setMessages,
             handleChat,
         });
-
-    // Hands-free voice mode, as in the assistant chat: owned here so a turn
-    // spoken while a new chat is being created carries into it. Each turn is
-    // sent through whichever composer is on screen, with its model.
-    const voiceSession = useVoiceChat({
-        chatId: activeChatId || null,
-        messages,
-        isResponseLoading,
-        send: (text) => chatInputRef.current?.sendVoice(text) ?? false,
-        replacePrompt: replaceVoicePrompt,
-        cancelResponse: cancel,
-    });
-
     // The branch actions surface failures through the page's warning popup:
     // the message rows own no error surface of their own.
     const handleEditPrompt = useCallback(
@@ -2500,7 +2486,6 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     }}
                     onEditBranch={handleEditPrompt}
                     onReplaceVoicePrompt={replaceVoicePrompt}
-                    voiceSession={voiceSession}
                     onNavigateSibling={handleNavigateSibling}
                     onRegenerate={handleRegenerate}
                     onBranchIntoNewThread={handleBranchIntoNewThread}
