@@ -40,7 +40,7 @@ export default function MikeLayout({
         /^\/projects\/[^/]+\/assistant\/chat\/[^/]+\/?$/.test(pathname);
     // On a phone these pages scroll the document itself (globals.css), so a
     // tap on the status bar scrolls the thread to the top.
-    const scrollsDocument = /^\/assistant\/chat\/[^/]+\/?$/.test(pathname);
+    const scrollsDocument = isChatPage;
     useEffect(() => watchDisplayEdge(), []);
     useEffect(() => watchNativeKeyboard(), []);
     const [mobileActionsContainer, setMobileActionsContainer] =
