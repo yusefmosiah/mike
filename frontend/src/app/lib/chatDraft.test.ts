@@ -75,6 +75,14 @@ describe("chat drafts", () => {
         });
     });
 
+    it("ignores a corrupted draft index rather than failing reads", () => {
+        localStorage.setItem("mike.composerDraft.v1:index", "not json{");
+        writeChatDraft("chat-1", { text: "kept", docs: [], workflow: null });
+        expect(readChatDraft("chat-1")?.text).toBe("kept");
+        localStorage.setItem("mike.composerDraft.v1:index", JSON.stringify(7));
+        expect(readChatDraft("chat-1")?.text).toBe("kept");
+    });
+
     it("evicts the least recently written drafts past the cap", () => {
         for (let i = 0; i < 101; i++) {
             writeChatDraft(`chat-${i}`, {
