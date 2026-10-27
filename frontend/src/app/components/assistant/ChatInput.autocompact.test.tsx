@@ -74,6 +74,7 @@ function renderInput() {
 describe("ChatInput /autocompact", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        localStorage.clear();
         vi.stubGlobal("ResizeObserver", ResizeObserverMock);
         vi.mocked(listWorkflows).mockResolvedValue([]);
         vi.mocked(setAutocompactTokens).mockImplementation(async (_model, tokens) => ({

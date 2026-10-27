@@ -236,6 +236,65 @@ describe("readSseFrames", () => {
         ).rejects.toMatchObject({ name: "AbortError" });
     });
 
+    it("gives up a stream that goes silent past the idle deadline", async () => {
+        vi.useFakeTimers();
+        try {
+            const silent = new Response(
+                new ReadableStream<Uint8Array>({ start: () => {} }),
+                { status: 200 },
+            );
+            const iterate = (async () => {
+                for await (const frame of readSseFrames(silent, {
+                    idleTimeoutMs: 1_000,
+                }))
+                    void frame;
+            })();
+            const assertion = expect(iterate).rejects.toMatchObject({
+                name: "SseIdleTimeoutError",
+            });
+            await vi.advanceTimersByTimeAsync(1_100);
+            await assertion;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    // Any bytes reset the deadline — a live stream that only sends SSE
+    // comments between long pauses is left alone.
+    it("resets the idle deadline on every chunk, comments included", async () => {
+        vi.useFakeTimers();
+        try {
+            const encoder = new TextEncoder();
+            let controller!: ReadableStreamDefaultController<Uint8Array>;
+            const stream = new ReadableStream<Uint8Array>({
+                start(c) {
+                    controller = c;
+                },
+            });
+            const frames: unknown[] = [];
+            const run = (async () => {
+                for await (const frame of readSseFrames(
+                    new Response(stream, { status: 200 }),
+                    { idleTimeoutMs: 1_000 },
+                ))
+                    frames.push(frame);
+            })();
+
+            // A comment at 900 ms, the record at 1800 ms: twice the deadline
+            // in wall time, never one silent second.
+            await vi.advanceTimersByTimeAsync(900);
+            controller.enqueue(encoder.encode(": keep-alive\n\n"));
+            await vi.advanceTimersByTimeAsync(900);
+            controller.enqueue(encoder.encode('data: {"n":1}\n\n'));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+            await run;
+            expect(frames).toEqual([{ n: 1 }]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("throws when the response has no body", async () => {
         const bodyless = new Response(null, { status: 204 });
         const iterate = async () => {

@@ -70,6 +70,7 @@ const sendButton = () => screen.getByRole("button", { name: "Send message" });
 describe("ChatInput with an image attached", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        localStorage.clear();
         vi.stubGlobal("ResizeObserver", ResizeObserverMock);
         vision.answers = { "gpt-5.6-luna": false, "gpt-5.6-sol": true };
     });

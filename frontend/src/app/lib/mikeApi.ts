@@ -2447,8 +2447,13 @@ function mapServerMessages(messages: ServerTranscriptRow[]): Message[] {
     return mapped;
 }
 
-export async function getChat(chatId: string): Promise<ChatDetailOut> {
-    const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`);
+export async function getChat(
+    chatId: string,
+    signal?: AbortSignal,
+): Promise<ChatDetailOut> {
+    const raw = await apiRequest<ServerChatDetailOut>(`/chat/${chatId}`, {
+        signal,
+    });
     const person = (id: string | null | undefined): ThreadAuthor | undefined =>
         id
             ? {

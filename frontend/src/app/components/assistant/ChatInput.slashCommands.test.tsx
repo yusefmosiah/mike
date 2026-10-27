@@ -59,6 +59,7 @@ class ResizeObserverMock {
 describe("ChatInput workflow slash commands", () => {
     beforeEach(() => {
         vi.mocked(listWorkflows).mockResolvedValue([workflow]);
+        localStorage.clear();
         vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     });
 

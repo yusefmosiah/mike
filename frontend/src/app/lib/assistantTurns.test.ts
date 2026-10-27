@@ -36,7 +36,7 @@ describe("assistant turn history loading", () => {
     const turn = begin("a");
     try {
       expect(await loadAssistantChat("a")).toEqual(history);
-      expect(getChatMock).toHaveBeenCalledWith("a");
+      expect(getChatMock).toHaveBeenCalledWith("a", expect.any(AbortSignal));
       expect(hasAssistantTurn("a")).toBe(true);
     } finally { turn.finish(); getChatMock.mockReset(); }
   });

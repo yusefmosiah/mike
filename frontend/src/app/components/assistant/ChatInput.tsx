@@ -27,6 +27,7 @@ import { UploadOverlay } from "./UploadOverlay";
 import { FileTypeIcon } from "../shared/FileTypeIcon";
 import { AddDocumentsModal } from "../modals/AddDocumentsModal";
 import { AssistantWorkflowModal } from "./AssistantWorkflowModal";
+import { useOptionalAuth } from "@/app/contexts/AuthContext";
 import {
     WORKFLOW_SLASH_MENU_ID,
     WorkflowSlashMenu,
@@ -90,6 +91,7 @@ import {
     incomingFiles,
 } from "@/app/lib/documentUploadValidation";
 import { isLongPaste, pastedTextFile } from "@/app/lib/pastedText";
+import { chatDraftKey, readChatDraft, writeChatDraft } from "@/app/lib/chatDraft";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
     AUTOCOMPACT_COMMAND,
@@ -286,11 +288,59 @@ function ChatInputForChatImpl(
     // names whichever one is missing.
     const composerOpen = canSend === true && !chatLoading;
     const [value, setValue] = useState("");
+    const auth = useOptionalAuth();
+    // The draft outlives the composer: keyed remounts (switching threads,
+    // the chat gaining its id) and app closes restore it from storage,
+    // scoped to the account and surface so one never leaks into another's.
+    const draftKey = chatDraftKey({
+        userId: auth?.user?.id ?? "anonymous",
+        projectId,
+        chatKey: chatKey ?? "new-chat",
+    });
     const [attachedDocs, setAttachedDocs] = useState<Document[]>([]);
     const [selectedWorkflow, setSelectedWorkflow] = useState<{
         id: string;
         title: string;
     } | null>(null);
+    // Restore the stored draft once, on mount — not during render, so SSR
+    // and hydration stay in sync. A set-aside draft (editing a sent prompt)
+    // is what gets restored if a close interrupted the edit.
+    const draftRestoredRef = useRef(false);
+    useEffect(() => {
+        if (draftRestoredRef.current) return;
+        draftRestoredRef.current = true;
+        const draft = readChatDraft(draftKey);
+        if (!draft) return;
+        if (draft.text) {
+            setValue(draft.text);
+            requestAnimationFrame(() => {
+                const el = textareaRef.current;
+                if (!el) return;
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+            });
+        }
+        if (draft.docs.length > 0) setAttachedDocs(draft.docs);
+        if (draft.workflow) setSelectedWorkflow(draft.workflow);
+        // Mount-only restore; draftKey is fixed for this mount's key.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    // Every change lands in storage synchronously so a force-close keeps it.
+    // While a sent prompt is being edited, the set-aside draft is what gets
+    // saved — the edit lives in `value` but is not the thread's draft.
+    const draftSkipPersistRef = useRef(true);
+    useEffect(() => {
+        if (draftSkipPersistRef.current) {
+            draftSkipPersistRef.current = false;
+            return;
+        }
+        const aside = setAsideRef.current;
+        writeChatDraft(draftKey, {
+            text: aside?.value ?? value,
+            docs: aside?.docs ?? attachedDocs,
+            workflow: aside ? aside.workflow : selectedWorkflow,
+        });
+    }, [value, attachedDocs, selectedWorkflow, draftKey]);
     const {
         profile,
         loading: profileLoading,

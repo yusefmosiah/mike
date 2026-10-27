@@ -345,7 +345,10 @@ export async function loadAssistantChat(chatId: string) {
     while (true) {
       changed = false;
       try {
-        const result = await getChat(chatId);
+        // Bounded: a stalled network must not hold the page's loading state
+        // open forever — the read fails and the page handles it like any
+        // other load failure.
+        const result = await getChat(chatId, AbortSignal.timeout(45_000));
         if (changed) continue;
         // Stop closes the socket before the backend saves the cancellation.
         // A returning reader must not adopt the empty reserved row in that

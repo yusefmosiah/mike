@@ -54,6 +54,13 @@ async function drainToEnd(
         clearTimeout(timer);
     }
 }
+export class SseIdleTimeoutError extends Error {
+    constructor(ms: number) {
+        super(`No bytes from the stream for ${ms} ms`);
+        this.name = "SseIdleTimeoutError";
+    }
+}
+
 export async function* readSseFrames(
     response: Response,
     opts?: {
@@ -64,6 +71,13 @@ export async function* readSseFrames(
          * can ask for the ones it has not seen (`from=<last id + 1>`).
          */
         onEventId?: (id: string) => void;
+        /**
+         * Give up when no bytes — keep-alive comments included — arrive for
+         * this long. A half-open connection that sends nothing would
+         * otherwise park `reader.read()` forever; throwing lets the caller's
+         * reconnect policy resume the turn.
+         */
+        idleTimeoutMs?: number;
     },
 ): AsyncGenerator<unknown> {
     const reader = response.body?.getReader();
@@ -79,7 +93,19 @@ export async function* readSseFrames(
         while (true) {
             if (opts?.signal?.aborted) throw abortError();
 
-            const { done, value } = await reader.read();
+            const readOnce = () => {
+                const { idleTimeoutMs } = opts ?? {};
+                if (idleTimeoutMs === undefined) return reader.read();
+                const { promise, reject } = Promise.withResolvers<never>();
+                const idle = setTimeout(
+                    () => reject(new SseIdleTimeoutError(idleTimeoutMs)),
+                    idleTimeoutMs,
+                );
+                return Promise.race([reader.read(), promise]).finally(() =>
+                    clearTimeout(idle),
+                );
+            };
+            const { done, value } = await readOnce();
             if (done) {
                 // Flush the bytes the decoder still holds, then treat the
                 // whole buffer as complete: there is no more input to

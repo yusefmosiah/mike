@@ -27,6 +27,12 @@ export class AuthApiError extends Error {
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`/api/auth${path}`, {
         ...init,
+        // A request that stalls — not one that is refused — must not hold a
+        // gate open: the session read guards every page's loading state.
+        signal:
+            init?.signal !== undefined && init.signal !== null
+                ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
+                : AbortSignal.timeout(30_000),
         credentials: "include",
         cache: "no-store",
         headers: {

@@ -540,6 +540,10 @@ export async function consumeAssistantTurnStream(
 
   for await (const frame of readSseFrames(response, {
     signal,
+    // Nothing on the wire — keep-alives included — for this long means the
+    // connection is dead in a way TCP has not reported; the resume loop
+    // below re-attaches to the server's copy of the turn.
+    idleTimeoutMs: 90_000,
     onEventId: (id) => {
       const seq = Number.parseInt(id, 10);
       if (Number.isFinite(seq)) cursor.lastSeq = seq;
@@ -1638,7 +1642,21 @@ export async function readAssistantTurn(args: {
 }): Promise<void> {
   const { turn, sink, cursor, signal, hooks } = args;
   const policy = createTurnReconnectPolicy(args.reconnect);
-  let response = await args.open();
+  // The turn's first response is bounded: the request may already have
+  // started a server-side turn, so it cannot be retried — but a network that
+  // stalls instead of refusing would otherwise hold the composer forever.
+  const { promise: openDeadline, reject: openTimedOut } =
+    Promise.withResolvers<never>();
+  const openTimer = setTimeout(
+    () => openTimedOut(new Error("The chat request did not answer in time.")),
+    45_000,
+  );
+  let response: Response;
+  try {
+    response = await Promise.race([args.open(), openDeadline]);
+  } finally {
+    clearTimeout(openTimer);
+  }
   if (!response.ok) {
     if (response.status === 409) {
       const body = (await response.json().catch(() => null)) as {
