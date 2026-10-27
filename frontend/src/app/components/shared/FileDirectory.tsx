@@ -653,10 +653,17 @@ export function FileDirectory({
                     onChange={() => toggle(doc)}
                 />
                 <DocFileIcon fileType={doc.file_type} />
-                <span
-          className={`min-w-0 truncate ${selected ? "text-gray-900" : "text-gray-700"}`}
-                >
-                    {doc.filename}
+                <span className="flex min-w-0 items-center gap-2">
+                    <span
+                        className={`min-w-0 flex-1 truncate ${selected ? "text-gray-900" : "text-gray-700"}`}
+                    >
+                        {doc.filename}
+                    </span>
+                    {doc.confidential && (
+                        <span className="shrink-0 text-[11px] font-normal text-gray-400">
+                            Confidential — this chat only
+                        </span>
+                    )}
                 </span>
                 <FileDirectoryMetaCells
                     version={versionLabel(doc)}

@@ -67,6 +67,9 @@ pulling new migrations, `docker compose up db-init` (or
 | RustFS console | `http://localhost:9001` | `rustfsadmin` / `rustfsadmin` |
 | Mailpit | `http://localhost:8025` | Captured local auth email |
 
+The addresses above are as of 2026-10-27; re-read `docker-compose.yml` before
+relying on a port or service name.
+
 The GoTrue JWT secret and `service_role` key in `docker-compose.yml` are
 well-known local demo values. They are convenient for
 localhost but must be regenerated before exposing an instance anywhere.

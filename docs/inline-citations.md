@@ -1,7 +1,10 @@
 # Inline citations
 
 Design for replacing the trailing `<CITATIONS>` block with citation tags the
-model writes at the claim. Status: approved for implementation.
+model writes at the claim. Status: implemented; the current parser and marker
+issuer are in `backend/src/modules/chat/engine/citations.inline.ts` (as of
+2026-10-27; re-read it and the streaming path before relying on transition
+details).
 
 ## Problem
 

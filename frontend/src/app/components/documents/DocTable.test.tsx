@@ -22,6 +22,7 @@ function document(id: string, filename: string): Document {
         id,
         user_id: "user-1",
         project_id: "project-1",
+        confidential: false,
         folder_id: "folder-1",
         filename,
         file_type: "pdf",

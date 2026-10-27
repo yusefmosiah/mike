@@ -7,6 +7,7 @@ const doc: Document = {
     filename: "Lease.pdf",
     file_type: "pdf",
     project_id: null,
+    confidential: false,
     storage_path: null,
     pdf_storage_path: null,
     size_bytes: null,
@@ -93,6 +94,25 @@ describe("chat drafts", () => {
         writeChatDraft("chat-1", { text: "ok", docs: [], workflow: null });
         expect(readChatDraft("chat-1")?.text).toBe("ok");
         expect(readChatDraft("chat-2")?.text).toBe("ok");
+    });
+
+    it("treats a non-array index as empty", () => {
+        localStorage.setItem("mike.composerDraft.v1:index", JSON.stringify("not-an-array"));
+        writeChatDraft("chat-1", { text: "kept", docs: [], workflow: null });
+        expect(readChatDraft("chat-1")?.text).toBe("kept");
+    });
+
+    it("normalizes a draft whose fields have the wrong types", () => {
+        localStorage.setItem(
+            "mike.composerDraft.v1:chat-1",
+            JSON.stringify({ text: 7, docs: "x", workflow: { id: 5 } }),
+        );
+        expect(readChatDraft("chat-1")).toEqual({ text: "", docs: [], workflow: null });
+        localStorage.setItem(
+            "mike.composerDraft.v1:chat-2",
+            JSON.stringify({ text: "t", docs: [], workflow: { id: "w" } }),
+        );
+        expect(readChatDraft("chat-2")?.workflow).toEqual({ id: "w", title: "" });
     });
 
     it("still saves when storage reads throw", () => {

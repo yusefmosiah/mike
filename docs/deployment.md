@@ -10,8 +10,9 @@ server) for accounts and sessions, and a bucket for files.
 - Node.js 22 or newer
 - npm and Git
 - A Postgres 17 database Mike can reach directly
-- A GoTrue auth server (v2.189.0 is the pinned, tested version) using the same
-  database
+- A GoTrue auth server (v2.189.0 is the pinned, tested version; as of
+  2026-10-27, so re-read `docker-compose.yml` before relying on it) using the
+  same database
 - A Cloudflare R2, MinIO, or other S3-compatible bucket
 - At least one supported model-provider API key, or an accessible Ollama server
 - Optional: a CourtListener API token for case-law tools
@@ -286,7 +287,9 @@ expire after 30 minutes, extended by a further 30 minutes each time a file
 completes so a slow batch is not destroyed mid-upload, up to four hours from
 creation; individual signed URLs expire after 15 minutes and can
 be refreshed while the session is pending. These limits are enforced atomically
-in PostgreSQL, not only in the browser.
+in PostgreSQL, not only in the browser. The limits above are as of 2026-10-27;
+re-read `backend/src/modules/uploads/uploads.manifest.ts` and
+`backend/.env.example` before relying on them.
 
 The Express process also runs a durable upload-processing pool. By default,
 each backend replica claims up to 8 jobs concurrently while PostgreSQL limits

@@ -1,0 +1,22 @@
+[
+  {
+    "key": "route:/download",
+    "reason": "Signed download-token endpoint. Users reach it through document viewers, publications and exports, so it is plumbing rather than a capability of its own."
+  },
+  {
+    "key": "module:downloads",
+    "reason": "Resolves a signed token to bytes; the same internal plumbing as route:/download, with no separate user-facing surface."
+  },
+  {
+    "key": "module:diligence",
+    "reason": "RLM deep runs are tabled: app.ts deliberately does not mount diligence.routes.ts, so there is no shipped capability to document."
+  },
+  {
+    "key": "module:retrieval",
+    "reason": "Internal document retrieval used while assembling chat context; it has no HTTP surface and no user-facing capability of its own."
+  },
+  {
+    "key": "module:workspace",
+    "reason": "Internal workstation-to-documents sync called by chat turns; it has no HTTP surface and no user-facing command."
+  }
+]

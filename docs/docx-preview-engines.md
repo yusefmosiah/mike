@@ -98,6 +98,9 @@ supply the file. The editor is loaded lazily. Failed font loads show a dismissib
 keeping the document and unsaved edits available; parse/load failures remain
 fatal.
 
+The 2.32.0 pin and the behavior above are as of 2026-10-27; re-read the
+frontend package manifest and lockfile before relying on them.
+
 This installation uses only EigenPal's open-source packages. Mike registers
 `docxReviewModule` through the public `EditorModule` contract. It composes
 `collectReviewItems` and `revisionItemsOf` exported by the Apache-2.0 core's

@@ -43,6 +43,9 @@ must not appear in a provider configuration.
 | Local development | `http://localhost:3000/api` | `http://localhost:3000/api/user/mcp-connectors/oauth/callback` |
 | Production | `https://<your-mike-host>/api` | `https://<your-mike-host>/api/user/mcp-connectors/oauth/callback` |
 
+The example addresses above are as of 2026-10-27; re-read the provider
+configuration and `API_PUBLIC_URL` before relying on them.
+
 The provider redirect URI must match byte-for-byte. Some providers impose
 additional requirements; Slack requires HTTPS.
 

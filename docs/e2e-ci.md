@@ -7,6 +7,9 @@ needs and the **branch-protection step that turns a red run into a blocked
 merge** — the workflow reports pass/fail on its own, but only branch protection
 makes that check *required*.
 
+Workflow names, ports and service versions here are as of 2026-10-27; re-read
+`.github/workflows/e2e.yml` and `docker-compose.yml` before relying on them.
+
 ## What the workflow does
 
 On every `pull_request`, including stacked PRs targeting another feature branch,

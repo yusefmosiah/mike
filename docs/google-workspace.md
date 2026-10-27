@@ -2,6 +2,10 @@
 
 Drive, Gmail, and Calendar are delivered together in [PR #434](https://github.com/open-legal-products/mike/pull/434). The Gmail/Calendar design is recorded in [#521](https://github.com/open-legal-products/mike/issues/521).
 
+Callback URLs, provider quotas and the tool list below are as of 2026-10-27;
+re-read the Google console and
+`backend/src/lib/integrations/googleWorkspace.ts` before relying on them.
+
 ## User behavior
 
 **Connecting is always opt-in, including for users who sign into Mike with Google.** Mike sign-in tokens are never reused for Gmail or Calendar. Gmail and Calendar behave like every other connector in Settings → Connectors. In **Discover**, choose **Add**: the button shows **Adding...** while Mike starts authorization and **Cancel** while Google's window is open. There is no Mike account-selection dialog. After authorization, the Discover card shows **Added** and the connector appears under **Installed** with an on/off switch. Click it to open the same Manage dialog Slack uses: account, **Read-only** (disable write tools while preserving individual choices), **Ask for permission for write actions**, a switch per tool, **Refresh**, and **Delete**. If the server has no Google OAuth app configured, **Add** shows the same **Could not add connector** warning as Slack, with the server's setup steps and a guide link. Google shows an account chooser: choose a personal Gmail or Workspace account, including one different from your Mike login and different accounts for Gmail and Calendar. Each Mike user has one connection per service; choosing another account replaces that service's connection but keeps its settings.

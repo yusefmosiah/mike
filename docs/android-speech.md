@@ -8,6 +8,10 @@ use it unchanged, apart from a download step for Fluid Speech Mini and
 platform-neutral wording. Hands-free voice mode is not implemented on Android
 yet (see "Android (next)" in `voice-chat.md`).
 
+The dependency versions, model sizes and measurements below are as of
+2026-10-27; re-read `mobile/plugins/speech/android/` and re-run the benchmark
+before relying on them.
+
 ## What runs where
 
 | | iPhone | Android |

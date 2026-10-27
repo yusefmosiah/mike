@@ -52,6 +52,30 @@ export type PublishingConfigView = {
     reason?: "off" | "strict_private" | "no_content_origin" | "no_secret";
 };
 
+/**
+ * A confidential document may not gain a publication, nor have one edited.
+ * Existing links keep serving: they were an explicit prior share, and
+ * revoking them is still allowed through revokePublication.
+ */
+async function documentIsConfidential(
+    db: Db,
+    documentId: string | null,
+): Promise<boolean> {
+    if (!documentId) return false;
+    const { data } = await db
+        .from("documents")
+        .select("confidential")
+        .eq("id", documentId)
+        .maybeSingle();
+    const row: unknown = data;
+    return (
+        typeof row === "object" &&
+        row !== null &&
+        "confidential" in row &&
+        row.confidential === true
+    );
+}
+
 export function publishingConfigView(env: NodeJS.ProcessEnv = process.env): PublishingConfigView {
     const config = publishingConfig(env);
     if (config.enabled) return { enabled: true, audiences: config.audiences };
@@ -63,6 +87,7 @@ export type PublishFailure =
     | "password_too_short"
     | "bad_audience"
     | "bad_expiry"
+    | "confidential"
     | "not_found"
     | "not_owner"
     | "unsupported_type"
@@ -110,6 +135,8 @@ export async function createPublication(
     const access = await ensureDocumentAccess(input.documentId, input.userId, input.userEmail, db);
     if (!access.ok) return { ok: false, code: "not_found" };
     if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
+    if (await documentIsConfidential(db, input.documentId))
+        return { ok: false, code: "confidential" };
     const version = await loadActiveVersion(input.documentId, db, input.versionId ?? null);
     if (!version) return { ok: false, code: "not_found" };
 
@@ -379,6 +406,8 @@ export async function updatePublication(
         .maybeSingle();
     if (!existing) return { ok: false, code: "not_found" };
     const row = existing as PublicationRow;
+    if (await documentIsConfidential(db, row.document_id))
+        return { ok: false, code: "confidential" };
 
     const patch: Record<string, unknown> = {};
     const changed: string[] = [];

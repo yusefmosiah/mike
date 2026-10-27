@@ -55,7 +55,8 @@ checks nor changes timeouts or workers to suppress the failures.
 
 `backend/vitest.config.mts` enforces global coverage **floors** (currently
 statements 74 / branches 65 / functions 76 / lines 77, measured without the
-dormant features listed in `backend/vitest.groups.mts`; see `docs/ci.md`).
+dormant features listed in `backend/vitest.groups.mts`; as of 2026-10-27, so
+re-read the config before relying on them; see `docs/ci.md`).
 They are a no-regression ratchet, not a target:
 
 `.github/workflows/ci.yml` defines the coverage check. A workflow definition does

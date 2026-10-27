@@ -415,6 +415,11 @@ async function processCreatedDocument(
         : "file";
   const workflowId =
     scope === "workflow" ? (destination.workflow_id as string) : null;
+  // The manifest's flag is only meaningful for a standalone document; the
+  // parser already refuses it on the other destinations, and the column
+  // default is false for everything else.
+  const confidential =
+    scope === "standalone" && destination.confidential === true;
   const documentId = file.resource_id;
   const versionId = file.id;
 
@@ -470,6 +475,7 @@ async function processCreatedDocument(
       library_kind: libraryKind,
       library_folder_id: libraryFolderId,
       workflow_id: workflowId,
+      confidential,
     },
     { onConflict: "id" },
   );

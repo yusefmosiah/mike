@@ -154,6 +154,7 @@ describe("composer message queue", () => {
             created_at: null,
             current_version_id: "v1",
             active_version_number: 2,
+            confidential: false,
         };
         act(() => ref.current?.addDoc(document));
         type("Check the notice period");

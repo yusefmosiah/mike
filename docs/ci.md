@@ -13,6 +13,10 @@ What runs, when, what it blocks, and what to do when it is red.
 - Everything else either runs on a schedule or only when its own files
   change, and reports to a standing GitHub issue instead of blocking anyone.
 
+Workflow names, schedules, job lists and coverage thresholds here are as of
+2026-10-27; re-read `.github/workflows/` and `backend/vitest.config.mts` before
+relying on them.
+
 ## What gates the deploy
 
 `.github/workflows/ci.yml`. Its jobs run side by side:

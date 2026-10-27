@@ -484,3 +484,38 @@ describe("who may edit", () => {
         expect(notOwner).toEqual({ ok: false, code: "not_owner" });
     });
 });
+
+describe("confidential documents", () => {
+    it("refuses a new publication and writes no row", async () => {
+        store.rows("documents").find((doc) => doc.id === "article")!.confidential = true;
+
+        const result = await createPublication(
+            store.db,
+            { userId: "u1", documentId: "article", audience: "public", expiresInDays: 30 },
+            ENV,
+        );
+
+        expect(result).toEqual({ ok: false, code: "confidential" });
+        expect(store.rows("publications")).toHaveLength(0);
+    });
+
+    it("refuses edits to an existing link but keeps it serving", async () => {
+        const created = await publishFollow();
+        store.rows("documents").find((doc) => doc.id === "article")!.confidential = true;
+
+        const edited = await updatePublication(
+            store.db,
+            { userId: "u1", publicationId: created.id, expiresInDays: 7 },
+            ENV,
+        );
+        expect(edited).toEqual({ ok: false, code: "confidential" });
+
+        // The explicit prior share stays live: the flag gates new shares.
+        const page = await findPublicationFile(
+            store.db,
+            await livePublication(created.id),
+            "",
+        );
+        expect(page!.bytes!.toString()).toContain("Version one");
+    });
+});

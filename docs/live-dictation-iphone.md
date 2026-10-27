@@ -7,6 +7,9 @@ dictation engine with Fluid Speech Mini. Apple's recognizer, the browser
 engines and the server engines keep recording a clip and transcribing it at
 the end.
 
+The component names, model behavior and timings below are as of 2026-10-27;
+re-read `mobile/plugins/speech/ios/` before relying on them.
+
 ## Today
 
 `useDictation.ts` records the whole clip in the web view (MediaRecorder,

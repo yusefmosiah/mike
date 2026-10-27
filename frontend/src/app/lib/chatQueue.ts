@@ -177,7 +177,7 @@ function readPause(value: unknown): ChatQueuePause | null {
 export const EMPTY_CHAT_QUEUE: ChatQueueState = { entries: [], paused: null };
 
 export function readChatQueue(key: string): ChatQueueState {
-    if (typeof window === "undefined") return EMPTY_CHAT_QUEUE;
+    if (typeof localStorage === "undefined") return EMPTY_CHAT_QUEUE;
     try {
         const raw = localStorage.getItem(storageKey(key));
         if (!raw) return EMPTY_CHAT_QUEUE;
@@ -204,7 +204,7 @@ export function readChatQueue(key: string): ChatQueueState {
  * empty-means-gone rule as drafts.
  */
 export function writeChatQueue(key: string, state: ChatQueueState) {
-    if (typeof window === "undefined") return;
+    if (typeof localStorage === "undefined") return;
     // Paused with nothing left to review is not a queue.
     const next: ChatQueueState = {
         entries: state.entries,

@@ -322,6 +322,10 @@ Configuration:
 - There is no separate model setting for reviews: a review runs on the
   conversation's own model.
 
+These defaults and clamp ranges are as of 2026-10-27; re-read
+`backend/.env.example` and `backend/src/modules/memory/` before relying on
+them.
+
 Operational logs contain sanitized identifiers and outcomes only. Queue
 payloads contain IDs and cursors, not transcripts, credentials, or memory
 content. Account exports include the applicable current memory body and, under

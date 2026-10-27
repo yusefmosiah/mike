@@ -6,6 +6,10 @@ to people signed in to the app who can open the document. The design,
 with its threat model, is `docs/reports/artifact-sharing-2026-10-24.md`; this
 page is how it works and how to run it.
 
+Audiences, file limits, expiry defaults and rate limits below are as of
+2026-10-27; re-read `backend/src/modules/publications/` and the content server
+before relying on them.
+
 ## What gets published
 
 | Document | What the link shows |

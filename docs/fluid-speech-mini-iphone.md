@@ -1,8 +1,8 @@
 # Fluid Speech Mini for iPhone dictation
 
 Design for on-device dictation with Fluid Speech Mini in the iPhone app.
-Status: approved for implementation. Scope: the iPhone app only; browsers,
-the Mac app and the Word add-in are unchanged.
+Status: implemented on iPhone; browsers, the Mac app and the Word add-in are
+unchanged.
 
 ## The model
 
@@ -20,6 +20,9 @@ the Mac app and the Word add-in are unchanged.
   also loads it as a Parakeet v3 model.
 - Licence: CC BY 4.0. Credit "Fluid Speech Mini by FluidVoice", link the
   licence, keep LICENSE and NOTICE with the files.
+
+Model artifacts, sizes and measurements below are as of 2026-10-27; re-read
+the model card and `mobile/plugins/speech/` before relying on them.
 
 ## Mike today
 

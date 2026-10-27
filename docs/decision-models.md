@@ -292,7 +292,9 @@ Auto Mode waits on the gate before every tier-3 call, so faster is better.
 
 Prices are per million input tokens. The median is Mike's sequential benchmark
 over 107 calls. Numbers marked (vendor) are the vendor's own claims; the eval
-report has ours.
+report has ours. The benchmark, prices and default-model claims below are as
+of 2026-10-27; re-read the linked eval report and provider pages before
+relying on them.
 
 | Model | Median | Price | Weights | Notes |
 |---|---:|---:|---|---|

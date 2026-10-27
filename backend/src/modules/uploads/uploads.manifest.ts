@@ -49,7 +49,16 @@ const clientFileSchema = z
 const tabularReviewId = z.string().uuid().optional();
 
 const documentDestinationSchema = z.discriminatedUnion("scope", [
-  z.object({ scope: z.literal("standalone"), tabular_review_id: tabularReviewId }).strict(),
+  z
+    .object({
+      scope: z.literal("standalone"),
+      // The document is kept out of the owner's other conversations. Only a
+      // standalone destination has the flag: project and workflow documents
+      // are governed by their container's scope in v1.
+      confidential: z.boolean().optional(),
+      tabular_review_id: tabularReviewId,
+    })
+    .strict(),
   z
     .object({
       scope: z.literal("project"),

@@ -6,6 +6,10 @@ OpenCode Go. A deployment that also runs a self-hosted or third-party
 OpenAI-compatible endpoint declares it with `MIKE_MODEL_CONFIG_JSON`, without
 a code change.
 
+Model ids, prices, context limits and provider behavior below are examples as
+of 2026-10-27; re-read the provider catalogues and `backend/src/lib/llm/`
+before relying on them.
+
 ## Configuration
 
 Set `MIKE_MODEL_CONFIG_JSON` on the backend to a JSON object with a `models`

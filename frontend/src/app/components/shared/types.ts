@@ -92,6 +92,8 @@ export interface Document {
   id: string;
   user_id?: string;
   project_id: string | null;
+  /** True when the owner kept this standalone document out of cross-chat sharing. */
+  confidential: boolean;
   workflow_id?: string | null;
   folder_id?: string | null;
   library_kind?: "file" | "template" | "workflow_asset";
@@ -482,6 +484,8 @@ export type MessageFile = {
   document_id?: string;
   version_id?: string | null;
   version_number?: number | null;
+  /** Present when the referenced document is confidential. */
+  confidential?: boolean;
 };
 
 export interface CitationQuote {

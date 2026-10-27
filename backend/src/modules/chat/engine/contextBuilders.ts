@@ -1270,6 +1270,13 @@ export function buildCancelledAssistantMessage(args: {
 // Document context builder (from message file attachments)
 // ---------------------------------------------------------------------------
 
+/**
+ * How many documents a chat's context carries in all: the ones this
+ * conversation references first, then the owner's other standalone,
+ * non-confidential documents, most recently updated first.
+ */
+export const MAX_CONTEXT_DOCUMENTS = 50;
+
 export async function buildDocContext(
   messages: ChatMessage[],
   userId: string,
@@ -1320,6 +1327,52 @@ export async function buildDocContext(
               documentIds.add((copy as { document_id: string }).document_id);
             }
           }
+        }
+      }
+    }
+  }
+
+  // Documents are shared by default across the owner's conversations: a
+  // standalone chat carries the caller's own standalone, non-confidential
+  // documents even when no message in this chat ever referenced them. The
+  // sweep runs only when `chatId` is set — that is the chat surfaces (a
+  // project chat's attachment builder passes no chat id, and its project
+  // scope already governs). Referenced documents always win: the cap applies
+  // to the total, and the referenced set is never truncated, so a turn that
+  // cites more than the cap still gives the model every cited file.
+  //
+  // Confidential documents are absent here unless they were referenced
+  // above (an explicit prior share), which is also what keeps them out of
+  // the tool layer: find_in_documents / list_documents / read_document all
+  // resolve against this builder's doc store.
+  if (chatId) {
+    const budget = Math.max(0, MAX_CONTEXT_DOCUMENTS - documentIds.size);
+    if (budget > 0) {
+      let sharedQuery = db
+        .from("documents")
+        .select("id")
+        .eq("user_id", userId)
+        .is("project_id", null)
+        .is("workflow_id", null)
+        .eq("confidential", false)
+        .eq("status", "ready")
+        .order("updated_at", { ascending: false })
+        .limit(budget);
+      // Referenced documents already hold their slots; exclude them so the
+      // limit spends the remaining budget on new documents.
+      if (documentIds.size > 0) {
+        sharedQuery = sharedQuery.not("id", "in", [...documentIds]);
+      }
+      const { data: shared } = await sharedQuery;
+      for (const row of shared ?? []) {
+        if (
+          row &&
+          typeof row === "object" &&
+          "id" in row &&
+          typeof row.id === "string" &&
+          !documentIds.has(row.id)
+        ) {
+          documentIds.add(row.id);
         }
       }
     }

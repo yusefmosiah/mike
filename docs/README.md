@@ -41,7 +41,7 @@
   setup, sideloading, builds, storage behavior, testing, and troubleshooting
 - [Preset contract templates](preset-templates.md) — the bundled General
   Legal, Common Paper and Bonterms catalog, with each file's license
-- [Mac app (planned)](mac-app.md) — the desktop window around the web app:
+- [Mac app](mac-app.md) — the desktop window around the web app:
   what to take from upstream, what to change, and the later local mode
 - [Tamper-evident exports](tamper-evident-exports.md) — document hashes and
   optional signed manifests
@@ -50,6 +50,32 @@
 - [Decision models](decision-models.md) — the Auto Mode gate's questions,
   consent-aware policy, injection hardening and eval method, with the
   [2026-10-09 eval report](reports/auto-mode-gate-eval-2026-10-09.md)
+
+## Capability reference
+
+- [Authentication](authentication.md) — sign-in, sessions, OAuth, MFA, and the
+  Word add-in handoff
+- [Chat](chat.md) — turn runs, branches, sharing, attachments, and questions
+- [Projects](projects.md) — project scoping, access, folders, documents, and
+  export
+- [Organizations](organizations.md) — the admin/member model, invitations, and
+  organization-owned resources
+- [Documents, files and the library](documents.md) — versions, the library,
+  upload sessions, and the assistant's document tools
+- [Workflows and quick actions](workflows.md) — the workflow catalogue,
+  versions, sharing, addons, and per-surface quick actions
+- [Skills](skills.md) — `SKILL.md` authoring and installation from chat
+- [Tabular review](tabular-review.md) — documents, extraction, generation, and
+  per-review chats
+- [Subagents](subagents.md) — synchronous delegation and background subagents
+- [Web research](web-research.md) — search providers and cached page reads
+- [Computer use](computer-use.md) — connected computers and the
+  observe/act tools
+- [Speech endpoints](speech.md) — dictation transcription and read-aloud
+  synthesis
+- [Account and settings](account.md) — profile, API keys, connectors, exports,
+  and deletion
+- [Audit log](audit-log.md) — the activity log and its CSV export
 
 ## Backend
 

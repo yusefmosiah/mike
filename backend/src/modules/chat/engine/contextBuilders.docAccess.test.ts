@@ -45,6 +45,8 @@ type Doc = {
   org_id?: string | null;
   workflow_id?: string | null;
   status?: string;
+  confidential?: boolean;
+  updated_at?: string;
 };
 
 /**
@@ -55,10 +57,27 @@ function makeDb(docs: Doc[]) {
   return {
     from: () => {
       const filters: Record<string, unknown> = {};
+      const excluded: Record<string, string[]> = {};
+      let orderBy: { column: string; ascending: boolean } | null = null;
+      let max: number | null = null;
       const b: Record<string, unknown> = {
         select: () => b,
-        is: () => b,
-        order: () => b,
+        is: (column: string, value: unknown) => {
+          filters[`is:${column}`] = value;
+          return b;
+        },
+        order: (column: string, options: { ascending?: boolean } = {}) => {
+          orderBy = { column, ascending: options.ascending !== false };
+          return b;
+        },
+        limit: (count: number) => {
+          max = count;
+          return b;
+        },
+        not: (column: string, _operator: string, value: string[]) => {
+          excluded[column] = value;
+          return b;
+        },
         eq: (column: string, value: unknown) => {
           filters[column] = value;
           return b;
@@ -69,15 +88,31 @@ function makeDb(docs: Doc[]) {
         },
         then: (resolve: (v: unknown) => unknown) => {
           const ids = (filters["in:id"] as string[] | undefined) ?? null;
-          const data = docs.filter(
-            (doc) =>
-              (!ids || ids.includes(doc.id)) &&
-              Object.entries(filters).every(
-                ([column, value]) =>
-                  column.startsWith("in:") ||
-                  (doc as Record<string, unknown>)[column] === value,
-              ),
-          );
+          let data = docs.filter((doc) => {
+            const row = doc as Record<string, unknown>;
+            if (ids && !ids.includes(doc.id)) return false;
+            for (const [column, value] of Object.entries(filters)) {
+              if (column.startsWith("in:")) continue;
+              if (column.startsWith("is:")) {
+                if ((row[column.slice(3)] ?? null) !== value) return false;
+                continue;
+              }
+              if (row[column] !== value) return false;
+            }
+            for (const [column, values] of Object.entries(excluded)) {
+              if (values.includes(row[column] as string)) return false;
+            }
+            return true;
+          });
+          if (orderBy) {
+            const { column, ascending } = orderBy;
+            data = [...data].sort((left, right) => {
+              const a = String((left as Record<string, unknown>)[column] ?? "");
+              const b2 = String((right as Record<string, unknown>)[column] ?? "");
+              return ascending ? a.localeCompare(b2) : b2.localeCompare(a);
+            });
+          }
+          if (max !== null) data = data.slice(0, max);
           return Promise.resolve({ data, error: null }).then(resolve);
         },
       };
@@ -252,5 +287,158 @@ describe("buildDocContext access scoping", () => {
       "d1",
     ]);
     expect(ensureDocAccess).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Documents are shared by default across the owner's conversations: a
+// standalone chat sees the caller's own standalone, non-confidential
+// documents even when this conversation never referenced them. The referenced
+// set always survives; the cap only limits the extras.
+describe("buildDocContext shared standalone documents", () => {
+  beforeEach(() => {
+    ensureDocAccess.mockReset().mockResolvedValue({ ok: true });
+  });
+
+  const standalone = (
+    id: string,
+    userId: string,
+    extra: Partial<Doc> = {},
+  ): Doc => ({
+    id,
+    user_id: userId,
+    project_id: null,
+    workflow_id: null,
+    status: "ready",
+    confidential: false,
+    ...extra,
+  });
+
+  it("includes the caller's own non-confidential standalone documents", async () => {
+    const db = makeDb([
+      standalone("d-shared", "u1", { updated_at: "2026-10-01T00:00:00Z" }),
+      standalone("d-secret", "u1", {
+        confidential: true,
+        updated_at: "2026-10-02T00:00:00Z",
+      }),
+      {
+        id: "d-project",
+        user_id: "u1",
+        project_id: "p1",
+        status: "ready",
+        confidential: false,
+        updated_at: "2026-10-03T00:00:00Z",
+      },
+      standalone("d-other-user", "u2", {
+        updated_at: "2026-10-04T00:00:00Z",
+      }),
+    ]);
+
+    const { docIndex } = await buildDocContext(
+      message([]),
+      "u1",
+      db,
+      "chat-1",
+      "chat_messages",
+      "u1@test.local",
+    );
+
+    // Not the confidential document, not a project document (its scope is
+    // governed elsewhere), and never another user's document.
+    expect(Object.values(docIndex).map((entry) => entry.document_id)).toEqual([
+      "d-shared",
+    ]);
+  });
+
+  it("applies the same rule to a guest, who never receives host documents", async () => {
+    const db = makeDb([
+      standalone("d-host", "u1"),
+      standalone("d-host-secret", "u1", { confidential: true }),
+      standalone("d-guest", "guest-1"),
+    ]);
+
+    const { docIndex } = await buildDocContext(
+      message([]),
+      "guest-1",
+      db,
+      "guest-chat",
+      "chat_messages",
+    );
+
+    expect(Object.values(docIndex).map((entry) => entry.document_id)).toEqual([
+      "d-guest",
+    ]);
+  });
+
+  it("leaves a builder call without a chat id alone (project attachments)", async () => {
+    const db = makeDb([standalone("d-standalone", "u1")]);
+
+    const { docIndex } = await buildDocContext(
+      message([]),
+      "u1",
+      db,
+      undefined,
+      undefined,
+      "u1@test.local",
+    );
+
+    expect(docIndex).toEqual({});
+  });
+
+  it("caps the total at 50, newest first, and keeps every referenced document", async () => {
+    const referenced = ["d-ref-0", "d-ref-1", "d-ref-2"];
+    const extras: Doc[] = Array.from({ length: 60 }, (_, index) =>
+      standalone(`d-extra-${String(index).padStart(2, "0")}`, "u1", {
+        // 60 minutes apart, so the newest is the highest index.
+        updated_at: new Date(
+          Date.UTC(2026, 0, 1) + index * 60_000,
+        ).toISOString(),
+      }),
+    );
+    const db = makeDb([
+      ...referenced.map((id, index) =>
+        standalone(id, "u1", {
+          // Older than every extra: only the "referenced wins" rule keeps them.
+          updated_at: `2020-01-0${index + 1}T00:00:00Z`,
+        }),
+      ),
+      ...extras,
+    ]);
+
+    const { docIndex } = await buildDocContext(
+      message(referenced),
+      "u1",
+      db,
+      "chat-2",
+      "chat_messages",
+    );
+    const ids = Object.values(docIndex).map((entry) => entry.document_id);
+
+    expect(ids).toHaveLength(50);
+    for (const id of referenced) expect(ids).toContain(id);
+    // 47 newest extras fill the rest; the oldest extra is pushed out.
+    expect(ids).toContain("d-extra-59");
+    expect(ids).toContain("d-extra-13");
+    expect(ids).not.toContain("d-extra-12");
+  });
+
+  it("never truncates the referenced set, even past the cap", async () => {
+    const referenced = Array.from({ length: 55 }, (_, index) =>
+      `d-ref-${String(index).padStart(2, "0")}`,
+    );
+    const db = makeDb(
+      referenced.map((id) =>
+        standalone(id, "u1", { updated_at: "2026-01-01T00:00:00Z" }),
+      ),
+    );
+
+    const { docIndex } = await buildDocContext(
+      message(referenced),
+      "u1",
+      db,
+      "chat-3",
+      "chat_messages",
+    );
+
+    expect(Object.keys(docIndex)).toHaveLength(55);
   });
 });

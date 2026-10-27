@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Document } from "@/app/components/shared/types";
 import {
     adoptChatQueue,
@@ -20,6 +20,7 @@ const doc: Document = {
     filename: "Lease.pdf",
     file_type: "pdf",
     project_id: null,
+    confidential: false,
     storage_path: null,
     pdf_storage_path: null,
     size_bytes: null,
@@ -191,6 +192,130 @@ describe("chat queue persistence", () => {
     it("writes nothing for an empty queue", () => {
         writeChatQueue("chat-1", { entries: [], paused: null });
         expect(localStorage.getItem("mike.composerQueue.v1:chat-1")).toBeNull();
+    });
+
+    it("ignores a corrupted queue index and a throwing read", () => {
+        localStorage.setItem("mike.composerQueue.v1:index", "{not json");
+        enqueueChatQueue("chat-1", draft("kept"));
+        expect(readChatQueue("chat-1").entries).toHaveLength(1);
+
+        localStorage.setItem("mike.composerQueue.v1:index", JSON.stringify(7));
+        localStorage.setItem("mike.composerQueue.v1:index", JSON.stringify([1, null, "chat-2"]));
+        enqueueChatQueue("chat-2", draft("also kept"));
+        expect(readChatQueue("chat-2").entries).toHaveLength(1);
+    });
+
+    it("still queues when storage writes throw", () => {
+        const setItem = vi.spyOn(Storage.prototype, "setItem");
+        const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+        setItem.mockImplementation(() => { throw new Error("quota"); });
+        removeItem.mockImplementation(() => { throw new Error("denied"); });
+        // Index write and eviction cleanup both throw; the returned queue
+        // still carries the entry even though nothing persisted.
+        const state = enqueueChatQueue("chat-1", draft("kept"));
+        setItem.mockRestore();
+        removeItem.mockRestore();
+        expect(state.entries).toHaveLength(1);
+        // A later write lands on its own: the entry lost to the failed
+        // write is not replayed from storage it never reached.
+        enqueueChatQueue("chat-1", draft("more"));
+        expect(readChatQueue("chat-1").entries.map((e) => e.text)).toEqual(["more"]);
+    });
+
+    it("drops an unrecognized pause reason when reloaded", () => {
+        const entries = [{ id: "e1", text: "x", docs: [], workflow: null, model: null, effort: null, stampedAt: 1, status: "queued" }];
+        localStorage.setItem(
+            "mike.composerQueue.v1:chat-1",
+            JSON.stringify({ entries, paused: { reason: "mystery", at: 1 } }),
+        );
+        expect(readChatQueue("chat-1").paused).toBeNull();
+
+        localStorage.setItem(
+            "mike.composerQueue.v1:chat-1",
+            JSON.stringify({ entries, paused: { reason: "stopped", at: "not-a-number" } }),
+        );
+        expect(readChatQueue("chat-1").paused?.reason).toBe("stopped");
+    });
+
+    it("treats a non-array queue index and non-array entries as empty", () => {
+        localStorage.setItem("mike.composerQueue.v1:index", JSON.stringify("x"));
+        enqueueChatQueue("chat-1", draft("kept"));
+        expect(readChatQueue("chat-1").entries).toHaveLength(1);
+        localStorage.setItem(
+            "mike.composerQueue.v1:chat-2",
+            JSON.stringify({ entries: "nope", paused: null }),
+        );
+        expect(readChatQueue("chat-2")).toEqual({ entries: [], paused: null });
+    });
+
+    it("is a no-op outside the browser", () => {
+        const storage = localStorage;
+        vi.stubGlobal("localStorage", undefined);
+        expect(readChatQueue("chat-1")).toEqual({ entries: [], paused: null });
+        expect(() => writeChatQueue("chat-1", { entries: [], paused: null })).not.toThrow();
+        vi.stubGlobal("localStorage", storage);
+    });
+
+    it("keeps mark/resume idempotent: empty queue, same reason, unpaused", () => {
+        expect(markChatQueuePaused("chat-empty", "stopped").paused).toBeNull();
+        enqueueChatQueue("chat-1", draft("x"));
+        markChatQueuePaused("chat-1", "stopped");
+        const at = readChatQueue("chat-1").paused?.at;
+        markChatQueuePaused("chat-1", "stopped");
+        expect(readChatQueue("chat-1").paused?.at).toBe(at);
+        expect(resumeChatQueue("chat-2").paused).toBeNull();
+        resumeChatQueue("chat-1");
+        expect(readChatQueue("chat-1").paused).toBeNull();
+    });
+
+    it("tolerates an evicted-key removal throwing during MRU cleanup", () => {
+        // Fill the index to capacity, then evict while removeItem throws.
+        localStorage.setItem(
+            "mike.composerQueue.v1:index",
+            JSON.stringify(Array.from({ length: 100 }, (_, i) => `chat-old-${i}`)),
+        );
+        const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+        removeItem.mockImplementation(() => { throw new Error("denied"); });
+        enqueueChatQueue("chat-new", draft("x"));
+        removeItem.mockRestore();
+        expect(readChatQueue("chat-new").entries).toHaveLength(1);
+    });
+
+    it("treats a stored non-object as an empty queue", () => {
+        localStorage.setItem("mike.composerQueue.v1:chat-1", JSON.stringify(42));
+        localStorage.setItem("mike.composerQueue.v1:chat-2", JSON.stringify(null));
+        expect(readChatQueue("chat-1")).toEqual({ entries: [], paused: null });
+        expect(readChatQueue("chat-2")).toEqual({ entries: [], paused: null });
+    });
+
+    it("normalizes entries with wrong-typed fields on reload", () => {
+        localStorage.setItem(
+            "mike.composerQueue.v1:chat-1",
+            JSON.stringify({
+                entries: [{
+                    id: "e1", text: "x",
+                    docs: "nope",
+                    workflow: { id: "w", title: 9 },
+                    model: 4, effort: "hyper", stampedAt: "when",
+                }],
+                paused: null,
+            }),
+        );
+        const [entry] = readChatQueue("chat-1").entries;
+        expect(entry).toMatchObject({
+            docs: [], workflow: { id: "w", title: "" },
+            model: null, effort: null,
+        });
+        expect(typeof entry.stampedAt).toBe("number");
+    });
+
+    it("builds a queued message for a doc without version info", () => {
+        const message = queuedMessage({
+            id: "e1", text: "x",
+            docs: [{ ...doc, current_version_id: null, active_version_number: null }],
+            workflow: null, model: null, effort: null, stampedAt: 1, status: "queued",
+        });
+        expect(message.files).toEqual([{ filename: "Lease.pdf", document_id: "d1" }]);
     });
 });
 

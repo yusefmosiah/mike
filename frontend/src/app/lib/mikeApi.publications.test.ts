@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPublication, getPublishingConfig, listPublications, openPublication, revokePublication } from "./mikeApi";
+import { createPublication, getPublishingConfig, listPublications, openPublication, revokePublication, updatePublication } from "./mikeApi";
 
 const fetchMock = vi.fn();
 const json = (body: unknown, status = 200) =>
@@ -38,6 +38,17 @@ describe("publications API", () => {
         const [url, init] = calls()[0]!;
         expect(String(url)).toMatch(/\/publications\/p%201\/revoke$/);
         expect(init?.method).toBe("POST");
+    });
+
+    it("edits a link's expiry, audience and follow with a PATCH", async () => {
+        fetchMock.mockResolvedValueOnce(json({ publication: { id: "p1", follow_document: false } }));
+        await expect(
+            updatePublication("p 1", { follow_document: false, expires_in_days: null }),
+        ).resolves.toEqual({ id: "p1", follow_document: false });
+        const [url, init] = calls()[0]!;
+        expect(String(url)).toMatch(/\/publications\/p%201$/);
+        expect(init?.method).toBe("PATCH");
+        expect(JSON.parse(String(init?.body))).toEqual({ follow_document: false, expires_in_days: null });
     });
 
     it("asks where a signed-in visitor reads a signed-in-only link, with or without a path", async () => {

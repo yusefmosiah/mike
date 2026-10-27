@@ -17,6 +17,7 @@ import { Loader2, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import {
     UploadBatchError,
     deleteDocument,
+    updateDocumentConfidential,
     getDocument,
     getDocumentUrl,
     downloadDocumentsZip,
@@ -769,6 +770,7 @@ export function DocTable({
         ((choice: "rename" | "cancel") => void) | null
     >(null);
     const [deletingDocIds, setDeletingDocIds] = useState<Set<string>>(() => new Set());
+    const [confidentialUpdatingDocIds, setConfidentialUpdatingDocIds] = useState<Set<string>>(() => new Set());
     const [documentUploadWarning, setDocumentUploadWarning] = useState<string | null>(null);
     const [documentRenameWarning, setDocumentRenameWarning] = useState<string | null>(null);
     const [collectionActionWarning, setCollectionActionWarning] = useState<string | null>(null);
@@ -1394,6 +1396,54 @@ export function DocTable({
                 return next;
             });
         }
+    }
+
+    /**
+     * Owner-only and standalone-only. Row actions hide this for project
+     * documents; the guard keeps a stale menu from sending a doomed request.
+     */
+    async function toggleDocumentConfidential(doc: Document) {
+        if (doc.project_id != null || confidentialUpdatingDocIds.has(doc.id)) {
+            return;
+        }
+        setConfidentialUpdatingDocIds((prev) => new Set(prev).add(doc.id));
+        try {
+            const updated = await updateDocumentConfidential(
+                doc.id,
+                !doc.confidential,
+            );
+            setDocuments((prev) =>
+                prev.map((document) =>
+                    document.id === doc.id
+                        ? { ...document, confidential: updated.confidential }
+                        : document,
+                ),
+            );
+        } catch (error) {
+            console.error("updateDocumentConfidential failed", error);
+            setCollectionActionWarning(
+                userFacingApiError(
+                    error,
+                    "This document's sharing setting could not be changed.",
+                ),
+            );
+        } finally {
+            setConfidentialUpdatingDocIds((prev) => {
+                const next = new Set(prev);
+                next.delete(doc.id);
+                return next;
+            });
+        }
+    }
+
+    /** Row-menu props for a document that may carry the confidential flag. */
+    function confidentialRowActions(doc: Document) {
+        if (doc.project_id != null) return {};
+        return {
+            confidential: doc.confidential,
+            onToggleConfidential: () => void toggleDocumentConfidential(doc),
+            confidentialUpdating: confidentialUpdatingDocIds.has(doc.id),
+        };
     }
 
     function requestRemoveDoc(doc: Document) {
@@ -2673,9 +2723,16 @@ export function DocTable({
                                                             onBlur={() => void submitDocumentRename(doc.id)}
                                                         />
                                                     ) : (
-                                                        <span className="text-xs text-gray-800 truncate">
-                                                            {docName}
-                                                        </span>
+                                                        <>
+                                                            <span className="text-xs text-gray-800 truncate">
+                                                                {docName}
+                                                            </span>
+                                                            {doc.confidential && (
+                                                                <span className="ml-2 shrink-0 text-[11px] text-gray-400">
+                                                                    Confidential
+                                                                </span>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             </div>
@@ -2726,6 +2783,7 @@ export function DocTable({
                                             <div className="w-8 shrink-0 flex justify-end">
                                                 {!isProcessing && (
                                                     <RowActions
+                                                        {...confidentialRowActions(doc)}
                                                         onView={() => {
                                                             setViewingDocVersion(null);
                                                             setViewingDoc(doc);
@@ -4335,9 +4393,16 @@ export function DocTable({
                                                                             }
                                                                         />
                                                                     ) : (
-                                                                        <span className="text-xs text-gray-800 truncate">
-                                                                            {docName}
-                                                                        </span>
+                                                                        <>
+                                                                            <span className="text-xs text-gray-800 truncate">
+                                                                                {docName}
+                                                                            </span>
+                                                                            {doc.confidential && (
+                                                                                <span className="ml-2 shrink-0 text-[11px] text-gray-400">
+                                                                                    Confidential
+                                                                                </span>
+                                                                            )}
+                                                                        </>
                                                                     )}
                                                                 </div>
                                                             </div>
@@ -4390,6 +4455,7 @@ export function DocTable({
                                                             <div className="w-8 shrink-0 flex justify-end">
                                                                 {!isProcessing && (
                                                                     <RowActions
+                                                                        {...confidentialRowActions(doc)}
                                                                         onView={() => {
                                                                             setViewingDocVersion(null);
                                                                             setViewingDoc(doc);

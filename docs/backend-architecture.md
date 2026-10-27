@@ -207,7 +207,9 @@ A client that was attached when the process died does not need a reload.
 Its reader (the web chat, the review chat and the Word pane share one policy,
 `frontend/src/shared/lib/turnReconnect.ts`) waits out the outage, retrying
 from 400 ms up to every 5 s for three minutes, and tolerates 404s for 15 s
-while the new process re-registers its turns. Sequence numbers restart with
+while the new process re-registers its turns. Those reconnect timings are as
+of 2026-10-27; re-read `frontend/src/shared/lib/turnReconnect.ts` before
+relying on them. Sequence numbers restart with
 the run, so each attach opens with an unnumbered
 `{"type":"stream_incarnation"}` frame naming the process
 (`STREAM_RUNS_INCARNATION` in `lib/streamRuns.ts`), and a reader that

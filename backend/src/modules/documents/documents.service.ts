@@ -52,6 +52,7 @@ export {
 export { docxViewForVersion, saveBlockIds, blockIdsRecord } from "./documents.blockIds";
 
 export { renameDocument } from "./documents.rename";
+export { setDocumentConfidential } from "./documents.confidential";
 export { deleteCollectionDocuments } from "./documents.cleanup";
 
 export { handleDocumentPrecomputeText } from "./documents.textJobs";

@@ -15,7 +15,8 @@ OpenRouter, the browser's voices, Kokoro and Apple's voices all stay.
   cloning.
 - Runtime: https://github.com/gradium-ai/xn-ptts, MIT OR Apache-2.0, release
   v0.4.0 (2026-10-20). Two weeks old and its API has already changed once:
-  pin exact versions everywhere.
+  pin exact versions everywhere. This pin is as of 2026-10-27; re-read the
+  package manifest and upstream release before relying on it.
 
 ## Browser: a second model for the "webgpu" engine
 

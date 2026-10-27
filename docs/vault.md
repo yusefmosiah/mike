@@ -7,6 +7,9 @@ the model, not the workstation VM it runs code in, not other users, not the
 backend. This document is the design; `infra/vault/README.md` is how to run
 it.
 
+Time limits, TTLs and host-binding rules below are as of 2026-10-27; re-read
+`infra/vault/` before relying on them.
+
 ## What it protects against
 
 | Threat | Answer |
