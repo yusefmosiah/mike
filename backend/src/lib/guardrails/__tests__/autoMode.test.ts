@@ -35,6 +35,7 @@ const T1_NAMES = [
     "list_documents",
     "read_table_cells",
     "get_diff",
+    "show_media",
     "list_workflows",
     "read_workflow",
     "courtlistener_search_case_law",

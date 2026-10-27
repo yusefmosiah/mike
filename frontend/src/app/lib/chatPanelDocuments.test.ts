@@ -9,7 +9,7 @@ const assistant = (events: Message["events"]): Message => ({
 });
 
 describe("chatPanelDocuments", () => {
-    it("lists created, edited and copied documents, oldest first", () => {
+    it("lists created, edited, shown and copied documents, oldest first", () => {
         const documents = chatPanelDocuments([
             { role: "user", content: "draft it" },
             assistant([
@@ -28,12 +28,21 @@ describe("chatPanelDocuments", () => {
                     count: 1,
                     copies: [{ new_filename: "nda copy.docx", document_id: "d2", version_id: "v9" }],
                 },
+                {
+                    type: "media",
+                    document_id: "d3",
+                    version_id: "v3",
+                    version_number: 4,
+                    filename: "chart.png",
+                    kind: "image",
+                },
             ]),
         ]);
 
         expect(documents).toEqual([
             { documentId: "d1", filename: "nda.docx", versionId: "v1", versionNumber: 1 },
             { documentId: "d2", filename: "nda copy.docx", versionId: "v9", versionNumber: 1 },
+            { documentId: "d3", filename: "chart.png", versionId: "v3", versionNumber: 4 },
         ]);
     });
 
@@ -69,6 +78,7 @@ describe("chatPanelDocuments", () => {
                 { type: "doc_replicated", filename: "d.docx", count: 1, isStreaming: true } as never,
                 { type: "doc_replicated", filename: "e.docx", count: 1, error: "failed" } as never,
                 { type: "doc_replicated", filename: "f.docx", count: 0 } as never,
+                { type: "media", filename: "orphan.png", kind: "image" } as never,
             ]),
             { role: "assistant", content: "no events" },
         ]);

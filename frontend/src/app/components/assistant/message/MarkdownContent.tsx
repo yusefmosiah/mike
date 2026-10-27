@@ -316,6 +316,21 @@ export function MarkdownContent({
                             {...withoutMarkdownNode(props)}
                         />
                     ),
+                    // Media in prose is shown through `media` events, not
+                    // through markup: a pasted URL would load a third party
+                    // without an allowlist, and would have no document
+                    // identity for the viewer. Render it as a link instead.
+                    img: ({ src, alt }) => (
+                        <a
+                            href={typeof src === "string" ? src : undefined}
+                            className="text-blue-600 hover:text-blue-700 underline break-all"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={openLinkInNativeBrowser}
+                        >
+                            {alt || (typeof src === "string" ? src : undefined) || "image"}
+                        </a>
+                    ),
                 }}
             >
                 {text}

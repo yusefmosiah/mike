@@ -15,7 +15,12 @@ import {
   type CourtlistenerToolEvent,
 } from "./courtlistenerTools";
 import { executeMcpToolCall, type McpToolEvent } from "../../../../lib/mcpConnectors";
-import type { AssistantEvent, WebFetchEvent, WebSearchEvent } from "@mike/contracts";
+import type {
+  AssistantEvent,
+  MediaEvent,
+  WebFetchEvent,
+  WebSearchEvent,
+} from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
@@ -67,6 +72,9 @@ import { convertedPdfKey, docxToPdf } from "../../../../lib/convert";
 import { enqueueConversion } from "../../../../lib/queue/conversionQueue";
 import {
   contentTypeForDocumentType,
+  isAudioFileType,
+  isImageFileType,
+  isVideoFileType,
   shouldConvertToPdf,
 } from "../../../../lib/documentTypes";
 import { buildDownloadUrl } from "../../../../lib/downloadTokens";
@@ -298,6 +306,7 @@ export async function runToolCalls(
   docsReplicated: DocReplicatedResult[];
   workflowsApplied: WorkflowAppliedResult[];
   docsEdited: DocEditedResult[];
+  mediaEvents: MediaEvent[];
   askInputsEvents: AskInputsEvent[];
   courtlistenerEvents: CourtlistenerToolEvent[];
   caseCitationEvents: CaseCitationEvent[];
@@ -324,6 +333,7 @@ export async function runToolCalls(
   const docsReplicated: DocReplicatedResult[] = [];
   const workflowsApplied: WorkflowAppliedResult[] = [];
   const docsEdited: DocEditedResult[] = [];
+  const mediaEvents: MediaEvent[] = [];
   const askInputsEvents: AskInputsEvent[] = [];
   const courtlistenerEvents: CourtlistenerToolEvent[] = [];
   const caseCitationEvents: CaseCitationEvent[] = [];
@@ -341,6 +351,7 @@ export async function runToolCalls(
     docsReplicated,
     workflowsApplied,
     docsEdited,
+    mediaEvents,
     courtlistenerEvents,
     caseCitationEvents,
     mcpEvents,
@@ -628,6 +639,70 @@ export async function runToolCalls(
           role: "tool",
           tool_call_id: tc.id,
           content: JSON.stringify({ ok: false, error: parsed.error }),
+        });
+      }
+      continue;
+    }
+
+    if (tc.function.name === "show_media") {
+      const requested = String(args.doc_id ?? "");
+      const label = resolveDocLabel(requested, docStore, docIndex);
+      const indexed = label ? docIndex?.[label] : undefined;
+      const stored = label ? docStore.get(label) : undefined;
+      const fileType = stored?.file_type ?? "";
+      const kind: MediaEvent["kind"] | null = isImageFileType(fileType)
+        ? "image"
+        : isAudioFileType(fileType)
+          ? "audio"
+          : isVideoFileType(fileType)
+            ? "video"
+            : null;
+      if (!label || !stored) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: `No document "${requested}" is available in this chat. Use the doc_id of an image, audio or video document that is available here.`,
+          }),
+        });
+      } else if (!indexed) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: `Document "${stored.filename}" has no saved version to show.`,
+          }),
+        });
+      } else if (!kind) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: `"${indexed.filename}" is a ${fileType || "non-media"} document, not an image, audio or video. Do not call show_media for it; its document card is shown automatically, so describe or cite it instead.`,
+          }),
+        });
+      } else {
+        const caption =
+          typeof args.caption === "string"
+            ? args.caption.trim().slice(0, 300) || undefined
+            : undefined;
+        const event: MediaEvent = {
+          type: "media",
+          document_id: indexed.document_id,
+          version_id: indexed.version_id ?? null,
+          version_number: indexed.version_number ?? null,
+          filename: indexed.filename,
+          kind,
+          ...(caption ? { caption } : {}),
+        };
+        mediaEvents.push(event);
+        write(`data: ${JSON.stringify(event)}\n\n`);
+        // The model already knows the filename and label; the document id
+        // and version belong to the wire event, not to its context.
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ shown: indexed.filename }),
         });
       }
       continue;
@@ -2552,6 +2627,7 @@ export async function runToolCalls(
     docsReplicated,
     workflowsApplied,
     docsEdited,
+    mediaEvents,
     askInputsEvents,
     courtlistenerEvents,
     caseCitationEvents,

@@ -46,6 +46,10 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     group: "Documents",
     text: "every document in the project, with ids and file types. Use when `docs` may not hold all of the project's documents.",
   },
+  show_media: {
+    group: "Documents",
+    text: "show an image, audio or video document inline in the reply, at this point. Use for media the person should see; save a workstation file first.",
+  },
   fetch_documents: {
     group: "Documents",
     text: "several documents' text in one call, each as an opening window. Prefer `docs` for reading.",

@@ -1,7 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { authenticatedFetch } from "@/app/lib/authEvents";
 import { AssistantMessage } from "./AssistantMessage";
 import type { AssistantEvent } from "../shared/types";
+
+vi.mock("@/app/lib/authEvents", () => ({ authenticatedFetch: vi.fn() }));
+vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/lib/mikeApi")>()),
+    API_BASE: "/api",
+}));
 
 describe("AssistantMessage document events", () => {
     it("opens every identified event document in the document panel", () => {
@@ -202,5 +209,61 @@ describe("AssistantMessage document events", () => {
             "agreement.docx",
             1,
         );
+    });
+
+    it("shows shown media once: no Created step or download card for the same document", async () => {
+        vi.mocked(authenticatedFetch).mockImplementation(() =>
+            Promise.resolve(new Response(new Blob(["x"]), { status: 200 })),
+        );
+        URL.createObjectURL = vi.fn(() => "blob:media");
+        URL.revokeObjectURL = vi.fn();
+        const onOpenDocument = vi.fn();
+        const events: AssistantEvent[] = [
+            {
+                type: "doc_created",
+                filename: "chart.png",
+                document_id: "document-media",
+                version_id: "version-media",
+                version_number: 1,
+                download_url: "/x",
+            },
+            {
+                type: "media",
+                document_id: "document-media",
+                version_id: "version-media",
+                version_number: 1,
+                filename: "chart.png",
+                kind: "image",
+            },
+            {
+                type: "doc_created",
+                filename: "other.docx",
+                document_id: "document-other",
+                version_id: "version-other",
+                version_number: 1,
+                download_url: "/x",
+            },
+        ];
+
+        render(
+            <AssistantMessage
+                events={events}
+                onOpenDocument={onOpenDocument}
+            />,
+        );
+
+        // The media tile replaces the step and the download card for that
+        // document; a different created document still gets its card.
+        expect(
+            screen.queryByRole("button", { name: "chart.png" }),
+        ).toBeNull();
+        expect(
+            await screen.findByRole("button", {
+                name: "Open chart.png in the document viewer",
+            }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "other.docx" }),
+        ).toBeInTheDocument();
     });
 });

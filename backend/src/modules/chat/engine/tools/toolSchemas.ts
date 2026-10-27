@@ -753,6 +753,29 @@ export const TOOLS = [
   {
     type: "function",
     function: {
+      name: "show_media",
+      description:
+        "Show an image, audio or video document inline in your answer, at the point where it belongs. The document must be available in this chat — an attachment, a project file, or a file saved this turn with save_to_mike. Only image, audio and video documents can be shown; for any other document its card is shown automatically, so describe or cite it instead. Write the prose around the media; never paste a URL, a data URL, a Markdown image or an HTML media tag for the same file. The block references the document; it does not let you see or hear it, so describe only media you have seen or made.",
+      parameters: {
+        type: "object",
+        properties: {
+          doc_id: {
+            type: "string",
+            description: "Chat-local ID of the media document (e.g. 'doc-0').",
+          },
+          caption: {
+            type: "string",
+            description:
+              "Short visible caption for the media; for an image describe what it shows.",
+          },
+        },
+        required: ["doc_id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "generate_docx",
       description:
         "Generate a Word (.docx) document from structured content. Use this when the user asks you to draft, create, or produce a document. Returns {\"doc_id\", ...}: the new document's doc_id for read_document; the user gets its card automatically.",

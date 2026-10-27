@@ -30,6 +30,7 @@ import { useSmoothedReveal } from "./message/useSmoothedReveal";
 import { ReadAloudPlayer } from "./ReadAloudPlayer";
 import { useReadAloud } from "./useReadAloud";
 import { MarkdownContent } from "./message/MarkdownContent";
+import { MediaBlock } from "./message/MediaBlock";
 import { CitationsBlock, buildCitationAppendix } from "./message/CitationSources";
 import { EditCardsSection } from "./message/EditCardsSection";
 import {
@@ -183,6 +184,9 @@ export function AssistantMessage({
     onLoadSubagentTranscript,
 }: Props) {
     const contentDivRef = useRef<HTMLDivElement | null>(null);
+    // Documents shown inline in this message: doc_created steps and download
+    // cards for the same document are drawn once, in the media block.
+    const mediaShownRef = useRef<Set<string>>(new Set());
     const [isCopied, setIsCopied] = useState(false);
     // Per-document override of the download URL, set as Accept/Reject resolves
     // each tracked change and produces a new version.
@@ -401,6 +405,11 @@ export function AssistantMessage({
     type EventGroup =
         | { kind: "pre"; events: AssistantEvent[]; indices: number[] }
         | {
+              kind: "media";
+              events: Extract<AssistantEvent, { type: "media" }>[];
+              indices: number[];
+          }
+        | {
               kind: "content";
               event: Extract<AssistantEvent, { type: "content" }>;
               index: number;
@@ -409,6 +418,15 @@ export function AssistantMessage({
     const groups: EventGroup[] = [];
     if (events) {
         let current: Extract<EventGroup, { kind: "pre" }> | null = null;
+        // A media event for the same document as a doc_created event replaces
+        // the "Created" step and download card: one inline block, carrying
+        // the open path.
+        const mediaDocuments = new Set(
+            events
+                .filter((e) => e.type === "media")
+                .map((e) => e.document_id),
+        );
+        mediaShownRef.current = mediaDocuments;
         events.forEach((e, i) => {
             if (!isRenderableEvent(e)) return;
             // Models often emit a bare newline between tool calls. Splitting
@@ -421,6 +439,29 @@ export function AssistantMessage({
                     current = null;
                 }
                 groups.push({ kind: "content", event: e, index: i });
+            } else if (e.type === "media") {
+                if (current) {
+                    groups.push(current);
+                    current = null;
+                }
+                const previous = groups.at(-1);
+                if (previous?.kind === "media") {
+                    previous.events.push(e);
+                    previous.indices.push(i);
+                } else {
+                    groups.push({
+                        kind: "media",
+                        events: [e],
+                        indices: [i],
+                    });
+                }
+            } else if (
+                e.type === "doc_created" &&
+                e.document_id &&
+                mediaDocuments.has(e.document_id)
+            ) {
+                // Shown inline in a media block already; no step.
+                return;
             } else {
                 if (!current)
                     current = { kind: "pre", events: [], indices: [] };
@@ -1017,6 +1058,15 @@ export function AssistantMessage({
                                     </div>
                                 );
                             }
+                            if (g.kind === "media") {
+                                return (
+                                    <MediaBlock
+                                        key={`m-${g.indices[0]}`}
+                                        events={g.events}
+                                        onOpenDocument={onOpenDocument}
+                                    />
+                                );
+                            }
                             const subsequentContent = hasContentAfter(gIdx);
                             const pendingAskInput = hasPendingAskInput(g);
                             const wrapperIsStreaming =
@@ -1270,14 +1320,26 @@ export function AssistantMessage({
                 {events &&
                     !isStreaming &&
                     events.some(
-                        (e) => e.type === "doc_created" && e.download_url,
+                        (e) =>
+                            e.type === "doc_created" &&
+                            e.download_url &&
+                            !(
+                                e.document_id &&
+                                mediaShownRef.current.has(e.document_id)
+                            ),
                     ) && (
                         <div className="flex flex-col gap-2 mt-2 mb-3">
                             {(
                                 events.filter(
                                     (e) =>
                                         e.type === "doc_created" &&
-                                        e.download_url,
+                                        e.download_url &&
+                                        !(
+                                            e.document_id &&
+                                            mediaShownRef.current.has(
+                                                e.document_id,
+                                            )
+                                        ),
                                 ) as Extract<
                                     AssistantEvent,
                                     { type: "doc_created" }

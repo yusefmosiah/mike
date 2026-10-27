@@ -637,6 +637,44 @@ describe("content and reasoning deltas", () => {
       thinking,
     ]);
   });
+
+  it("adopts a complete media frame and drops malformed ones", async () => {
+    expect(
+      await eventsOf([
+        {
+          type: "media",
+          document_id: "d1",
+          version_id: "v2",
+          version_number: 3,
+          filename: "chart.png",
+          kind: "image",
+          caption: "Spend",
+        },
+        { type: "media", document_id: "d2", filename: "note.mp3", kind: "audio" },
+        // Unknown kind and no document id both drop the frame.
+        { type: "media", document_id: "d3", filename: "doc.pdf", kind: "document" },
+        { type: "media", filename: "noid.png", kind: "image" },
+      ]),
+    ).toEqual([
+      {
+        type: "media",
+        document_id: "d1",
+        version_id: "v2",
+        version_number: 3,
+        filename: "chart.png",
+        kind: "image",
+        caption: "Spend",
+      },
+      {
+        type: "media",
+        document_id: "d2",
+        version_id: null,
+        version_number: null,
+        filename: "note.mp3",
+        kind: "audio",
+      },
+    ]);
+  });
 });
 
 describe("tool placeholders and cancellation", () => {

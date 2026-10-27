@@ -801,6 +801,7 @@ const COMPLETES_TEXTLESS_TURN = {
   doc_created: true,
   doc_download: true,
   doc_replicated: true,
+  media: true,
   workflow_applied: true,
   memory_updated: true,
   doc_edited: true,

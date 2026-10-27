@@ -1588,6 +1588,7 @@ export async function runLLMStream(params: {
         docsReplicated,
         workflowsApplied,
         docsEdited,
+        mediaEvents = [],
         askInputsEvents,
         courtlistenerEvents,
         caseCitationEvents,
@@ -1657,6 +1658,9 @@ export async function runLLMStream(params: {
           version_id: dl.version_id,
           version_number: dl.version_number ?? null,
         });
+      }
+      for (const event of mediaEvents) {
+        record(event);
       }
       for (const r of docsReplicated) {
         record({

@@ -37,6 +37,8 @@ export const TIER_1_READ_TOOLS: ReadonlySet<string> = new Set([
   "list_documents",
   "read_table_cells",
   "get_diff",
+  // Showing a document the conversation already holds: display only.
+  "show_media",
   // Workflow catalog reads.
   "list_workflows",
   "read_workflow",

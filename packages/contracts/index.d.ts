@@ -524,6 +524,24 @@ export type AssistantEvent =
     }
   | { type: "doc_download"; filename: string; download_url: string }
   | {
+      /**
+       * An image, audio or video document shown inline in the response, at
+       * the point the model placed it. References the document row — never
+       * bytes or a URL — so the chat and the document viewer resolve the
+       * same identity, access and version.
+       */
+      type: "media";
+      /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
+      call_id?: string;
+      document_id: string;
+      version_id: string | null;
+      version_number: number | null;
+      filename: string;
+      kind: "image" | "audio" | "video";
+      /** A short visible caption the model wrote; falls back to the filename. */
+      caption?: string;
+    }
+  | {
       type: "doc_replicated";
       /** The tool call that produced it (`<cell call_id>.<n>` for a call made from code). */
       call_id?: string;
@@ -614,6 +632,9 @@ export type AssistantEvent =
   | CodeCellEvent
   | CodeApprovalEvent
   | TurnUsageEvent;
+
+/** An image, audio or video document shown inline in an answer. */
+export type MediaEvent = Extract<AssistantEvent, { type: "media" }>;
 
 export type AssistantErrorCode = "invalid_api_key";
 

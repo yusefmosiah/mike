@@ -1480,6 +1480,35 @@ export async function consumeAssistantTurnStream(
           continue;
         }
 
+        // show_media's frame: the event is complete when it arrives, unlike
+        // the doc_* pairs that wait for a second frame to fill in ids.
+        if (data.type === "media") {
+          if (
+            typeof data.document_id === "string" &&
+            typeof data.filename === "string" &&
+            (data.kind === "image" || data.kind === "audio" || data.kind === "video")
+          ) {
+            pushEvent({
+              type: "media",
+              document_id: data.document_id as string,
+              version_id:
+                typeof data.version_id === "string"
+                  ? (data.version_id as string)
+                  : null,
+              version_number:
+                typeof data.version_number === "number"
+                  ? (data.version_number as number)
+                  : null,
+              filename: data.filename as string,
+              kind: data.kind,
+              ...(typeof data.caption === "string" && data.caption
+                ? { caption: data.caption as string }
+                : {}),
+            });
+          }
+          continue;
+        }
+
         if (data.type === "doc_replicate_start") {
           pushEvent({
             type: "doc_replicated",

@@ -398,6 +398,7 @@ export type AssistantEvent =
   | WireActivity<"run_summary">
   | WireActivity<"code_approval">
   | WireActivity<"turn_usage">
+  | WireActivity<"media">
   | (Omit<WireActivity<"content">, "isStreaming"> & { isStreaming?: boolean });
 
 export type CaseCitationQuote = {
