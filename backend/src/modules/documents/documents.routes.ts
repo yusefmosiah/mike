@@ -12,6 +12,7 @@ import { requireAuth } from "../../middleware/auth";
 import { asyncRoute, routerErrorHandler } from "../../middleware/asyncRoute";
 import { createDb } from "../../lib/db";
 import { sendInternalError } from "../../lib/httpError";
+import { sendServiceFailure } from "../../lib/serviceResult";
 import { buildContentDisposition, createFileReadStream } from "../../lib/storage";
 import { sendDocumentDisplay } from "../../lib/documentDisplay";
 import { contentTypeForDocumentType } from "../../lib/documentTypes";
@@ -31,6 +32,7 @@ import {
     deleteVersion,
     getTrackedChangeIds,
     resolveEdit,
+    getDocumentText,
 } from "./documents.service";
 
 export const documentsRouter = Router();
@@ -161,6 +163,28 @@ documentsRouter.get("/:documentId/file", requireAuth, asyncRoute(async (req, res
             return void sendInternalError(res, error);
         }
     }
+}));
+
+// GET /single-documents/:documentId/text
+// The version's whole readable text, flattened through the shared document
+// model (cached per version). The viewer's Copy action reads this; formats
+// with no text content answer 400.
+documentsRouter.get("/:documentId/text", requireAuth, asyncRoute(async (req, res) => {
+    const userId = res.locals.userId as string;
+    const userEmail = res.locals.userEmail as string | undefined;
+    const versionIdParam =
+        typeof req.query.version_id === "string" ? req.query.version_id : null;
+    const db = createDb();
+
+    const result = await getDocumentText(
+        req.params.documentId,
+        userId,
+        userEmail,
+        versionIdParam,
+        db,
+    );
+    if (!result.ok) return void sendServiceFailure(res, result);
+    res.json(result.data);
 }));
 
 // POST /single-documents/download-zip

@@ -1,5 +1,6 @@
 "use client";
 
+import { resolveDocumentViewType } from "@/app/lib/documentViewType";
 import { useEffect, useState } from "react";
 import { Download, ExternalLink, Globe } from "lucide-react";
 import { nativeBrowserSupported, openInNativeBrowser } from "@/app/lib/nativeBrowser";
@@ -8,6 +9,7 @@ import { userFacingApiError } from "@/app/lib/userFacingError";
 import { TextButtonUI } from "@/shared/ui/TextButtonUI";
 import { textButtonUIClassName } from "@/shared/ui/TextButtonUI.styles";
 import { WarningPopup } from "../popups/WarningPopup";
+import { DocumentCopyButton } from "./DocumentCopyButton";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { DocumentVersionPicker } from "./DocumentVersionPicker";
 import type { DocumentVersion } from "@/app/lib/mikeApi";
@@ -29,6 +31,7 @@ export function DocumentTitleRow({
     isReloading,
     compactActions,
     onDownload,
+    onCopy,
     saveState,
     onVersionChange,
     toolbarVisible,
@@ -39,6 +42,8 @@ export function DocumentTitleRow({
     compactActions: boolean;
     /** Export live editor bytes when available; undefined falls back to the server version. */
     onDownload?: () => Promise<void> | undefined;
+    /** Rich full-document copy while the docx editor is live; plain text otherwise. */
+    onCopy?: () => Promise<void> | undefined;
     saveState?: DocxSaveState | null;
     onVersionChange?: (version: DocumentVersion) => void;
     toolbarVisible?: boolean;
@@ -49,6 +54,14 @@ export function DocumentTitleRow({
         document.type === "pdf" ||
         document.type === "spreadsheet";
     const versionNumber = document.version_number;
+    const copyable =
+        !isExternalSourceType(document.type) &&
+        ["pdf", "docx", "spreadsheet", "text", "html"].includes(
+            resolveDocumentViewType({
+                filename: document.title,
+                fileType: document.type,
+            }),
+        );
 
     return (
         <div className="shrink-0 px-3 py-2">
@@ -113,6 +126,14 @@ export function DocumentTitleRow({
                         >
                             Edit
                         </TextButtonUI>
+                    )}
+                    {copyable && (
+                        <DocumentCopyButton
+                            documentId={document.document_id}
+                            versionId={document.version_id ?? null}
+                            isReloading={isReloading}
+                            onCopy={onCopy}
+                        />
                     )}
                     {isFile && (
                         <DownloadButton

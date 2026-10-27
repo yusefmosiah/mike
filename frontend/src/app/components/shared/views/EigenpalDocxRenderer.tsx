@@ -191,6 +191,18 @@ export default function DocxRenderer({ bytes, mode, toolbarVisible = true, filen
                                 editor.selectMatch({ ...selection.match, length: 0 });
                             }
                         },
+                        copyAll: () => {
+                            if (!editor.can({ type: "selectAll" }).ok) return false;
+                            // Ctrl+A, Ctrl+C with selection restore, so a
+                            // Copy toolbar click never moves the caret.
+                            const previous = editor.snapshot().selection;
+                            if (!editor.exec({ type: "selectAll" }).ok) return false;
+                            const copied = editor.exec({ type: "copy" }).ok;
+                            if (previous && "paraId" in previous.from && "paraId" in previous.to) {
+                                editor.exec({ type: "setSelection", range: { from: previous.from, to: previous.to } });
+                            }
+                            return copied;
+                        },
                     });
                     else onError();
                 }}

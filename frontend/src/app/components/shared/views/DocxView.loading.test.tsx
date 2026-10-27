@@ -12,6 +12,7 @@ const activateRevision = vi.hoisted(() => vi.fn());
 const clearRevisionHighlight = vi.hoisted(() => vi.fn());
 const selectText = vi.hoisted(() => vi.fn());
 const clearTextSelection = vi.hoisted(() => vi.fn());
+const copyAll = vi.hoisted(() => vi.fn());
 const replaceVersion = vi.hoisted(() => vi.fn());
 
 vi.mock("@/app/lib/authEvents", () => ({ authenticatedFetch: vi.fn() }));
@@ -31,7 +32,7 @@ function MockRenderer({ bytes, mode, toolbarVisible = true, onChange, onReady, o
     const revision = new Uint8Array(bytes)[0];
     useEffect(() => {
         if (revision === 99) onError();
-        else if (scroll.current && content.current) onReady({ scroll: scroll.current, content: content.current, exportDocx, selectText, clearTextSelection, activateRevision, clearRevisionHighlight });
+        else if (scroll.current && content.current) onReady({ scroll: scroll.current, content: content.current, exportDocx, selectText, clearTextSelection, activateRevision, clearRevisionHighlight, copyAll });
     }, [bytes, onReady, onError, revision]);
     return (
         <div ref={scroll} data-testid="renderer-scroll" data-mode={mode}>
@@ -58,6 +59,7 @@ beforeEach(() => {
     clearRevisionHighlight.mockReset();
     selectText.mockReset().mockReturnValue(true);
     clearTextSelection.mockReset();
+    copyAll.mockReset().mockReturnValue(true);
     vi.mocked(authenticatedFetch).mockReset();
     vi.mocked(authenticatedFetch).mockResolvedValue(new Response(new Uint8Array([1])));
     HTMLElement.prototype.scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number) {
@@ -243,6 +245,18 @@ it("keeps edits after a failed export and downloads the edited bytes on retry", 
     expect(screen.queryByRole("alert")).toBeNull();
     // Cleanup's revoke timeout can run after the test restores its mocks.
     revokeUrl.mockRestore();
+});
+
+it("offers a working whole-document copy through onCopyReady", async () => {
+    let copy: (() => Promise<void>) | null = null;
+    render(<DocxView documentId="copy-all" cacheBytes={false} defaultMode="edit"
+        onCopyReady={(handler) => { copy = handler; }} />);
+    await editorReady("EigenPal preview");
+    await waitFor(() => expect(copy).toEqual(expect.any(Function)));
+    await act(async () => copy?.());
+    expect(copyAll).toHaveBeenCalledOnce();
+    copyAll.mockReturnValueOnce(false);
+    await expect(copy?.()).rejects.toThrow("not ready");
 });
 
 it("leaves native revision painting alone during page repaints and clears it on dismissal", async () => {

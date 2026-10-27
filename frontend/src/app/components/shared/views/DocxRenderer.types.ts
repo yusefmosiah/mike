@@ -24,6 +24,12 @@ export interface DocxSurface {
     selectText?: (text: string) => boolean;
     /** Clear the citation selection without removing document content. */
     clearTextSelection?: () => void;
+    /**
+     * Put the whole body on the clipboard as the editor would for Ctrl+A,
+     * Ctrl+C — rich flavours and the current (unsaved) text. Returns false
+     * when the editor refused, e.g. while it is still opening.
+     */
+    copyAll?: () => boolean;
     exportDocx?: () => Promise<ArrayBuffer>;
 }
 

@@ -50,6 +50,13 @@ choice while Edit is active. Turning Edit off overrides it with read-only mode;
 turning it on returns to the initial mode. Opening another document or version
 creates a new editor.
 
+The title bar's copy button writes the whole document to the clipboard. A live
+docx editor supplies it through `DocxSurface.copyAll` — EigenPal's own
+select-all + copy, rich flavours and unsaved edits included — and every other
+text-bearing format goes through `GET /single-documents/:documentId/text`,
+which flattens a version with the shared document model (`modelToText`, cached
+per version). Very large documents ask for confirmation first.
+
 Open **… → Navigation pane** to show or hide the document outline and search.
 The action shares EigenPal's overflow menu; a More menu remains available when
 all formatting controls fit. The navigation pane has a 12px left inset.

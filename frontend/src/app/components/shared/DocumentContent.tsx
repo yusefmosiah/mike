@@ -145,6 +145,13 @@ export function DocumentContent({
         },
         [onDownloadReady],
     );
+    const localCopy = useRef<(() => Promise<void>) | null>(null);
+    const handleCopyReady = useCallback(
+        (copy: (() => Promise<void>) | null) => {
+            localCopy.current = copy;
+        },
+        [],
+    );
     const {
         document: resolvedDocument,
         isLoading: isDocumentLoading,
@@ -254,6 +261,7 @@ export function DocumentContent({
                             saveState={saveState}
                             onVersionChange={onVersionChange}
                             onDownload={() => localDownload.current?.()}
+                            onCopy={() => localCopy.current?.()}
                             toolbarVisible={toolbarVisible}
                             onToggleToolbar={
                                 viewType === "docx" && canEdit
@@ -345,6 +353,7 @@ export function DocumentContent({
                 ) : viewType === "docx" ? (
                     <DocxView
                         onDownloadReady={handleDownloadReady}
+                        onCopyReady={handleCopyReady}
                         onSaveStateChange={onSaveStateChange}
                         cacheBytes={cacheBytes}
                         refetchKey={refetchKey}

@@ -154,6 +154,7 @@ export function DocumentSidePanel({
     const dragStartPanelWidth = useRef(
         DEFAULT_DOC_COLUMN_WIDTH + RESIZER_WIDTH + DEFAULT_DATA_COLUMN_WIDTH,
     );
+    const localCopyRef = useRef<(() => Promise<void>) | null>(null);
 
     useEffect(() => setMounted(true), []);
 
@@ -269,6 +270,7 @@ export function DocumentSidePanel({
         filename: selectedFilename,
         fileType: selectedFileType,
     });
+    const selectedCopyable = ["pdf", "docx", "spreadsheet", "text", "html"].includes(selectedViewType);
     const selectedSizeBytes =
         selectedVersion?.size_bytes === undefined
             ? doc.size_bytes
@@ -563,6 +565,10 @@ export function DocumentSidePanel({
                         filename={selectedFilename}
                         fileType={selectedFileType}
                         versionNumber={selectedVersionNumber}
+                        documentId={doc.id}
+                        versionId={selectedVersionId}
+                        copyable={selectedCopyable}
+                        onCopy={() => localCopyRef.current?.()}
                     />
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                         {selectedViewType === "spreadsheet" ? (
@@ -612,6 +618,7 @@ export function DocumentSidePanel({
                                 // A read-only preview: no EigenPal editing toolbar.
                                 toolbarVisible={false}
                                 filename={doc.filename}
+                                onCopyReady={(copy) => { localCopyRef.current = copy; }}
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 documentId={doc.id}
                                 versionId={selectedVersionId}

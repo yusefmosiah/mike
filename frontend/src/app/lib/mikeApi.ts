@@ -2313,6 +2313,15 @@ export async function getDocumentUrl(
     return apiRequest(`/single-documents/${documentId}/url${qs}`);
 }
 
+/** The version's whole readable text via the shared document model. */
+export async function fetchDocumentText(
+    documentId: string,
+    versionId?: string | null,
+): Promise<{ text: string; chars: number; format: string }> {
+    const qs = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
+    return apiRequest(`/single-documents/${encodeURIComponent(documentId)}/text${qs}`);
+}
+
 function documentFilePath(
     documentId: string,
     versionId?: string | null,

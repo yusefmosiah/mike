@@ -33,6 +33,9 @@ export {
     getFileStreamSource,
 } from "./documents.download";
 export type { ZipExportEntry } from "./documents.download";
+export { getDocumentText, modelToText } from "./documents.text";
+export type { DocumentText } from "./documents.text";
+
 
 export {
     listVersions,

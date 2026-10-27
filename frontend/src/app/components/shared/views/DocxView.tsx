@@ -40,6 +40,8 @@ interface Props {
     displayUrl?: string | null;
     onReady?: () => void;
     onCloseGuardReady?: (guard: DocxCloseGuard | null) => void;
+    /** Rich "copy whole document" while the editor is live; null when not. */
+    onCopyReady?: (copy: (() => Promise<void>) | null) => void;
     onDownloadReady?: (download: (() => Promise<void>) | null) => void;
     onSaveStateChange?: (documentId: string, state: DocxSaveState | null) => void;
     highlightEdit?: {
@@ -126,10 +128,11 @@ function DocxViewContent(props: Props) {
         }
     }, [fetched.bytes, editedBytes, adoptSnapshot]);
     const { dirty, status, error: saveError, hasUnsavedChanges, prepareClose, discard } = autosave;
+    const { onCloseGuardReady } = props;
     useEffect(() => {
-        props.onCloseGuardReady?.({ hasUnsavedChanges, prepareClose, discard });
-        return () => props.onCloseGuardReady?.(null);
-    }, [props.onCloseGuardReady, hasUnsavedChanges, prepareClose, discard]);
+        onCloseGuardReady?.({ hasUnsavedChanges, prepareClose, discard });
+        return () => onCloseGuardReady?.(null);
+    }, [onCloseGuardReady, hasUnsavedChanges, prepareClose, discard]);
     const saveReady = !!bytes && !error && !displayUrl && readyKey === renderKey && failedKey !== renderKey;
     useEffect(() => {
         onSaveStateChange?.(documentId, { ready: saveReady, dirty, status, error: saveError });
@@ -184,6 +187,16 @@ function DocxViewContent(props: Props) {
             setDownloading(false);
         }
     }, [downloading]);
+    const { onCopyReady } = props;
+    useEffect(() => {
+        if (readyKey !== renderKey || failedKey === renderKey) return;
+        onCopyReady?.(async () => {
+            if (!surfaceRef.current?.copyAll?.()) {
+                throw new Error("The editor is not ready to copy.");
+            }
+        });
+        return () => onCopyReady?.(null);
+    }, [onCopyReady, readyKey, renderKey, failedKey]);
     useEffect(() => {
         if (readyKey !== renderKey || failedKey === renderKey) return;
         onDownloadReady?.(download);

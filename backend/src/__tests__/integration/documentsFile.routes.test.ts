@@ -192,3 +192,78 @@ describe("GET /single-documents/:documentId/file", () => {
     expect(mocks.loadActiveVersion).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /single-documents/:documentId/text", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ensureDocAccess.mockResolvedValue({ ok: true, isCreator: true });
+    mocks.loadActiveVersion.mockResolvedValue({
+      id: "version-2",
+      storage_path: "documents/user-1/document-1/notes.txt",
+      pdf_storage_path: null,
+      version_number: 2,
+      filename: "notes.txt",
+      source: "user_upload",
+      file_type: "txt",
+      size_bytes: 42,
+      page_count: null,
+    });
+    mocks.downloadFile.mockResolvedValue(
+      Buffer.from("Alpha.\n\nBeta line two.").buffer.slice(0),
+    );
+  });
+
+  it("returns the version's whole readable text with its size", async () => {
+    const response = await request(app)
+      .get("/single-documents/document-1/text?version_id=version-2")
+      .set("Authorization", "Bearer test");
+
+    expect(response.status).toBe(200);
+    expect(response.body.format).toBe("text");
+    expect(response.body.text).toContain("Alpha.");
+    expect(response.body.text).toContain("Beta line two.");
+    expect(response.body.chars).toBe(response.body.text.length);
+    expect(mocks.loadActiveVersion).toHaveBeenCalledWith(
+      "document-1",
+      database,
+      "version-2",
+    );
+    expect(mocks.downloadFile).toHaveBeenCalledWith(
+      "documents/user-1/document-1/notes.txt",
+    );
+  });
+
+  it("refuses an image with no text content", async () => {
+    mocks.loadActiveVersion.mockResolvedValue({
+      id: "version-2",
+      storage_path: "documents/user-1/document-1/scan.png",
+      pdf_storage_path: null,
+      version_number: 2,
+      filename: "scan.png",
+      source: "user_upload",
+      file_type: "png",
+      size_bytes: 99,
+      page_count: null,
+    });
+
+    const response = await request(app)
+      .get("/single-documents/document-1/text")
+      .set("Authorization", "Bearer test");
+
+    expect(response.status).toBe(400);
+    expect(mocks.downloadFile).not.toHaveBeenCalled();
+  });
+
+  it("does not read storage when the caller cannot access the document", async () => {
+    mocks.ensureDocAccess.mockResolvedValue({ ok: false });
+
+    const response = await request(app)
+      .get("/single-documents/document-1/text")
+      .set("Authorization", "Bearer test");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ detail: "Document not found" });
+    expect(mocks.loadActiveVersion).not.toHaveBeenCalled();
+    expect(mocks.downloadFile).not.toHaveBeenCalled();
+  });
+});
