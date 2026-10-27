@@ -1,5 +1,6 @@
 import { EDIT_MEMORY_TOOL } from "../../../../lib/memory/editTool";
 import type { OnlineComputer } from "../../../computers/computers.service";
+import { DOCUMENT_FORMATS } from "../../../../lib/workstation/capabilities";
 /**
  * The tools that WRITE to stored content rather than read it: they create
  * `documents` rows (and, in a project chat, attach them to the project) or
@@ -343,7 +344,7 @@ export const WORKSTATION_TOOLS = [
     function: {
       name: "save_to_mike",
       description:
-        "Save a file from the workstation into the user's documents: as a new document in this chat's project (or the library), or, with replace, as a new version of a document under ~/mike. This is the only way a workstation file reaches the user's documents. Documents can be PDF, Word, Excel, PowerPoint, images (PNG, JPEG, WebP, GIF), plain text (.txt, .md, .csv), HTML pages (.html), audio (.mp3, .m4a, .wav, .ogg) and video (.mp4, .webm, .mov), which open in the viewer and can be published as a link.",
+        `Save a file from the workstation into the user's documents: as a new document in this chat's project (or the library), or, with replace, as a new version of a document under ~/mike. This is the only way a workstation file reaches the user's documents. Documents can be ${DOCUMENT_FORMATS.office}, images (${DOCUMENT_FORMATS.image}), plain text (${DOCUMENT_FORMATS.text}), HTML pages (${DOCUMENT_FORMATS.html}), audio (${DOCUMENT_FORMATS.audio}) and video (${DOCUMENT_FORMATS.video}), which open in the viewer and can be published as a link.`,
       parameters: {
         type: "object",
         properties: {

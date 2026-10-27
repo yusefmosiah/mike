@@ -84,7 +84,7 @@ import { safeError } from "../../../lib/safeError";
 import { getWebSnapshot } from "../../../lib/search/engine";
 import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
 import { attachWebSnapshots } from "./webSnapshots";
-import { resolveWorkstation, snapshotOncePerTurn } from "../../../lib/workstation";
+import { resolveWorkstation, snapshotOncePerTurn, workstationCapabilitiesSection } from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
 import { publishingConfig } from "../../publications/publications.service";
 import { listOnlineDevices, takeComputerScreenshot, type ComputerImage } from "../../computers/computers.service";
@@ -749,6 +749,10 @@ export async function runLLMStream(params: {
     ...(pythonSession ? [{ key: "python-session", text: pythonSession }] : []),
     ...(isGuest && workstation
       ? [{ key: "workstation", text: guestWorkstationPrompt(guestCode?.hostName ?? null, guestAllowed) }]
+      : []),
+    // Accepted inputs and the on-demand layer list, at the point of use.
+    ...(workstation
+      ? [{ key: "capabilities", text: workstationCapabilitiesSection() }]
       : []),
     // A voice turn: spoken answers (prompts.ts). A typed turn after one
     // withdraws it, because the section is no longer desired.
