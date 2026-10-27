@@ -1,6 +1,6 @@
-// Making, listing and revoking publications: the signed-in side of the
-// module. Publishing needs the document's owner role (access.manage) because
-// a link reaches people the document's own sharing never named.
+// Making, listing, editing and revoking publications: the signed-in side of
+// the module. Publishing needs the document's owner role (access.manage)
+// because a link reaches people the document's own sharing never named.
 
 import crypto from "node:crypto";
 import type { Db } from "../../lib/db";
@@ -431,7 +431,9 @@ export async function updatePublication(
         .eq("publication_id", row.id);
     let fileCount = ((existingFiles ?? []) as { path: string }[]).length;
     const targetFollow =
-        input.followDocument === undefined ? row.follow_document === true : input.followDocument === true;
+        typeof input.followDocument === "boolean"
+            ? input.followDocument
+            : row.follow_document === true;
     if (targetFollow !== (row.follow_document === true)) {
         changed.push("follow_document");
         if (targetFollow) {
@@ -454,6 +456,9 @@ export async function updatePublication(
                 version,
             });
             if (!built.ok) return { ok: false, code: built.code };
+            // A followed publication should have no rows; clear any left by
+            // an earlier interrupted freeze before writing its copy.
+            await clearPublicationFiles(db, row.id, "publications/freeze-replace");
             let copiedFiles: { files: PublicationFileRow[]; copied: string[] } = { files: [], copied: [] };
             try {
                 copiedFiles = await copyBundleFiles(row.id, built.bundle);
@@ -506,14 +511,6 @@ export async function updatePublication(
         });
     }
     return { ok: true, publication: toView(updated as PublicationRow, config, fileCount) };
-}
-
-async function publicationFileCount(db: Db, publicationId: string): Promise<number> {
-    const { data } = await db
-        .from("publication_files")
-        .select("path")
-        .eq("publication_id", publicationId);
-    return ((data ?? []) as { path: string }[]).length;
 }
 
 function toView(row: PublicationRow, config: PublishingConfig, fileCount: number): PublicationView {

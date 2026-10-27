@@ -8,7 +8,6 @@ import type { Db } from "../../../lib/db";
 import { memoryDb } from "../../../__tests__/helpers/memoryDb";
 
 const state = vi.hoisted(() => ({
-    db: undefined as Db | undefined,
     objects: new Map<string, Buffer>(),
     role: "owner" as string,
     projectId: "p1" as string | null,
@@ -34,10 +33,6 @@ vi.mock("../../../lib/storage", () => {
         downloadFile: async (key: string) => {
             const bytes = state.objects.get(key);
             return bytes ? toArrayBuffer(bytes) : null;
-        },
-        createFileReadStream: (key: string) => {
-            const { Readable } = require("node:stream") as typeof import("node:stream");
-            return Readable.from([state.objects.get(key) ?? Buffer.alloc(0)]);
         },
         deleteFilesBestEffort: async (keys: string[]) => {
             for (const key of keys) state.objects.delete(key);
@@ -157,7 +152,6 @@ beforeEach(() => {
     state.audits = [];
     process.env.PUBLICATION_SECRET = "x".repeat(40);
     store = memoryDb();
-    state.db = store.db;
     seedDocument("article", "Field notes.html", "html", Buffer.from(V1), "2026-10-24T00:00:00Z");
     seedDocument("plan", "site-plan.png", "png", Buffer.from("PNG-ONE"), "2026-10-23T00:00:00Z");
 });

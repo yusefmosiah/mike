@@ -22,7 +22,7 @@ import type {
   WebSearchEvent,
 } from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
-import { runInWorkstation, snapshotOncePerTurn, type WorkstationTarget } from "../../../../lib/workstation";
+import { runInWorkstation, snapshotOncePerTurn, DOCUMENT_FORMATS, WORKSTATION_LAYERS, type WorkstationTarget } from "../../../../lib/workstation";
 import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
 import {
   readSkillFile,
@@ -2076,6 +2076,47 @@ export async function runToolCalls(
             content: JSON.stringify({ error: saved.error }),
           });
         }
+      }
+    } else if (tc.function.name === "workstation_capabilities") {
+      const target = options.workstation ?? null;
+      if (!target || !options.workspaceOwned) {
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({ error: "workstation_capabilities needs a workstation." }),
+        });
+      } else {
+        // Probe the guest's layer CLI: `layer list --json` when it exists,
+        // otherwise every layer reports installed=unknown and the model can
+        // still read purpose/entry off the manifest.
+        const probed = await runInWorkstation(target, {
+          command: "command -v layer >/dev/null 2>&1 && layer list --json 2>/dev/null || true",
+          timeoutMs: 15000,
+        });
+        let installed: Record<string, boolean> | null = null;
+        if (probed.ok && probed.stdout.trim()) {
+          try {
+            const parsed = JSON.parse(probed.stdout.trim());
+            if (parsed && typeof parsed === "object") installed = parsed as Record<string, boolean>;
+          } catch {
+            installed = null;
+          }
+        }
+        toolResults.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            save_to_mike_formats: DOCUMENT_FORMATS,
+            layer_cli: installed !== null,
+            layers: Object.entries(WORKSTATION_LAYERS).map(([name, l]) => ({
+              name,
+              purpose: l.purpose,
+              entry: l.unlocks,
+              installed: installed ? (installed[name] ?? false) : null,
+              ...(l.note ? { note: l.note } : {}),
+            })),
+          }),
+        });
       }
     } else if (tc.function.name === "fetch_web_page") {
       const url = String(args.url ?? "").trim();

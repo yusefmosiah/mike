@@ -13,7 +13,7 @@ import {
 describe("initialPublishOptions", () => {
     it("defaults to the first allowed audience, no sign-in and 30 days", () => {
         expect(initialPublishOptions(["password", "public"])).toEqual({
-            audience: "password", password: "", requireSignIn: false, expiry: "30",
+            audience: "password", password: "", requireSignIn: false, expiry: "30", followDocument: true,
         });
         expect(initialPublishOptions([]).audience).toBe("public");
     });
@@ -21,7 +21,7 @@ describe("initialPublishOptions", () => {
     it("takes the suggestions it can honour", () => {
         expect(
             initialPublishOptions(["public", "password"], { audience: "password", require_sign_in: true, expires_in_days: 7 }),
-        ).toEqual({ audience: "password", password: "", requireSignIn: true, expiry: "7" });
+        ).toEqual({ audience: "password", password: "", requireSignIn: true, expiry: "7", followDocument: true });
         expect(initialPublishOptions(["public", "password"], { expires_in_days: null }).expiry).toBe("never");
     });
 
@@ -33,18 +33,18 @@ describe("initialPublishOptions", () => {
 });
 
 describe("publish options to input", () => {
-    const base: PublishOptions = { audience: "public", password: "ignored", requireSignIn: false, expiry: "90" };
+    const base: PublishOptions = { audience: "public", password: "ignored", requireSignIn: false, expiry: "90", followDocument: true };
 
     it("sends a password only for password links and the flag only when set", () => {
         expect(publishOptionsToInput({ documentId: "d1" }, base)).toEqual({
-            document_id: "d1", version_id: null, audience: "public", expires_in_days: 90,
+            document_id: "d1", version_id: null, audience: "public", expires_in_days: 90, follow_document: true,
         });
         expect(
             publishOptionsToInput({ documentId: "d1", versionId: "v1" }, {
                 ...base, audience: "password", password: "pw", requireSignIn: true, expiry: "never",
             }),
         ).toEqual({
-            document_id: "d1", version_id: "v1", audience: "password", password: "pw", require_sign_in: true, expires_in_days: null,
+            document_id: "d1", version_id: "v1", audience: "password", password: "pw", require_sign_in: true, expires_in_days: null, follow_document: true,
         });
     });
 
@@ -70,16 +70,19 @@ describe("PublishOptionsForm", () => {
         render(<Harness />);
         await userEvent.click(screen.getByRole("button", { name: /With a password/ }));
         await userEvent.click(screen.getByRole("button", { name: "Generate" }));
-        await userEvent.click(screen.getByRole("switch"));
+        await userEvent.click(screen.getByRole("switch", { name: "Signed-in members only" }));
+        await userEvent.click(screen.getByRole("switch", { name: "Keep the link on the latest version" }));
         await userEvent.click(screen.getByRole("button", { name: "7 days" }));
         const value = JSON.parse(screen.getByRole("status").textContent!);
-        expect(value).toMatchObject({ audience: "password", requireSignIn: true, expiry: "7" });
+        expect(value).toMatchObject({ audience: "password", requireSignIn: true, expiry: "7", followDocument: false });
         expect(value.password.length).toBeGreaterThanOrEqual(12);
     });
 
     it("disables the controls while busy", async () => {
         render(<Harness disabled />);
-        expect(screen.getByRole("switch")).toBeDisabled();
+        for (const name of ["Signed-in members only", "Keep the link on the latest version"]) {
+            expect(screen.getByRole("switch", { name })).toBeDisabled();
+        }
         expect(screen.getByRole("button", { name: "7 days" })).toBeDisabled();
     });
 });

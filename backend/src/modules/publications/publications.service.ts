@@ -1,6 +1,6 @@
 // Facade for the publications module (docs/publishing.md): links that open a
-// frozen copy of a document on the content origin, for anyone with the link
-// or with the link and a password.
+// document on the content origin, following its current version or frozen at
+// one, for anyone with the link or with the link and a password.
 //
 //   publications.shared.ts  — policy, tokens, the server key, passwords, headers
 //   publications.bundle.ts  — the files a publication serves

@@ -12,13 +12,17 @@ import {
     type ForwardedRef,
 } from "react";
 import {
+    ArrowDown,
     ArrowRight,
+    ArrowUp,
     AudioLines,
     Check,
+    ListPlus,
     Loader2,
     Mic,
     Pencil,
     Square,
+    Trash2,
     Waypoints,
     X,
 } from "lucide-react";
@@ -92,6 +96,9 @@ import {
 } from "@/app/lib/documentUploadValidation";
 import { isLongPaste, pastedTextFile } from "@/app/lib/pastedText";
 import { chatDraftKey, readChatDraft, writeChatDraft } from "@/app/lib/chatDraft";
+import type { ChatQueueEffort } from "@/app/lib/chatQueue";
+import { TextButtonUI } from "@/shared/ui/TextButtonUI";
+import type { ChatQueueController } from "./useChatQueue";
 import { userFacingApiError } from "@/app/lib/userFacingError";
 import {
     AUTOCOMPACT_COMMAND,
@@ -219,6 +226,13 @@ export interface ChatInputProps {
      * is there): see `ChatInputVoice`.
      */
     voice?: ChatInputVoice;
+    /**
+     * The chat's message queue. While a turn runs, sending queues the written
+     * message here instead of refusing it; the strip above the input shows
+     * each entry's stamp and lets it be reordered or deleted. Absent in
+     * composers that have no thread to send into later.
+     */
+    queue?: ChatQueueController;
 }
 
 /**
@@ -254,6 +268,37 @@ function formatDictationTime(elapsedMs: number): string {
     return `${minutes}:${seconds}`;
 }
 
+/** The effort a queued message will run with, named as the picker does. */
+function queuedEffortLabel(effort: ChatQueueEffort | null): string {
+    if (!effort) return "Default effort";
+    if (effort === "none") return "No reasoning";
+    const name = effort === "xhigh" ? "XHigh" : effort[0].toUpperCase() + effort.slice(1);
+    return `${name} effort`;
+}
+
+/** What a paused queue says, and the decision it asks for. */
+function queuePauseCopy(reason: "stopped" | "failed" | "branch"): {
+    title: string;
+    detail: string;
+} {
+    if (reason === "stopped") {
+        return {
+            title: "Queue paused",
+            detail: "You stopped the response. Keep the queue to send the rest, or discard it.",
+        };
+    }
+    if (reason === "branch") {
+        return {
+            title: "Queue needs a decision",
+            detail: "The thread branched after these were written. Keep them to send on this branch, or discard them.",
+        };
+    }
+    return {
+        title: "Queue paused after an error",
+        detail: "The turn failed. Keep the queue to send the rest, or discard it.",
+    };
+}
+
 /** Below this width the composer controls always hide their labels. */
 const COMPACT_CONTROLS_BELOW_PX = 430;
 
@@ -281,6 +326,7 @@ function ChatInputForChatImpl(
         onEditSubmit,
         onEditCancel,
         voice,
+        queue,
     }: ChatInputProps,
     ref: ForwardedRef<ChatInputHandle>,
 ) {
@@ -979,6 +1025,60 @@ function ChatInputForChatImpl(
         });
     };
 
+    // A message written while a turn runs: the same validation as Send, then
+    // stored with this moment's model and effort. Attachments are already
+    // uploaded, so the entry keeps their finished references.
+    const queueMessage = (
+        query: string,
+        workflow: { id: string; title: string } | null,
+    ) => {
+        if (!queue || !query) return;
+        // An upload in flight has no finished reference yet; queueing now
+        // would send the words without the attachment and look like it took.
+        if (uploadingFiles.length > 0) return;
+        if (!model) {
+            setModelRequiredWarning(true);
+            return;
+        }
+        if (
+            apiKeys &&
+            !isModelAvailable(model, apiKeys, configuredModelIds)
+        ) {
+            setApiKeyModalProvider(getModelProvider(model));
+            return;
+        }
+        if (modelCannotSeeImages) return;
+        queue.enqueue({
+            text: query,
+            docs: attachedDocs,
+            workflow,
+            model,
+            effort: reasoningLevel,
+        });
+        setValue("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+        setAttachedDocs([]);
+        setSelectedWorkflow(null);
+    };
+
+    // `/nr` while a turn runs: queued as its own no-reply message. The
+    // selected workflow stays, as it does when a note is sent directly.
+    const queueNote = (content: string) => {
+        if (!queue || !content) return;
+        if (uploadingFiles.length > 0) return;
+        queue.enqueue({
+            text: content,
+            docs: attachedDocs,
+            workflow: null,
+            model,
+            effort: reasoningLevel,
+            noResponse: true,
+        });
+        setValue("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+        setAttachedDocs([]);
+    };
+
     // Voice mode: each turn the engine hears is sent like a typed message,
     // with the composer's model, marked as voice.
     const sendVoice = (text: string): boolean => {
@@ -1135,7 +1235,11 @@ function ChatInputForChatImpl(
         }
         const note = noResponseContent(text);
         if (note !== null) {
-            submitNote(note);
+            if (isLoading) {
+                if (queue) queueNote(note);
+            } else {
+                submitNote(note);
+            }
             return;
         }
         if (slashQuery !== null && slashWorkflows === null) return;
@@ -1146,12 +1250,21 @@ function ChatInputForChatImpl(
             selectSlashWorkflow(slashWorkflow);
             return;
         }
+        // Writing stays enabled while a turn runs: the message waits for the
+        // next turn instead of being refused or cutting the current one off.
+        if (isLoading) {
+            if (queue) queueMessage(query, selectedWorkflow);
+            return;
+        }
         submitMessage(query, selectedWorkflow);
     };
 
     const handleActionClick = () => {
         if (isLoading) {
-            if (canStop) onCancel();
+            if (canStop) {
+                queue?.pause("stopped");
+                onCancel();
+            }
         } else {
             handleSubmit();
         }
@@ -1188,7 +1301,8 @@ function ChatInputForChatImpl(
             onEditCancel?.();
             return;
         }
-        // Enter starts a new line; Cmd+Enter (Ctrl+Enter off a Mac) sends.
+        // Enter starts a new line; Cmd+Enter (Ctrl+Enter off a Mac) sends —
+        // while a turn runs, it queues the message instead.
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             handleSubmit();
@@ -1214,6 +1328,131 @@ function ChatInputForChatImpl(
                     data-slot="chat-input-surface"
                     className={CHAT_COMPOSER_SURFACE_CLASS}
                 >
+                    {queue && queue.entries.length > 0 && (
+                        <div
+                            data-slot="chat-queue"
+                            role="region"
+                            aria-label="Message queue"
+                            className="px-2 pt-2"
+                        >
+                            <div className="flex items-center justify-between gap-2 px-1">
+                                <p
+                                    role="status"
+                                    className="text-xs font-medium text-gray-600"
+                                >
+                                    {queue.paused
+                                        ? queuePauseCopy(queue.paused.reason)
+                                              .title
+                                        : `${queue.entries.length} queued ${
+                                              queue.entries.length === 1
+                                                  ? "message"
+                                                  : "messages"
+                                          }`}
+                                </p>
+                                <div className="flex shrink-0 items-center gap-1">
+                                    {queue.paused ? (
+                                        <>
+                                            <TextButtonUI
+                                                size="xs"
+                                                onClick={queue.resume}
+                                            >
+                                                Keep queue
+                                            </TextButtonUI>
+                                            <TextButtonUI
+                                                size="xs"
+                                                onClick={queue.clear}
+                                            >
+                                                Discard
+                                            </TextButtonUI>
+                                        </>
+                                    ) : (
+                                        <TextButtonUI
+                                            size="xs"
+                                            onClick={queue.clear}
+                                        >
+                                            Clear queue
+                                        </TextButtonUI>
+                                    )}
+                                </div>
+                            </div>
+                            {queue.paused && (
+                                <p className="px-1 pt-0.5 text-xs text-gray-500">
+                                    {queuePauseCopy(queue.paused.reason).detail}
+                                </p>
+                            )}
+                            <ol className="flex max-h-44 flex-col gap-1.5 overflow-y-auto pt-1.5">
+                                {queue.entries.map((entry, index) => (
+                                    <li
+                                        key={entry.id}
+                                        data-slot="chat-queue-entry"
+                                        className={cn(
+                                            "flex items-start gap-2 rounded-xl px-2 py-1.5",
+                                            LIQUID_GLASS_FLAT_CLASS,
+                                        )}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm leading-5 text-gray-800 [overflow-wrap:anywhere]">
+                                                {entry.text}
+                                            </p>
+                                            <p className="pt-0.5 text-xs text-gray-500">
+                                                {entry.model
+                                                    ? modelDisplayName(
+                                                          entry.model,
+                                                      )
+                                                    : "No model"}
+                                                {" · "}
+                                                {queuedEffortLabel(entry.effort)}
+                                                {entry.docs.length > 0
+                                                    ? ` · ${entry.docs.length} ${
+                                                          entry.docs.length === 1
+                                                              ? "attachment"
+                                                              : "attachments"
+                                                      }`
+                                                    : ""}
+                                            </p>
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-0.5">
+                                            <button
+                                                type="button"
+                                                aria-label={`Move queued message ${index + 1} up`}
+                                                disabled={index === 0}
+                                                onClick={() =>
+                                                    queue.reorder(entry.id, -1)
+                                                }
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-900/5 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-default disabled:opacity-40"
+                                            >
+                                                <ArrowUp className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                aria-label={`Move queued message ${index + 1} down`}
+                                                disabled={
+                                                    index ===
+                                                    queue.entries.length - 1
+                                                }
+                                                onClick={() =>
+                                                    queue.reorder(entry.id, 1)
+                                                }
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-900/5 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-default disabled:opacity-40"
+                                            >
+                                                <ArrowDown className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                aria-label={`Delete queued message ${index + 1}`}
+                                                onClick={() =>
+                                                    queue.remove(entry.id)
+                                                }
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-900/5 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
                     {editTarget && (
                         <div className="flex items-center justify-between gap-2 pl-3 pr-1.5 pt-1.5 text-xs text-gray-600">
                             <span className="inline-flex items-center gap-1.5 font-medium">
@@ -1333,6 +1572,16 @@ function ChatInputForChatImpl(
                         <p role="status" className="px-3 pt-1.5 text-xs text-gray-600">
                             This model can&apos;t see images. Choose a model marked
                             &ldquo;Sees images&rdquo; in the model menu, or remove the image.
+                        </p>
+                    )}
+
+                    {isLoading && uploadingFiles.length > 0 && (
+                        <p
+                            role="status"
+                            className="px-3 pt-1.5 text-xs text-gray-600"
+                        >
+                            Attachments are still uploading. Queue the message
+                            when they finish.
                         </p>
                     )}
 
@@ -1535,6 +1784,36 @@ function ChatInputForChatImpl(
                                         )}
                                     </button>
                                 ))}
+                            {isLoading &&
+                                queue &&
+                                composerOpen &&
+                                value.trim().length > 0 && (
+                                    <button
+                                        type="button"
+                                        aria-label="Queue message"
+                                        title="Queue message — sends when this response finishes"
+                                        data-slot="chat-queue-button"
+                                        className={cn(
+                                            "relative bg-gradient-to-b from-neutral-700 to-black text-white rounded-[11px] h-8 w-8 flex items-center justify-center cursor-pointer disabled:cursor-default disabled:from-neutral-600 disabled:to-black backdrop-blur-xl border-0 active:enabled:scale-95 transition-all duration-150",
+                                            "shadow-[0_3px_9px_rgba(15,23,42,0.10),inset_1px_1px_0_rgba(255,255,255,0.22),inset_-1px_-1px_0_rgba(255,255,255,0.10),inset_-4px_-4px_9px_rgba(15,23,42,0.2)]",
+                                        )}
+                                        onClick={handleSubmit}
+                                        disabled={
+                                            finishing ||
+                                            uploadingFiles.length > 0 ||
+                                            autocompactRunning ||
+                                            (slashCommandsLoading &&
+                                                parseAutocompactCommand(
+                                                    value,
+                                                ) === null) ||
+                                            (modelCannotSeeImages &&
+                                                noResponseContent(value) ===
+                                                    null)
+                                        }
+                                    >
+                                        <ListPlus className="h-4 w-4" />
+                                    </button>
+                                )}
                             <button
                                 type="button"
                                 aria-label={
@@ -1551,12 +1830,15 @@ function ChatInputForChatImpl(
                                 }
                                 data-slot="chat-send-button"
                                 className={cn(
-                                    "relative bg-gradient-to-b from-neutral-700 to-black text-white rounded-[11px] h-8 w-8 flex items-center justify-center cursor-pointer disabled:cursor-default disabled:from-neutral-600 disabled:to-black backdrop-blur-xl border-0 active:enabled:scale-95 transition-all duration-150",
-                                    "shadow-[0_3px_9px_rgba(15,23,42,0.10),inset_1px_1px_0_rgba(255,255,255,0.22),inset_-1px_-1px_0_rgba(255,255,255,0.10),inset_-4px_-4px_9px_rgba(15,23,42,0.2)]",
-                                    // A colleague's response: visibly not stoppable here.
                                     isLoading &&
                                         !canStop &&
                                         "cursor-not-allowed opacity-40",
+                                    isLoading &&
+                                        queue &&
+                                        composerOpen &&
+                                        value.trim().length > 0
+                                        ? `relative text-gray-700 rounded-[11px] h-8 w-8 flex items-center justify-center cursor-pointer disabled:cursor-default backdrop-blur-xl active:enabled:scale-95 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${LIQUID_GLASS_FLAT_CLASS}`
+                                        : "relative bg-gradient-to-b from-neutral-700 to-black text-white rounded-[11px] h-8 w-8 flex items-center justify-center cursor-pointer disabled:cursor-default disabled:from-neutral-600 disabled:to-black backdrop-blur-xl border-0 active:enabled:scale-95 transition-all duration-150 shadow-[0_3px_9px_rgba(15,23,42,0.10),inset_1px_1px_0_rgba(255,255,255,0.22),inset_-1px_-1px_0_rgba(255,255,255,0.10),inset_-4px_-4px_9px_rgba(15,23,42,0.2)]",
                                 )}
                                 onClick={handleActionClick}
                                 disabled={

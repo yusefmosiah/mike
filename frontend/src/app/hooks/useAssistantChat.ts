@@ -69,6 +69,9 @@ export function useAssistantChat({
 
   const [messages, setRawMessages] = useState<Message[]>(initialMessages);
   const [isResponseLoading, setIsResponseLoading] = useState(false);
+  // A counter, not a boolean: each failed stream must be a new signal even
+  // when the previous one had the same error. The composer queue pauses on it.
+  const [turnFailedAt, setTurnFailedAt] = useState(0);
   // An object, not a bare model id: an ask-inputs response submits without a
   // model, and a null id has to still open the popup — the id only decides
   // whether the provider can be named.
@@ -547,6 +550,10 @@ export function useAssistantChat({
       }
 
       if (!isCurrentRequest()) return null;
+      // Stop is not a failure; the composer pauses the queue for that on its
+      // own. Every other end is: a broken stream, or a send refused because
+      // another turn still holds the thread.
+      if (!isAbortError(error)) setTurnFailedAt((at) => at + 1);
       setIsResponseLoading(false);
       setIsLoadingCitations(false);
       return null;
@@ -587,6 +594,8 @@ export function useAssistantChat({
     rejectedApiKey,
     dismissInvalidApiKey: () => setRejectedApiKey(null),
     isResponseLoading: isResponseLoading || pendingTurn,
+    /** Increments when a turn fails; never for Stop. */
+    turnFailedAt,
     setIsResponseLoading,
     isLoadingCitations,
     handleChat,

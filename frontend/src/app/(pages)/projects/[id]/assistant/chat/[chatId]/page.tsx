@@ -450,6 +450,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
         rejectedApiKey,
         dismissInvalidApiKey,
         isResponseLoading,
+        turnFailedAt,
         handleChat,
         setMessages,
         cancel,
@@ -2459,6 +2460,7 @@ export default function ProjectAssistantChatPage({ params }: Props) {
                     chatId={activeChatId}
                     messages={messages}
                     isResponseLoading={isResponseLoading}
+                    turnFailedAt={turnFailedAt}
                     chatLoading={!chatLoaded}
                     accessResolved={composerReady}
                     canSend={canSendChat}

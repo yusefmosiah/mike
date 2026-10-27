@@ -1,5 +1,6 @@
-// What a publication serves: the files copied out of the document store when
-// it is made. An HTML page becomes index.html plus the files it refers to by
+// What a publication serves: the files of a document version. A frozen
+// publication copies them when it is made; a followed one builds them per
+// request. An HTML page becomes index.html plus the files it refers to by
 // relative path, found by name among the documents beside it (the same
 // project, or the publisher's library); Markdown, plain text and images get a
 // small page of their own, as does audio and video (with the browser's

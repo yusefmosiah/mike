@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
     createPublication: vi.fn(),
     listPublications: vi.fn(),
     revokePublication: vi.fn(),
+    updatePublication: vi.fn(),
 }));
 vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/app/lib/mikeApi")>()),
@@ -18,7 +19,7 @@ vi.mock("@/app/lib/mikeApi", async (importOriginal) => ({
 const pub = (over: Partial<Publication> = {}): Publication => ({
     id: "p1", document_id: "d1", version_id: "v1", title: "T", kind: "file", audience: "public",
     url: "https://pub.example/p1", created_at: "2026-01-02T12:00:00Z", expires_at: null, revoked_at: null,
-    file_count: 1, require_sign_in: false, ...over,
+    file_count: 1, require_sign_in: false, follow_document: true, ...over,
 });
 
 const target = { documentId: "d1", versionId: "v1", filename: "plan.html" };
@@ -46,14 +47,14 @@ describe("PublishModal", () => {
     it("publishes a public link for 30 days by default and offers to copy it", async () => {
         api.createPublication.mockResolvedValue({ publication: pub(), missing_files: [] });
         open();
-        expect(screen.getByText(/frozen copy/)).toBeInTheDocument();
+        expect(screen.getByText(/always shows the newest saved version/)).toBeInTheDocument();
         expect(screen.getByText(/Anyone who has a public link/)).toBeInTheDocument();
         expect(screen.getByRole("status", { name: "Loading links" })).toBeInTheDocument();
         await screen.findByText("No links yet.");
 
         await userEvent.click(screen.getByRole("button", { name: "Publish" }));
         expect(api.createPublication).toHaveBeenCalledWith({
-            document_id: "d1", version_id: "v1", audience: "public", expires_in_days: 30,
+            document_id: "d1", version_id: "v1", audience: "public", expires_in_days: 30, follow_document: true,
         });
         const section = await screen.findByRole("region", { name: "Published link" });
         expect(within(section).getByText("https://pub.example/p1")).toBeInTheDocument();
@@ -62,7 +63,7 @@ describe("PublishModal", () => {
         expect(writeText).toHaveBeenCalledWith("https://pub.example/p1");
         await screen.findByText("Copied");
         // Also listed among the document's links.
-        expect(within(screen.getByRole("region", { name: "Existing links" })).getByText("Created Jan 2, 2026 · Never expires")).toBeInTheDocument();
+        expect(within(screen.getByRole("region", { name: "Existing links" })).getByText(/Created Jan 2, 2026 · Never expires/)).toBeInTheDocument();
     });
 
     it("sends a password link with a generated passphrase and the chosen expiry", async () => {
@@ -81,7 +82,7 @@ describe("PublishModal", () => {
         await userEvent.click(screen.getByRole("button", { name: "Never" }));
         await userEvent.click(publish);
         expect(api.createPublication).toHaveBeenCalledWith({
-            document_id: "d1", version_id: "v1", audience: "password", password, expires_in_days: null,
+            document_id: "d1", version_id: "v1", audience: "password", password, expires_in_days: null, follow_document: true,
         });
         const section = await screen.findByRole("region", { name: "Published link" });
         await userEvent.click(within(section).getByRole("button", { name: "Copy password" }));
@@ -223,10 +224,28 @@ describe("PublishModal signed-in-only links", () => {
         expect(screen.getByText(/Only people signed in to this app/)).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "Publish" }));
         expect(api.createPublication).toHaveBeenCalledWith({
-            document_id: "d1", version_id: "v1", audience: "public", require_sign_in: true, expires_in_days: 30,
+            document_id: "d1", version_id: "v1", audience: "public", require_sign_in: true, expires_in_days: 30, follow_document: true,
         });
         await screen.findByRole("region", { name: "Published link" });
         expect(within(screen.getByRole("region", { name: "Existing links" })).getByText("Signed in only")).toBeInTheDocument();
+    });
+
+    it("lets a link stop following the document and edit its expiry from the list", async () => {
+        api.listPublications.mockResolvedValue([
+            pub({ id: "a", expires_at: "2099-02-01T12:00:00Z" }),
+        ]);
+        api.updatePublication.mockResolvedValue(pub({ id: "a", follow_document: false, expires_at: "2099-02-01T12:00:00Z" }));
+        open();
+        await screen.findByText(/Follows the latest version/);
+
+        await userEvent.click(screen.getByRole("button", { name: "Freeze this version" }));
+        expect(api.updatePublication).toHaveBeenCalledWith("a", { follow_document: false });
+        await screen.findByText(/Frozen copy/);
+
+        api.updatePublication.mockResolvedValue(pub({ id: "a", follow_document: false, expires_at: null }));
+        await userEvent.click(screen.getByRole("button", { name: "Remove expiry" }));
+        expect(api.updatePublication).toHaveBeenCalledWith("a", { expires_in_days: null });
+        await screen.findByText(/Never expires/);
     });
 
     it("lists signed-in-only links as plain text", async () => {

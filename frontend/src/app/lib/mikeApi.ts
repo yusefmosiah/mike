@@ -44,6 +44,7 @@ import type {
     ActiveAssistantTurn,
     Citation,
     CreatePublicationInput,
+    UpdatePublicationInput,
     Document,
     Folder,
     LibraryFolder,
@@ -2262,6 +2263,21 @@ export async function revokePublication(id: string): Promise<Publication> {
     const { publication } = await apiRequest<{ publication: Publication }>(
         `/publications/${encodeURIComponent(id)}/revoke`,
         { method: "POST" },
+    );
+    return publication;
+}
+
+export async function updatePublication(
+    id: string,
+    input: UpdatePublicationInput,
+): Promise<Publication> {
+    const { publication } = await apiRequest<{ publication: Publication }>(
+        `/publications/${encodeURIComponent(id)}`,
+        {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+        },
     );
     return publication;
 }

@@ -23,6 +23,8 @@ export interface PublishOptions {
     requireSignIn: boolean;
     /** A value of `EXPIRY_OPTIONS`. */
     expiry: string;
+    /** Serve the current version (true) or freeze a copy now (false). */
+    followDocument: boolean;
 }
 
 export const AUDIENCE_LABEL: Record<PublicationAudience, string> = {
@@ -43,6 +45,7 @@ export function initialPublishOptions(
         audience?: PublicationAudience;
         require_sign_in?: boolean;
         expires_in_days?: number | null;
+        follow_document?: boolean;
     },
 ): PublishOptions {
     const audience =
@@ -58,6 +61,7 @@ export function initialPublishOptions(
         password: "",
         requireSignIn: suggestion?.require_sign_in ?? false,
         expiry: expiry?.value ?? "30",
+        followDocument: suggestion?.follow_document ?? true,
     };
 }
 
@@ -79,6 +83,7 @@ export function publishOptionsToInput(
         ...(options.audience === "password" ? { password: options.password } : {}),
         ...(options.requireSignIn ? { require_sign_in: true } : {}),
         expires_in_days: EXPIRY_OPTIONS.find((o) => o.value === options.expiry)!.days,
+        follow_document: options.followDocument,
     };
 }
 
@@ -158,6 +163,21 @@ export function PublishOptionsForm({
                 </ToggleSwitchUI>
                 <p className="mt-1.5 text-xs text-gray-500">
                     Visitors sign in and need access to this document.
+                </p>
+            </div>
+
+            <div>
+                <ToggleSwitchUI
+                    checked={value.followDocument}
+                    disabled={disabled}
+                    onCheckedChange={(followDocument) => set({ followDocument })}
+                >
+                    Keep the link on the latest version
+                </ToggleSwitchUI>
+                <p className="mt-1.5 text-xs text-gray-500">
+                    On, readers always see the newest saved version. Off, the
+                    link keeps a copy of this version — later edits are not
+                    shared unless you publish again.
                 </p>
             </div>
 

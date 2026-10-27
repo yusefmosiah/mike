@@ -100,6 +100,10 @@ export const TOOL_STUBS: Readonly<Record<string, ToolStub>> = {
     group: "Drafting and editing",
     text: "save a file from the workstation into the person's documents, new or as a new version. The only way a workstation file reaches them.",
   },
+  workstation_capabilities: {
+    group: "Drafting and editing",
+    text: "exactly what the workstation can do right now: the formats save_to_mike accepts and each on-demand layer's name, purpose and entry command. Call before picking a layer by name.",
+  },
 
   // Research
   web_search: {

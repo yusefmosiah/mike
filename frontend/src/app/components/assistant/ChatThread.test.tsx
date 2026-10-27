@@ -1,8 +1,9 @@
 import { createRef } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, MessageFile } from "../shared/types";
 import type { ChatInputHandle } from "./ChatInput";
+import { chatQueueKey, enqueueChatQueue, readChatQueue } from "@/app/lib/chatQueue";
 import { ChatThread, type ChatThreadProps } from "./ChatThread";
 
 vi.mock("./CodeApprovalRequests", () => ({
@@ -507,6 +508,69 @@ describe("ChatThread messages", () => {
 });
 
 describe("ChatThread composer", () => {
+    const queueKey = chatQueueKey({ userId: "me", chatKey: "chat-1" });
+
+    function seedQueue() {
+        enqueueChatQueue(queueKey, {
+            text: "waiting",
+            docs: [],
+            workflow: null,
+            model: "gpt-5.6-sol",
+            effort: "high",
+        });
+    }
+
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it("pauses the queue when the host reports a failed turn", () => {
+        seedQueue();
+        const view = renderThread({ isResponseLoading: true });
+        expect(readChatQueue(queueKey).paused).toBeNull();
+
+        view.rerender(
+            <div className="relative flex flex-col">
+                <ChatThread {...view.props} turnFailedAt={1} />
+            </div>,
+        );
+
+        expect(readChatQueue(queueKey).paused?.reason).toBe("failed");
+        expect(readChatQueue(queueKey).entries).toHaveLength(1);
+    });
+
+    it("pauses the queue when a branch action starts", () => {
+        seedQueue();
+        renderThread({ onRegenerate: vi.fn() });
+
+        fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+
+        expect(readChatQueue(queueKey).paused?.reason).toBe("branch");
+        expect(readChatQueue(queueKey).entries).toHaveLength(1);
+    });
+
+    it("sends a queued entry through the thread's normal submit path", async () => {
+        enqueueChatQueue(queueKey, {
+            text: "waiting",
+            docs: [],
+            workflow: null,
+            model: "gpt-5.6-sol",
+            effort: "high",
+        });
+        const onSubmit = vi.fn();
+        renderThread({ onSubmit });
+
+        await waitFor(() =>
+            expect(onSubmit).toHaveBeenCalledWith({
+                role: "user",
+                content: "waiting",
+                model: "gpt-5.6-sol",
+                reasoning: "high",
+            }),
+        );
+        expect(readChatQueue(queueKey).entries).toEqual([]);
+    });
+
     it("lets only the turn's owner stop a colleague's answer", () => {
         const { unmount } = renderThread({
             isResponseLoading: true,

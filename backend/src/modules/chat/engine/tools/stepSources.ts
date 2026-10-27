@@ -69,6 +69,7 @@ export const TOOL_SOURCES: Record<string, "sources" | "none" | "pending"> = {
   generate_ppt: "sources",
   generate_html: "sources",
   save_to_mike: "sources",
+  workstation_capabilities: "none", // describes the machine, records no source
   show_media: "sources",
   read_table_cells: "pending", // tabular review cells; no event yet
   check_citations: "pending", // checks a document's citations; no event yet

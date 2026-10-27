@@ -17,6 +17,7 @@ import {
     createPublication,
     listPublications,
     revokePublication,
+    updatePublication,
 } from "@/app/lib/mikeApi";
 import {
     formatPublicationDate,
@@ -155,7 +156,9 @@ function PublishModalBody({ target, config, onClose }: Props) {
                             : options.audience === "public"
                               ? "Anyone who has a public link can open it, with no sign-in, and the link may be shared onward. "
                               : "Anyone who has the link and its password can open it, with no sign-in. "}
-                        This publishes this version as a frozen copy: later edits are not shared unless you publish again.
+                        {options.followDocument
+                            ? "The link always shows the newest saved version of this document."
+                            : "The link keeps a frozen copy of this version: later edits are not shared unless you publish again."}
                     </p>
 
                     <PublishOptionsForm
@@ -211,7 +214,16 @@ function PublishModalBody({ target, config, onClose }: Props) {
                         ) : (
                             <ul className="space-y-3">
                                 {links.map((link) => (
-                                    <LinkRow key={link.id} link={link} onRevoke={() => setRevokeId(link.id)} />
+                                    <LinkRow
+                                        key={link.id}
+                                        link={link}
+                                        onRevoke={() => setRevokeId(link.id)}
+                                        onUpdated={(updated) =>
+                                            setLinks((current) =>
+                                                (current ?? []).map((p) => (p.id === updated.id ? updated : p)),
+                                            )
+                                        }
+                                    />
                                 ))}
                             </ul>
                         )}
@@ -232,13 +244,38 @@ function PublishModalBody({ target, config, onClose }: Props) {
     );
 }
 
-function LinkRow({ link, onRevoke }: { link: Publication; onRevoke: () => void }) {
+function LinkRow({
+    link,
+    onRevoke,
+    onUpdated,
+}: {
+    link: Publication;
+    onRevoke: () => void;
+    onUpdated: (link: Publication) => void;
+}) {
     const state = publicationState(link);
+    const [saving, setSaving] = useState(false);
+    const [editError, setEditError] = useState<string | null>(null);
+
+    async function patch(input: Parameters<typeof updatePublication>[1]) {
+        setSaving(true);
+        setEditError(null);
+        try {
+            onUpdated(await updatePublication(link.id, input));
+        } catch (cause) {
+            setEditError(userFacingApiError(cause, "The link could not be updated. Please try again."));
+        } finally {
+            setSaving(false);
+        }
+    }
+
     return (
         <li className="space-y-1">
             <p className="text-xs font-medium text-gray-800">{AUDIENCE_LABEL[link.audience]}</p>
             {link.require_sign_in && <p className="text-xs text-gray-600">Signed in only</p>}
             <p className="text-xs text-gray-600">
+                {link.follow_document ? "Follows the latest version" : "Frozen copy"}
+                {" · "}
                 Created {formatPublicationDate(link.created_at)}
                 {" · "}
                 {state === "revoked"
@@ -268,11 +305,43 @@ function LinkRow({ link, onRevoke }: { link: Publication; onRevoke: () => void }
                     </>
                 )}
                 {state === "active" && (
-                    <TextButtonUI type="button" onClick={onRevoke}>
-                        Revoke
-                    </TextButtonUI>
+                    <>
+                        <TextButtonUI
+                            type="button"
+                            disabled={saving}
+                            onClick={() => void patch({ follow_document: !link.follow_document })}
+                        >
+                            {link.follow_document ? "Freeze this version" : "Follow latest"}
+                        </TextButtonUI>
+                        {link.expires_at && (
+                            <TextButtonUI
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void patch({ expires_in_days: null })}
+                            >
+                                Remove expiry
+                            </TextButtonUI>
+                        )}
+                        {!link.expires_at && (
+                            <TextButtonUI
+                                type="button"
+                                disabled={saving}
+                                onClick={() => void patch({ expires_in_days: 30 })}
+                            >
+                                Expire in 30 days
+                            </TextButtonUI>
+                        )}
+                        <TextButtonUI type="button" onClick={onRevoke}>
+                            Revoke
+                        </TextButtonUI>
+                    </>
                 )}
             </div>
+            {editError && (
+                <p role="alert" className="text-xs text-red-600 [overflow-wrap:anywhere]">
+                    {editError}
+                </p>
+            )}
         </li>
     );
 }

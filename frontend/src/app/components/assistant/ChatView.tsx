@@ -96,6 +96,8 @@ interface Props {
     chatReasoningLevel?: NonNullable<Message["reasoning"]> | null;
     messages: Message[];
     isResponseLoading: boolean;
+    /** Increments when a turn fails (not on Stop); the queue pauses on it. */
+    turnFailedAt?: number;
     handleChat: (
         message: Message,
         opts?: {
@@ -240,6 +242,7 @@ export function ChatView({
     chatReasoningLevel,
     messages,
     isResponseLoading,
+    turnFailedAt = 0,
     handleChat,
     cancel,
     rejectedApiKey = null,
@@ -1256,6 +1259,7 @@ export function ChatView({
                         chatId={chatId}
                         messages={messages}
                         isResponseLoading={isResponseLoading}
+                        turnFailedAt={turnFailedAt}
                         chatLoading={chatLoading}
                         accessResolved={accessResolved}
                         canSend={canSend}

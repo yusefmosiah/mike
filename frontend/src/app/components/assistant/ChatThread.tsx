@@ -31,6 +31,8 @@ import {
     type EditedPrompt,
 } from "./ChatInput";
 import { ChatInputPrompt } from "./ChatInputPrompt";
+import { useChatQueue } from "./useChatQueue";
+import { chatQueueKey, queuedMessage, type ChatQueueEntry } from "@/app/lib/chatQueue";
 import type { UseVoiceChatOptions, UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { useVoiceChat } from "@/app/hooks/useVoiceChat";
 import {
@@ -76,6 +78,8 @@ export interface ChatThreadProps {
     isResponseLoading: boolean;
     /** The thread's history is still arriving: the skeleton stands in. */
     chatLoading?: boolean;
+    /** Increments when a turn fails (not on Stop); the queue pauses on it. */
+    turnFailedAt?: number;
     /**
      * Whether the composer may render. While the caller's standing is
      * unknown it is left out entirely (see ChatView's `accessResolved`).
@@ -318,6 +322,7 @@ export function ChatThread({
     messages,
     isResponseLoading,
     chatLoading,
+    turnFailedAt = 0,
     accessResolved = true,
     canSend,
     viewerId,
@@ -367,13 +372,48 @@ export function ChatThread({
     } | null>(null);
     const editingMessage =
         editing && editing.chatId === chatId ? editing.message : null;
+
+    // Messages written while a turn runs wait here, persisted per chat, and
+    // send as individual turns through the same submit the composer uses.
+    const queueKey = chatQueueKey({
+        userId: viewerId ?? "anonymous",
+        projectId: chatInputProps?.projectId,
+        chatKey: chatId ?? "new-chat",
+    });
+    const sendQueued = useCallback(
+        async (entry: ChatQueueEntry) => {
+            await onSubmit(queuedMessage(entry));
+        },
+        [onSubmit],
+    );
+    const queue = useChatQueue(queueKey, {
+        send: sendQueued,
+        isStreaming: isResponseLoading || !!generatingBy,
+    });
+    const pauseQueue = queue.pause;
+    // Stop is a pause, never a silent discard: the entries stay for review.
+    const handleCancel = useCallback(() => {
+        pauseQueue("stopped");
+        onCancel();
+    }, [onCancel, pauseQueue]);
+    // A failed turn pauses the queue the same way Stop does. The host counts
+    // failures, so an error already present in a loaded transcript never
+    // closes a queue written after it.
+    const lastTurnFailureRef = useRef(turnFailedAt ?? 0);
+    useEffect(() => {
+        if ((turnFailedAt ?? 0) === lastTurnFailureRef.current) return;
+        lastTurnFailureRef.current = turnFailedAt ?? 0;
+        pauseQueue("failed");
+    }, [pauseQueue, turnFailedAt]);
+
     const submitEdit = useCallback(
         async (edited: EditedPrompt) => {
             if (!editingMessage || !onEditBranch) return;
+            pauseQueue("branch");
             await onEditBranch(editingMessage, edited);
             setEditing(null);
         },
-        [editingMessage, onEditBranch],
+        [editingMessage, onEditBranch, pauseQueue],
     );
     const showEmptyState =
         emptyState !== undefined && !chatLoading && messages.length === 0;
@@ -790,8 +830,11 @@ export function ChatThread({
                     : null;
             const navigateSibling =
                 branchActionsEnabled && onNavigateSibling && msg.id
-                    ? (dir: -1 | 1) =>
-                          void onNavigateSibling(msg, knownSiblingIds, dir)
+                    ? (dir: -1 | 1) => {
+                          // The queue was written against this branch.
+                          pauseQueue("branch");
+                          void onNavigateSibling(msg, knownSiblingIds, dir);
+                      }
                     : undefined;
             return (
                 <div
@@ -848,7 +891,10 @@ export function ChatThread({
                                 branchActionsEnabled &&
                                 onRegenerate &&
                                 parentUser?.id
-                                    ? () => void onRegenerate(msg, parentUser)
+                                    ? () => {
+                                          pauseQueue("branch");
+                                          void onRegenerate(msg, parentUser);
+                                      }
                                     : undefined
                             }
                             onNavigateSibling={navigateSibling}
@@ -856,7 +902,10 @@ export function ChatThread({
                                 branchActionsEnabled &&
                                 onBranchIntoNewThread &&
                                 msg.id
-                                    ? () => void onBranchIntoNewThread(msg)
+                                    ? () => {
+                                          pauseQueue("branch");
+                                          void onBranchIntoNewThread(msg);
+                                      }
                                     : undefined
                             }
                             events={msg.events}
@@ -910,13 +959,14 @@ export function ChatThread({
             canSend={canSend}
             chatLoading={chatLoading}
             onSubmit={onSubmit}
-            onCancel={onCancel}
+            onCancel={handleCancel}
             isLoading={isResponseLoading}
             canStop={!generatingBy || generatingBy.id === viewerId}
             chatKey={chatId}
             chatModel={chatModel}
             chatReasoningLevel={chatReasoningLevel}
             onDocumentClick={onDocumentClick}
+            queue={queue}
             {...chatInputProps}
             editTarget={editingMessage}
             onEditSubmit={submitEdit}
@@ -1037,7 +1087,7 @@ export function ChatThread({
                                         { askInputsResponse: response },
                                     );
                                 }}
-                                onCancel={onCancel}
+                                onCancel={handleCancel}
                             >
                                 {voiceSession ? (
                                     renderInput(voiceSession)

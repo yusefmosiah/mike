@@ -143,6 +143,8 @@ export interface Publication {
   expires_at: string | null;
   revoked_at: string | null;
   file_count: number;
+  /** True when the link serves the document's current version live. */
+  follow_document: boolean;
 }
 
 export interface CreatePublicationInput {
@@ -150,8 +152,18 @@ export interface CreatePublicationInput {
   version_id?: string | null;
   audience: PublicationAudience;
   password?: string;
-  require_sign_in?: boolean;
   expires_in_days: number | null;
+  /** Serve the document's current version (default) or freeze a copy now. */
+  follow_document?: boolean;
+}
+
+/** PATCH body: every field optional, null clears where the field is nullable. */
+export interface UpdatePublicationInput {
+  expires_in_days?: number | null;
+  audience?: PublicationAudience;
+  password?: string;
+  require_sign_in?: boolean;
+  follow_document?: boolean;
 }
 
 export type PanelDocumentType = SourceDocumentType;

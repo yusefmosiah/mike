@@ -31,6 +31,7 @@ export default function AssistantChatPage() {
     const {
         messages,
         isResponseLoading,
+        turnFailedAt,
         handleChat,
         setMessages,
         cancel,
@@ -242,6 +243,7 @@ export default function AssistantChatPage() {
             rejectedApiKey={rejectedApiKey}
             onDismissInvalidApiKey={dismissInvalidApiKey}
             isResponseLoading={isResponseLoading}
+            turnFailedAt={turnFailedAt}
             handleChat={handleChat}
             cancel={cancel}
             onNewChat={handleNewChat}
