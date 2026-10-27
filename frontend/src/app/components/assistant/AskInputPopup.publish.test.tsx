@@ -49,7 +49,7 @@ describe("AskInputPopup publish requests", () => {
     it("shows the filename, not the agent's reason, with the suggestions filled in", async () => {
         render(<AskInputPopup assistantMessageId="m1" event={request({ require_sign_in: true, expires_in_days: 7 })} onSubmit={vi.fn()} />);
         expect(screen.getByRole("status", { name: "Loading publishing options" })).toBeInTheDocument();
-        expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "true");
+        expect(await screen.findByRole("switch", { name: "Signed-in members only" })).toHaveAttribute("aria-checked", "true");
         expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
         expect(screen.getByText("plan.html")).toBeInTheDocument();
         expect(screen.queryByText(/Share the plan/)).toBeNull();
@@ -64,14 +64,14 @@ describe("AskInputPopup publish requests", () => {
         const submit = screen.getByRole("button", { name: "Publish" });
         expect(submit).toBeDisabled();
         await userEvent.type(password, PASSWORD);
-        await userEvent.click(screen.getByRole("switch"));
+        await userEvent.click(screen.getByRole("switch", { name: "Signed-in members only" }));
         await userEvent.click(screen.getByRole("button", { name: "Never" }));
         await userEvent.click(submit);
 
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
         expect(api.createPublication).toHaveBeenCalledWith({
             document_id: "d1", version_id: "v1", audience: "password", password: PASSWORD,
-            require_sign_in: true, expires_in_days: null,
+            require_sign_in: true, expires_in_days: null, follow_document: true,
         });
         const [response, content] = onSubmit.mock.calls[0];
         expect(response.responses).toEqual([{ id: "pub", kind: "publish", publication_id: "pub-1" }]);
@@ -90,19 +90,19 @@ describe("AskInputPopup publish requests", () => {
     it("offers no password copy for a public link", async () => {
         const onSubmit = vi.fn();
         render(<AskInputPopup assistantMessageId="m1" event={request()} onSubmit={onSubmit} />);
-        await screen.findByRole("switch");
-        fireEvent.submit(screen.getByRole("switch").closest("form")!);
+        await screen.findByRole("switch", { name: "Signed-in members only" });
+        fireEvent.submit(screen.getByRole("switch", { name: "Signed-in members only" }).closest("form")!);
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
         expect(screen.queryByRole("button", { name: "Copy password" })).toBeNull();
         expect(api.createPublication).toHaveBeenCalledWith({
-            document_id: "d1", version_id: "v1", audience: "public", expires_in_days: 30,
+            document_id: "d1", version_id: "v1", audience: "public", expires_in_days: 30, follow_document: true,
         });
     });
 
     it("answers as not published when the person declines", async () => {
         const onSubmit = vi.fn();
         render(<AskInputPopup assistantMessageId="m1" event={request()} onSubmit={onSubmit} />);
-        await screen.findByRole("switch");
+        await screen.findByRole("switch", { name: "Signed-in members only" });
         fireEvent.click(screen.getByRole("button", { name: "Don't publish" }));
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
         expect(onSubmit.mock.calls[0][0].responses).toEqual([{ id: "pub", kind: "publish", skipped: true }]);
@@ -114,13 +114,13 @@ describe("AskInputPopup publish requests", () => {
         api.createPublication.mockRejectedValueOnce(new MikeApiError({ status: 400, code: "no_rendition", message: "internal detail" }));
         const onSubmit = vi.fn();
         render(<AskInputPopup assistantMessageId="m1" event={request()} onSubmit={onSubmit} />);
-        await screen.findByRole("switch");
-        fireEvent.submit(screen.getByRole("switch").closest("form")!);
+        await screen.findByRole("switch", { name: "Signed-in members only" });
+        fireEvent.submit(screen.getByRole("switch", { name: "Signed-in members only" }).closest("form")!);
         const alert = await screen.findByRole("alert");
         expect(alert).toHaveTextContent("not ready yet");
         expect(alert).not.toHaveTextContent("internal detail");
         expect(onSubmit).not.toHaveBeenCalled();
-        expect(screen.getByRole("switch")).toBeInTheDocument();
+        expect(screen.getByRole("switch", { name: "Signed-in members only" })).toBeInTheDocument();
     });
 
     it("says so, and can still be declined, when publishing is off or unreachable", async () => {
@@ -165,8 +165,8 @@ describe("AskInputPopup publish requests", () => {
                 onSubmit={onSubmit}
             />,
         );
-        await screen.findByRole("switch");
-        fireEvent.submit(screen.getByRole("switch").closest("form")!);
+        await screen.findByRole("switch", { name: "Signed-in members only" });
+        fireEvent.submit(screen.getByRole("switch", { name: "Signed-in members only" }).closest("form")!);
         await waitFor(() => expect(api.createPublication).toHaveBeenCalled());
         expect(onSubmit).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Publish link" }));
