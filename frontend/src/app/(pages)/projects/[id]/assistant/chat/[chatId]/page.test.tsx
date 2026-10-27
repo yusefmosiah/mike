@@ -1262,8 +1262,13 @@ describe("leaving a project chat mid-stream", () => {
                 row.textContent?.includes("Other thread"),
             )!,
         );
+        // getChat's second argument is the read's AbortSignal; assert on the
+        // chat id alone.
         await waitFor(() =>
-            expect(state.getChat).toHaveBeenCalledWith("other"),
+            expect(state.getChat).toHaveBeenCalledWith(
+                "other",
+                expect.anything(),
+            ),
         );
         await screen.findByRole("button", { name: "Send question" });
         expect(screen.queryByText(/First answer/)).not.toBeInTheDocument();
@@ -1296,7 +1301,10 @@ describe("leaving a project chat mid-stream", () => {
         );
         // The history is requested at once instead of after the stream ends.
         await waitFor(() =>
-            expect(state.getChat).toHaveBeenCalledWith("created-chat"),
+            expect(state.getChat).toHaveBeenCalledWith(
+                "created-chat",
+                expect.anything(),
+            ),
         );
         await act(async () =>
             finishHistory({
