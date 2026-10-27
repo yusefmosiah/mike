@@ -105,7 +105,19 @@ let
       cmd="''${1:-}"; [ $# -gt 0 ] && shift
       case "$cmd" in
         list)
-          jq -r '.layers | to_entries[] | "\(.key)\n  \(.value.purpose)\n  enter: layer use \(.key)\n  unlocks: \(.value.unlocks)"' "$manifest"
+          if [ "''${1:-}" = "--json" ]; then
+            # name -> installed, checked against the layer gc roots.
+            first=1
+            printf '{'
+            for name in $(jq -r '.layers | keys[]' "$manifest"); do
+              [ "$first" -eq 0 ] && printf ','
+              first=0
+              if [ -e "$roots/$name" ]; then printf '"%s":true' "$name"; else printf '"%s":false' "$name"; fi
+            done
+            printf '}\n'
+          else
+            jq -r '.layers | to_entries[] | "\(.key)\n  \(.value.purpose)\n  enter: layer use \(.key)\n  unlocks: \(.value.unlocks)"' "$manifest"
+          fi
           ;;
         env)
           has "''${1:?layer name}" || { echo "unknown layer: $1" >&2; exit 1; }
