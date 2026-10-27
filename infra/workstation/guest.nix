@@ -32,6 +32,116 @@ let
     xlsxwriter
     youtube-transcript-api
   ]);
+
+  # `layer` checks a named tool out of the Nix store on demand (Mission 20):
+  # `layer use <name> [reason] [-- <cmd>]` builds the manifest's attr through
+  # the egress proxy if the closure is not already present, logs the entry
+  # to the host's ledger, and puts the closure on PATH for the command (or
+  # prints the activation line). `layer install` keeps it in the agent's nix
+  # profile; `nix gc` may remove an installed-but-unused closure, so the
+  # manifest is the check-out list, not a cache.
+  layer = pkgs.writeShellApplication {
+    name = "layer";
+    runtimeInputs = [ pkgs.curl pkgs.jq pkgs.nix ];
+    text = ''
+      set -euo pipefail
+      manifest=/etc/layers.json
+      ledger_url=''${MIKE_LAYER_LEDGER_URL:-}
+      roots="$HOME/.local/share/mike/layers"
+
+      usage() {
+        cat >&2 <<'EOF'
+      layer list                      names, purposes and how to enter each layer
+      layer use <name> [reason] [-- <cmd>...]
+                                    fetch the layer (once), then run the command
+                                    with it on PATH, or print its activation line
+      layer install <name> [reason] keep the layer in the agent's nix profile
+      layer forget <name>           remove it from the profile again
+      layer env <name>              print export lines for the layer's env vars
+      EOF
+        exit 2
+      }
+
+      attr()  { jq -r --arg n "$1" '.layers[$n].attr // empty' "$manifest"; }
+      pkgs_of() { jq -r --arg n "$1" '.layers[$n].packages // [] | map("p.\(.)") | join(" ")' "$manifest"; }
+      has()   { jq -e --arg n "$1" '.layers | has($n)' "$manifest" >/dev/null; }
+
+      # Log the check-out to the host-side ledger (vsock relay on 8201). A
+      # dead relay must not break the tool, so failure downgrades to stderr.
+      ledger() {
+        [ -n "$ledger_url" ] || return 0
+        curl -sf -m 5 -X POST -H 'content-type: application/json' \
+          --data-binary "$1" "$ledger_url" \
+          || echo "layer: ledger relay unreachable; entry not logged" >&2
+      }
+
+      # Build the layer's closure if it is not already a gc root; returns the
+      # store path on stdout. The registry pins nixpkgs to the same revision
+      # the VM was built from, so almost everything substitutes.
+      ensure() {
+        local name="$1" reason="''${2:-}" out a expr
+        out="$roots/$name"
+        if [ ! -e "$out" ]; then
+          a="$(attr "$name")"
+          if [ "$a" = "symlinkJoin" ]; then
+            expr="with import <nixpkgs> {}; symlinkJoin { name = \"layer-$name\"; paths = [ $(pkgs_of "$name") ]; }"
+            nix build --no-link --print-out-paths --expr "$expr" >/dev/null
+            nix-store --add-root "$out" --realise "$(nix build --no-link --print-out-paths --expr "$expr")" >/dev/null
+          else
+            nix-store --add-root "$out" --realise \
+              "$(nix build --no-link --print-out-paths "nixpkgs#$a")" >/dev/null
+          fi
+          ledger "{\"event\":\"layer_fetch\",\"vm\":\"$HOSTNAME\",\"layer\":\"$name\",\"store_path\":\"$(readlink "$out")\",\"reason\":$(jq -Rn --arg r "$reason" '$r')}"
+        fi
+        readlink "$out"
+      }
+
+      enter_line() {
+        jq -r --arg n "$1" --arg p "$2" \
+          '.layers[$n].env // {} | to_entries | map("export \(.key)=\(.value|@sh)") | join("; ") + (if length > 0 then "; " else "" end) + "export PATH=\($p)/bin:$PATH"' \
+          "$manifest"
+      }
+
+      cmd="''${1:-}"; [ $# -gt 0 ] && shift
+      case "$cmd" in
+        list)
+          jq -r '.layers | to_entries[] | "\(.key)\n  \(.value.purpose)\n  enter: layer use \(.key)\n  unlocks: \(.value.unlocks)"' "$manifest"
+          ;;
+        env)
+          has "''${1:?layer name}" || { echo "unknown layer: $1" >&2; exit 1; }
+          jq -r --arg n "$1" '.layers[$n].env // {} | to_entries[] | "export \(.key)=\(.value|@sh)"' "$manifest"
+          ;;
+        use|install)
+          name="''${1:?layer name}"; shift
+          has "$name" || { echo "unknown layer: $name (layer list)" >&2; exit 1; }
+          reason="''${*%% -- *}"; [ "$reason" = "$*" ] || set -- "''${*#* -- }"
+          path="$(ensure "$name" "$reason")"
+          if [ "$cmd" = install ]; then
+            nix profile install "$path"
+            ledger "{\"event\":\"layer_install\",\"vm\":\"$HOSTNAME\",\"layer\":\"$name\",\"store_path\":\"$path\",\"reason\":$(jq -Rn --arg r "$reason" '$r')}"
+            echo "installed $name ($path)"
+          else
+            env_line="$(enter_line "$name" "$path")"
+            if [ "''${1:-}" = "--" ]; then shift; fi
+            if [ $# -gt 0 ]; then
+              eval "$env_line"
+              exec "$@"
+            else
+              echo "$env_line"
+              echo "# eval \"\$(layer use $name)\" to enter, or: layer use $name -- <cmd>" >&2
+            fi
+          fi
+          ;;
+        forget)
+          name="''${1:?layer name}"; shift
+          nix profile remove "layers.$name" 2>/dev/null || nix profile remove "$name" 2>/dev/null || true
+          rm -f "$roots/$name"
+          echo "forgot $name"
+          ;;
+        *) usage ;;
+      esac
+    '';
+  };
 in
 {
   options.workstation = {
@@ -135,9 +245,76 @@ in
       # The transcriber skill: video metadata and captions, audio when asked.
       yt-dlp
       zip
+      # The `layer` wrapper itself, from the let block above.
+      layer
     ];
 
-    nix.enable = false;
+
+    # Layers: the store stays a read-only image for the base system, and a
+    # writable overlay on the home disk takes what `nix` fetches through the
+    # egress proxy. Fetched closures persist on home.img, so snapshots and
+    # restores cover them with the agent's files; a wipe drops them too.
+    microvm.writableStoreOverlay = "/home";
+    nix = {
+      enable = true;
+      # auto-optimise-store hardlinks through the overlay, which microvm.nix
+      # asserts against; keep it off.
+      settings = {
+        experimental-features = [ "nix-command" "flakes" ];
+        auto-optimise-store = false;
+      };
+      # The same nixpkgs the VM was built from: `nixpkgs#foo` resolves without
+      # network and substitutes cover nearly everything it names.
+      registry.nixpkgs.to = {
+        type = "path";
+        path = pkgs.path;
+      };
+      nixPath = [ "nixpkgs=${pkgs.path}" ];
+      gc = {
+        automatic = true;
+        dates = "weekly";
+        options = "--delete-older-than 30d";
+      };
+    };
+
+    # The daemon does the fetching, so it needs the proxy vars (production
+    # guests set them on every process through environment.variables).
+    systemd.services.nix-daemon.serviceConfig.Environment =
+      lib.mapAttrsToList
+        (k: v: "${k}=${v}")
+        (lib.filterAttrs (k: _: lib.hasInfix "proxy" k) config.environment.variables);
+
+    # The manifest the `layer` script and the harness both read; one source.
+    environment.etc."layers.json".source = ./layers.json;
+    environment.etc."layers/fonts.conf".text = ''
+      <?xml version="1.0"?>
+      <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+      <fontconfig>
+        <include>/etc/fonts/fonts.conf</include>
+        <dir>~/.nix-profile/share/fonts</dir>
+      </fontconfig>
+    '';
+
+    # Layer check-ins are logged on the host, not in the guest: a local
+    # socket relays each JSON line over vsock to a host-side journald sink,
+    # the same shape as the vault relay above.
+    systemd.sockets.mike-layer-ledger = {
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ "127.0.0.1:8201" ];
+      socketConfig.Accept = true;
+    };
+    systemd.services."mike-layer-ledger@" = {
+      description = "Relay one layer-ledger line to the host";
+      serviceConfig = {
+        ExecStart = "${pkgs.socat}/bin/socat STDIO VSOCK-CONNECT:2:8201";
+        StandardInput = "socket";
+        StandardOutput = "socket";
+        StandardError = "journal";
+        DynamicUser = true;
+      };
+    };
+    environment.variables.MIKE_LAYER_LEDGER_URL = "http://127.0.0.1:8201";
+
     documentation.enable = false;
   };
 }

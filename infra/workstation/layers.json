@@ -1,0 +1,37 @@
+{
+  "//": "Standard layers every workstation VM can check out of the Nix store on demand (goals/mission-20-workstation-tooling.md). `layer use <name>` in the guest builds the attr through the egress proxy if it is not already in the store, logs the entry to the host's ledger, and puts it on PATH. The backend reads the same file for the turn-context capability list and the generated README section. Attrs are evaluated against the guest's pinned nixpkgs (registry `nixpkgs`). Keep closures small: heavy deps belong here, not in guest.nix.",
+  "version": 1,
+  "layers": {
+    "python": {
+      "attr": "python3",
+      "purpose": "a throwaway virtualenv for wheels the base interpreter does not carry",
+      "unlocks": "python3 -m venv ~/venv && ~/venv/bin/pip install <wheel>",
+      "env": {},
+      "note": "The base interpreter already has pandas/matplotlib/etc. for code mode; wheels that cannot come from nixpkgs go in the venv, never in the base image."
+    },
+    "ocr": {
+      "attr": "tesseract",
+      "purpose": "read text out of images and scanned pages",
+      "unlocks": "tesseract <image> out",
+      "env": {},
+      "note": "Interim engine pending the corpus benchmark in the mission file (RapidOCR/PP-OCRv6, Indra, LightOnOCR candidates); swap this attr when the measurement lands."
+    },
+    "browser": {
+      "attr": "chromium",
+      "purpose": "render JavaScript pages and print HTML to PDF",
+      "unlocks": "chromium --headless --print-to-pdf=out.pdf <url>",
+      "env": {},
+      "note": "Heavy and slow to start; deliberately on-demand."
+    },
+    "fonts": {
+      "attr": "symlinkJoin",
+      "packages": ["inter", "source-serif", "source-sans", "jetbrains-mono", "liberation_ttf", "dejavu_fonts"],
+      "purpose": "six text faces (~20 MB) for documents produced here",
+      "unlocks": "any tool that honours fontconfig, once FONTCONFIG_FILE is exported",
+      "env": {
+        "FONTCONFIG_FILE": "/etc/layers/fonts.conf"
+      },
+      "note": "fonts.conf points fontconfig at the layer's share/fonts plus the base DejaVu."
+    }
+  }
+}

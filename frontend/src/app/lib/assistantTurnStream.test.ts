@@ -274,6 +274,26 @@ describe("readAssistantTurn", () => {
     turn.finish();
   });
 
+  it("gives up a first response that never arrives", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const read = readAssistantTurn({
+      // The request stalls: neither a refusal nor a body.
+      open: () => new Promise<Response>(() => {}),
+      turn,
+      sink,
+      cursor: createTurnCursor("chat-a"),
+    });
+    const outcome = read.then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(await outcome).toBe("The chat request did not answer in time.");
+    turn.finish();
+  });
+
   it("waits out a server restart and re-attaches to the resumed turn", async () => {
     vi.useFakeTimers();
     const turn = begin();

@@ -161,6 +161,28 @@ let
   vmNames = lib.attrNames workstations;
   poolNames = lib.attrNames poolVms;
 
+  # Layer ledger (Mission 20): the guest's `layer` POSTs one JSON line per
+  # check-out to a relayed socket; it lands in the host journal, which the
+  # guest cannot edit. `journalctl -t mike-layer-ledger -o cat` reads it.
+  wsLedgerSink = pkgs.writeShellApplication {
+    name = "ws-ledger-sink";
+    runtimeInputs = [ pkgs.systemd ];
+    text = ''
+      # socat reports the peer as "vsock:<cid>:<port>" or "<cid>:<port>";
+      # anything else lands in the journal with the raw address.
+      peer="''${SOCAT_PEERADDR:-unknown}"
+      cid="''${peer#vsock:}"
+      cid="''${cid%:*}"
+      case "$cid" in
+        ${lib.concatStringsSep "\n        " (lib.mapAttrsToList (name: ws: ''${toString (100 + ws.index)}) vm="$name" ;;'') workstations)}
+        *) vm="vsock-$peer" ;;
+      esac
+      while IFS= read -r line; do
+        printf '{ "vm": "%s", "entry": %s }\n' "$vm" "$line"
+      done | ${pkgs.systemd}/bin/systemd-cat -t mike-layer-ledger
+    '';
+  };
+
   # One request per connection on stdin:
   #   snapshot <vm> <turn|daily>  answers `ok <vm>/<snapshot>`. A turn
   #                               snapshot taken in the last two minutes is
@@ -327,6 +349,16 @@ in
       description = "Daily workstation snapshots";
       serviceConfig.Type = "oneshot";
       script = lib.concatMapStringsSep "\n" (name: "echo 'snapshot ${name} daily' | ${wsControl}/bin/ws-control") vmNames;
+    };
+    # One JSON line per guest layer check-out, tagged by peer VM and journaled.
+    mike-layer-ledger = {
+      description = "Workstation layer ledger (vsock)";
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        ExecStart = "${pkgs.socat}/bin/socat VSOCK-LISTEN:8201,fork,reuseaddr EXEC:${wsLedgerSink}/bin/ws-ledger-sink";
+        Restart = "always";
+        RestartSec = 2;
+      };
     };
   } // lib.mapAttrs' (name: _: lib.nameValuePair "ws-relay-${name}@" {
     description = "Relay to workstation ${name}'s vsock socket";
