@@ -41,6 +41,13 @@ replaces `required_status_checks`.
 Pushes that change only documentation (`docs/**`, `*.md`) skip `CI` and
 therefore do not deploy; the next code change deploys them.
 
+The backend suite also runs the docs audit
+(`backend/src/__tests__/docsAudit.test.ts`): a route mounted in `app.ts`, a
+module directory, or a code-mode tool must have a page in
+`docs/capabilities-map.json` or a reasoned entry in
+`docs/capabilities-allowlist.json`. A stale map or allowlist entry fails too,
+so a removed capability cannot keep its page alive.
+
 `.github/workflows/deploy-staging.yml` runs when `CI` completes on `main` and
 deploys only a green run.
 

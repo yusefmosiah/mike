@@ -41,10 +41,21 @@ vi.mock("../../../lib/storage", () => {
 });
 
 vi.mock("../../documents/documents.service", () => ({
-    ensureDocumentAccess: async (documentId: string) =>
-        state.role === "none"
-            ? { ok: false }
-            : { ok: true, doc: { id: documentId, project_id: state.projectId }, projectRole: state.role },
+    ensureDocumentAccess: async (documentId: string) => {
+        if (state.role === "none") return { ok: false };
+        const document = store
+            .rows("documents")
+            .find((row) => row.id === documentId);
+        return {
+            ok: true,
+            doc: {
+                id: documentId,
+                project_id: state.projectId,
+                confidential: document?.confidential === true,
+            },
+            projectRole: state.role,
+        };
+    },
 }));
 
 vi.mock("../../../lib/audit", () => ({

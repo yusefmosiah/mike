@@ -130,6 +130,8 @@ interface FileDirectoryProps {
     selectedDocuments: Document[];
     onChange: (documents: Document[]) => void;
     uploadingFilenames?: string[];
+    /** Text shown beside a confidential document's name. */
+    confidentialLabel?: string;
     showTabs: boolean;
     initialTab?: DirectoryTab;
     tabs?: readonly DirectoryTab[];
@@ -164,6 +166,7 @@ export function FileDirectory({
     selectedDocuments,
     onChange,
     uploadingFilenames = [],
+    confidentialLabel = "Confidential",
     showTabs,
     initialTab = "files",
     tabs = ALL_DIRECTORY_TAB_VALUES,
@@ -661,7 +664,7 @@ export function FileDirectory({
                     </span>
                     {doc.confidential && (
                         <span className="shrink-0 text-[11px] font-normal text-gray-400">
-                            Confidential — this chat only
+                            {confidentialLabel}
                         </span>
                     )}
                 </span>

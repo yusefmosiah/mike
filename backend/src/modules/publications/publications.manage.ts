@@ -56,24 +56,35 @@ export type PublishingConfigView = {
  * A confidential document may not gain a publication, nor have one edited.
  * Existing links keep serving: they were an explicit prior share, and
  * revoking them is still allowed through revokePublication.
+ *
+ * The read is explicit rather than folded into the caller's document query
+ * because updatePublication loads a publication, not a document. A failed
+ * read is an error, not "not confidential": silently allowing the edit would
+ * turn a transient database failure into exactly the share the flag exists
+ * to prevent.
  */
 async function documentIsConfidential(
     db: Db,
     documentId: string | null,
-): Promise<boolean> {
-    if (!documentId) return false;
-    const { data } = await db
+): Promise<
+    { ok: true; confidential: boolean } | { ok: false; error: unknown }
+> {
+    if (!documentId) return { ok: true, confidential: false };
+    const { data, error } = await db
         .from("documents")
         .select("confidential")
         .eq("id", documentId)
         .maybeSingle();
+    if (error) return { ok: false, error };
     const row: unknown = data;
-    return (
-        typeof row === "object" &&
-        row !== null &&
-        "confidential" in row &&
-        row.confidential === true
-    );
+    return {
+        ok: true,
+        confidential:
+            typeof row === "object" &&
+            row !== null &&
+            "confidential" in row &&
+            row.confidential === true,
+    };
 }
 
 export function publishingConfigView(env: NodeJS.ProcessEnv = process.env): PublishingConfigView {
@@ -132,11 +143,12 @@ export async function createPublication(
     if (expiresInDays !== null && !EXPIRY_DAYS.includes(expiresInDays as (typeof EXPIRY_DAYS)[number]))
         return { ok: false, code: "bad_expiry" };
 
-    const access = await ensureDocumentAccess(input.documentId, input.userId, input.userEmail, db);
+    const access = await ensureDocumentAccess(input.documentId, input.userId, input.userEmail, db, {
+        select: "id, user_id, project_id, org_id, workflow_id, confidential",
+    });
     if (!access.ok) return { ok: false, code: "not_found" };
     if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
-    if (await documentIsConfidential(db, input.documentId))
-        return { ok: false, code: "confidential" };
+    if (access.doc.confidential === true) return { ok: false, code: "confidential" };
     const version = await loadActiveVersion(input.documentId, db, input.versionId ?? null);
     if (!version) return { ok: false, code: "not_found" };
 
@@ -406,8 +418,9 @@ export async function updatePublication(
         .maybeSingle();
     if (!existing) return { ok: false, code: "not_found" };
     const row = existing as PublicationRow;
-    if (await documentIsConfidential(db, row.document_id))
-        return { ok: false, code: "confidential" };
+    const confidentiality = await documentIsConfidential(db, row.document_id);
+    if (!confidentiality.ok) return { ok: false, code: "error", error: confidentiality.error };
+    if (confidentiality.confidential) return { ok: false, code: "confidential" };
 
     const patch: Record<string, unknown> = {};
     const changed: string[] = [];

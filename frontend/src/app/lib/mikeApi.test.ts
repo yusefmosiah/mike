@@ -57,6 +57,7 @@ import {
     cancelGoogleDriveOAuth,
     disconnectGoogleDrive,
     downloadDocumentsZip,
+    updateDocumentConfidential,
     downloadUserExport,
     exportAccountData,
     exportAuditHistory,
@@ -786,6 +787,25 @@ describe("downloadDocumentsZip", () => {
         await expect(downloadDocumentsZip(["x"])).rejects.toThrow(
             "The request could not be completed. Please try again.",
         );
+    });
+});
+
+describe("updateDocumentConfidential", () => {
+    it("PATCHes the flag and returns the document", async () => {
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ document: { id: "d1", confidential: true } }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            }),
+        );
+
+        const document = await updateDocumentConfidential("d 1", true);
+
+        expect(document.confidential).toBe(true);
+        const { url, init } = lastFetchCall();
+        expect(url).toBe("/api/single-documents/d%201");
+        expect(init.method).toBe("PATCH");
+        expect(JSON.parse(init.body as string)).toEqual({ confidential: true });
     });
 });
 

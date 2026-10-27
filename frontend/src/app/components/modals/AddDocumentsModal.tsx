@@ -434,6 +434,7 @@ export function AddDocumentsModal({
                     loading={projectDirectoryLoading}
                     selectedDocuments={selectedDocuments}
                     onChange={setSelectedDocuments}
+                    confidentialLabel="Confidential — this chat only"
                     uploadingFilenames={uploadingFiles.map(
                         (upload) => upload.filename,
                     )}

@@ -82,6 +82,12 @@ def main() -> int:
     lines.append(END)
 
     text = README.read_text(encoding="utf-8")
+    if text.count(START) != 1 or text.count(END) != 1:
+        print(
+            f"{README}: expected exactly one {START} and one {END} marker",
+            file=sys.stderr,
+        )
+        return 1
     updated, replacements = re.subn(
         re.escape(START) + r".*?" + re.escape(END),
         "\n".join(lines),

@@ -397,8 +397,13 @@ describe("buildDocContext shared standalone documents", () => {
     const db = makeDb([
       ...referenced.map((id, index) =>
         standalone(id, "u1", {
-          // Older than every extra: only the "referenced wins" rule keeps them.
-          updated_at: `2020-01-0${index + 1}T00:00:00Z`,
+          // One referenced document is NEWER than every extra, so a query
+          // that does not exclude referenced ids would spend a slot on it
+          // and come up one document short of the ceiling.
+          updated_at:
+            index === 0
+              ? "2027-01-01T00:00:00Z"
+              : `2020-01-0${index + 1}T00:00:00Z`,
         }),
       ),
       ...extras,

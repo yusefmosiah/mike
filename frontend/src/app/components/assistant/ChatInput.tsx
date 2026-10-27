@@ -1650,7 +1650,7 @@ function ChatInputForChatImpl(
                         />
                     </div>
 
-                    {composerOpen && !(dropUploadsToProject && projectId) && (
+                    {composerOpen && !hideAddDocButton && !(dropUploadsToProject && projectId) && (
                         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-3 pt-1.5">
                             <ToggleSwitchUI
                                 checked={confidentialUpload}

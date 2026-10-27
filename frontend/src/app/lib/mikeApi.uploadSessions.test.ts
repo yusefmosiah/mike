@@ -850,6 +850,20 @@ describe("direct upload sessions", () => {
         expect(progress).toHaveBeenCalled();
     });
 
+    it("carries the confidential flag into a standalone upload session", async () => {
+        const server = installSuccessfulSessionServer();
+        const file = new File(["private"], "private.pdf", {
+            type: "application/pdf",
+        });
+
+        await uploadStandaloneDocuments([{ file }], { confidential: true });
+
+        expect(server.manifests[0]).toMatchObject({
+            purpose: "document_create",
+            destination: { scope: "standalone", confidential: true },
+        });
+    });
+
     it("throws with the per-file accounting when a single-file upload fails", async () => {
         installSuccessfulSessionServer({
             storageUpload: async () => new Response(null, { status: 503 }),
