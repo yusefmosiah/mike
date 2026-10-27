@@ -12,7 +12,7 @@ import type {
  */
 export type ChatQueueEffort = NonNullable<Message["reasoning"]>;
 
-export type ChatQueuePauseReason = "stopped" | "failed" | "branch";
+export type ChatQueuePauseReason = "stopped" | "failed" | "branch" | "orphaned";
 
 export interface ChatQueuePause {
     reason: ChatQueuePauseReason;
@@ -164,7 +164,8 @@ function readPause(value: unknown): ChatQueuePause | null {
     if (
         pause.reason !== "stopped" &&
         pause.reason !== "failed" &&
-        pause.reason !== "branch"
+        pause.reason !== "branch" &&
+        pause.reason !== "orphaned"
     ) {
         return null;
     }

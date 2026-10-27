@@ -9,6 +9,7 @@ at pages where it disagrees with itself on re-runs.
 import json
 import os
 import sys
+import time
 
 MODEL = os.environ.get("LIGHTON_MODEL", "lightonai/LightOnOCR-3-1B")
 
@@ -21,8 +22,10 @@ except ImportError:
 
 processor = AutoProcessor.from_pretrained(MODEL)
 model = AutoModelForVision2Seq.from_pretrained(MODEL, torch_dtype="float32")
+start = time.perf_counter()
 inputs = processor(images=sys.argv[1], text="Extract all text from this page, preserving layout.",
                    return_tensors="pt")
 out = model.generate(**inputs, max_new_tokens=4096)
+engine_ms = (time.perf_counter() - start) * 1000
 text = processor.batch_decode(out[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
-print(json.dumps({"text": text, "confidence": None, "cells": None}))
+print(json.dumps({"text": text, "confidence": None, "cells": None, "engine_ms": engine_ms}))

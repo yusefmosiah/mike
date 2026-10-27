@@ -84,9 +84,12 @@ let
         if [ ! -e "$out" ]; then
           a="$(attr "$name")"
           if [ "$a" = "symlinkJoin" ]; then
-            expr="with import <nixpkgs> {}; symlinkJoin { name = \"layer-$name\"; paths = [ $(pkgs_of "$name") ]; }"
-            nix build --no-link --print-out-paths --expr "$expr" >/dev/null
-            nix-store --add-root "$out" --realise "$(nix build --no-link --print-out-paths --expr "$expr")" >/dev/null
+            # `with` scopes attrs but binds no `p.` names, so the package
+            # list has to come through an explicit let-binding — and the
+            # build happens once, not twice.
+            expr="let p = import <nixpkgs> {}; in p.symlinkJoin { name = \"layer-$name\"; paths = [ $(pkgs_of "$name") ]; }"
+            out_path="$(nix build --no-link --print-out-paths --expr "$expr")"
+            nix-store --add-root "$out" --realise "$out_path" >/dev/null
           else
             nix-store --add-root "$out" --realise \
               "$(nix build --no-link --print-out-paths "nixpkgs#$a")" >/dev/null

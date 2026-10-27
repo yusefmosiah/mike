@@ -340,6 +340,7 @@ describe("buildDocContext shared standalone documents", () => {
       "chat-1",
       "chat_messages",
       "u1@test.local",
+      true, // sender's private standalone chat — the sweep is on
     );
 
     // Not the confidential document, not a project document (its scope is
@@ -349,13 +350,17 @@ describe("buildDocContext shared standalone documents", () => {
     ]);
   });
 
-  it("applies the same rule to a guest, who never receives host documents", async () => {
+  it("does not sweep a guest's library into a chat someone else reads", async () => {
     const db = makeDb([
       standalone("d-host", "u1"),
       standalone("d-host-secret", "u1", { confidential: true }),
       standalone("d-guest", "guest-1"),
     ]);
 
+    // A guest sending in a host's shared chat: the sweep is off (the route
+    // passes the shared-audience verdict), so the guest's own library does
+    // not ride into a transcript the host reads — the same boundary the
+    // confidential flag exists to keep.
     const { docIndex } = await buildDocContext(
       message([]),
       "guest-1",
@@ -364,9 +369,7 @@ describe("buildDocContext shared standalone documents", () => {
       "chat_messages",
     );
 
-    expect(Object.values(docIndex).map((entry) => entry.document_id)).toEqual([
-      "d-guest",
-    ]);
+    expect(docIndex).toEqual({});
   });
 
   it("leaves a builder call without a chat id alone (project attachments)", async () => {
@@ -415,6 +418,8 @@ describe("buildDocContext shared standalone documents", () => {
       db,
       "chat-2",
       "chat_messages",
+      undefined,
+      true,
     );
     const ids = Object.values(docIndex).map((entry) => entry.document_id);
 

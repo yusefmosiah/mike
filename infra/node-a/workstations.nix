@@ -177,9 +177,28 @@ let
         ${lib.concatStringsSep "\n        " (lib.mapAttrsToList (name: ws: ''${toString (100 + ws.index)}) vm="$name" ;;'') workstations)}
         *) vm="vsock-$peer" ;;
       esac
+      # The guest POSTs one JSON body per call. socat speaks raw TCP, so we
+      # do the HTTP ourselves: read headers for Content-Length, read exactly
+      # that much body, answer 200, then log only the body — a raw stream
+      # would pipe "content-type: ..." into the journal as entries and leave
+      # curl waiting on a response that never comes.
+      clen=0
       while IFS= read -r line; do
-        printf '{ "vm": "%s", "entry": %s }\n' "$vm" "$line"
-      done | ${pkgs.systemd}/bin/systemd-cat -t mike-layer-ledger
+        line="''${line%$'\r'}"
+        [ -z "$line" ] && break
+        case "$line" in
+          [Cc]ontent-[Ll]ength:*) clen="''${line##*:}" ;;
+        esac
+      done
+      clen="''${clen//[[:space:]]/}"
+      case "$clen" in ''|*[!0-9]*) clen=0 ;; esac
+      body=""
+      if [ "$clen" -gt 0 ]; then
+        IFS= read -r -N "$clen" body || true
+      fi
+      printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok'
+      [ -n "$body" ] && printf '{ "vm": "%s", "entry": %s }\n' "$vm" "$body" | ${pkgs.systemd}/bin/systemd-cat -t mike-layer-ledger
+      :
     '';
   };
 

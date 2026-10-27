@@ -68,6 +68,9 @@ export type ChatThreadSubmit = (
             AssistantEvent,
             { type: "ask_inputs_response" }
         >;
+        /** Queued sends ask the submit to throw on failure so the queue
+         * can restore the entry it removed up front. */
+        strict?: boolean;
     },
 ) => unknown;
 
@@ -382,7 +385,9 @@ export function ChatThread({
     });
     const sendQueued = useCallback(
         async (entry: ChatQueueEntry) => {
-            await onSubmit(queuedMessage(entry));
+            // strict: the queue already removed the entry; a failure must
+            // come back as a rejection so drain can restore and pause it.
+            await onSubmit(queuedMessage(entry), { strict: true });
         },
         [onSubmit],
     );

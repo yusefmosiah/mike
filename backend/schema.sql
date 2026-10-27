@@ -836,9 +836,12 @@ create index if not exists idx_documents_library_kind_folder
   on public.documents(user_id, library_kind, library_folder_id)
   where project_id is null;
 
-create index if not exists idx_documents_user_confidential
-  on public.documents(user_id, confidential)
-  where confidential;
+create index if not exists idx_documents_user_doc_sweep
+  on public.documents(user_id, updated_at desc)
+  where confidential = false
+    and project_id is null
+    and workflow_id is null
+    and status = 'ready';
 
 create index if not exists idx_documents_org
   on public.documents(org_id);
@@ -8436,5 +8439,6 @@ insert into public.schema_migrations (filename) values
   ('20261026_03_media_upload_types.sql'),
   ('20261026_04_remove_upload_session_limit.sql'),
   ('20261027_01_publication_follow_document.sql'),
-  ('20261027_02_doc_confidential.sql')
+  ('20261027_02_doc_confidential.sql'),
+  ('20261027_03_sweep_index.sql')
 on conflict (filename) do nothing;

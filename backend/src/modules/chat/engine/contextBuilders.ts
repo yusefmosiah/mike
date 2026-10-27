@@ -1278,12 +1278,23 @@ export function buildCancelledAssistantMessage(args: {
 export const MAX_CONTEXT_DOCUMENTS = 50;
 
 export async function buildDocContext(
-  messages: ChatMessage[],
-  userId: string,
-  db: Db,
-  chatId?: string | null,
-  messageTable = "chat_messages",
-  userEmail?: string | null,
+    messages: ChatMessage[],
+    userId: string,
+    db: Db,
+    chatId?: string | null,
+    messageTable = "chat_messages",
+    userEmail?: string | null,
+    /**
+     * Whether this conversation is the sender's private standalone chat —
+     * the only place the auto-share sweep below may run. A guest writing in
+     * a host's shared chat must not have their library swept into a
+     * transcript the host reads; an owner writing in a project or org chat
+     * must not leak their personal standalone docs into an audience that
+     * isn't theirs alone. Callers pass the same shared-audience verdict
+     * that already fences personal memory. Explicit per-document
+     * references above are unaffected either way.
+     */
+    sharedDocSweep?: boolean,
 ): Promise<{ docIndex: DocIndex; docStore: DocStore }> {
   const docIndex: DocIndex = {};
   const docStore: DocStore = new Map();
@@ -1332,20 +1343,28 @@ export async function buildDocContext(
     }
   }
 
-  // Documents are shared by default across the owner's conversations: a
-  // standalone chat carries the caller's own standalone, non-confidential
-  // documents even when no message in this chat ever referenced them. The
-  // sweep runs only when `chatId` is set — that is the chat surfaces (a
-  // project chat's attachment builder passes no chat id, and its project
-  // scope already governs). Referenced documents always win: the cap applies
-  // to the total, and the referenced set is never truncated, so a turn that
-  // cites more than the cap still gives the model every cited file.
+  // The sweep is also private-chat-only: `sharedDocSweep` is required and
+  // callers derive it from the same shared-audience check that fences
+  // personal memory. A guest's send inside a host's shared chat, and an
+  // owner's send inside a project or org chat, keep only the docs that
+  // chat already references; otherwise a personal library would ride into
+  // a transcript a wider audience reads.
+  //
+  // Documents are shared by default across the owner's private
+  // conversations: a standalone chat carries the caller's own standalone,
+  // non-confidential documents even when no message in this chat ever
+  // referenced them. The sweep runs only when `chatId` is set — that is
+  // the chat surfaces (a project chat's attachment builder passes no chat
+  // id, and its project scope already governs). Referenced documents
+  // always win: the cap applies to the total, and the referenced set is
+  // never truncated, so a turn that cites more than the cap still gives
+  // the model every cited file.
   //
   // Confidential documents are absent here unless they were referenced
   // above (an explicit prior share), which is also what keeps them out of
   // the tool layer: find_in_documents / list_documents / read_document all
   // resolve against this builder's doc store.
-  if (chatId) {
+  if (chatId && sharedDocSweep === true) {
     const budget = Math.max(0, MAX_CONTEXT_DOCUMENTS - documentIds.size);
     if (budget > 0) {
       let sharedQuery = db

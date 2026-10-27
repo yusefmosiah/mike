@@ -297,6 +297,12 @@ export function useAssistantChat({
        * history, not whatever this hook last rendered.
        */
       history?: Message[];
+      /**
+       * Queued sends need the refusal back: the queue removes the entry
+       * before calling us, and only a rejection restores it. Ordinary
+       * submits swallow errors into the thread as today.
+       */
+      strict?: boolean;
     },
   ): Promise<string | null> => {
     if (message.noResponse) return addNote(message);
@@ -549,13 +555,17 @@ export function useAssistantChat({
         }));
       }
 
+      setIsResponseLoading(false);
+      setIsLoadingCitations(false);
+      // A strict caller (the queue) needs the refusal: it removed the
+      // entry up front, and only a throw puts it back. Aborts are the
+      // user's own stop — the queue pauses itself for those.
+      if (opts?.strict && !isAbortError(error)) throw error;
       if (!isCurrentRequest()) return null;
       // Stop is not a failure; the composer pauses the queue for that on its
       // own. Every other end is: a broken stream, or a send refused because
       // another turn still holds the thread.
       if (!isAbortError(error)) setTurnFailedAt((at) => at + 1);
-      setIsResponseLoading(false);
-      setIsLoadingCitations(false);
       return null;
     } finally {
       turn.finish();

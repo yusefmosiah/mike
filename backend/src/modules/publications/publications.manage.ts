@@ -99,6 +99,7 @@ export type PublishFailure =
     | "bad_audience"
     | "bad_expiry"
     | "confidential"
+    | "revoked"
     | "not_found"
     | "not_owner"
     | "unsupported_type"
@@ -418,6 +419,11 @@ export async function updatePublication(
         .maybeSingle();
     if (!existing) return { ok: false, code: "not_found" };
     const row = existing as PublicationRow;
+    // A revoked link is gone for good — editing it can't quietly re-arm it.
+    if (row.revoked_at) return { ok: false, code: "revoked" };
+    if (input.followDocument !== undefined && typeof input.followDocument !== "boolean") {
+        return { ok: false, code: "bad_audience" };
+    }
     const confidentiality = await documentIsConfidential(db, row.document_id);
     if (!confidentiality.ok) return { ok: false, code: "error", error: confidentiality.error };
     if (confidentiality.confidential) return { ok: false, code: "confidential" };
@@ -467,16 +473,19 @@ export async function updatePublication(
     // follow drops the copy and serves the live version from then on.
     let dropCopy = false;
     let freeze = false;
-    const { data: existingFiles } = await db
-        .from("publication_files")
-        .select("path")
-        .eq("publication_id", row.id);
-    let fileCount = ((existingFiles ?? []) as { path: string }[]).length;
+    // The frozen-copy row count only matters when the follow flag is being
+    // toggled; a routine expiry/audience edit skips the extra query.
+    let fileCount = 0;
     const targetFollow =
         typeof input.followDocument === "boolean"
             ? input.followDocument
             : row.follow_document === true;
     if (targetFollow !== (row.follow_document === true)) {
+        const { data: existingFiles } = await db
+            .from("publication_files")
+            .select("path")
+            .eq("publication_id", row.id);
+        fileCount = ((existingFiles ?? []) as { path: string }[]).length;
         changed.push("follow_document");
         if (targetFollow) {
             dropCopy = true;
@@ -540,6 +549,14 @@ export async function updatePublication(
     if (dropCopy) {
         await clearPublicationFiles(db, row.id, "publications/follow");
         fileCount = 0;
+    } else if (!freeze) {
+        // Nothing re-counted the copy this request — the view still needs
+        // an honest file count, so read it here and only here.
+        const { data: existingFiles } = await db
+            .from("publication_files")
+            .select("path")
+            .eq("publication_id", row.id);
+        fileCount = ((existingFiles ?? []) as { path: string }[]).length;
     }
 
     if (changed.length > 0) {
@@ -632,7 +649,7 @@ export async function grantPublicationAccess(
 
 export type PublishPreflight =
     | { ok: true; documentId: string; versionId: string; filename: string }
-    | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" };
+    | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" | "confidential" };
 
 const PUBLISHABLE = new Set([
     "html", "md", "txt", "pdf", "png", "jpg", "jpeg", "webp", "gif", "docx", "doc", "pptx", "ppt",
@@ -653,9 +670,12 @@ export async function publishPreflight(
     env: NodeJS.ProcessEnv = process.env,
 ): Promise<PublishPreflight> {
     if (!publishingConfig(env).enabled) return { ok: false, code: "publishing_off" };
-    const access = await ensureDocumentAccess(documentId, userId, userEmail, db);
+    const access = await ensureDocumentAccess(documentId, userId, userEmail, db, {
+        select: "id, user_id, project_id, org_id, workflow_id, confidential",
+    });
     if (!access.ok) return { ok: false, code: "not_found" };
     if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
+    if (access.doc.confidential === true) return { ok: false, code: "confidential" };
     const version = await loadActiveVersion(documentId, db, versionId);
     if (!version) return { ok: false, code: "not_found" };
     const type = (version.file_type ?? "").toLowerCase();

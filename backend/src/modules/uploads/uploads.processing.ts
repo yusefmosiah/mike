@@ -464,19 +464,24 @@ async function processCreatedDocument(
       ]);
   }
 
+  // `confidential` is written only when this job creates the row: on a
+  // retry, the flag the user set after the first attempt must survive —
+  // an upsert that rewrote it would silently re-share a document the
+  // user marked private while processing was mid-flight.
+  const documentRow: Record<string, unknown> = {
+    id: documentId,
+    project_id: projectId,
+    user_id: session.user_id,
+    status: "processing",
+    org_id: orgId,
+    folder_id: folderId,
+    library_kind: libraryKind,
+    library_folder_id: libraryFolderId,
+    workflow_id: workflowId,
+  };
+  if (!file.document_created_at) documentRow.confidential = confidential;
   const { error: documentError } = await db.from("documents").upsert(
-    {
-      id: documentId,
-      project_id: projectId,
-      user_id: session.user_id,
-      status: "processing",
-      org_id: orgId,
-      folder_id: folderId,
-      library_kind: libraryKind,
-      library_folder_id: libraryFolderId,
-      workflow_id: workflowId,
-      confidential,
-    },
+    documentRow,
     { onConflict: "id" },
   );
   if (documentError) throw documentError;

@@ -137,16 +137,28 @@ export function useChatQueue(
         const fromKey = keyRef.current;
         keyRef.current = chatKey;
         cancelDrain();
-        const adopted =
-            streamRef.current &&
-            fromKey.endsWith(`:${encodeURIComponent("new-chat")}`);
-        const next = adopted
+        // Adoption is unconditional now: the stream the id waited on can
+        // end before the key lands, and an orphaned new-chat queue that
+        // stayed drainable would auto-send into the next fresh chat.
+        const next = fromKey.endsWith(`:${encodeURIComponent("new-chat")}`)
             ? adoptChatQueue(fromKey, chatKey)
             : readChatQueue(chatKey);
         stateRef.current = next;
         setState(next);
         scheduleDrain();
     }, [chatKey, cancelDrain, scheduleDrain]);
+
+    // A queue still parked under a new-chat key with no live stream is an
+    // orphan: the chat it was written for either never got an id, or the
+    // adoption above happened before this mount saw it. Left drainable it
+    // would auto-send into the next new conversation the user opens.
+    useEffect(() => {
+        if (!chatKey.endsWith(`:${encodeURIComponent("new-chat")}`)) return;
+        if (streamRef.current) return;
+        const current = stateRef.current;
+        if (current.entries.length === 0 || current.paused) return;
+        commit(markChatQueuePaused(chatKey, "orphaned"));
+    }, [chatKey, commit]);
 
     useEffect(() => {
         if (isStreaming) {

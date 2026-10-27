@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -159,7 +160,9 @@ def iter_pages(corpus: Path, sample: int | None):
                 rows.append((group.name, pdf, page))
     if sample:
         # Stratified sample: round-robin across groups keeps the mix.
-        rows = sorted(rows, key=lambda r: (hash(r[1].stem) % sample, r[1].name))[:sample]
+        # crc32 not hash() — Python salts hash() per process, so every run
+        # would pick a different corpus and the engines couldn't be compared.
+        rows = sorted(rows, key=lambda r: (zlib.crc32(r[1].stem.encode()) % sample, r[1].name))[:sample]
     return rows
 
 
@@ -183,7 +186,7 @@ def main() -> int:
 
     rows = []
     stats = {"pages": 0, "text_layer": 0, "ocr": 0, "escalate": 0, "errors": 0,
-             "ms_total": 0.0, "cers": [], "exactness": [], "peak_kb": 0}
+             "ms_total": 0.0, "engine_ms_total": 0.0, "cers": [], "exactness": [], "peak_kb": 0}
     with tempfile.TemporaryDirectory() as tmp:
         for group, pdf, page in iter_pages(args.corpus, args.sample):
             rel = f"{group}/{pdf.name}"
@@ -210,12 +213,15 @@ def main() -> int:
             except subprocess.CalledProcessError as e:
                 row.update(ok=False, error=f"rasterize: {e.stderr[:200]}")
                 stats["errors"] += 1
+                # A page the harness couldn't rasterize still lands in the
+                # escalation bucket — it's a page no engine got to try.
+                stats["escalate"] += 1
                 rows.append(row)
                 continue
             result = run_engine(args.engine, image, env)
             row.update(result)
             stats["ms_total"] += result["ms"]
-            stats["peak_kb"] = max(stats["peak_kb"], result.get("peak_kb", 0))
+            stats["engine_ms_total"] += result.get("engine_ms") or 0.0
             if not result.get("ok"):
                 stats["errors"] += 1
                 stats["escalate"] += 1
@@ -247,6 +253,7 @@ def main() -> int:
 
     stats["escalation_rate"] = stats["escalate"] / max(stats["ocr"], 1)
     stats["ms_per_page"] = stats["ms_total"] / max(stats["ocr"], 1)
+    stats["engine_ms_per_page"] = stats["engine_ms_total"] / max(stats["ocr"], 1)
     stats["cer_mean"] = sum(stats["cers"]) / max(len(stats["cers"]), 1)
     stats["cell_exactness"] = (
         sum(stats["exactness"]) / max(len(stats["exactness"]), 1)

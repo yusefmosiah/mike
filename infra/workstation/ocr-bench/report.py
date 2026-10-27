@@ -15,15 +15,16 @@ def main() -> int:
         print("no results", file=sys.stderr)
         return 1
 
-    print("| engine | pages | ocr'd | text-layer | ms/page | peak RSS | CER | cell exact | escalation |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print("| engine | pages | ocr'd | text-layer | ms/page | engine ms/page | peak RSS | CER | cell exact | escalation |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
     for name, s in rows:
         peak = f"{s['peak_kb']/1024:.0f} MB" if s.get("peak_kb") else "—"
         cer = f"{s['cer_mean']:.3f}" if s.get("cer_mean") is not None else "—"
         ex = f"{s['cell_exactness']:.2f}" if s.get("cell_exactness") is not None else "—"
         esc = f"{s['escalation_rate']:.1%}"
         ms = f"{s['ms_per_page']:.0f}"
-        print(f"| {name} | {s['pages']} | {s['ocr']} | {s['text_layer']} | {ms} | {peak} | {cer} | {ex} | {esc} |")
+        ems = f"{s['engine_ms_per_page']:.0f}" if s.get("engine_ms_per_page") is not None else "—"
+        print(f"| {name} | {s['pages']} | {s['ocr']} | {s['text_layer']} | {ms} | {ems} | {peak} | {cer} | {ex} | {esc} |")
     return 0
 
 if __name__ == "__main__":

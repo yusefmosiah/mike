@@ -550,6 +550,13 @@ async function prepareAdmittedChatStream(
             chatId,
             "chat_messages",
             userEmail,
+            // The sweep runs only in the sender's private standalone chat:
+            // memorySharedAudience is false exactly when nobody else can
+            // read this transcript (no org, no direct grants, owner == sender).
+            // Project and org chats always resolve true; the project id is
+            // also excluded explicitly because a project chat can gain
+            // members later and the transcript outlives today's audience.
+            memorySharedAudience === false && resolvedProjectId === null,
         );
         const docAvailability = Object.entries(docIndex).map(([doc_id, info]) => ({
             doc_id,

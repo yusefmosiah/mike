@@ -1403,7 +1403,7 @@ export function DocTable({
      * documents; the guard keeps a stale menu from sending a doomed request.
      */
     async function toggleDocumentConfidential(doc: Document) {
-        if (doc.project_id != null || confidentialUpdatingDocIds.has(doc.id)) {
+        if (doc.project_id != null || doc.workflow_id != null || confidentialUpdatingDocIds.has(doc.id)) {
             return;
         }
         setConfidentialUpdatingDocIds((prev) => new Set(prev).add(doc.id));
@@ -1438,7 +1438,7 @@ export function DocTable({
 
     /** Row-menu props for a document that may carry the confidential flag. */
     function confidentialRowActions(doc: Document) {
-        if (doc.project_id != null) return {};
+        if (doc.project_id != null || doc.workflow_id != null) return {};
         return {
             confidential: doc.confidential,
             onToggleConfidential: () => void toggleDocumentConfidential(doc),

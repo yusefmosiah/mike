@@ -279,7 +279,7 @@ function queuedEffortLabel(effort: ChatQueueEffort | null): string {
 }
 
 /** What a paused queue says, and the decision it asks for. */
-function queuePauseCopy(reason: "stopped" | "failed" | "branch"): {
+function queuePauseCopy(reason: "stopped" | "failed" | "branch" | "orphaned"): {
     title: string;
     detail: string;
 } {
@@ -293,6 +293,12 @@ function queuePauseCopy(reason: "stopped" | "failed" | "branch"): {
         return {
             title: "Queue needs a decision",
             detail: "The thread branched after these were written. Keep them to send on this branch, or discard them.",
+        };
+    }
+    if (reason === "orphaned") {
+        return {
+            title: "Queue waiting on a chat",
+            detail: "These were written for a conversation that never got an id. Send them here, or discard them.",
         };
     }
     return {
@@ -382,13 +388,17 @@ function ChatInputForChatImpl(
             draftSkipPersistRef.current = false;
             return;
         }
+        // An unresolved session must not write: the draftKey's "anonymous"
+        // placeholder switching to the real id would let this empty first
+        // write erase the draft already stored under that id.
+        if (auth && auth.authLoading) return;
         const aside = setAsideRef.current;
         writeChatDraft(draftKey, {
             text: aside?.value ?? value,
             docs: aside?.docs ?? attachedDocs,
             workflow: aside ? aside.workflow : selectedWorkflow,
         });
-    }, [value, attachedDocs, selectedWorkflow, draftKey]);
+    }, [value, attachedDocs, selectedWorkflow, draftKey, auth]);
     const {
         profile,
         loading: profileLoading,

@@ -561,12 +561,15 @@ describe("ChatThread composer", () => {
         renderThread({ onSubmit });
 
         await waitFor(() =>
-            expect(onSubmit).toHaveBeenCalledWith({
-                role: "user",
-                content: "waiting",
-                model: "gpt-5.6-sol",
-                reasoning: "high",
-            }),
+            expect(onSubmit).toHaveBeenCalledWith(
+                {
+                    role: "user",
+                    content: "waiting",
+                    model: "gpt-5.6-sol",
+                    reasoning: "high",
+                },
+                { strict: true },
+            ),
         );
         expect(readChatQueue(queueKey).entries).toEqual([]);
     });

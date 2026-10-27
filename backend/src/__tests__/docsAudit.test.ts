@@ -24,8 +24,12 @@ const SRC = resolve(__dirname, "..");
 const REPO = resolve(__dirname, "../../..");
 
 const ROUTE_KEYS = [
+  // Any mount that names a path counts as a route: app.use("path", router),
+  // app.use("path", middleware, router), app.use("path", handler). A tighter
+  // regex that demands a single identifier silently lets a route escape the
+  // audit the day a middleware gets inserted before the router.
   ...readFileSync(join(SRC, "app.ts"), "utf8").matchAll(
-    /^\s*app\.use\(\s*["'](\/[^"']*)["']\s*,\s*[A-Za-z_$][\w$]*\s*\)/gm,
+    /^\s*app\.use\(\s*["'](\/[^"']*)["']/gm,
   ),
 ].map((match) => `route:${match[1]}`);
 

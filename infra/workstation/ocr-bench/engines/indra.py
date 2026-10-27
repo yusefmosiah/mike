@@ -10,6 +10,7 @@ differs.
 import json
 import os
 import sys
+import time
 
 try:
     from indra_ocr import IndraOCR  # wheel: datalab-indra-ocr
@@ -18,7 +19,9 @@ except ImportError:
     sys.exit(0)
 
 engine = IndraOCR()
+start = time.perf_counter()
 result = engine.recognize(sys.argv[1])
+engine_ms = (time.perf_counter() - start) * 1000
 texts, confs = [], []
 for line in getattr(result, "lines", result if isinstance(result, list) else []):
     texts.append(line.text if hasattr(line, "text") else line[0])
@@ -29,4 +32,5 @@ print(json.dumps({
     "text": "\n".join(texts),
     "confidence": (sum(confs) / len(confs)) if confs else None,
     "cells": None,
+    "engine_ms": engine_ms,
 }))

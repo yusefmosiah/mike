@@ -43,17 +43,18 @@ export async function setDocumentConfidential(
     .maybeSingle();
   if (error) return internalFailure(error);
   const doc = data as ConfidentialDocumentRow | null;
-  // A non-owner cannot read a standalone document at all, so "not found" is
-  // the honest answer and avoids turning this route into an existence oracle.
-  if (!doc) return failure("not_found", "Document not found");
+  // Ownership is checked before the project/workflow rule on purpose: for a
+  // UUID the caller knows, "conflict" would confirm a container document
+  // exists while "not found" leaves standalone docs indistinguishable from
+  // missing ones — the no-oracle rule this route keeps.
+  if (!doc || !doc.user_id || doc.user_id !== userId) {
+    return failure("not_found", "Document not found");
+  }
   if (doc.project_id || doc.workflow_id) {
     return failure(
       "conflict",
       "Only standalone documents can be marked confidential.",
     );
-  }
-  if (!doc.user_id || doc.user_id !== userId) {
-    return failure("not_found", "Document not found");
   }
 
   const { error: updateError } = await db
