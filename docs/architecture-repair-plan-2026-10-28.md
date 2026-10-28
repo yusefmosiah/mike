@@ -1,24 +1,35 @@
 # Architecture repair plan
 
-Date: 2026-10-28. Status: proposed execution plan awaiting independent review.
-The owner authorized: commit this plan, review it with Devin and DeepSeek,
-integrate justified findings, commit the reviewed plan, then delegate its
-bounded implementation with the parent assistant orchestrating. Implementation
-starts only after that sequence. Open decisions are not implicit authority.
+Date: 2026-10-28. Status: reviewed plan (Devin and DeepSeek closure reviews
+accepted the first-round integration); updated the same day with evidence from
+the mobile investigation. The owner authorized: commit this plan, then delegate
+its bounded implementation with the parent assistant orchestrating. Open
+decisions are not implicit authority.
 
 ## Starting receipt
 
-- Local HEAD: `0531331fa15446705d4eb619e008c0e0f1cfa569`; working tree clean
-  immediately before this documentation change.
-- Read-only investigation observed staging source marker `67af87a1`.
-- The owner reports that mobile backgrounding stops processing. A client
-  premature-EOF defect was reproduced, but the particular incident has not been
-  correlated to a server turn. Do not claim the incident's cause is proved.
-- The podcast trace in conversation `509a8d5f-5b0a-4908-9250-5f8ad533913e`
-  exposed incompatible transcription instructions, missing runtime dependencies,
-  and undiscoverable speech packages. It ultimately built audio without ASR QA.
-- No application source, remote state, or infrastructure was changed during
-  the investigation or in writing this plan.
+- Plan base: `0531331f`; the plan commit is `4f4581ee`. The timeout removal
+  `4aaadb29` landed afterward and is deployed to staging (CI and deploy green;
+  running frontend and source marker both `4aaadb29`).
+- Owner observation, confirmed on the phone: switching apps during a turn
+  produced a failed or cancelled-looking turn, for dictated and typed prompts
+  alike. After `4aaadb29` was deployed the owner re-tested and reported that it
+  worked. This is one passing comparison, not a proof of the whole class.
+- Observed server facts. A typed turn (chat `6bd07688-8131-4c83-95aa-cbc7b572069b`)
+  completed on the server (all 51 execution tasks completed, no abort request,
+  7,401 answer characters stored) while the phone showed two steps and a generic
+  error. Four turns in `509a8d5f-5b0a-4908-9250-5f8ad533913e` were genuinely
+  aborted (`abortRequested`), with no stored reason; their initiator is
+  unidentified. The stored label "Cancelled by user" is not evidence of a Stop
+  press.
+- The podcast trace in that conversation exposed incompatible transcription
+  instructions, missing runtime dependencies, and undiscoverable speech
+  packages. It ultimately built audio without ASR QA.
+- Sentry is not configured; there is no client exception history to consult.
+- The working tree held uncommitted edits to this plan only. No other
+  application source, remote state, or infrastructure was changed by the
+  investigation, except the owner-approved removal of unused container images
+  on node-a (3,016 to 8 images; root disk 93% to 83%).
 
 ## Settled owner decisions
 
@@ -64,25 +75,89 @@ changing existing project memberships or broadening other users' permissions.
 
 ### 1. Repair mobile turn continuity
 
-Separate server execution from the phone's SSE reader. In the existing reader,
-EOF without `[DONE]` returns normally; `readAssistantTurn` consequently skips
-reconnection and the hook finalizes locally. The server close handler only
-unsubscribes the reader; it does not cancel the run.
+Separate server execution from the phone's SSE reader. The server close handler
+in `streamRuns` only unsubscribes the reader; it does not cancel the run (the
+older `assistantSse` path is route-specific and aborts; do not generalize).
 
-- Correlate a controlled background/foreground scenario with server turn ID,
-  execution progress, and stored result before selecting the full fix.
+Landed: `4aaadb29` removed the 90-second client stream-idle deadline and its
+unused machinery. A silent connection no longer fails the reader. It is not a
+general fix and does not repair the gaps below.
+
+Known gaps, in the order they hurt:
+
+- A finished run's replay buffer is retained 60 seconds
+  (`FINISHED_RUN_RETENTION_MS`). After that a reconnect to a completed turn gets
+  `404 turn_not_found`; the reader retries 404s for 15 seconds and then surfaces
+  its original stream error although the answer is safely stored.
+- A finished local turn stays attached to the mounted hook until the thread
+  changes, and `overlayTurn` replaces a same-ID saved row with it, so a stale
+  error can mask the saved answer on a later history load.
+- No foreground reconciliation: nothing asks the server for the turn's state when
+  the app returns, except an opt-in background-agents refresh.
+- EOF without `[DONE]` returns normally, so `readAssistantTurn` skips
+  reconnection and the hook finalizes locally.
+- Abort propagation in the reconnect loop replaces a Stop that lands during a
+  wait or re-attach with the earlier stream error (pinned by an existing test
+  that must be revisited, not preserved as incidental behavior).
+- Native voice: backgrounding ends a voice session as an interruption, and the
+  web handler can turn an interrupted answer into the chat's cancellation
+  callback, which sends the server an explicit Stop. The callback is not bound
+  to the interrupted turn's identity. Conditional suspect for the four genuine
+  aborts; unproven. Typed and dictated turns must never be stopped by it.
+- The cause of the four genuine aborts is unattributed. Durable abort records
+  carry no reason. Candidate sources found by reading: the explicit Stop route,
+  run lifetime/idle deadlines, a tool-failure halt, Pi owner cascades, and the
+  voice path above. None is linked to the incident by evidence.
+
+Work:
+
+- Reconcile with the server on return and on reader failure: ask the existing
+  `active_turn` / messages lookup for the turn's state. Running: re-attach by
+  cursor. Completed or stopped: load the saved answer. Never infer task failure
+  from connection silence and never start another generation to repair a broken
+  observation connection.
+- Resolve a `404 turn_not_found` for a turn the transcript already holds to the
+  saved answer, not to an error. A finished local overlay must yield to an
+  authoritative saved row for the same message ID.
 - Treat premature EOF as incomplete delivery, not successful completion;
-  reconnect to the existing turn using the existing replay protocol.
-- Preserve explicit Stop behavior. Do not resubmit the prompt or start another
-  generation to repair a broken observation connection.
+  reconnect to the existing turn using the existing replay protocol. Require
+  completion markers only for assistant-turn readers that promise them; preserve
+  other consumers of the shared SSE parser that legitimately end at EOF.
+- Preserve explicit Stop. Revisit the reconnect loop so Stop surfaces as Stop.
+- Bind a voice interruption's cancellation to the turn it interrupted.
+  Background audio interruption must not Stop a turn it did not start.
+- Give durable aborts an attributable source (Stop route, deadline, tool halt)
+  using the existing redacted logging helpers, so the next incident is
+  explainable. This is an observer upgrade, not a new subsystem.
 - Investigate pre-admission disconnects separately: a reader without a turn ID
   cannot simply resume by cursor.
+- The remaining client deadlines from `5ff405f9` are not part of this repair and
+  change only on evidence: the 45-second first-response race does not cancel the
+  losing request, so a late acceptance can follow a reported failure; the
+  30-second timeout covers every authentication request, including account
+  mutations, not only the session read. Review each separately.
+- Delivery contract shared with workstation errors: restore a queue entry only
+  after a confirmed refusal before persistence. After admission/persistence,
+  errors are terminal SSE plus a stored failed turn, not an HTTP rejection
+  that invites resubmission. An ambiguous disconnect stays paused for existing
+  turn/transcript reconciliation; never automatically resend an unknown outcome.
+  Reuse the existing active-turn/messages lookup, not a new retry subsystem.
+  Today every send error restores the entry (`useChatQueue.drain`), and a
+  terminal error frame does not pause the queue (it does not advance
+  `turnFailedAt`). Both are code-path findings from review, not reproduced
+  incidents. Keep one authoritative in-memory queue state and persist it best
+  effort; storage must not be the source for mutations.
+  Acceptance includes queued pre-admission refusal, post-admission workstation
+  failure, and a lost connection before the first turn-ID frame.
 
 Acceptance: on the actual mobile surface, background during generation and
-code execution; foreground and recover the same turn/result. Also exercise
+code execution; foreground and recover the same turn/result, including after the
+replay window has expired (return after more than a minute). Also exercise
 connection loss, normal completion, and explicit Stop. Prove no duplicate
 user message, generation, or tool side effect. If the server itself stops,
 identify that additional failure rather than declaring the reader fix complete.
+A physical-device result is required for the mobile claim; a browser smoke is
+supporting evidence only.
 
 ### 2. Make workstation capabilities real and discoverable
 
@@ -104,6 +179,26 @@ model assets, skill scripts, and capability description.
 - Preserve one VM assignment per user. Remove silent tool-less continuation
   on assignment/configuration failures; report provisioning/capacity problems
   intentionally. No new VM-per-project scheme or automatic capacity platform.
+- Apply explicit provisioning failure to execution that requires the account
+  workstation, not deliberate guest approval waits or orphaned-host
+  restrictions. An approved guest whose turn needs a host that failed to
+  provision follows section 1's terminal-SSE contract. Preserve guest gating
+  without granting execution or turning the existing wait into a new hard
+  failure.
+  Preserve non-production local-kernel configuration for development/tests.
+  Leave nullable workstation resolution for non-generation callers such as
+  vault lookup intact. History, document, and publication reads must still work
+  while provisioning is unavailable. Surface failures at the phase described
+  in section 1; do not introduce post-persistence HTTP refusal.
+- The supported entry point is the actual persistent kernel's Python, with
+  subprocess instructions using its compatible interpreter/environment.
+  Record runtime versions, model identity/checksum, and license with the
+  capability. A layer-specific interpreter must not masquerade as kernel state.
+  Exercise discovery in a real agent turn, not only a shell import demo.
+- Use local/disposable development resources for new VM acceptance. Node-a VM
+  rebuilds, package installation, and guest mutation remain owner-gated; if a
+  required device/VM is unavailable, report that verification boundary rather
+  than substituting a mocked success.
 
 Acceptance: a fresh representative user VM, not just the manually repaired
 owner VM, runs synthesis and a real transcription round trip using documented
@@ -123,6 +218,12 @@ ASR step counted as success.
 - Use a NEW forward migration for shipped schema changes. Never delete or
   rewrite the shipped confidential migrations or falsify the migration ledger.
   Remove the obsolete sweep index with the final schema change.
+  Update `search_library_documents`'s returned row shape and every publication
+  projection of `confidential` in the same cutover. Code must stop depending on
+  the column before a destructive migration is applied. Recheck flags just
+  before application; the read-only 2026-10-28 staging count was zero, not an
+  enduring disposition or migration authority. A guard must refuse deletion
+  if flagged rows now exist without owner-approved disposition/recovery.
 - Correct docs, tests, and the misleading 'stays in this chat' promise. Do not
   replace the feature with another per-file switch.
 
@@ -138,23 +239,33 @@ The filesystem and document tools currently disagree: the mirror includes
 readable projects/library/templates, while tools rely on an assembled per-chat
 store. Remove that reachability mismatch without making every file prompt text.
 
-- Resolve requested document IDs against user authorization, regardless of
-  whether a thread already attached them. Preserve stable identity/version and
-  citation behavior across filesystem and tool reads.
-- Keep the turn's environment instructions small: stable paths, discovery,
-  and callable signatures; no recency-selected bodies. Determine whether any
-  additional name/path index is needed before adding one.
-- Define cross-project tool search as search over the requesting user's
-  authorized documents; an active project may provide a task default but not
-  silently erase other authorized reach.
+- Account-wide expansion applies only in private owner execution. Resolve IDs
+  using the ACTING SENDER's authorization on every lazy load, never the chat
+  starter's authority. Shared/project-audience/guest turns keep their existing
+  referenced/project document scope and authorization checks; do not enable
+  account-wide listing, search, or reads there. This is preservation of the
+  shared boundary, not a new shared-chat design.
+- Preserve stable document/version identity and citation behavior across file
+  and tool reads. Reuse the existing mirror inventory/manifest where practical
+  for path-to-ID discovery; choose and document that mapping before coding
+  resolution. No second index of document bodies and no NAS scope.
+- Keep environment instructions small: stable paths, discovery and callable
+  signatures, not recency-selected bodies. In private execution, search covers
+  the actor's authorized projects/library; the active project is a task default,
+  not an additional user-level permission boundary.
 - Preserve the distinction between consulting another project's file and the
   existing project picker operation that moves standalone documents or copies
   documents from another project.
 
-Acceptance: a member of A and B can find/read/cite authorized material from both
-in an ordinary or project conversation. A user with only A cannot retrieve B
-through tools or their VM mirror. Project invitations and membership checks
-continue to work. Verify original and derived files, not only picker labels.
+Acceptance: in private owner execution, a member of A and B can find/read/cite
+authorized material from both, and original and derived files resolve, not only
+picker labels. A user with only A cannot retrieve B through
+tools or the mirror. In shared/project-audience/guest turns, an unattached
+host-private OR sender-private document must not become newly listable,
+searchable, readable, or citable through this change. Preserve project-scope
+reads, explicit authorized references, invitations and membership checks.
+Guest VM access already granted by the existing design remains an acknowledged
+deferred risk; this repair must not broaden it.
 
 ### 5. Shelve shared-chat redesign; preserve existing safeguards
 
@@ -178,10 +289,19 @@ must not silently expose account-wide files to guests or shared transcripts.
 The linked context reports that repeated revisions of generated documents
 collide because version-number allocation omits `source = 'generated'`.
 Verify the function and reproduce this independently before patching it.
+Verified source mechanism: the latest RPC locks the document row `for update`,
+then computes max only over upload/user_upload/assistant_edit; generated
+replacements pass a null version number. Prefer source-independent numbering
+over extending a brittle source list, after checking all source semantics.
+Preserve the lock, explicit numbering, idempotent same-version behavior,
+grants and hardening. Use the complete current function in a new migration.
 
-Acceptance: create a generated document, revise it at least three times, and
-observe distinct increasing versions. An explicitly followed publication serves
-the new versions through the same link.
+Acceptance: reproduce through `save_to_mike` replacement (not only
+`edit_document`), revise a generated document at least three times, and observe
+distinct increasing versions. Exercise two concurrent replacements and mixed
+source history. An explicitly followed publication serves updated contents
+through the same link. Server and UI already default to following; preserve
+that behavior rather than rebuilding it.
 
 New links follow by default. Normal publishing should say that saved changes
 update the link, without forcing an equal-weight live-versus-frozen decision.
@@ -189,14 +309,46 @@ Keep the frozen-copy option secondary, preserve existing frozen publications,
 and retain revocation/expiry behavior. Verify both modes. Do not silently
 convert stored links.
 
+### 7. Composer and queue behavior
+
+Owner-reported, in scope:
+
+- Queued messages must not show the model name. Model and effort stay in the
+  entry because they decide the eventual send; this is display only. Show only
+  what helps the owner recognise the entry, such as its text and attachment
+  count, in the existing queue strip.
+- Dictation must work while a response is running, queuing the dictated message
+  as typing does. Today the dictation hook is created disabled while a response
+  runs and the microphone button is disabled. Finishing a dictation must use the
+  existing queue path and must never press Stop. Hands-free voice mode stays
+  unavailable while a response is running.
+- The Home screen composer must not restore a message after it was sent and
+  created a thread (owner-reported). Suspected mechanism, not yet reproduced:
+  sending clears React state, but the persisted draft is cleared only by a
+  later effect, and navigation may unmount the composer first. Reproduce before
+  fixing. The fix clears the stored draft when the message is handed off, and
+  only then; an unsent or refused message must still be kept. Separately, the
+  project composer remounts when a new chat gains its id and the text stays
+  stored under the old key (a code-path finding); carry the draft across that
+  key change.
+- Remove queue metadata nothing consumes (`stampedAt`, pause time, the
+  `sending` status) only if the slice is already editing those files; do not
+  make that cleanup a goal.
+
+Acceptance: with a response running, dictate a message and see it queued and
+sent when the response ends, without Stop. A queued entry shows no model name.
+Send from Home, create the thread, return Home: the composer is empty. Type,
+leave without sending, return: the text is restored. A refused send (no model,
+rejected key) keeps its text. Verify on the phone.
+
 ## Preserve, defer, and guard against repeats
 
 - Preserve useful queue/draft behavior, media rendering, publication management,
   layers, and docs audit unless a specific reproduced defect requires a fix.
 - Existing review is not an acceptance receipt. In particular, queue failures
   before admission versus after persistence need different handling to avoid
-  silent loss OR duplicate submissions. Check this alongside turn-continuity
-  work rather than assuming the previous strict-throw patch solved it.
+  silent loss OR duplicate submissions; section 1 owns that contract and
+  section 7 owns the composer behavior that sits on top of it.
 - Do not add automatic restart loops, project encryption/sandboxes, project
   hiding flags, a new classification scheme, or NAS features in this repair.
 - Membership revocation can stop future authorized retrieval and clean managed
@@ -220,15 +372,46 @@ acceptance. Plan rollback before landing each slice. For data removal, preserve
 a recovery export before applying the forward migration; never restore a
 misleading privacy promise as an emergency fallback.
 
+## Delegation and landing contracts
+
+Independent slices: A continuity/queue delivery, B workstation/runtime/skills,
+C confidentiality UI/API removal, D private document resolution + sweep removal,
+E generated-version allocation + secondary publication UI, F composer and queue
+behavior (section 7). A and F both edit `useChatQueue.ts`, `chatQueue.ts` and
+`ChatInput.tsx`, so one agent owns both and does them in that order; F's
+acceptance is separate. C and D land together after account-resolution and
+shared-scope checks; do not ship an intermediate tool-discovery regression. E
+may proceed independently.
+
+Parent owns final integration and all canonical commits. Agents do not commit,
+push, migrate remote databases, deploy, or run builds/lint/tests/formatters
+mid-flight. They may perform safe throwaway reproduction/smoke probes, preserve
+consumer-visible regression tests, and return exact verification commands.
+Parent runs the combined checks once the mutation wave is finished.
+
+Shared files have one named owner: D owns `contextBuilders.ts` and
+`toolDispatcher.ts`; B owns `streaming.ts` integration; C sends flag-removal
+requirements to those owners. C owns confidentiality SQL removal, E owns
+version SQL; parent reserves distinct migration sequences before either writes.
+Use existing typed boundaries; reviewer-suggested `ConversationAudience`,
+`DocumentRef`, or `WorkstationAvailability` frameworks are not requirements.
+
+No push that auto-deploys a destructive migration until target, latest flag
+inventory, recovery/disposition and deployment authority are reconciled.
+Available local implementation and verification continue without that authority.
+
 ## Current state and next action
 
-- Plan proposed for independent review; no implementation started.
-- After review and integration, delegate bounded slices using the configured
-  task model; the parent owns integration, final checks, and honest receipts.
-- Main uncertainty: the specific mobile incident's server fate. Shared-chat
-  redesign is deferred, not a prerequisite for the single-user repairs.
-- First implementation slice after review: reproduce mobile backgrounding with
-  correlated client/server turn identity, then repair existing continuity.
+- Plan reviewed (closure reviews accepted) and updated with the day's evidence.
+  The only implementation landed is `4aaadb29`, the idle-deadline removal.
+- Delegate bounded slices using the configured task model; the parent owns
+  integration, final checks, and honest receipts.
+- Main uncertainty: what initiated the four genuine aborts, and whether the
+  owner's one passing comparison generalizes. Shared-chat redesign is deferred,
+  not a prerequisite for the single-user repairs.
+- First wave: A+F (continuity, queue, composer), B, E in parallel. C+D after
+  their joint landing contract is met. Confidentiality data removal waits for
+  the flag inventory and owner disposition.
 - No whole-stack revert. No hidden expansion of this plan into new features.
 
 ## Investigation references
