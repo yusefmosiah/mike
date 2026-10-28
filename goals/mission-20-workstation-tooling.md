@@ -1,9 +1,29 @@
 ---
-readiness: owner direction 2026-10-27 ("design and implement" the published
-workstation-tooling note, all of it, including the machine work); phased
+readiness: historical record; not executable pending reconciliation with
+  docs/architecture-repair-plan-2026-10-28.md
 ---
 
 # Mission 20: Workstation tooling, and the two things after it
+
+## Authority correction — 2026-10-28
+
+The owner clarified that each client organization has its own installation,
+each user has one VM with coding always available, and projects are retained
+for collaboration and membership rather than isolation between that user's
+conversations. The external NAS archive is out of scope.
+
+Item 7 below is an **agent-authored interpretation, not the owner's requested
+confidentiality feature**. Its confidential flag and automatic document sweep
+are superseded; do not implement or restore them from this historical list.
+The earlier blanket statement that the full list stood does not override this
+correction. Other delivered work is not automatically accepted or reverted.
+
+The current repair plan is
+[`docs/architecture-repair-plan-2026-10-28.md`](../docs/architecture-repair-plan-2026-10-28.md).
+It separates settled direction, defects, open choices, and acceptance checks.
+The owner authorized review followed by bounded implementation under that plan;
+this historical mission is not authority for new work or deployments.
+
 
 Source: the published note "Workstation tooling, and the two things after it"
 (2026-10-26), written against a guest that had spent a day hand-installing

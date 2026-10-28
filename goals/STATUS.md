@@ -1,5 +1,16 @@
 # Status and Agenda
 
+## Current repair planning — 2026-10-28
+
+See [Architecture repair plan](../docs/architecture-repair-plan-2026-10-28.md)
+for the owner's clarified single-client-installation, per-user-VM, and
+collaborative-project direction, the investigation findings, and ordered repair
+acceptance checks. The owner authorized independent review followed by bounded,
+orchestrated implementation once the reviewed plan is committed. Mission 20's
+confidential-flag requirement is superseded. Historical receipts and agenda
+below do not override the current plan.
+
+
 Updated 2026-10-10 (Missions 5 and 6 built, staging, upstream picks, model costs); 2026-10-09 with the owner's direction for the next missions. First
 written 2026-10-07, after an unattended overnight run that marked every
 station of `goals/private-firm-deployment-spine.md` complete. It wasn't; the
