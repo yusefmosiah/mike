@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -223,8 +223,10 @@ describe("kernel session", () => {
 });
 
 describe("kernel bundle", () => {
-  it("installs itself under the VM home and starts from there", async () => {
+  it("installs itself under the VM home, starts from there, and imports ~/pylibs without sys.path patches", async () => {
     const home = realpathSync(mkdtempSync(path.join(tmpdir(), "mike-kernel-home-")));
+    mkdirSync(path.join(home, "pylibs"), { recursive: true });
+    writeFileSync(path.join(home, "pylibs", "guest_helper.py"), "VALUE = 42\n", "utf8");
     const bundle = kernelBundle();
     const command = kernelStartCommand(bundle);
     // One argument of an exec is capped at 128 KiB on Linux; keep well clear.
@@ -234,8 +236,8 @@ describe("kernel bundle", () => {
     );
     sessions.push(session);
     expect(existsSync(path.join(home, ".mike", "kernel", bundle.hash, "mike_kernel", "repl.py"))).toBe(true);
-    const outcome = await session.execute("import os\nos.getcwd()", { timeoutMs: 5_000, onHostRequest: echo });
-    expect(outcome.result).toBe(JSON.stringify(home).replace(/"/g, "'"));
+    const outcome = await session.execute("import os, guest_helper\n(os.getcwd(), guest_helper.VALUE)", { timeoutMs: 5_000, onHostRequest: echo });
+    expect(outcome.result).toBe(`(${JSON.stringify(home).replace(/"/g, "'")}, 42)`);
     await session.shutdown();
   });
 });

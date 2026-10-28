@@ -84,7 +84,12 @@ import { safeError } from "../../../lib/safeError";
 import { getWebSnapshot } from "../../../lib/search/engine";
 import { storeCitationSnapshot } from "../../../lib/citationSnapshots";
 import { attachWebSnapshots } from "./webSnapshots";
-import { resolveWorkstation, snapshotOncePerTurn, workstationCapabilitiesSection } from "../../../lib/workstation";
+import {
+  resolveWorkstation,
+  snapshotOncePerTurn,
+  workstationCapabilitiesSection,
+  type WorkstationProvisioningFailure,
+} from "../../../lib/workstation";
 import { vaultEnabled } from "../../../lib/vault/client";
 import { publishingConfig } from "../../publications/publications.service";
 import { listOnlineDevices, takeComputerScreenshot, type ComputerImage } from "../../computers/computers.service";
@@ -626,10 +631,14 @@ export async function runLLMStream(params: {
   const workstationOwner = params.workstationUserId === undefined ? userId : params.workstationUserId;
   const guestCode = workstationOwner && workstationOwner !== userId ? params.guestCode ?? null : null;
   const isGuest = !!workstationOwner && workstationOwner !== userId;
+  const workstationProvisioning: {
+    failure: WorkstationProvisioningFailure | null;
+  } = { failure: null };
   const workstation = !workstationOwner || (isGuest && !guestCode)
     ? null
-    : await resolveWorkstation(db, workstationOwner);
-  // A guest the host has not allowed for the whole thread waits for the host
+    : await resolveWorkstation(db, workstationOwner, undefined, (failure) => {
+        workstationProvisioning.failure = failure;
+      });
   // before their first cell in each message (workstationGate).
   let guestAllowed = !isGuest || !!guestCode?.standing;
   // A guest runs code in the host's workstation but cannot save its files
@@ -1012,6 +1021,9 @@ export async function runLLMStream(params: {
   let waitingOnUser = false;
   try {
     throwIfAborted(signal);
+    if (workstationProvisioning.failure && !kernelLauncher && guestAllowed) {
+      throw new UserFacingError(workstationProvisioning.failure.message);
+    }
     // A guest working in the host's VM could read anything lent to it: the
     // vault revokes the VM's leases now, lends it nothing until this turn
     // finishes, and keeps them paused until the host allows them again. If

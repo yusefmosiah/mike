@@ -205,3 +205,8 @@ export function syncWorkspaceOncePerTurn(
   }
   return pending;
 }
+
+/** Clears the per-turn sync cache after a skill save or install so the next cell sees the new files. */
+export function invalidateWorkspaceTurnSync(turn: object | undefined): void {
+  if (turn) synced.delete(turn);
+}

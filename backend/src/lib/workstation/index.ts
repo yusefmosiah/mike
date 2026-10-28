@@ -1,5 +1,9 @@
 /** Workstation VMs: running commands in an employee's VM (Mission 13). */
-export { clearAssignmentCache, resolveWorkstation } from "./assignments";
+export {
+  clearAssignmentCache,
+  resolveWorkstation,
+  type WorkstationProvisioningFailure,
+} from "./assignments";
 export { targetForVm, workstationFor, workstationPool } from "./config";
 export {
   Capped,

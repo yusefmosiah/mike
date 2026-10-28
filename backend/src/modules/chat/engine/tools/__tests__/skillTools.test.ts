@@ -161,6 +161,13 @@ describe("after a save", () => {
     expect(message.message).toContain("Saved the skill 'deposition-summary' as version 3.");
     const copy = JSON.parse(skillSavedMessage({ ok: true, saved: { ...saved, copiedFrom: "Firm NDA" }, body: "B" }, false));
     expect(copy).toMatchObject({ copied_from: "Firm NDA", message: expect.stringContaining("own copy") });
+    const stale = JSON.parse(
+      skillSavedMessage({ ok: true, saved, body: "B" }, false, false),
+    );
+    expect(stale).toMatchObject({
+      workstation_refreshed: false,
+      message: expect.stringContaining("~/skills could not be refreshed"),
+    });
 
     const store: WorkflowStore = new Map();
     rememberSkill(store, { ok: true, saved, body: "Steps." });

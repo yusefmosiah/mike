@@ -64,6 +64,6 @@ export function kernelStartCommand(bundle: KernelBundle, python = "python3"): st
   return [
     `test -f ${dir}/mike_kernel/repl.py || ${python} -c ${quote(INSTALLER)} ${dir} ${payload}`,
     `cd "$HOME"`,
-    `PYTHONPATH=${dir} exec ${python} -u -m mike_kernel`,
+    `PYTHONPATH=${dir}:"$HOME/pylibs" exec ${python} -u -m mike_kernel`,
   ].join(" && ");
 }

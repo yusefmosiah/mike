@@ -25,7 +25,8 @@ export function workstationCapabilitiesSection(): string {
         )
         .join("\n");
     return `# Workstation capabilities
-Shell tools on PATH: bash, git, Node 22, ffmpeg, jq, yt-dlp. Python 3 with pandas, matplotlib, Pillow, pypdf, pdfplumber, openpyxl, python-docx and friends for data and documents.
+Platform: x86-64 Linux CPU guest (no Apple GPU/MLX). Shell tools on PATH: bash, git, Node 22, ffmpeg, jq, yt-dlp.
+Python entry point: the persistent kernel (\`sys.executable\`, Python 3 with pandas, matplotlib, Pillow, pypdf, pdfplumber, openpyxl, python-docx, and youtube-transcript-api for data and documents) puts \`~/pylibs\` on \`PYTHONPATH\` for extra wheels; run skill scripts with \`sys.executable\` so they share the kernel's environment.
 save_to_mike accepts: ${DOCUMENT_FORMATS.office}; images (${DOCUMENT_FORMATS.image}); plain text (${DOCUMENT_FORMATS.text}); HTML pages (${DOCUMENT_FORMATS.html}); audio (${DOCUMENT_FORMATS.audio}); video (${DOCUMENT_FORMATS.video}).
 Heavier tools are not installed; check them out of the Nix store on demand — they download through the proxy the first time and are instant after. \`layer list\` shows every entry:
 ${layers}

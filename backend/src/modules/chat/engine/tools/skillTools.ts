@@ -110,10 +110,18 @@ export async function runInstallSkill(
 }
 
 /** The tool result the model sees for a save or an install. */
-export function skillSavedMessage(result: Extract<SkillToolResult, { ok: true }>, installed: boolean): string {
+export function skillSavedMessage(
+  result: Extract<SkillToolResult, { ok: true }>,
+  installed: boolean,
+  workstationRefreshed?: boolean,
+): string {
   const { saved } = result;
   const what = installed ? "Installed" : "Saved";
   const version = saved.created ? "" : ` as version ${saved.versionNumber}`;
+  const staleWarning =
+    workstationRefreshed === false
+      ? " Note: ~/skills could not be refreshed in the workstation right now, so ~/skills still holds the earlier copy; read the updated skill with read_workflow instead of running its older files from ~/skills."
+      : "";
   return JSON.stringify({
     ok: true,
     skill_id: saved.skillId,
@@ -122,10 +130,14 @@ export function skillSavedMessage(result: Extract<SkillToolResult, { ok: true }>
     created: saved.created,
     ...(saved.copiedFrom ? { copied_from: saved.copiedFrom } : {}),
     ...(result.sourceUrl ? { source: result.sourceUrl } : {}),
+    ...(workstationRefreshed !== undefined
+      ? { workstation_refreshed: workstationRefreshed }
+      : {}),
     message:
       `${what} the skill '${saved.name}'${version}.` +
       (saved.copiedFrom ? ` You could not edit '${saved.copiedFrom}', so this is the user's own copy.` : "") +
-      " Every chat lists it from its next turn, and the Workflows page shows it with its versions.",
+      " Every chat lists it from its next turn, and the Workflows page shows it with its versions." +
+      staleWarning,
   });
 }
 

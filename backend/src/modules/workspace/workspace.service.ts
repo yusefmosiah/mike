@@ -7,5 +7,11 @@
 //   workspace.save.ts  — a workstation file into a document or a version
 
 export { buildWorkspaceView, safeSegment, uniqueName, type WorkspaceFile, type WorkspaceView } from "./workspace.view";
-export { syncSkills, syncWorkspace, syncWorkspaceOncePerTurn, type WorkspaceSyncResult } from "./workspace.sync";
+export {
+  invalidateWorkspaceTurnSync,
+  syncSkills,
+  syncWorkspace,
+  syncWorkspaceOncePerTurn,
+  type WorkspaceSyncResult,
+} from "./workspace.sync";
 export { saveToMike, workspaceRelative, MAX_SAVE_BYTES, type SaveToMikeInput, type SaveToMikeResult } from "./workspace.save";

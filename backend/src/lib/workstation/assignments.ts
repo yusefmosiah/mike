@@ -26,6 +26,10 @@ import { requestWipe, type SnapshotResult } from "./snapshot";
 type Env = Record<string, string | undefined>;
 type Row = { vm: string; user_id: string; temporary: boolean; last_used_at: string; wiping: boolean };
 export type WipeVm = (vm: string) => Promise<SnapshotResult>;
+export type WorkstationProvisioningFailure = {
+  reason: "capacity" | "wiping" | "misconfigured" | "error";
+  message: string;
+};
 
 /** A real account's assignment never changes while the process runs, so each is read once. */
 const permanent = new Map<string, string>();
@@ -170,13 +174,20 @@ export async function poolVmFor(
   pool: string[],
   env: Env = process.env,
   wipe: WipeVm | null = hostWipe(env),
+  onFailure?: (failure: WorkstationProvisioningFailure) => void,
 ): Promise<string | null> {
   const cached = permanent.get(userId);
   if (cached) return cached;
   const existing = await touchAssignment(db, userId);
   if (existing) {
     // A VM being wiped is gone; the account gets a fresh one once it is back.
-    if (existing.wiping) return null;
+    if (existing.wiping) {
+      onFailure?.({
+        reason: "wiping",
+        message: "Your workstation is resetting right now. Please try again in a minute.",
+      });
+      return null;
+    }
     if (!existing.temporary) permanent.set(userId, existing.vm);
     return existing.vm;
   }
@@ -192,6 +203,10 @@ export async function poolVmFor(
     if (error) throw new Error("workstation pool lookup failed");
     if ((data ?? []).length >= policy.limit && !(await reclaimOne(db, pool, policy.reclaimMs, wipe))) {
       console.warn("[workstation] test accounts already hold their share of the pool", { limit: policy.limit });
+      onFailure?.({
+        reason: "capacity",
+        message: "No workstation is available right now because all workstations are in use. Please try again in a few minutes.",
+      });
       return null;
     }
   }
@@ -202,6 +217,10 @@ export async function poolVmFor(
   }
   if (!vm) {
     console.warn("[workstation] pool is used up", { size: pool.length });
+    onFailure?.({
+      reason: "capacity",
+      message: "No workstation is available right now because all workstations are in use. Please try again in a few minutes.",
+    });
     return null;
   }
   if (!temporary) permanent.set(userId, vm);
@@ -244,16 +263,38 @@ export async function resolveWorkstation(
   db: Db,
   userId: string,
   env: Env = process.env,
+  onFailure?: (failure: WorkstationProvisioningFailure) => void,
 ): Promise<WorkstationTarget | null> {
   const staticVm = staticWorkstationVm(userId, env);
-  if (staticVm !== null) return targetForVm(staticVm, env);
+  if (staticVm !== null) {
+    const target = targetForVm(staticVm, env);
+    if (!target) {
+      onFailure?.({
+        reason: "misconfigured",
+        message: "Your workstation is not configured correctly right now. Please try again in a moment.",
+      });
+    }
+    return target;
+  }
   const pool = workstationPool(env);
   if (pool.length === 0) return null;
   try {
-    const vm = await poolVmFor(db, userId, pool, env);
-    return vm ? targetForVm(vm, env) : null;
+    const vm = await poolVmFor(db, userId, pool, env, hostWipe(env), onFailure);
+    if (!vm) return null;
+    const target = targetForVm(vm, env);
+    if (!target) {
+      onFailure?.({
+        reason: "misconfigured",
+        message: "Your workstation is not configured correctly right now. Please try again in a moment.",
+      });
+    }
+    return target;
   } catch (error) {
     console.error("[workstation] could not resolve a VM", safeError(error));
+    onFailure?.({
+      reason: "error",
+      message: "Your workstation could not be reached right now. Please try again in a moment.",
+    });
     return null;
   }
 }

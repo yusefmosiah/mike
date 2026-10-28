@@ -23,7 +23,12 @@ import type {
 } from "@mike/contracts";
 import { DEFAULT_WINDOW_CHARS } from "../../../../lib/docx/render";
 import { runInWorkstation, snapshotOncePerTurn, DOCUMENT_FORMATS, WORKSTATION_LAYERS, type WorkstationTarget } from "../../../../lib/workstation";
-import { saveToMike, syncWorkspaceOncePerTurn } from "../../../workspace/workspace.service";
+import {
+  invalidateWorkspaceTurnSync,
+  saveToMike,
+  syncSkills,
+  syncWorkspaceOncePerTurn,
+} from "../../../workspace/workspace.service";
 import {
   readSkillFile,
   rememberSkill,
@@ -1100,8 +1105,16 @@ export async function runToolCalls(
             workstation: options.workstation ?? null,
             workspaceOwned: !!options.workspaceOwned,
           });
+      let workstationRefreshed: boolean | undefined;
       if (result.ok) {
         rememberSkill(workflowStore, result);
+        invalidateWorkspaceTurnSync(turnEditState);
+        if (options.workstation && options.workspaceOwned && user.id) {
+          const synced = await syncSkills(db, user, options.workstation).catch(
+            () => ({ ok: false as const, error: "" }),
+          );
+          workstationRefreshed = synced.ok;
+        }
         const applied: WorkflowAppliedResult = {
           workflow_id: result.saved.skillId,
           title: result.saved.title,
@@ -1114,7 +1127,9 @@ export async function runToolCalls(
       toolResults.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: result.ok ? skillSavedMessage(result, installing) : JSON.stringify({ error: result.error }),
+        content: result.ok
+          ? skillSavedMessage(result, installing, workstationRefreshed)
+          : JSON.stringify({ error: result.error }),
       });
     } else if (tc.function.name === "read_workflow") {
       const wfId = args.workflow_id as string;

@@ -105,12 +105,16 @@ describe("resolveWorkstation", () => {
     ]);
   });
 
-  it("gives nothing once the pool is used up, and never reuses a VM", async () => {
+  it("gives nothing once the pool is used up, reports capacity failure, and never reuses a VM", async () => {
     const db = fakeDb([
       { vm: "ws-01", user_id: "gone" },
       { vm: "ws-02", user_id: "bob" },
     ]);
-    expect(await resolveWorkstation(db as never, "carol", env)).toBeNull();
+    const onFailure = vi.fn();
+    expect(await resolveWorkstation(db as never, "carol", env, onFailure)).toBeNull();
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "capacity" }),
+    );
     expect(db.rows).toHaveLength(2);
   });
 
