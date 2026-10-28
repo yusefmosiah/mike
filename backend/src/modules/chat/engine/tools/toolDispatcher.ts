@@ -114,6 +114,7 @@ import {
   type SearchProvider,
 } from "../../../../lib/search/index";
 import {
+  expandAccountDocContext,
   spotlight,
   spotlightFilename,
   spotlightWorkflow,
@@ -290,6 +291,13 @@ export async function runToolCalls(
     memoryEdit?: MemoryEditTarget | null;
     /** The turn's abort signal: a stopped turn stops waiting on the person's computer. */
     signal?: AbortSignal;
+    /**
+     * Whether document tools may lazily resolve across the acting sender's
+     * authorized projects, library and templates (private owner execution only).
+     */
+    allowAccountDocAccess?: boolean;
+    /** Optional turn-scoped loader for account-wide documents. */
+    ensureAccountDocs?: () => Promise<void>;
   } = {},
 ): Promise<{
   toolResults: unknown[];
@@ -343,6 +351,31 @@ export async function runToolCalls(
   const courtlistenerEvents: CourtlistenerToolEvent[] = [];
   const caseCitationEvents: CaseCitationEvent[] = [];
   const mcpEvents: McpToolEvent[] = [];
+  const allowAccountDocs = options.allowAccountDocAccess === true;
+  let localAccountDocsLoading: Promise<void> | null = null;
+  const ensureAccountDocs = async () => {
+    if (!allowAccountDocs) return;
+    if (options.ensureAccountDocs) {
+      await options.ensureAccountDocs();
+      return;
+    }
+    localAccountDocsLoading ??= expandAccountDocContext(
+      db,
+      { id: userId, email: options.userEmail },
+      docStore,
+      docIndex,
+    );
+    await localAccountDocsLoading;
+  };
+  const resolveTurnDocLabel = async (rawId: string): Promise<string | null> => {
+    const existing = resolveDocLabel(rawId, docStore, docIndex);
+    if (existing) return existing;
+    if (allowAccountDocs) {
+      await ensureAccountDocs();
+      return resolveDocLabel(rawId, docStore, docIndex);
+    }
+    return null;
+  };
   const memoryUpdates: MemoryUpdatedEvent[] = [];
   const webEvents: (WebSearchEvent | WebFetchEvent)[] = [];
   // Every frame and event a call produces names the call, so the timeline
@@ -412,18 +445,23 @@ export async function runToolCalls(
       const storagePath = (result as { storage_path?: string }).storage_path;
 
       if (documentId && storagePath && docIndex) {
-        newDocLabel = stableDocLabel(documentId, new Set(Object.keys(docIndex)));
+        newDocLabel =
+          resolveDocLabel(documentId, docStore, docIndex) ??
+          stableDocLabel(documentId, new Set(Object.keys(docIndex)));
         docIndex[newDocLabel] = {
+          ...docIndex[newDocLabel],
           document_id: documentId,
           filename: dlFilename,
           version_id: versionId ?? null,
           version_number: versionNumber,
         };
         docStore.set(newDocLabel, {
+          ...docStore.get(newDocLabel),
           storage_path: storagePath,
           file_type: fileType,
           filename: dlFilename,
         });
+        clearTurnReadsForDocument(turnReadState, documentId);
       }
 
       write(
@@ -527,7 +565,7 @@ export async function runToolCalls(
 
     if (tc.function.name === PUBLISH_TOOL_NAME) {
       const label = typeof args.doc_id === "string" ? args.doc_id : "";
-      const indexed = docIndex?.[resolveDocLabel(label, docStore, docIndex) ?? label];
+      const indexed = docIndex?.[(await resolveTurnDocLabel(label)) ?? label];
       const outcome = await runPublishTool({
         db,
         args,
@@ -651,7 +689,7 @@ export async function runToolCalls(
 
     if (tc.function.name === "show_media") {
       const requested = String(args.doc_id ?? "");
-      const label = resolveDocLabel(requested, docStore, docIndex);
+      const label = await resolveTurnDocLabel(requested);
       const indexed = label ? docIndex?.[label] : undefined;
       const stored = label ? docStore.get(label) : undefined;
       const fileType = stored?.file_type ?? "";
@@ -715,7 +753,7 @@ export async function runToolCalls(
 
     if (tc.function.name === "read_document") {
       const rawDocId = args.doc_id as string;
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docId = (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const offset = typeof args.offset === "number" ? args.offset : undefined;
       const limit = typeof args.limit === "number" ? args.limit : undefined;
       const docxRead = {
@@ -801,7 +839,7 @@ export async function runToolCalls(
       });
     } else if (tc.function.name === "find_in_document") {
       const rawDocId = args.doc_id as string;
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docId = (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const docInfo = docStore.get(docId);
       // Request-scoped inline documents (currently the active Word document)
       // must enter model context only through read_document/fetch_documents.
@@ -867,6 +905,9 @@ export async function runToolCalls(
       toolResults.push({ role: "tool", tool_call_id: tc.id, content });
     } else if (tc.function.name === "find_in_documents") {
       const query = typeof args.query === "string" ? args.query : "";
+      if (allowAccountDocs) {
+        await ensureAccountDocs();
+      }
       const requested = Array.isArray(args.doc_ids)
         ? (args.doc_ids as unknown[]).filter((id): id is string => typeof id === "string")
         : [];
@@ -942,10 +983,14 @@ export async function runToolCalls(
         }),
       });
     } else if (tc.function.name === "list_documents") {
+      if (allowAccountDocs) {
+        await ensureAccountDocs();
+      }
       const list = Array.from(docStore.entries()).map(([doc_id, info]) => ({
         doc_id,
         filename: info.filename,
         file_type: info.file_type,
+        ...(info.workspace_path ? { path: info.workspace_path } : {}),
       }));
       toolResults.push({
         role: "tool",
@@ -954,9 +999,10 @@ export async function runToolCalls(
       });
     } else if (tc.function.name === "fetch_documents") {
       const rawDocIds = (args.doc_ids as string[]) ?? [];
-      const docIds = rawDocIds.map(
-        (id) => resolveDocLabel(id, docStore, docIndex) ?? id,
-      );
+      const docIds: string[] = [];
+      for (const id of rawDocIds) {
+        docIds.push((await resolveTurnDocLabel(id)) ?? id);
+      }
       const parts: string[] = [];
       // One budget for the whole call: five long documents must not arrive
       // as five full windows at once. Each gets a share, and its
@@ -1795,7 +1841,7 @@ export async function runToolCalls(
       }
     } else if (tc.function.name === "check_citations" && docIndex) {
       const rawDocId = args.doc_id as string;
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docId = (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const indexed = docIndex[docId];
       let content: Record<string, unknown>;
       if (!indexed) {
@@ -1830,7 +1876,7 @@ export async function runToolCalls(
     } else if (tc.function.name === "edit_document" && docIndex) {
       const rawDocId = args.doc_id as string;
       const parsedEdits = parseEditOps(args.edits);
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docId = (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const docInfo = docStore.get(docId);
       const indexed = docIndex?.[docId];
 
@@ -2002,7 +2048,7 @@ export async function runToolCalls(
       }
     } else if (tc.function.name === "get_diff" && docIndex) {
       const rawDocId = args.doc_id as string;
-      const docId = resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+      const docId = (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const docInfo = docStore.get(docId);
       const indexed = docIndex?.[docId];
       if (!docInfo || !indexed) {
@@ -2206,7 +2252,7 @@ export async function runToolCalls(
           ? Math.max(1, Math.min(20, Math.floor(args.count)))
           : 1;
       const sourceLabel =
-        resolveDocLabel(rawDocId, docStore, docIndex) ?? rawDocId;
+        (await resolveTurnDocLabel(rawDocId)) ?? rawDocId;
       const sourceInfo = docStore.get(sourceLabel);
       const sourceIndexed = docIndex[sourceLabel];
       const sourceFilename = sourceInfo?.filename ?? rawDocId;

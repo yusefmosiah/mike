@@ -415,11 +415,6 @@ async function processCreatedDocument(
         : "file";
   const workflowId =
     scope === "workflow" ? (destination.workflow_id as string) : null;
-  // The manifest's flag is only meaningful for a standalone document; the
-  // parser already refuses it on the other destinations, and the column
-  // default is false for everything else.
-  const confidential =
-    scope === "standalone" && destination.confidential === true;
   const documentId = file.resource_id;
   const versionId = file.id;
 
@@ -464,10 +459,6 @@ async function processCreatedDocument(
       ]);
   }
 
-  // `confidential` is written only when this job creates the row: on a
-  // retry, the flag the user set after the first attempt must survive —
-  // an upsert that rewrote it would silently re-share a document the
-  // user marked private while processing was mid-flight.
   const documentRow: Record<string, unknown> = {
     id: documentId,
     project_id: projectId,
@@ -479,7 +470,6 @@ async function processCreatedDocument(
     library_folder_id: libraryFolderId,
     workflow_id: workflowId,
   };
-  if (!file.document_created_at) documentRow.confidential = confidential;
   const { error: documentError } = await db.from("documents").upsert(
     documentRow,
     { onConflict: "id" },

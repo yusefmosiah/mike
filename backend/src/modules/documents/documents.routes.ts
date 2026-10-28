@@ -22,7 +22,6 @@ import {
     listSingleDocuments,
     getDocument,
     deleteDocument,
-    setDocumentConfidential,
     getDisplayableVersion,
     resolveZipExportDocuments,
     getDownloadUrl,
@@ -81,25 +80,6 @@ documentsRouter.delete("/:documentId", requireAuth, asyncRoute(async (req, res) 
         return void res.status(404).json({ detail: "Document not found" });
     }
     res.status(204).send();
-}));
-
-// PATCH /single-documents/:documentId
-// Owner-only visibility switch for a standalone document:
-// `{ "confidential": true }` keeps it out of the owner's other conversations
-// and pickers; false shares it. Project/workflow documents are refused —
-// their container's scope already governs visibility. Answers with the
-// document in the same shape as GET /single-documents/:documentId.
-documentsRouter.patch("/:documentId", requireAuth, asyncRoute(async (req, res) => {
-    const db = createDb();
-    const result = await setDocumentConfidential(
-        req.params.documentId,
-        res.locals.userId as string,
-        res.locals.userEmail as string | undefined,
-        req.body?.confidential,
-        db,
-    );
-    if (!result.ok) return void sendServiceFailure(res, result);
-    res.json({ document: result.data });
 }));
 
 // GET /single-documents/:documentId/display

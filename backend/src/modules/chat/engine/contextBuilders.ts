@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import path from "node:path";
 import type { Db } from "../../../lib/db";
 import { ensureDocAccess } from "../../../lib/access";
 import { attachActiveVersionPaths } from "../../../lib/documentVersions";
@@ -27,6 +28,7 @@ import type { AssistantEvent } from "./streaming";
 import { catalogWorkflowId, ensureDefaultWorkflows } from "../../../lib/workflowCatalog";
 import { describeOwnPublication } from "../../publications/publications.service";
 import { describeFromBody, skillName } from "../../../lib/skillFormat";
+import { buildWorkspaceView } from "../../workspace/workspace.service";
 
 // ---------------------------------------------------------------------------
 // Prompt-injection spotlighting helpers
@@ -1270,13 +1272,6 @@ export function buildCancelledAssistantMessage(args: {
 // Document context builder (from message file attachments)
 // ---------------------------------------------------------------------------
 
-/**
- * How many documents a chat's context carries in all: the ones this
- * conversation references first, then the owner's other standalone,
- * non-confidential documents, most recently updated first.
- */
-export const MAX_CONTEXT_DOCUMENTS = 50;
-
 export async function buildDocContext(
     messages: ChatMessage[],
     userId: string,
@@ -1284,17 +1279,6 @@ export async function buildDocContext(
     chatId?: string | null,
     messageTable = "chat_messages",
     userEmail?: string | null,
-    /**
-     * Whether this conversation is the sender's private standalone chat —
-     * the only place the auto-share sweep below may run. A guest writing in
-     * a host's shared chat must not have their library swept into a
-     * transcript the host reads; an owner writing in a project or org chat
-     * must not leak their personal standalone docs into an audience that
-     * isn't theirs alone. Callers pass the same shared-audience verdict
-     * that already fences personal memory. Explicit per-document
-     * references above are unaffected either way.
-     */
-    sharedDocSweep?: boolean,
 ): Promise<{ docIndex: DocIndex; docStore: DocStore }> {
   const docIndex: DocIndex = {};
   const docStore: DocStore = new Map();
@@ -1338,60 +1322,6 @@ export async function buildDocContext(
               documentIds.add((copy as { document_id: string }).document_id);
             }
           }
-        }
-      }
-    }
-  }
-
-  // The sweep is also private-chat-only: `sharedDocSweep` is required and
-  // callers derive it from the same shared-audience check that fences
-  // personal memory. A guest's send inside a host's shared chat, and an
-  // owner's send inside a project or org chat, keep only the docs that
-  // chat already references; otherwise a personal library would ride into
-  // a transcript a wider audience reads.
-  //
-  // Documents are shared by default across the owner's private
-  // conversations: a standalone chat carries the caller's own standalone,
-  // non-confidential documents even when no message in this chat ever
-  // referenced them. The sweep runs only when `chatId` is set — that is
-  // the chat surfaces (a project chat's attachment builder passes no chat
-  // id, and its project scope already governs). Referenced documents
-  // always win: the cap applies to the total, and the referenced set is
-  // never truncated, so a turn that cites more than the cap still gives
-  // the model every cited file.
-  //
-  // Confidential documents are absent here unless they were referenced
-  // above (an explicit prior share), which is also what keeps them out of
-  // the tool layer: find_in_documents / list_documents / read_document all
-  // resolve against this builder's doc store.
-  if (chatId && sharedDocSweep === true) {
-    const budget = Math.max(0, MAX_CONTEXT_DOCUMENTS - documentIds.size);
-    if (budget > 0) {
-      let sharedQuery = db
-        .from("documents")
-        .select("id")
-        .eq("user_id", userId)
-        .is("project_id", null)
-        .is("workflow_id", null)
-        .eq("confidential", false)
-        .eq("status", "ready")
-        .order("updated_at", { ascending: false })
-        .limit(budget);
-      // Referenced documents already hold their slots; exclude them so the
-      // limit spends the remaining budget on new documents.
-      if (documentIds.size > 0) {
-        sharedQuery = sharedQuery.not("id", "in", [...documentIds]);
-      }
-      const { data: shared } = await sharedQuery;
-      for (const row of shared ?? []) {
-        if (
-          row &&
-          typeof row === "object" &&
-          "id" in row &&
-          typeof row.id === "string" &&
-          !documentIds.has(row.id)
-        ) {
-          documentIds.add(row.id);
         }
       }
     }
@@ -1500,6 +1430,117 @@ export async function buildDocContext(
     })),
   );
   return { docIndex, docStore };
+}
+
+/**
+ * In private owner execution, align document tools with the acting sender's
+ * authorized workspace view (`~/mike/projects/...`, `~/mike/library/...`,
+ * `~/mike/templates/...`) without preloading every file into prompt text.
+ *
+ * Uses the acting sender's (`user.id`, `user.email`) authorization via
+ * `buildWorkspaceView` and preserves existing labels/versions already in
+ * `docIndex` / `docStore` (such as attachments or in-turn edits).
+ */
+export async function expandAccountDocContext(
+  db: Db,
+  user: { id: string; email?: string | null },
+  docStore: DocStore,
+  docIndex?: DocIndex,
+): Promise<void> {
+  if (!db || typeof (db as { from?: unknown }).from !== "function" || !user.id) {
+    return;
+  }
+  let view: Awaited<ReturnType<typeof buildWorkspaceView>>;
+  try {
+    view = await buildWorkspaceView(db, { id: user.id, email: user.email });
+  } catch {
+    return;
+  }
+  if (!view || view.size === 0) return;
+
+  const versionIds = [...new Set([...view.values()].map((file) => file.versionId))];
+  const versionMeta = new Map<
+    string,
+    { filename: string | null; version_number: number | null }
+  >();
+  try {
+    const { data } = await db
+      .from("document_versions")
+      .select("id, filename, version_number")
+      .in("id", versionIds);
+    for (const row of (data ?? []) as {
+      id?: unknown;
+      filename?: unknown;
+      version_number?: unknown;
+    }[]) {
+      if (typeof row?.id === "string") {
+        versionMeta.set(row.id, {
+          filename: typeof row.filename === "string" ? row.filename : null,
+          version_number:
+            typeof row.version_number === "number" ? row.version_number : null,
+        });
+      }
+    }
+  } catch {
+    // Fall back to the workspace path's basename when version metadata is not mocked.
+  }
+
+  const takenLabels = new Set<string>([
+    ...docStore.keys(),
+    ...(docIndex ? Object.keys(docIndex) : []),
+  ]);
+  const existingLabelByDocId = new Map<string, string>();
+  if (docIndex) {
+    for (const [label, info] of Object.entries(docIndex)) {
+      if (info.document_id) existingLabelByDocId.set(info.document_id, label);
+    }
+  }
+
+  for (const [workspacePath, file] of view.entries()) {
+    const existingLabel = existingLabelByDocId.get(file.documentId);
+    if (existingLabel) {
+      if (docIndex?.[existingLabel] && !docIndex[existingLabel].workspace_path) {
+        docIndex[existingLabel] = {
+          ...docIndex[existingLabel],
+          workspace_path: workspacePath,
+        };
+      }
+      const currentStore = docStore.get(existingLabel);
+      if (currentStore && !currentStore.workspace_path) {
+        docStore.set(existingLabel, {
+          ...currentStore,
+          workspace_path: workspacePath,
+        });
+      }
+      continue;
+    }
+    const label = stableDocLabel(file.documentId, takenLabels);
+    takenLabels.add(label);
+    existingLabelByDocId.set(file.documentId, label);
+    const meta = versionMeta.get(file.versionId);
+    const filename =
+      meta?.filename?.trim() ||
+      path.posix.basename(workspacePath) ||
+      "Untitled document";
+    if (docIndex) {
+      docIndex[label] = {
+        document_id: file.documentId,
+        filename,
+        version_id: file.versionId,
+        version_number: meta?.version_number ?? null,
+        workspace_path: workspacePath,
+      };
+    }
+    docStore.set(label, {
+      storage_path: file.storagePath,
+      file_type: file.fileType ?? "",
+      filename,
+      source_kind: workspacePath.startsWith("templates/")
+        ? "library_template"
+        : "document",
+      workspace_path: workspacePath,
+    });
+  }
 }
 
 /**

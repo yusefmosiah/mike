@@ -13,10 +13,8 @@ import {
     Eye,
     EyeOff,
     FolderMinus,
-    Globe,
     Hash,
     History,
-    Lock,
     Pencil,
     Trash2,
     Upload,
@@ -60,10 +58,6 @@ interface Props {
     onEditDetails?: () => void;
     onRename?: () => void;
     onUpdateCmNumber?: () => void;
-    /** Standalone documents only: toggle cross-chat sharing. */
-    confidential?: boolean;
-    onToggleConfidential?: () => void;
-    confidentialUpdating?: boolean;
     viewLabel?: string;
     editDetailsLabel?: string;
     newSubfolderLabel?: string;
@@ -100,9 +94,6 @@ export const RowActionMenuItems = forwardRef<
     onEditDetails,
     onRename,
     onUpdateCmNumber,
-    confidential = false,
-    onToggleConfidential,
-    confidentialUpdating = false,
     viewLabel = "View",
     editDetailsLabel = "Edit details",
     newSubfolderLabel = "New subfolder",
@@ -237,30 +228,6 @@ export const RowActionMenuItems = forwardRef<
                 >
                     <EyeOff className="h-3.5 w-3.5" />
                     Deactivate
-                </LiquidDropdownButton>
-            )}
-            {onToggleConfidential && (
-                <LiquidDropdownButton
-                    onClick={() => {
-                        if (confidentialUpdating) return;
-                        onClose();
-                        onToggleConfidential();
-                    }}
-                    disabled={confidentialUpdating}
-                    aria-disabled={confidentialUpdating || undefined}
-                    aria-busy={confidentialUpdating || undefined}
-                    className={cn(
-                        ROW_ACTION_LEFT_ITEM_CLASS,
-                        confidentialUpdating &&
-                            "cursor-wait opacity-60 hover:bg-transparent",
-                    )}
-                >
-                    {confidential ? (
-                        <Globe className="h-3.5 w-3.5 shrink-0" />
-                    ) : (
-                        <Lock className="h-3.5 w-3.5 shrink-0" />
-                    )}
-                    {confidential ? "Share across chats" : "Mark confidential"}
                 </LiquidDropdownButton>
             )}
             {onDelete && (

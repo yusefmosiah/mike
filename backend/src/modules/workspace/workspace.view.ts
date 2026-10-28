@@ -175,7 +175,6 @@ export async function buildWorkspaceView(
       .eq("user_id", user.id)
       .is("project_id", null)
       .is("workflow_id", null)
-      .in("library_kind", ["file", "template"])
       .eq("status", "ready")
       .order("id", { ascending: true })
       .range(from, to),

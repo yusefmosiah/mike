@@ -257,9 +257,6 @@ export async function prepareWordChatStream(
       persistChat ? chatId : null,
       "word_chat_messages",
       userEmail,
-      // word_chats are strictly the sender's own (the lookup above requires
-      // user_id = userId), so the sweep is always on here.
-      persistChat ? true : false,
     );
     const activeDocumentText = args.documentContext;
     if (activeDocumentText !== undefined) {

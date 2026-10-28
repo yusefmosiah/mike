@@ -422,11 +422,16 @@ Available local implementation and verification continue without that authority.
     `PYTHONPATH`, refresh `~/skills` when a skill is saved or installed (or
     report when refresh fails), and surface workstation provisioning/capacity
     failures as terminal SSE errors rather than continuing silently without tools.
-- Next wave: C+D (remove unrequested confidentiality controls/API and prompt
-  sweep; align private-owner document tools with the account's authorized file
-  access while preserving shared/project-audience fences). Staging's current
-  `documents.confidential = true` count is `0`; destructive schema removal of
-  `documents.confidential` remains gated on owner confirmation before push.
+- Wave Two (Slices C+D): removed the unrequested confidentiality UI controls,
+  upload option, PATCH endpoint/service, publication refusals, 50-document
+  prompt sweep, and database column/index (`20261028_02_remove_doc_confidential.sql`,
+  guarded on `confidential = true` count being `0`, verified `0` on staging
+  before push); aligned private-owner document tools (`list_documents`,
+  `find_in_documents`, `find_in_document`, `read_document`, `fetch_documents`,
+  `edit_document`, `replicate_document`, `get_diff`, `check_citations`,
+  `show_media`, `publish_document`, and `docs.list()`/`docs.load()`) with the
+  acting sender's authorized workspace view while preserving shared,
+  project-audience, and guest fences.
 - No whole-stack revert. No hidden expansion of this plan into new features.
 
 ## Investigation references

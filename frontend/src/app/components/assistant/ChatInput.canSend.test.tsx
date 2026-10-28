@@ -120,41 +120,6 @@ describe("ChatInput canSend gating", () => {
         expect(input).toHaveValue("");
     });
 
-    it("marks new standalone uploads confidential when the composer toggle is on", async () => {
-        const user = userEvent.setup();
-        vi.mocked(uploadStandaloneDocuments).mockResolvedValue([]);
-        render(
-            <ChatInput
-                onSubmit={vi.fn()}
-                onCancel={vi.fn()}
-                isLoading={false}
-                projectId="p1"
-                dropUploadsToProject={false}
-            />,
-        );
-
-        const toggle = screen.getByRole("switch", {
-            name: "Upload as confidential",
-        });
-        expect(toggle).toHaveAttribute("aria-checked", "false");
-        await user.click(toggle);
-        expect(toggle).toHaveAttribute("aria-checked", "true");
-
-        const input = screen.getByLabelText("Upload Documents");
-        const file = new File(["example"], "example.pdf", {
-            type: "application/pdf",
-        });
-        await user.upload(input, file);
-
-        await waitFor(() =>
-            expect(uploadStandaloneDocuments).toHaveBeenCalledOnce(),
-        );
-        expect(uploadStandaloneDocuments).toHaveBeenCalledWith(
-            [expect.objectContaining({ file })],
-            expect.objectContaining({ confidential: true }),
-        );
-    });
-
     it("omits the workflow button when workflow selection is hidden", async () => {
         const user = userEvent.setup();
         render(<ChatInput onSubmit={vi.fn()} onCancel={vi.fn()} isLoading={false} hideWorkflowButton />);

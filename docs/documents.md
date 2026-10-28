@@ -21,7 +21,10 @@ the rendered outputs the assistant generates.
   the app; file bytes never pass through Express.
 - **Assistant tools:** `read_document`, `find_in_document`,
   `find_in_documents`, `fetch_documents` and `list_documents` read the chat's
-  document index; `replicate_document` copies a document or template;
+  document index (and, in private owner execution, lazily resolve the acting
+  sender's authorized projects, library and templates by label, UUID, filename
+  or `~/mike` path without preloading unreferenced document bodies into the
+  prompt); `replicate_document` copies a document or template;
   `generate_docx`, `generate_excel` and `generate_ppt` create new files;
   `save_to_mike` turns a workstation file into a new document or version.
   `generate_html` is described in [Publishing](publishing.md).

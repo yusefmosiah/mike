@@ -49,38 +49,6 @@ describe("parseUploadSessionRequest", () => {
     expect(() => parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "library", library_kind: "file", ...review } }, USER_ID, SESSION_ID)).toThrow(UploadSessionValidationError);
     expect(() => parseUploadSessionRequest({ ...documentRequest(1), destination: { scope: "standalone", tabular_review_id: "not-a-uuid" } }, USER_ID, SESSION_ID)).toThrow(UploadSessionValidationError);
   });
-  it("accepts a standalone confidentiality flag, defaulting it off and refusing it elsewhere", () => {
-    const flagged = parseUploadSessionRequest(
-      { ...documentRequest(1), destination: { scope: "standalone", confidential: true } },
-      USER_ID,
-      SESSION_ID,
-    );
-    expect(flagged.destination).toMatchObject({ confidential: true });
-
-    const unflagged = parseUploadSessionRequest(documentRequest(1), USER_ID, SESSION_ID);
-    expect(unflagged.destination).not.toHaveProperty("confidential");
-
-    expect(() =>
-      parseUploadSessionRequest(
-        { ...documentRequest(1), destination: { scope: "standalone", confidential: "true" } },
-        USER_ID,
-        SESSION_ID,
-      ),
-    ).toThrow(UploadSessionValidationError);
-
-    // Confidentiality is a standalone concept in v1: a project destination
-    // cannot smuggle the flag into the document row.
-    expect(() =>
-      parseUploadSessionRequest(
-        {
-          ...documentRequest(1),
-          destination: { scope: "project", project_id: USER_ID, confidential: true },
-        },
-        USER_ID,
-        SESSION_ID,
-      ),
-    ).toThrow(UploadSessionValidationError);
-  });
   it("accepts exactly 50 files and derives server-owned storage metadata", () => {
     const result = parseUploadSessionRequest(
       documentRequest(MAX_UPLOAD_SESSION_FILES),

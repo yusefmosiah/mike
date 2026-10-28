@@ -249,11 +249,6 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 export type UploadRequestOptions<T> = {
     onProgress?: (progress: UploadProgress<T>) => void;
     signal?: AbortSignal;
-    /**
-     * Standalone document uploads only: keep the uploaded documents out of
-     * cross-chat sharing. The upload session rejects it for any other scope.
-     */
-    confidential?: boolean;
 };
 
 export async function uploadFilesWithSession<T>(args: {
@@ -2228,7 +2223,6 @@ export async function uploadStandaloneDocuments(
         purpose: "document_create",
         destination: {
             scope: "standalone",
-            confidential: options?.confidential ?? false,
         },
         files,
         onProgress: options?.onProgress,
@@ -2307,25 +2301,6 @@ export async function openPublication(
 
 export async function deleteDocument(documentId: string): Promise<void> {
     await apiRequest(`/single-documents/${documentId}`, { method: "DELETE" });
-}
-
-/**
- * Owner-only, standalone-only. A confidential document stays out of
- * cross-chat sharing; it is still attachable to a chat deliberately.
- */
-export async function updateDocumentConfidential(
-    documentId: string,
-    confidential: boolean,
-): Promise<Document> {
-    const { document } = await apiRequest<{ document: Document }>(
-        `/single-documents/${encodeURIComponent(documentId)}`,
-        {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confidential }),
-        },
-    );
-    return document;
 }
 
 interface DocumentEditResolution {

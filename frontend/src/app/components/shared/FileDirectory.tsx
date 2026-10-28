@@ -130,8 +130,6 @@ interface FileDirectoryProps {
     selectedDocuments: Document[];
     onChange: (documents: Document[]) => void;
     uploadingFilenames?: string[];
-    /** Text shown beside a confidential document's name. */
-    confidentialLabel?: string;
     showTabs: boolean;
     initialTab?: DirectoryTab;
     tabs?: readonly DirectoryTab[];
@@ -166,7 +164,6 @@ export function FileDirectory({
     selectedDocuments,
     onChange,
     uploadingFilenames = [],
-    confidentialLabel = "Confidential",
     showTabs,
     initialTab = "files",
     tabs = ALL_DIRECTORY_TAB_VALUES,
@@ -656,17 +653,10 @@ export function FileDirectory({
                     onChange={() => toggle(doc)}
                 />
                 <DocFileIcon fileType={doc.file_type} />
-                <span className="flex min-w-0 items-center gap-2">
-                    <span
-                        className={`min-w-0 flex-1 truncate ${selected ? "text-gray-900" : "text-gray-700"}`}
-                    >
-                        {doc.filename}
-                    </span>
-                    {doc.confidential && (
-                        <span className="shrink-0 text-[11px] font-normal text-gray-400">
-                            {confidentialLabel}
-                        </span>
-                    )}
+                <span
+                    className={`min-w-0 truncate ${selected ? "text-gray-900" : "text-gray-700"}`}
+                >
+                    {doc.filename}
                 </span>
                 <FileDirectoryMetaCells
                     version={versionLabel(doc)}

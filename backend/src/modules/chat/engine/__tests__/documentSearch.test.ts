@@ -54,3 +54,120 @@ it("finds which documents mention something, without reading them", async () => 
   const some = JSON.parse(content(await run("find_in_documents", { query: "report line 7:", doc_ids: ["doc-1", "doc-9"] })));
   expect(some).toMatchObject({ searched: 1, total_matches: 1, skipped: [{ doc_id: "doc-9", reason: "not found" }] });
 });
+
+it("lazily resolves account-wide documents in private owner execution and fences them in shared/project turns", async () => {
+  texts["store/matter-a.pdf"] = "Matter A governing law is Delaware.";
+  texts["store/matter-b.pdf"] = "Matter B governing law is New York.";
+  const ensureAccountDocs = vi.fn(async (store: Map<string, unknown>, index: Record<string, unknown>) => {
+    index["doc-aaaa1111"] = {
+      document_id: "aaaa1111-0000-4000-8000-000000000001",
+      filename: "Matter-A.pdf",
+      version_id: "v-a",
+      version_number: 1,
+      workspace_path: "projects/Matter A/Matter-A.pdf",
+    };
+    store.set("doc-aaaa1111", {
+      filename: "Matter-A.pdf",
+      file_type: "pdf",
+      storage_path: "store/matter-a.pdf",
+      workspace_path: "projects/Matter A/Matter-A.pdf",
+    });
+    index["doc-bbbb2222"] = {
+      document_id: "bbbb2222-0000-4000-8000-000000000002",
+      filename: "Matter-B.pdf",
+      version_id: "v-b",
+      version_number: 2,
+      workspace_path: "projects/Matter B/Matter-B.pdf",
+    };
+    store.set("doc-bbbb2222", {
+      filename: "Matter-B.pdf",
+      file_type: "pdf",
+      storage_path: "store/matter-b.pdf",
+      workspace_path: "projects/Matter B/Matter-B.pdf",
+    });
+  });
+
+  // Shared / project-audience / guest turn (allowAccountDocAccess: false): unattached docs stay unreachable.
+  const sharedStore = new Map();
+  const sharedIndex = {};
+  const sharedList = await runToolCalls(
+    call("list_documents", {}),
+    sharedStore as never,
+    "u1",
+    undefined as never,
+    vi.fn(),
+    undefined,
+    undefined,
+    sharedIndex,
+    undefined,
+    undefined,
+    "project-1",
+    undefined,
+    undefined,
+    undefined,
+    {
+      allowAccountDocAccess: false,
+      ensureAccountDocs: () => ensureAccountDocs(sharedStore, sharedIndex),
+    },
+  );
+  expect(JSON.parse(content(sharedList))).toEqual([]);
+  expect(ensureAccountDocs).not.toHaveBeenCalled();
+
+  // Private owner execution (allowAccountDocAccess: true): resolves by ~/mike path, filename, and searches across both projects.
+  const privateStore = new Map();
+  const privateIndex: Record<string, unknown> = {};
+  const privateRead = await runToolCalls(
+    call("read_document", { doc_id: "~/mike/projects/Matter A/Matter-A.pdf" }),
+    privateStore as never,
+    "u1",
+    undefined as never,
+    vi.fn(),
+    undefined,
+    undefined,
+    privateIndex as never,
+    undefined,
+    undefined,
+    null,
+    undefined,
+    undefined,
+    undefined,
+    {
+      allowAccountDocAccess: true,
+      ensureAccountDocs: () => ensureAccountDocs(privateStore, privateIndex),
+    },
+  );
+  expect(content(privateRead)).toContain("Matter A governing law is Delaware.");
+  expect(privateRead.docsRead).toEqual([
+    expect.objectContaining({
+      filename: "Matter-A.pdf",
+      document_id: "aaaa1111-0000-4000-8000-000000000001",
+    }),
+  ]);
+
+  const privateSearch = await runToolCalls(
+    call("find_in_documents", { query: "governing law" }),
+    privateStore as never,
+    "u1",
+    undefined as never,
+    vi.fn(),
+    undefined,
+    undefined,
+    privateIndex as never,
+    undefined,
+    undefined,
+    null,
+    undefined,
+    undefined,
+    undefined,
+    {
+      allowAccountDocAccess: true,
+      ensureAccountDocs: () => ensureAccountDocs(privateStore, privateIndex),
+    },
+  );
+  const parsedSearch = JSON.parse(content(privateSearch));
+  expect(parsedSearch).toMatchObject({ ok: true, searched: 2, total_matches: 2 });
+  expect(parsedSearch.documents.map((d: { doc_id: string }) => d.doc_id)).toEqual([
+    "doc-aaaa1111",
+    "doc-bbbb2222",
+  ]);
+});

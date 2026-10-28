@@ -116,7 +116,6 @@ import { liveTextOf, spliceDictation } from "@/app/lib/voice/liveComposer";
 import { useDictation } from "./useDictation";
 import type { UseVoiceChatResult } from "@/app/hooks/useVoiceChat";
 import { VoiceModePanel } from "./VoiceModePanel";
-import { ToggleSwitchUI } from "@/shared/ui/ToggleSwitchUI";
 
 export interface ChatInputHandle {
     addDoc: (doc: Document) => void;
@@ -168,7 +167,6 @@ function attachmentsOf(files: MessageFile[] | undefined): Document[] {
                       created_at: null,
                       current_version_id: file.version_id ?? null,
                       active_version_number: file.version_number ?? null,
-                      confidential: file.confidential ?? false,
                   },
               ]
             : [],
@@ -540,9 +538,6 @@ function ChatInputForChatImpl(
         Array<{ clientId: string; filename: string }>
     >([]);
     const [uploadWarning, setUploadWarning] = useState<string | null>(null);
-    // Applies to new standalone uploads from this composer. Off by default:
-    // documents are shared across chats unless the person opts out.
-    const [confidentialUpload, setConfidentialUpload] = useState(false);
     // The answer to an `/autocompact` command: shown under the composer until
     // the next edit, never sent to the model.
     const [autocompactNotice, setAutocompactNotice] =
@@ -833,7 +828,6 @@ function ChatInputForChatImpl(
                       })
                     : await uploadStandaloneDocuments(uploadInputs, {
                           onProgress: handleProgress,
-                          confidential: confidentialUpload,
                       });
                 if (!uploadGenerationActiveRef.current) return;
                 const uploaded = outcomes.flatMap((outcome) =>
@@ -866,7 +860,6 @@ function ChatInputForChatImpl(
             addAttachedDocuments,
             canSend,
             composerOpen,
-            confidentialUpload,
             dropUploadsToProject,
             onDocumentsUploaded,
             projectId,
@@ -1695,22 +1688,6 @@ function ChatInputForChatImpl(
                         />
                     </div>
 
-                    {composerOpen && !hideAddDocButton && !(dropUploadsToProject && projectId) && (
-                        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-3 pt-1.5">
-                            <ToggleSwitchUI
-                                checked={confidentialUpload}
-                                onCheckedChange={setConfidentialUpload}
-                                aria-label="Upload as confidential"
-                                className="text-xs"
-                            >
-                                Confidential
-                            </ToggleSwitchUI>
-                            <span className="text-xs text-gray-500">
-                                New uploads stay in this chat.
-                            </span>
-                        </div>
-                    )}
-
                     {/* Controls */}
                     <div
                         ref={controlsRef}
@@ -1971,7 +1948,6 @@ function ChatInputForChatImpl(
                 externalUploadedDocuments={droppedDocuments}
                 initialTab={docSelectorInitialTab}
                 projectId={dropUploadsToProject ? projectId : undefined}
-                uploadConfidential={confidentialUpload}
                 uploadStateId={`assistant-chat:${projectId ?? "standalone"}`}
                 breadcrumb={
                     selectedWorkflow

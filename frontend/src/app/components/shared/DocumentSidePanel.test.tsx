@@ -14,7 +14,6 @@ vi.mock("@/app/components/shared/views/DocxView", () => ({
 const doc: Document = {
     id: "doc-1",
     project_id: "project-1",
-    confidential: false,
     filename: "agreement.docx",
     file_type: "docx",
     storage_path: "documents/agreement.docx",

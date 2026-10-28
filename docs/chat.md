@@ -8,11 +8,11 @@ it.
 
 The web chat reader does not impose a byte-idle deadline on an established
 SSE connection. Silence alone does not fail the reader or trigger a reconnect;
-later frames continue the same answer. Reported transport errors still use
-the existing cursor-based reconnect policy, and explicit Stop is unchanged.
-A half-open connection that neither delivers bytes nor reports an error can
-remain pending. This does not add foreground reconciliation or extend the
-server's completed-run replay window.
+later frames continue the same answer. Premature EOF before `[DONE]` on a named
+turn reconnects by cursor, `404 turn_not_found` after the replay window
+resolves to the saved answer in chat history, returning the app to the
+foreground reconciles the turn, and explicit Stop surfaces as an abort across
+reconnect waits and re-attachment.
 
 ## Surfaces
 

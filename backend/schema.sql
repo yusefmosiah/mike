@@ -816,10 +816,6 @@ create table if not exists public.documents (
   folder_id uuid references public.project_subfolders(id) on delete set null,
   library_kind text not null default 'file',
   library_folder_id uuid references public.library_folders(id) on delete set null,
-  -- Standalone-only visibility flag (mission 20, item 7): false shares the
-  -- document with the owner's other conversations; true keeps it out of their
-  -- cross-conversation context and pickers. Not an authorization input.
-  confidential boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint documents_library_kind_check
@@ -835,13 +831,6 @@ create index if not exists idx_documents_project_folder
 create index if not exists idx_documents_library_kind_folder
   on public.documents(user_id, library_kind, library_folder_id)
   where project_id is null;
-
-create index if not exists idx_documents_user_doc_sweep
-  on public.documents(user_id, updated_at desc)
-  where confidential = false
-    and project_id is null
-    and workflow_id is null
-    and status = 'ready';
 
 create index if not exists idx_documents_org
   on public.documents(org_id);
@@ -3292,7 +3281,6 @@ returns table (
   library_kind text,
   library_folder_id uuid,
   current_version_id uuid,
-  confidential boolean,
   created_at timestamptz,
   updated_at timestamptz,
   filename text,
@@ -3315,7 +3303,6 @@ as $$
     d.library_kind,
     d.library_folder_id,
     d.current_version_id,
-    d.confidential,
     d.created_at,
     d.updated_at,
     coalesce(nullif(trim(v.filename), ''), 'Untitled document') as filename,
@@ -8440,5 +8427,6 @@ insert into public.schema_migrations (filename) values
   ('20261027_01_publication_follow_document.sql'),
   ('20261027_02_doc_confidential.sql'),
   ('20261027_03_sweep_index.sql'),
-  ('20261028_01_generated_version_numbering.sql')
+  ('20261028_01_generated_version_numbering.sql'),
+  ('20261028_02_remove_doc_confidential.sql')
 on conflict (filename) do nothing;

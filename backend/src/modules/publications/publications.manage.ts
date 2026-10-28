@@ -52,41 +52,6 @@ export type PublishingConfigView = {
     reason?: "off" | "strict_private" | "no_content_origin" | "no_secret";
 };
 
-/**
- * A confidential document may not gain a publication, nor have one edited.
- * Existing links keep serving: they were an explicit prior share, and
- * revoking them is still allowed through revokePublication.
- *
- * The read is explicit rather than folded into the caller's document query
- * because updatePublication loads a publication, not a document. A failed
- * read is an error, not "not confidential": silently allowing the edit would
- * turn a transient database failure into exactly the share the flag exists
- * to prevent.
- */
-async function documentIsConfidential(
-    db: Db,
-    documentId: string | null,
-): Promise<
-    { ok: true; confidential: boolean } | { ok: false; error: unknown }
-> {
-    if (!documentId) return { ok: true, confidential: false };
-    const { data, error } = await db
-        .from("documents")
-        .select("confidential")
-        .eq("id", documentId)
-        .maybeSingle();
-    if (error) return { ok: false, error };
-    const row: unknown = data;
-    return {
-        ok: true,
-        confidential:
-            typeof row === "object" &&
-            row !== null &&
-            "confidential" in row &&
-            row.confidential === true,
-    };
-}
-
 export function publishingConfigView(env: NodeJS.ProcessEnv = process.env): PublishingConfigView {
     const config = publishingConfig(env);
     if (config.enabled) return { enabled: true, audiences: config.audiences };
@@ -98,7 +63,6 @@ export type PublishFailure =
     | "password_too_short"
     | "bad_audience"
     | "bad_expiry"
-    | "confidential"
     | "revoked"
     | "not_found"
     | "not_owner"
@@ -145,11 +109,10 @@ export async function createPublication(
         return { ok: false, code: "bad_expiry" };
 
     const access = await ensureDocumentAccess(input.documentId, input.userId, input.userEmail, db, {
-        select: "id, user_id, project_id, org_id, workflow_id, confidential",
+        select: "id, user_id, project_id, org_id, workflow_id",
     });
     if (!access.ok) return { ok: false, code: "not_found" };
     if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
-    if (access.doc.confidential === true) return { ok: false, code: "confidential" };
     const version = await loadActiveVersion(input.documentId, db, input.versionId ?? null);
     if (!version) return { ok: false, code: "not_found" };
 
@@ -424,10 +387,6 @@ export async function updatePublication(
     if (input.followDocument !== undefined && typeof input.followDocument !== "boolean") {
         return { ok: false, code: "bad_audience" };
     }
-    const confidentiality = await documentIsConfidential(db, row.document_id);
-    if (!confidentiality.ok) return { ok: false, code: "error", error: confidentiality.error };
-    if (confidentiality.confidential) return { ok: false, code: "confidential" };
-
     const patch: Record<string, unknown> = {};
     const changed: string[] = [];
 
@@ -649,7 +608,7 @@ export async function grantPublicationAccess(
 
 export type PublishPreflight =
     | { ok: true; documentId: string; versionId: string; filename: string }
-    | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" | "confidential" };
+    | { ok: false; code: "publishing_off" | "not_found" | "not_owner" | "unsupported_type" | "no_rendition" };
 
 const PUBLISHABLE = new Set([
     "html", "md", "txt", "pdf", "png", "jpg", "jpeg", "webp", "gif", "docx", "doc", "pptx", "ppt",
@@ -671,11 +630,10 @@ export async function publishPreflight(
 ): Promise<PublishPreflight> {
     if (!publishingConfig(env).enabled) return { ok: false, code: "publishing_off" };
     const access = await ensureDocumentAccess(documentId, userId, userEmail, db, {
-        select: "id, user_id, project_id, org_id, workflow_id, confidential",
+        select: "id, user_id, project_id, org_id, workflow_id",
     });
     if (!access.ok) return { ok: false, code: "not_found" };
     if (!can(access.projectRole, "access.manage")) return { ok: false, code: "not_owner" };
-    if (access.doc.confidential === true) return { ok: false, code: "confidential" };
     const version = await loadActiveVersion(documentId, db, versionId);
     if (!version) return { ok: false, code: "not_found" };
     const type = (version.file_type ?? "").toLowerCase();

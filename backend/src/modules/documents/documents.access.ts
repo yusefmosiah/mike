@@ -22,8 +22,6 @@ type DocRow = {
     // combine it with the returned `canEdit`.
     workflow_id?: string | null;
     current_version_id?: string | null;
-    /** Standalone visibility flag; project/workflow rows ignore it (v1). */
-    confidential?: boolean;
 };
 
 /**
@@ -94,8 +92,6 @@ export async function listSingleDocuments(
           docs: {
               id: string;
               current_version_id?: string | null;
-              /** select("*") carries the standalone visibility flag. */
-              confidential?: boolean;
           }[];
       }
     // The raw error travels back so the route can hand it to
@@ -113,7 +109,6 @@ export async function listSingleDocuments(
     const docs = (data ?? []) as unknown as {
         id: string;
         current_version_id?: string | null;
-        confidential?: boolean;
     }[];
     await attachLatestVersionNumbers(db, docs);
     await attachActiveVersionPaths(db, docs);

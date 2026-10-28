@@ -12,7 +12,6 @@ const doc: Document = {
     filename: "Lease.pdf",
     file_type: "pdf",
     project_id: null,
-    confidential: false,
     storage_path: null,
     pdf_storage_path: null,
     size_bytes: null,

@@ -53,11 +53,6 @@ interface Props {
      */
     uploadStateId?: string;
     /**
-     * New standalone uploads inherit the composer's confidential choice.
-     * Ignored for project uploads, which cannot be confidential.
-     */
-    uploadConfidential?: boolean;
-    /**
      * Render in place, filling the parent, instead of in a modal: the
      * directory with Upload and Confirm in a footer beneath it. `breadcrumb`
      * and `keepMounted` are unused; `onClose` still runs after Confirm.
@@ -81,7 +76,6 @@ export function AddDocumentsModal({
     tabs,
     disabledDocumentIds,
     uploadStateId,
-    uploadConfidential = false,
     inline = false,
 }: Props) {
     const uploadSurfaceId =
@@ -313,7 +307,7 @@ export function AddDocumentsModal({
                   )
                 : await uploadStandaloneDocuments(
                       uploadInputs,
-                      { onProgress: handleProgress, confidential: uploadConfidential },
+                      { onProgress: handleProgress },
                   );
             const uploaded = outcomes.flatMap((outcome) =>
                 outcome.status === "completed" && outcome.result
@@ -434,7 +428,6 @@ export function AddDocumentsModal({
                     loading={projectDirectoryLoading}
                     selectedDocuments={selectedDocuments}
                     onChange={setSelectedDocuments}
-                    confidentialLabel="Confidential — this chat only"
                     uploadingFilenames={uploadingFiles.map(
                         (upload) => upload.filename,
                     )}

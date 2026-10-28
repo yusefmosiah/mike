@@ -62,7 +62,11 @@ import { InlineCitationStream } from "./citations.inline";
 import { endAtLastUser, mergeConsecutiveUserTurns } from "../../../lib/llm/userTurns";
 import { runToolCalls } from "./tools/toolDispatcher";
 import { parseAskInputs } from "./tools/askInputs";
-import { moveToolActivityToInput, skillsPromptSection } from "./contextBuilders";
+import {
+  expandAccountDocContext,
+  moveToolActivityToInput,
+  skillsPromptSection,
+} from "./contextBuilders";
 import { voiceTurnContext } from "./prompts";
 import { syncWorkspaceOncePerTurn } from "../../workspace/workspace.service";
 import {
@@ -580,6 +584,12 @@ export async function runLLMStream(params: {
    * such a sender gets no workstation.
    */
   guestCode?: GuestCodeApproval | null;
+  /**
+   * Whether document tools may lazily resolve across the acting sender's
+   * authorized projects, library and templates. Defaults to true only in
+   * private owner execution (`!isGuest && !memorySharedAudience && !projectId`).
+   */
+  allowAccountDocAccess?: boolean;
 }): Promise<{
   fullText: string;
   events: AssistantEvent[];
@@ -1193,8 +1203,23 @@ export async function runLLMStream(params: {
      * model. A load is a read, so it shows in the transcript like one.
      */
     /** `callId` names the step: `<cell call_id>.docs` for a read through `docs`. */
+    const allowAccountDocAccess =
+      params.allowAccountDocAccess ??
+      (!isGuest && !memorySharedAudience && !projectId);
+    let accountDocsLoading: Promise<void> | null = null;
+    const ensureAccountDocs = async () => {
+      if (!allowAccountDocAccess) return;
+      accountDocsLoading ??= expandAccountDocContext(
+        db,
+        { id: userId, email: userEmail },
+        docStore,
+        docIndex,
+      );
+      await accountDocsLoading;
+    };
     const documentsRequest = async (data: Record<string, unknown>, callId?: string): Promise<HostReply> => {
       if (data.op === "list") {
+        await ensureAccountDocs();
         const documents = [...docStore.entries()]
           .filter(([, info]) => info.inline_text === undefined)
           .map(([docId, info]) => ({
@@ -1202,13 +1227,19 @@ export async function runLLMStream(params: {
             filename: info.filename,
             file_type: info.file_type ?? null,
             version_id: docIndex?.[docId]?.version_id ?? null,
+            ...(info.workspace_path ? { path: info.workspace_path } : {}),
           }));
         return { ok: true, content: JSON.stringify(documents) };
       }
       if (data.op !== "load" || typeof data.doc_id !== "string") {
         return { ok: false, error: "documents requests are list, or load with a doc_id" };
       }
-      const docLabel = resolveDocLabel(data.doc_id, docStore, docIndex) ?? data.doc_id;
+      let docLabel = resolveDocLabel(data.doc_id, docStore, docIndex);
+      if (!docLabel && allowAccountDocAccess) {
+        await ensureAccountDocs();
+        docLabel = resolveDocLabel(data.doc_id, docStore, docIndex);
+      }
+      docLabel ??= data.doc_id;
       const loaded = await documentModelFor({ docLabel, docStore, docIndex, db });
       if (!loaded.ok) return { ok: false, error: loaded.error };
       const readKey = `${docLabel}@${loaded.versionId ?? ""}`;
@@ -1639,6 +1670,8 @@ export async function runLLMStream(params: {
           // Memory is the person's: a delegated subagent does not change it.
           memoryEdit: scope === "parent" ? memoryEditTarget : null,
           signal,
+          allowAccountDocAccess,
+          ensureAccountDocs,
         },
       );
       throwIfAborted(signal);

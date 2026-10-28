@@ -17,8 +17,10 @@ vi.mock("../../../lib/db", () => ({ createDb: vi.fn() }));
 vi.mock("../../../lib/storage", () => ({ downloadFile: vi.fn() }));
 
 const ensureDocAccess = vi.fn(async (..._args: unknown[]) => ({ ok: true }));
+const listAccessibleProjectIds = vi.fn(async (..._args: unknown[]) => [] as string[]);
 vi.mock("../../../lib/access", () => ({
   ensureDocAccess: (...args: unknown[]) => ensureDocAccess(...args),
+  listAccessibleProjectIds: (...args: unknown[]) => listAccessibleProjectIds(...args),
 }));
 
 // Version enrichment is a separate concern; give every surviving doc a path
@@ -36,7 +38,8 @@ vi.mock("../../../lib/documentVersions", () => ({
   ),
 }));
 
-import { buildDocContext } from "./contextBuilders";
+import { buildDocContext, expandAccountDocContext } from "./contextBuilders";
+import { resolveDocLabel, type DocIndex, type DocStore } from "./types";
 
 type Doc = {
   id: string;
@@ -45,7 +48,6 @@ type Doc = {
   org_id?: string | null;
   workflow_id?: string | null;
   status?: string;
-  confidential?: boolean;
   updated_at?: string;
 };
 
@@ -290,11 +292,7 @@ describe("buildDocContext access scoping", () => {
   });
 });
 
-// Documents are shared by default across the owner's conversations: a
-// standalone chat sees the caller's own standalone, non-confidential
-// documents even when this conversation never referenced them. The referenced
-// set always survives; the cap only limits the extras.
-describe("buildDocContext shared standalone documents", () => {
+describe("buildDocContext unreferenced document boundary", () => {
   beforeEach(() => {
     ensureDocAccess.mockReset().mockResolvedValue({ ok: true });
   });
@@ -309,23 +307,17 @@ describe("buildDocContext shared standalone documents", () => {
     project_id: null,
     workflow_id: null,
     status: "ready",
-    confidential: false,
     ...extra,
   });
 
-  it("includes the caller's own non-confidential standalone documents", async () => {
+  it("does not preload unreferenced library or project documents into prompt context", async () => {
     const db = makeDb([
-      standalone("d-shared", "u1", { updated_at: "2026-10-01T00:00:00Z" }),
-      standalone("d-secret", "u1", {
-        confidential: true,
-        updated_at: "2026-10-02T00:00:00Z",
-      }),
+      standalone("d-library", "u1", { updated_at: "2026-10-01T00:00:00Z" }),
       {
         id: "d-project",
         user_id: "u1",
         project_id: "p1",
         status: "ready",
-        confidential: false,
         updated_at: "2026-10-03T00:00:00Z",
       },
       standalone("d-other-user", "u2", {
@@ -333,105 +325,20 @@ describe("buildDocContext shared standalone documents", () => {
       }),
     ]);
 
-    const { docIndex } = await buildDocContext(
+    const { docIndex, docStore } = await buildDocContext(
       message([]),
       "u1",
       db,
       "chat-1",
       "chat_messages",
       "u1@test.local",
-      true, // sender's private standalone chat — the sweep is on
-    );
-
-    // Not the confidential document, not a project document (its scope is
-    // governed elsewhere), and never another user's document.
-    expect(Object.values(docIndex).map((entry) => entry.document_id)).toEqual([
-      "d-shared",
-    ]);
-  });
-
-  it("does not sweep a guest's library into a chat someone else reads", async () => {
-    const db = makeDb([
-      standalone("d-host", "u1"),
-      standalone("d-host-secret", "u1", { confidential: true }),
-      standalone("d-guest", "guest-1"),
-    ]);
-
-    // A guest sending in a host's shared chat: the sweep is off (the route
-    // passes the shared-audience verdict), so the guest's own library does
-    // not ride into a transcript the host reads — the same boundary the
-    // confidential flag exists to keep.
-    const { docIndex } = await buildDocContext(
-      message([]),
-      "guest-1",
-      db,
-      "guest-chat",
-      "chat_messages",
     );
 
     expect(docIndex).toEqual({});
+    expect(docStore.size).toBe(0);
   });
 
-  it("leaves a builder call without a chat id alone (project attachments)", async () => {
-    const db = makeDb([standalone("d-standalone", "u1")]);
-
-    const { docIndex } = await buildDocContext(
-      message([]),
-      "u1",
-      db,
-      undefined,
-      undefined,
-      "u1@test.local",
-    );
-
-    expect(docIndex).toEqual({});
-  });
-
-  it("caps the total at 50, newest first, and keeps every referenced document", async () => {
-    const referenced = ["d-ref-0", "d-ref-1", "d-ref-2"];
-    const extras: Doc[] = Array.from({ length: 60 }, (_, index) =>
-      standalone(`d-extra-${String(index).padStart(2, "0")}`, "u1", {
-        // 60 minutes apart, so the newest is the highest index.
-        updated_at: new Date(
-          Date.UTC(2026, 0, 1) + index * 60_000,
-        ).toISOString(),
-      }),
-    );
-    const db = makeDb([
-      ...referenced.map((id, index) =>
-        standalone(id, "u1", {
-          // One referenced document is NEWER than every extra, so a query
-          // that does not exclude referenced ids would spend a slot on it
-          // and come up one document short of the ceiling.
-          updated_at:
-            index === 0
-              ? "2027-01-01T00:00:00Z"
-              : `2020-01-0${index + 1}T00:00:00Z`,
-        }),
-      ),
-      ...extras,
-    ]);
-
-    const { docIndex } = await buildDocContext(
-      message(referenced),
-      "u1",
-      db,
-      "chat-2",
-      "chat_messages",
-      undefined,
-      true,
-    );
-    const ids = Object.values(docIndex).map((entry) => entry.document_id);
-
-    expect(ids).toHaveLength(50);
-    for (const id of referenced) expect(ids).toContain(id);
-    // 47 newest extras fill the rest; the oldest extra is pushed out.
-    expect(ids).toContain("d-extra-59");
-    expect(ids).toContain("d-extra-13");
-    expect(ids).not.toContain("d-extra-12");
-  });
-
-  it("never truncates the referenced set, even past the cap", async () => {
+  it("keeps every referenced document without truncation", async () => {
     const referenced = Array.from({ length: 55 }, (_, index) =>
       `d-ref-${String(index).padStart(2, "0")}`,
     );
@@ -450,5 +357,210 @@ describe("buildDocContext shared standalone documents", () => {
     );
 
     expect(Object.keys(docIndex)).toHaveLength(55);
+  });
+});
+
+describe("expandAccountDocContext private owner resolution", () => {
+  beforeEach(() => {
+    ensureDocAccess.mockReset().mockResolvedValue({ ok: true });
+    listAccessibleProjectIds.mockReset().mockResolvedValue([]);
+  });
+
+  function makeWorkspaceDb(args: {
+    projects: { id: string; name: string; created_at: string }[];
+    documents: Record<string, unknown>[];
+    versions: Record<string, unknown>[];
+  }) {
+    return {
+      from: (table: string) => {
+        const filters: Record<string, unknown> = {};
+        let inColumn: { col: string; values: unknown[] } | null = null;
+        const b: Record<string, unknown> = {
+          select: () => b,
+          eq: (col: string, val: unknown) => {
+            filters[col] = val;
+            return b;
+          },
+          is: (col: string, val: unknown) => {
+            filters[`is:${col}`] = val;
+            return b;
+          },
+          in: (col: string, values: unknown[]) => {
+            inColumn = { col, values };
+            return b;
+          },
+          order: () => b,
+          range: () => b,
+          then: (resolve: (v: unknown) => unknown) => {
+            const source =
+              table === "projects"
+                ? args.projects
+                : table === "documents"
+                  ? args.documents
+                  : table === "document_versions"
+                    ? args.versions
+                    : [];
+            const data = source.filter((row: Record<string, unknown>) => {
+              if (inColumn && !inColumn.values.includes(row[inColumn.col])) {
+                return false;
+              }
+              for (const [k, v] of Object.entries(filters)) {
+                if (k.startsWith("is:")) {
+                  if ((row[k.slice(3)] ?? null) !== v) return false;
+                } else if (row[k] !== v) {
+                  return false;
+                }
+              }
+              return true;
+            });
+            return Promise.resolve({ data, error: null }).then(resolve);
+          },
+        };
+        return b;
+      },
+    } as never;
+  }
+
+  it("resolves authorized documents across projects A and B, library, templates and derived files by label, UUID, filename or ~/mike path", async () => {
+    listAccessibleProjectIds.mockResolvedValue(["proj-a", "proj-b"]);
+    const db = makeWorkspaceDb({
+      projects: [
+        { id: "proj-a", name: "Matter A", created_at: "2026-01-01T00:00:00Z" },
+        { id: "proj-b", name: "Matter B", created_at: "2026-01-02T00:00:00Z" },
+        { id: "proj-c", name: "Matter C", created_at: "2026-01-03T00:00:00Z" },
+      ],
+      documents: [
+        {
+          id: "aaaa1111-0000-4000-8000-000000000001",
+          project_id: "proj-a",
+          folder_id: null,
+          library_kind: "file",
+          library_folder_id: null,
+          current_version_id: "ver-a",
+          status: "ready",
+          created_at: "2026-02-01T00:00:00Z",
+        },
+        {
+          id: "bbbb2222-0000-4000-8000-000000000002",
+          project_id: "proj-b",
+          folder_id: null,
+          library_kind: "file",
+          library_folder_id: null,
+          current_version_id: "ver-b",
+          status: "ready",
+          created_at: "2026-02-02T00:00:00Z",
+        },
+        {
+          id: "cccc3333-0000-4000-8000-000000000003",
+          project_id: "proj-c",
+          folder_id: null,
+          library_kind: "file",
+          library_folder_id: null,
+          current_version_id: "ver-c",
+          status: "ready",
+          created_at: "2026-02-03T00:00:00Z",
+        },
+        {
+          id: "dddd4444-0000-4000-8000-000000000004",
+          user_id: "u1",
+          project_id: null,
+          workflow_id: null,
+          folder_id: null,
+          library_kind: null, // derived/generated standalone document
+          library_folder_id: null,
+          current_version_id: "ver-derived",
+          status: "ready",
+          created_at: "2026-02-04T00:00:00Z",
+        },
+      ],
+      versions: [
+        {
+          id: "ver-a",
+          filename: "Lease-A.docx",
+          file_type: "docx",
+          storage_path: "store/lease-a.docx",
+          size_bytes: 120,
+          version_number: 1,
+          deleted_at: null,
+        },
+        {
+          id: "ver-b",
+          filename: "Schedule-B.pdf",
+          file_type: "pdf",
+          storage_path: "store/schedule-b.pdf",
+          size_bytes: 240,
+          version_number: 2,
+          deleted_at: null,
+        },
+        {
+          id: "ver-c",
+          filename: "Forbidden-C.pdf",
+          file_type: "pdf",
+          storage_path: "store/forbidden-c.pdf",
+          size_bytes: 300,
+          version_number: 1,
+          deleted_at: null,
+        },
+        {
+          id: "ver-derived",
+          filename: "Derived-Summary.docx",
+          file_type: "docx",
+          storage_path: "store/derived.docx",
+          size_bytes: 180,
+          version_number: 3,
+          deleted_at: null,
+        },
+      ],
+    });
+
+    const docStore: DocStore = new Map();
+    const docIndex: DocIndex = {};
+    await expandAccountDocContext(
+      db,
+      { id: "u1", email: "u1@test.local" },
+      docStore,
+      docIndex,
+    );
+
+    expect(listAccessibleProjectIds).toHaveBeenCalledWith(
+      "u1",
+      "u1@test.local",
+      db,
+    );
+    expect(Object.keys(docIndex).sort()).toEqual([
+      "doc-aaaa1111",
+      "doc-bbbb2222",
+      "doc-dddd4444",
+    ]);
+    // Unauthorized Matter C is never included.
+    expect(resolveDocLabel("Forbidden-C.pdf", docStore, docIndex)).toBeNull();
+    expect(
+      resolveDocLabel("projects/Matter C/Forbidden-C.pdf", docStore, docIndex),
+    ).toBeNull();
+
+    // Both Matter A, Matter B, and derived files resolve by label, UUID, filename, and ~/mike path.
+    expect(
+      resolveDocLabel(
+        "~/mike/projects/Matter A/Lease-A.docx",
+        docStore,
+        docIndex,
+      ),
+    ).toBe("doc-aaaa1111");
+    expect(
+      resolveDocLabel("projects/Matter B/Schedule-B.pdf", docStore, docIndex),
+    ).toBe("doc-bbbb2222");
+    expect(
+      resolveDocLabel(
+        "/home/agent/mike/library/Derived-Summary.docx",
+        docStore,
+        docIndex,
+      ),
+    ).toBe("doc-dddd4444");
+    expect(docIndex["doc-dddd4444"]).toMatchObject({
+      document_id: "dddd4444-0000-4000-8000-000000000004",
+      version_id: "ver-derived",
+      version_number: 3,
+      workspace_path: "library/Derived-Summary.docx",
+    });
   });
 });

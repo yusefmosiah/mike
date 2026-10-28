@@ -22,6 +22,8 @@ export type DocStore = Map<
      * the model when it chooses to read them.
      */
     inline_text?: string;
+    /** Relative path under ~/mike when mirrored into the user's workstation. */
+    workspace_path?: string;
   }
 >;
 
@@ -55,6 +57,8 @@ export type DocIndex = Record<
     filename: string;
     version_id?: string | null;
     version_number?: number | null;
+    /** Relative path under ~/mike when mirrored into the user's workstation. */
+    workspace_path?: string;
   }
 >;
 
@@ -105,18 +109,41 @@ export function resolveDoc(rawId: string, docIndex: DocIndex) {
  * Resolve whatever identifier the model passed (`doc-N` slug, filename, or
  * document UUID) back to a chat-local doc label.
  */
+function normalizeWorkspaceLookupPath(rawId: string): string {
+  return rawId
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^(?:~\/mike\/|\/home\/[^/]+\/mike\/|\.?\/?mike\/|\.?\/)+/i, "")
+    .replace(/\/+$/, "");
+}
+
 export function resolveDocLabel(
   rawId: string,
   docStore: DocStore,
   docIndex?: DocIndex,
 ): string | null {
   if (docStore.has(rawId)) return rawId;
+  const normalizedPath = normalizeWorkspaceLookupPath(rawId);
   for (const [label, info] of docStore.entries()) {
     if (info.filename === rawId) return label;
+    if (
+      info.workspace_path &&
+      (info.workspace_path === normalizedPath ||
+        info.workspace_path.toLowerCase() === normalizedPath.toLowerCase())
+    ) {
+      return label;
+    }
   }
   if (docIndex) {
     for (const [label, info] of Object.entries(docIndex)) {
       if (info.document_id === rawId) return label;
+      if (
+        info.workspace_path &&
+        (info.workspace_path === normalizedPath ||
+          info.workspace_path.toLowerCase() === normalizedPath.toLowerCase())
+      ) {
+        return label;
+      }
     }
   }
   return null;
