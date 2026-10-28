@@ -402,16 +402,31 @@ Available local implementation and verification continue without that authority.
 
 ## Current state and next action
 
-- Plan reviewed (closure reviews accepted) and updated with the day's evidence.
-  The only implementation landed is `4aaadb29`, the idle-deadline removal.
-- Delegate bounded slices using the configured task model; the parent owns
-  integration, final checks, and honest receipts.
-- Main uncertainty: what initiated the four genuine aborts, and whether the
-  owner's one passing comparison generalizes. Shared-chat redesign is deferred,
-  not a prerequisite for the single-user repairs.
-- First wave: A+F (continuity, queue, composer), B, E in parallel. C+D after
-  their joint landing contract is met. Confidentiality data removal waits for
-  the flag inventory and owner disposition.
+- Wave One landed, passed full CI (`40772094437`), and deployed to staging
+  (`40772688814`; `/var/lib/mike-staging/src/.git-sha` and `NEXT_PUBLIC_GIT_SHA`
+  both `efa529ce`; `20261028_01_generated_version_numbering.sql` applied):
+  - `fa35ccbe` (Slice F): queue dictation while a response runs without Stop,
+    clear sent Home drafts at handoff and adopt new-chat drafts when a chat
+    gains its ID, and hide model/effort labels on queued entries.
+  - `17d77029` (Slice A): reconnect on premature EOF for named turns, preserve
+    Stop across reconnect backoff/re-attach, resolve `404 turn_not_found` to the
+    saved answer in chat history, yield finished local error overlays to saved
+    rows, reconcile on foreground return, keep queue mutations in memory and
+    restore only pre-admission refusals (`TurnRefusedError`), bind voice
+    interruption cancellation to the active voice turn while ignoring background
+    audio interruptions, and record `stop_reason` / tool-halt attribution.
+  - `32d0f3a0` (Slice E): allocate generated-document revision numbers across
+    all existing versions of the document (`20261028_01_generated_version_numbering.sql`)
+    and keep frozen-copy publishing secondary to automatic updates.
+  - `efa529ce` (Slice B repo-side): put `~/pylibs` on the persistent kernel's
+    `PYTHONPATH`, refresh `~/skills` when a skill is saved or installed (or
+    report when refresh fails), and surface workstation provisioning/capacity
+    failures as terminal SSE errors rather than continuing silently without tools.
+- Next wave: C+D (remove unrequested confidentiality controls/API and prompt
+  sweep; align private-owner document tools with the account's authorized file
+  access while preserving shared/project-audience fences). Staging's current
+  `documents.confidential = true` count is `0`; destructive schema removal of
+  `documents.confidential` remains gated on owner confirmation before push.
 - No whole-stack revert. No hidden expansion of this plan into new features.
 
 ## Investigation references
