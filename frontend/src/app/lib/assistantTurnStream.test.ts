@@ -104,6 +104,48 @@ describe("consumeAssistantTurnStream", () => {
 });
 
 describe("readAssistantTurn", () => {
+  it("preserves the answer when a silent connection later delivers the remaining frames", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(current) {
+        controller = current;
+        current.enqueue(encoder.encode(
+          frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" }) +
+          frame(2, { type: "content_delta", text: "Hello" }),
+        ));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    try {
+      const read = readAssistantTurn({
+        open: async () => new Response(stream),
+        turn,
+        sink: createTurnEventSink(turn, []),
+        cursor: createTurnCursor("chat-a"),
+      }).then(() => null, (error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      if (!cancelled) {
+        controller.enqueue(encoder.encode(
+          frame(3, { type: "content_delta", text: " world" }) +
+          "id: 4\ndata: [DONE]\n\n",
+        ));
+        controller.close();
+      }
+
+      expect(await read).toBeNull();
+      expect(text(turn.turn.assistant)).toBe("Hello world");
+    } finally {
+      turn.finish();
+    }
+  });
+
   it("ignores an incarnation frame without a string", async () => {
     const turn = begin();
     const sink = createTurnEventSink(turn, []);

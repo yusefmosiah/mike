@@ -4,6 +4,16 @@ A conversation is a tree of messages. A turn streams from the model over SSE,
 and the server owns the run so a dropped connection or a restart does not lose
 it.
 
+## Streaming reader
+
+The web chat reader does not impose a byte-idle deadline on an established
+SSE connection. Silence alone does not fail the reader or trigger a reconnect;
+later frames continue the same answer. Reported transport errors still use
+the existing cursor-based reconnect policy, and explicit Stop is unchanged.
+A half-open connection that neither delivers bytes nor reports an error can
+remain pending. This does not add foreground reconciliation or extend the
+server's completed-run replay window.
+
 ## Surfaces
 
 - **Chats:** list, create, read, rename and delete under `/chat`; project

@@ -540,10 +540,6 @@ export async function consumeAssistantTurnStream(
 
   for await (const frame of readSseFrames(response, {
     signal,
-    // Nothing on the wire — keep-alives included — for this long means the
-    // connection is dead in a way TCP has not reported; the resume loop
-    // below re-attaches to the server's copy of the turn.
-    idleTimeoutMs: 90_000,
     onEventId: (id) => {
       const seq = Number.parseInt(id, 10);
       if (Number.isFinite(seq)) cursor.lastSeq = seq;
