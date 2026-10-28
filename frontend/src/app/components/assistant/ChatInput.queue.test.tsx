@@ -169,17 +169,40 @@ describe("composer message queue", () => {
         );
     });
 
-    it("shows each entry's stamped model and effort, and offers reorder and delete", () => {
-        const first = entry({ id: "q1", text: "First question", model: "claude-sonnet-5", effort: "high" });
+    it("shows each entry's text and attachment count without model labels, and offers reorder and delete", () => {
+        const doc = {
+            id: "d1",
+            filename: "Lease.pdf",
+            file_type: "pdf",
+            project_id: null,
+            storage_path: null,
+            pdf_storage_path: null,
+            size_bytes: null,
+            page_count: null,
+            structure_tree: null,
+            status: "ready" as const,
+            created_at: null,
+            current_version_id: "v1",
+            active_version_number: 2,
+            confidential: false,
+        };
+        const first = entry({
+            id: "q1",
+            text: "First question",
+            docs: [doc],
+            model: "claude-sonnet-5",
+            effort: "high",
+        });
         const second = entry({ id: "q2", text: "Second question", model: "gpt-5.6-sol", effort: "low" });
         const queue = queueController([first, second]);
         renderComposer({ queue });
 
         expect(screen.getByText("2 queued messages")).toBeInTheDocument();
         expect(screen.getByText("First question")).toBeInTheDocument();
-        expect(screen.getByText(/Claude Sonnet 5 · High effort/)).toBeInTheDocument();
-        expect(screen.getByText(/GPT 5\.6 Sol · Low effort/)).toBeInTheDocument();
-
+        expect(screen.getByText("1 attachment")).toBeInTheDocument();
+        expect(screen.queryByText(/Claude Sonnet 5/)).toBeNull();
+        expect(screen.queryByText(/GPT 5\.6 Sol/)).toBeNull();
+        expect(screen.queryByText(/effort/i)).toBeNull();
         expect(
             screen.getByRole("button", { name: "Move queued message 1 up" }),
         ).toBeDisabled();

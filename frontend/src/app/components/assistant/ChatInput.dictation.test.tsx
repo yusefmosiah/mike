@@ -5,6 +5,7 @@ import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import type * as MikeApiModule from "@/app/lib/mikeApi";
 import type * as ModelToggleModule from "./ModelToggle";
 import { ChatInput } from "./ChatInput";
+import type { ChatQueueController } from "./useChatQueue";
 
 const { transcribeAudio } = vi.hoisted(() => ({ transcribeAudio: vi.fn() }));
 
@@ -84,6 +85,19 @@ const fakeStream = () =>
         getTracks: () => [{ stop: stopTrack }],
     }) as unknown as MediaStream;
 
+function queueStub() {
+    return {
+        entries: [],
+        paused: null,
+        enqueue: vi.fn(),
+        remove: vi.fn(),
+        reorder: vi.fn(),
+        clear: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn(),
+    } satisfies ChatQueueController;
+}
+
 function renderInput(
     props: Partial<ComponentProps<typeof ChatInput>> = {},
 ) {
@@ -137,12 +151,38 @@ describe("ChatInput dictation", () => {
         ).toBeEnabled();
     });
 
-    it("closes dictation while a response is loading", () => {
+    it("keeps dictation closed while a response runs when there is no queue to receive it", () => {
         renderInput({ isLoading: true });
 
         expect(
             screen.getByRole("button", { name: "Dictate prompt" }),
         ).toBeDisabled();
+    });
+
+    it("dictates into the queue while a response runs, without stopping it", async () => {
+        const queue = queueStub();
+        const onCancel = vi.fn();
+        const onSubmit = vi.fn();
+        renderInput({ isLoading: true, queue, onCancel, onSubmit });
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Dictate prompt" }));
+        });
+        await screen.findByRole("button", { name: "Stop dictation" });
+
+        // The big button must not be Stop while a dictation is open.
+        expect(screen.queryByRole("button", { name: "Stop response" })).toBeNull();
+        await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Queue message" }));
+        });
+
+        await waitFor(() => expect(queue.enqueue).toHaveBeenCalledTimes(1));
+        expect(queue.enqueue.mock.calls[0][0]).toMatchObject({ text: "contract" });
+        expect(onCancel).not.toHaveBeenCalled();
+        expect(queue.pause).not.toHaveBeenCalled();
+        expect(onSubmit).not.toHaveBeenCalled();
+        // With no dictation open the button is Stop again.
+        expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled();
     });
 
     it("hides dictation on a read-only composer", () => {

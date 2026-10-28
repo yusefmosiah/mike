@@ -95,8 +95,12 @@ import {
     incomingFiles,
 } from "@/app/lib/documentUploadValidation";
 import { isLongPaste, pastedTextFile } from "@/app/lib/pastedText";
-import { chatDraftKey, readChatDraft, writeChatDraft } from "@/app/lib/chatDraft";
-import type { ChatQueueEffort } from "@/app/lib/chatQueue";
+import {
+    adoptChatDraft,
+    chatDraftKey,
+    readChatDraft,
+    writeChatDraft,
+} from "@/app/lib/chatDraft";
 import { TextButtonUI } from "@/shared/ui/TextButtonUI";
 import type { ChatQueueController } from "./useChatQueue";
 import { userFacingApiError } from "@/app/lib/userFacingError";
@@ -214,6 +218,8 @@ export interface ChatInputProps {
     chatModel?: string | null;
     chatReasoningLevel?: ReasoningLevel | null;
     chatKey?: string | null;
+    /** Remounts the composer when incremented, without losing new-chat adoption. */
+    resetKey?: string;
     /**
      * A sent prompt being edited. Its text and files load into the composer,
      * where both can be changed, and sending saves them as a new version of
@@ -270,13 +276,6 @@ function formatDictationTime(elapsedMs: number): string {
     return `${minutes}:${seconds}`;
 }
 
-/** The effort a queued message will run with, named as the picker does. */
-function queuedEffortLabel(effort: ChatQueueEffort | null): string {
-    if (!effort) return "Default effort";
-    if (effort === "none") return "No reasoning";
-    const name = effort === "xhigh" ? "XHigh" : effort[0].toUpperCase() + effort.slice(1);
-    return `${name} effort`;
-}
 
 /** What a paused queue says, and the decision it asks for. */
 function queuePauseCopy(reason: "stopped" | "failed" | "branch" | "orphaned"): {
@@ -310,6 +309,10 @@ function queuePauseCopy(reason: "stopped" | "failed" | "branch" | "orphaned"): {
 /** Below this width the composer controls always hide their labels. */
 const COMPACT_CONTROLS_BELOW_PX = 430;
 
+interface ChatInputInternalProps extends ChatInputProps {
+    prevChatKeyRef?: { current: string };
+}
+
 function ChatInputForChatImpl(
     {
         onSubmit,
@@ -335,7 +338,8 @@ function ChatInputForChatImpl(
         onEditCancel,
         voice,
         queue,
-    }: ChatInputProps,
+        prevChatKeyRef,
+    }: ChatInputInternalProps,
     ref: ForwardedRef<ChatInputHandle>,
 ) {
     // Sending needs both a grant and a loaded thread; the placeholder below
@@ -346,10 +350,11 @@ function ChatInputForChatImpl(
     // The draft outlives the composer: keyed remounts (switching threads,
     // the chat gaining its id) and app closes restore it from storage,
     // scoped to the account and surface so one never leaks into another's.
+    const resolvedChatKey = chatKey || "new-chat";
     const draftKey = chatDraftKey({
         userId: auth?.user?.id ?? "anonymous",
         projectId,
-        chatKey: chatKey ?? "new-chat",
+        chatKey: resolvedChatKey,
     });
     const [attachedDocs, setAttachedDocs] = useState<Document[]>([]);
     const [selectedWorkflow, setSelectedWorkflow] = useState<{
@@ -363,7 +368,22 @@ function ChatInputForChatImpl(
     useEffect(() => {
         if (draftRestoredRef.current) return;
         draftRestoredRef.current = true;
-        const draft = readChatDraft(draftKey);
+        const adoptFromNewChat =
+            prevChatKeyRef?.current === "new-chat" &&
+            resolvedChatKey !== "new-chat";
+        if (prevChatKeyRef) {
+            prevChatKeyRef.current = resolvedChatKey;
+        }
+        const draft = adoptFromNewChat
+            ? adoptChatDraft(
+                  chatDraftKey({
+                      userId: auth?.user?.id ?? "anonymous",
+                      projectId,
+                      chatKey: "new-chat",
+                  }),
+                  draftKey,
+              )
+            : readChatDraft(draftKey);
         if (!draft) return;
         if (draft.text) {
             setValue(draft.text);
@@ -485,9 +505,11 @@ function ChatInputForChatImpl(
     const controlsRef = useRef<HTMLDivElement>(null);
     // Capture and transcription live in the hook; this composer only inserts
     // the finished transcript and shows the recording state. `disabled`
-    // keeps a recording from starting while the composer is closed or a
-    // response is already running.
-    const dictation = useDictation({ disabled: isLoading || !composerOpen });
+    // keeps a recording from starting while the composer is closed, or while
+    // a response runs and there is no queue to receive what is said.
+    const dictation = useDictation({
+        disabled: (isLoading && !queue) || !composerOpen,
+    });
     // True from a send-while-dictating tap until its message is handed over.
     const [finishing, setFinishing] = useState(false);
     const finishingRef = useRef(false);
@@ -976,7 +998,19 @@ function ChatInputForChatImpl(
                 ? { version_number: d.active_version_number }
                 : {}),
         }));
-
+    // Clear the stored draft at handoff time, not only on the next render's
+    // effect: sending the first message from Home unmounts the initial
+    // composer in the same render that switches to the thread view.
+    const clearStoredDraft = (
+        workflow: { id: string; title: string } | null = null,
+    ) => {
+        if ((auth && auth.authLoading) || setAsideRef.current) return;
+        writeChatDraft(draftKey, {
+            text: "",
+            docs: [],
+            workflow,
+        });
+    };
     // `/nr`: the message and its attachments join the thread and no reply
     // is asked for, so no model is needed. A selected workflow stays in the
     // composer for the next message that does ask.
@@ -988,6 +1022,7 @@ function ChatInputForChatImpl(
         }
         const files = attachedFiles();
         setAttachedDocs([]);
+        clearStoredDraft(selectedWorkflow);
         onSubmit?.({
             role: "user",
             content,
@@ -1031,6 +1066,7 @@ function ChatInputForChatImpl(
         const files = attachedFiles();
         setAttachedDocs([]);
         setSelectedWorkflow(null);
+        clearStoredDraft(null);
 
         onSubmit?.({
             role: "user",
@@ -1076,6 +1112,7 @@ function ChatInputForChatImpl(
         if (textareaRef.current) textareaRef.current.style.height = "auto";
         setAttachedDocs([]);
         setSelectedWorkflow(null);
+        clearStoredDraft(null);
     };
 
     // `/nr` while a turn runs: queued as its own no-reply message. The
@@ -1094,6 +1131,7 @@ function ChatInputForChatImpl(
         setValue("");
         if (textareaRef.current) textareaRef.current.style.height = "auto";
         setAttachedDocs([]);
+        clearStoredDraft(selectedWorkflow);
     };
 
     // Voice mode: each turn the engine hears is sent like a typed message,
@@ -1276,8 +1314,13 @@ function ChatInputForChatImpl(
         submitMessage(query, selectedWorkflow);
     };
 
+    // While a response runs the big button is Stop — unless a dictation is
+    // open (or being handed over): then it queues what was said, and a tap
+    // meant for that must never cancel the response.
+    const showStop = isLoading && !dictation.recording && !finishing;
+
     const handleActionClick = () => {
-        if (isLoading) {
+        if (showStop) {
             if (canStop) {
                 queue?.pause("stopped");
                 onCancel();
@@ -1411,22 +1454,14 @@ function ChatInputForChatImpl(
                                             <p className="text-sm leading-5 text-gray-800 [overflow-wrap:anywhere]">
                                                 {entry.text}
                                             </p>
-                                            <p className="pt-0.5 text-xs text-gray-500">
-                                                {entry.model
-                                                    ? modelDisplayName(
-                                                          entry.model,
-                                                      )
-                                                    : "No model"}
-                                                {" · "}
-                                                {queuedEffortLabel(entry.effort)}
-                                                {entry.docs.length > 0
-                                                    ? ` · ${entry.docs.length} ${
-                                                          entry.docs.length === 1
-                                                              ? "attachment"
-                                                              : "attachments"
-                                                      }`
-                                                    : ""}
-                                            </p>
+                                            {entry.docs.length > 0 && (
+                                                <p className="pt-0.5 text-xs text-gray-500">
+                                                    {entry.docs.length}{" "}
+                                                    {entry.docs.length === 1
+                                                        ? "attachment"
+                                                        : "attachments"}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="flex shrink-0 items-center gap-0.5">
                                             <button
@@ -1807,7 +1842,7 @@ function ChatInputForChatImpl(
                                         type="button"
                                         aria-label="Dictate prompt"
                                         onClick={dictation.toggle}
-                                        disabled={isLoading || dictation.busy}
+                                        disabled={(isLoading && !queue) || dictation.busy}
                                         className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 disabled:cursor-default disabled:text-gray-300"
                                     >
                                         {dictation.busy ? (
@@ -1820,6 +1855,7 @@ function ChatInputForChatImpl(
                             {isLoading &&
                                 queue &&
                                 composerOpen &&
+                                !dictation.recording &&
                                 value.trim().length > 0 && (
                                     <button
                                         type="button"
@@ -1850,23 +1886,25 @@ function ChatInputForChatImpl(
                             <button
                                 type="button"
                                 aria-label={
-                                    isLoading
+                                    showStop
                                         ? canStop
                                             ? "Stop response"
                                             : "Only the person generating can stop this response"
-                                        : "Send message"
+                                        : isLoading
+                                          ? "Queue message"
+                                          : "Send message"
                                 }
                                 title={
-                                    isLoading && !canStop
+                                    showStop && !canStop
                                         ? "Only the person generating can stop this response"
                                         : undefined
                                 }
                                 data-slot="chat-send-button"
                                 className={cn(
-                                    isLoading &&
+                                    showStop &&
                                         !canStop &&
                                         "cursor-not-allowed opacity-40",
-                                    isLoading &&
+                                    showStop &&
                                         queue &&
                                         composerOpen &&
                                         value.trim().length > 0
@@ -1875,7 +1913,7 @@ function ChatInputForChatImpl(
                                 )}
                                 onClick={handleActionClick}
                                 disabled={
-                                    isLoading
+                                    showStop
                                         ? !canStop
                                         : !composerOpen ||
                                           finishing ||
@@ -1887,7 +1925,7 @@ function ChatInputForChatImpl(
                                               noResponseContent(value) === null)
                                 }
                             >
-                                {isLoading ? (
+                                {showStop ? (
                                     <Square
                                         className="h-4 w-4"
                                         fill="currentColor"
@@ -1895,6 +1933,8 @@ function ChatInputForChatImpl(
                                     />
                                 ) : finishing ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : isLoading ? (
+                                    <ListPlus className="h-4 w-4" />
                                 ) : (
                                     <ArrowRight className="h-4 w-4" />
                                 )}
@@ -1996,7 +2036,9 @@ function ChatInputForChatImpl(
     );
 }
 
-const ChatInputForChat = forwardRef<ChatInputHandle, ChatInputProps>(ChatInputForChatImpl);
+const ChatInputForChat = forwardRef<ChatInputHandle, ChatInputInternalProps>(
+    ChatInputForChatImpl,
+);
 
 /**
  * Chat composer whose draft and asynchronous uploads belong to one chat key.
@@ -2007,10 +2049,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     props,
     ref,
 ) {
+    const resolvedChatKey = props.chatKey || "new-chat";
+    const prevChatKeyRef = useRef(resolvedChatKey);
     return (
         <ChatInputForChat
-            key={props.chatKey ?? "new-chat"}
+            key={
+                props.resetKey !== undefined
+                    ? `${resolvedChatKey}:${props.resetKey}`
+                    : resolvedChatKey
+            }
             {...props}
+            prevChatKeyRef={prevChatKeyRef}
             ref={ref}
         />
     );

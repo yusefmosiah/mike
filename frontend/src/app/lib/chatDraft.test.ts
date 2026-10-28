@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Document } from "@/app/components/shared/types";
-import { chatDraftKey, readChatDraft, writeChatDraft } from "./chatDraft";
+import {
+    adoptChatDraft,
+    chatDraftKey,
+    readChatDraft,
+    writeChatDraft,
+} from "./chatDraft";
 
 const doc: Document = {
     id: "d1",
@@ -164,6 +169,41 @@ describe("chat drafts", () => {
         writeChatDraft("chat-new", { text: "x", docs: [], workflow: null });
         expect(readChatDraft("chat-0")?.text).toBe("still here");
         expect(readChatDraft("chat-1")).toBeNull();
+    });
+
+    it("adopts a new-chat draft onto the created chat id without overwriting an existing draft", () => {
+        writeChatDraft("u1:project:p1:new-chat", {
+            text: "written before id",
+            docs: [doc],
+            workflow: { id: "wf-1", title: "Review" },
+        });
+        expect(
+            adoptChatDraft("u1:project:p1:new-chat", "u1:project:p1:chat-9"),
+        ).toEqual({
+            text: "written before id",
+            docs: [doc],
+            workflow: { id: "wf-1", title: "Review" },
+        });
+        expect(readChatDraft("u1:project:p1:new-chat")).toBeNull();
+        expect(readChatDraft("u1:project:p1:chat-9")?.text).toBe(
+            "written before id",
+        );
+
+        // Adopting again or when destination already holds a draft leaves destination intact.
+        expect(
+            adoptChatDraft("u1:project:p1:new-chat", "u1:project:p1:chat-9")?.text,
+        ).toBe("written before id");
+        writeChatDraft("u1:project:p1:new-chat", {
+            text: "later new chat",
+            docs: [],
+            workflow: null,
+        });
+        expect(
+            adoptChatDraft("u1:project:p1:new-chat", "u1:project:p1:chat-9")?.text,
+        ).toBe("written before id");
+        expect(readChatDraft("u1:project:p1:new-chat")?.text).toBe(
+            "later new chat",
+        );
     });
 });
 

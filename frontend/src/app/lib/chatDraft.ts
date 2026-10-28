@@ -125,3 +125,20 @@ export function writeChatDraft(key: string, draft: ChatDraft) {
         // Quota or private mode: the draft stays in memory for this mount.
     }
 }
+
+/**
+ * Moves a draft written before a new chat had its id onto the id it adopted.
+ * Only used for the `new-chat` composer scope; normal thread switches never
+ * move drafts between chats.
+ */
+export function adoptChatDraft(
+    fromKey: string,
+    toKey: string,
+): ChatDraft | null {
+    const from = readChatDraft(fromKey);
+    const to = readChatDraft(toKey);
+    if (!from || to) return to;
+    writeChatDraft(toKey, from);
+    writeChatDraft(fromKey, { text: "", docs: [], workflow: null });
+    return from;
+}

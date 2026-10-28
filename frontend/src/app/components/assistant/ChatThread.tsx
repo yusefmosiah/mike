@@ -381,7 +381,7 @@ export function ChatThread({
     const queueKey = chatQueueKey({
         userId: viewerId ?? "anonymous",
         projectId: chatInputProps?.projectId,
-        chatKey: chatId ?? "new-chat",
+        chatKey: chatId || "new-chat",
     });
     const sendQueued = useCallback(
         async (entry: ChatQueueEntry) => {
@@ -959,7 +959,7 @@ export function ChatThread({
     // real session by the time this runs, so ChatInput never opens its own.
     const renderInput = (session: UseVoiceChatResult) => (
         <ChatInput
-            key={chatInputKey}
+            resetKey={chatInputKey}
             ref={chatInputRef}
             canSend={canSend}
             chatLoading={chatLoading}

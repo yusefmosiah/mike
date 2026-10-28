@@ -121,4 +121,73 @@ describe("composer drafts", () => {
         renderComposer({ chatKey: "chat-1" });
         expect(textbox()).toHaveValue("");
     });
+
+    it("clears the stored Home draft even when sending unmounts the initial composer in the same render", async () => {
+        let unmountInitial = () => {};
+        const onSubmit = vi.fn(() => {
+            unmountInitial();
+        });
+        const initial = renderComposer({ chatKey: null, onSubmit });
+        unmountInitial = initial.unmount;
+        typeDraft("first message from Home");
+
+        await act(async () => {
+            fireEvent.keyDown(textbox(), { key: "Enter", metaKey: true });
+        });
+        expect(onSubmit).toHaveBeenCalledTimes(1);
+
+        // Returning Home mounts the new-chat composer again; the sent prompt must not come back.
+        renderComposer({ chatKey: null });
+        expect(textbox()).toHaveValue("");
+    });
+
+    it("keeps the draft when sending is refused", async () => {
+        vi.mocked(useUserProfile).mockReturnValue({
+            profile: {
+                openRouterModels: [],
+                vercelModels: [],
+                openCodeGoModels: [],
+                lastSelectedChatModel: null,
+                lastSelectedReasoningLevel: "high",
+                apiKeys: undefined,
+            },
+            loading: false,
+            apiKeysDegraded: false,
+            persistChatModelSelection: vi.fn(async () => true),
+            persistChatReasoningSelection: vi.fn(async () => true),
+        } as unknown as ReturnType<typeof useUserProfile>);
+        const view = renderComposer({ chatKey: null, chatModel: null });
+        typeDraft("keep me until a model is picked");
+
+        await act(async () => {
+            fireEvent.keyDown(textbox(), { key: "Enter", metaKey: true });
+        });
+        expect(view.onSubmit).not.toHaveBeenCalled();
+        expect(textbox()).toHaveValue("keep me until a model is picked");
+
+        view.unmount();
+        renderComposer({ chatKey: null, chatModel: null });
+        expect(textbox()).toHaveValue("keep me until a model is picked");
+    });
+
+    it("carries a new-chat draft across when the chat gains its id", () => {
+        const view = renderComposer({
+            chatKey: "",
+            projectId: "p1",
+            resetKey: "new:0",
+        });
+        typeDraft("written before the id arrived");
+
+        view.rerender({
+            chatKey: "chat-9",
+            projectId: "p1",
+            resetKey: "chat-9:0",
+        });
+        expect(textbox()).toHaveValue("written before the id arrived");
+
+        // And the new-chat slot is now clean for the next fresh conversation.
+        view.unmount();
+        renderComposer({ chatKey: "", projectId: "p1", resetKey: "new:1" });
+        expect(textbox()).toHaveValue("");
+    });
 });
