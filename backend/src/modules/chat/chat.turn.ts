@@ -527,7 +527,8 @@ export async function driveChatTurn(
                 );
             }
             if (isAbortError(err)) {
-                devLog("[chat/stream] turn stopped", { chatId });
+                const stopReason = run.stopReason ?? "signal";
+                devLog("[chat/stream] turn stopped", { chatId, stopReason });
                 void enqueueChatTurnAudit(
                     db,
                     {
@@ -538,7 +539,10 @@ export async function driveChatTurn(
                         title: chatTitle,
                         model: selectedModel,
                         status: "cancelled",
-                        flags: { actor_role: prepared.actorRole },
+                        flags: {
+                            actor_role: prepared.actorRole,
+                            stop_reason: stopReason,
+                        },
                     },
                     null,
                     drainReceiptsSince(),

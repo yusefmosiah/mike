@@ -944,6 +944,22 @@ describe("useVoiceChat", () => {
         expect(recordMock).not.toHaveBeenCalled();
     });
 
+    it("does not Stop the server turn when audio is interrupted while the app is backgrounded", async () => {
+        const view = await started();
+        emit({ type: "turn", turnId: "t1", text: "what notice", audioMs: 900 });
+        view.stream(ANSWER.slice(0, 120));
+        emit({ type: "clauseStarted", turnId: "t1", clauseId: 0 });
+        const visibility = vi
+            .spyOn(document, "visibilityState", "get")
+            .mockReturnValue("hidden");
+        try {
+            emit({ type: "interrupted", turnId: "t1", clauseId: 0, fraction: 0.5 });
+            expect(view.cancelResponse).not.toHaveBeenCalled();
+        } finally {
+            visibility.mockRestore();
+        }
+    });
+
     it("never splits a citation across clauses (W5)", async () => {
         const view = await started();
         emit({ type: "turn", turnId: "t1", text: "can they dismiss", audioMs: 900 });

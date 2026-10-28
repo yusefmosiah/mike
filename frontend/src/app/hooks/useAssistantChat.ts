@@ -26,12 +26,14 @@ import {
   readAssistantTurn,
   TURN_IN_PROGRESS_MESSAGE,
   TurnInProgressError,
+  TurnRefusedError,
 } from "@/app/lib/assistantTurnStream";
 import {
   beginAssistantTurn,
   cancelAssistantTurn,
   getAssistantTurn,
   hasAssistantTurn,
+  loadAssistantChat,
   subscribeAssistantTurns,
   withLiveTurn,
   type AssistantTurnHandle,
@@ -132,12 +134,22 @@ export function useAssistantChat({
   // this thread is never displaced by a snapshot taken before it was stored.
   const setMessages: Dispatch<SetStateAction<Message[]>> = useCallback(
     (action) => {
-      setRawMessages((prev) =>
-        withLiveTurn(
-          typeof action === "function" ? action(prev) : action,
-          attachedTurnRef.current,
-        ),
-      );
+      setRawMessages((prev) => {
+        const next = typeof action === "function" ? action(prev) : action;
+        const live = attachedTurnRef.current;
+        if (
+          live?.finished &&
+          live.assistant.id &&
+          next.some(
+            (message) =>
+              message.role === "assistant" && message.id === live.assistant.id,
+          )
+        ) {
+          attachedTurnRef.current = null;
+          return next;
+        }
+        return withLiveTurn(next, live);
+      });
     },
     [],
   );
@@ -155,6 +167,30 @@ export function useAssistantChat({
       attachToTurn(null);
     };
   }, [viewedChatId, attachToTurn]);
+
+  // When the app returns to the foreground after a local reader failed, ask
+  // the server for the chat's current state so a completed or still-running
+  // server turn replaces the stale reader error.
+  useEffect(() => {
+    if (typeof document === "undefined" || !viewedChatId) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const attached = attachedTurnRef.current;
+      if (hasAssistantTurn(viewedChatId) || !attached?.finished || !attached.assistant.error) {
+        return;
+      }
+      void loadAssistantChat(viewedChatId)
+        .then((detail) => {
+          if (!mountedRef.current) return;
+          setMessages(detail.messages);
+        })
+        .catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [viewedChatId, setMessages]);
 
   // Invalidate the previous request before a new thread can receive updates.
   //
@@ -175,11 +211,10 @@ export function useAssistantChat({
     adoptedThreadKeyRef.current = null;
     // A new chat receiving its persisted id is still the same live turn.
     if (isAdoptedThread) return;
-    // Detach — never abort. Aborting closes the socket, which the backend
-    // treats as Stop: it persists a truncated "Cancelled by user." answer in
-    // the thread the user just left. Retiring the generation is enough to
-    // keep the old turn from writing into the new thread; the request itself
-    // runs to completion and the server stores the whole answer.
+    // Detach — never abort. Closing the reader unsubscribes it while the
+    // server-owned run continues to completion and stores the whole answer;
+    // retiring the generation keeps the old turn from writing into the new
+    // thread.
     requestGenerationRef.current += 1;
     abortControllerRef.current = null;
     registeredTurnRef.current = null;
@@ -205,13 +240,23 @@ export function useAssistantChat({
   };
 
   /** Stop: this hook's own request, or the detached one streaming into the thread it views. */
-  const cancel = () => {
+  const cancel = (expectedAssistantMessageId?: string) => {
     const own = registeredTurnRef.current;
     if (own) {
+      if (expectedAssistantMessageId !== undefined) {
+        if (!own.turn.voice) return;
+        if (
+          expectedAssistantMessageId &&
+          own.turn.assistant.id &&
+          own.turn.assistant.id !== expectedAssistantMessageId
+        ) {
+          return;
+        }
+      }
       own.cancel();
       return;
     }
-    cancelAssistantTurn(viewedChatId);
+    cancelAssistantTurn(viewedChatId, expectedAssistantMessageId);
   };
 
   /**
@@ -306,7 +351,11 @@ export function useAssistantChat({
     },
   ): Promise<string | null> => {
     if (message.noResponse) return addNote(message);
-    if (!message.content.trim() || hasAssistantTurn(chatId)) return null;
+    if (!message.content.trim()) return null;
+    if (hasAssistantTurn(chatId)) {
+      if (opts?.strict) throw new TurnInProgressError(null);
+      return null;
+    }
 
     setIsResponseLoading(true);
 
@@ -383,6 +432,7 @@ export function useAssistantChat({
     const turn = beginAssistantTurn(chatId, {
       userMessage: optimisticResponseEvent ? null : message,
       assistant: assistantPlaceholder,
+      voice: Boolean(message.voice),
       cancel: () => {
         // The server keeps generating until it is told otherwise: closing
         // this connection only detaches. Name the turn to the Stop endpoint
@@ -405,7 +455,7 @@ export function useAssistantChat({
     registeredTurnRef.current = turn;
     attachToTurn(turn.turn);
     let streamedChatId: string | null = null;
-
+    let turnFailed = false;
     try {
       const apiMessages = apiMessagesForTurn.map((currentMessage) => ({
         role: currentMessage.role,
@@ -495,7 +545,13 @@ export function useAssistantChat({
             if (isCurrentRequest()) setRejectedApiKey({ model: model ?? null });
           },
           onErrorFrame: () => {
-            if (isCurrentRequest()) setIsResponseLoading(false);
+            if (isCurrentRequest()) {
+              setIsResponseLoading(false);
+              if (!turnFailed) {
+                turnFailed = true;
+                setTurnFailedAt((at) => at + 1);
+              }
+            }
           },
         },
       });
@@ -557,15 +613,22 @@ export function useAssistantChat({
 
       setIsResponseLoading(false);
       setIsLoadingCitations(false);
-      // A strict caller (the queue) needs the refusal: it removed the
-      // entry up front, and only a throw puts it back. Aborts are the
-      // user's own stop — the queue pauses itself for those.
-      if (opts?.strict && !isAbortError(error)) throw error;
+      // A strict caller (the queue) restores the entry only on a confirmed
+      // refusal before persistence; post-admission or ambiguous disconnects
+      // still pause the remaining queue without re-queuing what may already
+      // be stored.
+      if (!isAbortError(error) && isCurrentRequest() && !turnFailed) {
+        turnFailed = true;
+        setTurnFailedAt((at) => at + 1);
+      }
+      if (opts?.strict && !isAbortError(error)) {
+        if (error instanceof TurnRefusedError) throw error;
+        throw Object.assign(
+          error instanceof Error ? error : new Error(String(error)),
+          { restoreQueueEntry: false },
+        );
+      }
       if (!isCurrentRequest()) return null;
-      // Stop is not a failure; the composer pauses the queue for that on its
-      // own. Every other end is: a broken stream, or a send refused because
-      // another turn still holds the thread.
-      if (!isAbortError(error)) setTurnFailedAt((at) => at + 1);
       return null;
     } finally {
       turn.finish();

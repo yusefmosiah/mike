@@ -1,6 +1,6 @@
 "use client";
 
-import { streamChatTurn } from "@/app/lib/mikeApi";
+import { getChat, streamChatTurn } from "@/app/lib/mikeApi";
 import { readSseFrames } from "@/app/lib/sse";
 import { isPanelDocument } from "@/app/components/shared/types";
 import type { AssistantEvent, Citation } from "@/app/components/shared/types";
@@ -514,7 +514,7 @@ export async function consumeAssistantTurnStream(
     signal?: AbortSignal;
     hooks?: TurnStreamHooks;
   },
-): Promise<void> {
+): Promise<boolean> {
   const { turn, sink, cursor, signal } = args;
   const hooks = args.hooks ?? {};
   const {
@@ -538,8 +538,12 @@ export async function consumeAssistantTurnStream(
   const updateMatchingEvent: TurnEventSink["updateMatchingEvent"] = (predicate, updater) =>
     sink.updateMatchingEvent(predicate, (event) => withFrameCallId(updater(event)));
 
+  let completed = false;
   for await (const frame of readSseFrames(response, {
     signal,
+    onDone: () => {
+      completed = true;
+    },
     onEventId: (id) => {
       const seq = Number.parseInt(id, 10);
       if (Number.isFinite(seq)) cursor.lastSeq = seq;
@@ -1628,6 +1632,7 @@ export async function consumeAssistantTurnStream(
   }
 
   finalizeStreamingReasoning();
+  return completed;
 }
 
 /** What the sender reads when their send was refused for that reason. */
@@ -1638,11 +1643,47 @@ export const TURN_IN_PROGRESS_MESSAGE =
  * The server refused the send because another turn is generating into the
  * thread, usually a colleague's (a shared chat). Nothing was stored.
  */
-export class TurnInProgressError extends Error {
+export class TurnRefusedError extends Error {
+  constructor(readonly status: number, message?: string) {
+    super(message ?? `Chat request failed with status ${status}`);
+    this.name = "TurnRefusedError";
+  }
+}
+
+export class TurnInProgressError extends TurnRefusedError {
   constructor(readonly generatingUserId: string | null) {
-    super("A response is already being generated for this chat.");
+    super(409, "A response is already being generated for this chat.");
     this.name = "TurnInProgressError";
   }
+}
+
+function abortReason(fallback?: unknown): Error {
+  return isAbortError(fallback)
+    ? (fallback as Error)
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+async function reconcileTurnFromHistory(
+  cursor: TurnCursor,
+  turn: AssistantTurnHandle,
+  sink: TurnEventSink,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const chatId = cursor.chatId;
+  const assistantId = turn.turn.assistant.id;
+  if (!chatId || !assistantId) return false;
+  const detail = await (async () => getChat(chatId, signal))().catch(
+    () => null,
+  );
+  const saved = detail?.messages?.find(
+    (m) => m.role === "assistant" && m.id === assistantId,
+  );
+  if (!saved || detail?.active_turn?.id === cursor.turnId) return false;
+  sink.clearStreamingPlaceholders();
+  sink.eventsRef.current = saved.events ?? [];
+  turn.setLoadingCitations(false);
+  turn.update(() => saved);
+  return true;
 }
 
 /**
@@ -1694,28 +1735,36 @@ export async function readAssistantTurn(args: {
     } else {
       await response.body?.cancel().catch(() => {});
     }
+    if (response.status >= 400 && response.status < 500) {
+      throw new TurnRefusedError(response.status);
+    }
     throw new Error(`Chat request failed with status ${response.status}`);
   }
   for (;;) {
     let error: unknown;
     const seenBefore = cursor.lastSeq;
     try {
-      await consumeAssistantTurnStream(response, { turn, sink, cursor, signal, hooks });
-      return;
+      const completed = await consumeAssistantTurnStream(response, {
+        turn,
+        sink,
+        cursor,
+        signal,
+        hooks,
+      });
+      if (completed || !cursor.turnId) return;
+      error = new Error("SSE stream ended before [DONE]");
     } catch (caught) {
       error = caught;
     }
     if (isAbortError(error) || signal?.aborted || !cursor.chatId || !cursor.turnId) {
-      throw error;
+      throw signal?.aborted ? abortReason(error) : error;
     }
     if (cursor.lastSeq !== seenBefore) policy.recovered();
     let failure: TurnReconnectFailure = { kind: "stream" };
     for (;;) {
       const delay = policy.next(failure);
       if (delay === null) throw error;
-      await waitForReconnect(delay, signal).catch(() => {
-        throw error;
-      });
+      await waitForReconnect(delay, signal);
       let resumed: Response;
       try {
         resumed = await streamChatTurn({
@@ -1726,12 +1775,20 @@ export async function readAssistantTurn(args: {
           signal,
         });
       } catch (fetchError) {
-        if (isAbortError(fetchError) || signal?.aborted) throw error;
+        if (isAbortError(fetchError) || signal?.aborted) {
+          throw abortReason(fetchError);
+        }
         failure = { kind: "unreachable" };
         continue;
       }
       if (!resumed.ok) {
         await resumed.body?.cancel().catch(() => {});
+        if (
+          resumed.status === 404 &&
+          (await reconcileTurnFromHistory(cursor, turn, sink, signal))
+        ) {
+          return;
+        }
         failure = { kind: "status", status: resumed.status };
         continue;
       }

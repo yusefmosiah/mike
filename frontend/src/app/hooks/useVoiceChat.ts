@@ -106,8 +106,8 @@ export interface UseVoiceChatOptions {
      * of what they said is sent as a new message.
      */
     replacePrompt?: (messageId: string, text: string) => Promise<void>;
-    /** Stops the answer streaming into the thread. */
-    cancelResponse: () => void;
+    /** Stops the answer streaming into the thread, bound to the interrupted answer id when known. */
+    cancelResponse: (assistantMessageId?: string) => void;
     /** Thresholds for the engine; anything left out keeps the engine's default. */
     config?: Partial<VoiceConfig>;
 }
@@ -373,10 +373,24 @@ export function useVoiceChat({
             carryRef.current = joinWords(carryRef.current, turn.text);
             carryReplacesRef.current = turn.replaces;
         }
-        const streaming = turn.sent && !turn.ended;
+        const answer = answerOf(turn, latest.current.messages);
+        if (answer?.id) turn.answerId = answer.id;
+        const backgrounded =
+            typeof document !== "undefined" &&
+            document.visibilityState === "hidden";
+        const streaming =
+            !backgrounded &&
+            turn === turnRef.current &&
+            turn.sent &&
+            !turn.ended &&
+            latest.current.isResponseLoading &&
+            (!turn.answerId ||
+                latest.current.messages.some(
+                    (m) => m.role === "assistant" && m.id === turn.answerId,
+                ));
         turn.ended = true;
         turn.cancelled = true;
-        if (streaming) latest.current.cancelResponse();
+        if (streaming) latest.current.cancelResponse(turn.answerId ?? "");
     }, []);
 
     const teardown = useCallback(() => {

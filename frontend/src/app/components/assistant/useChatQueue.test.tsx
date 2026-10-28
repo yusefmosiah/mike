@@ -167,6 +167,55 @@ describe("useChatQueue", () => {
         expect(send).toHaveBeenCalledOnce();
     });
 
+    it("pauses without restoring an entry that failed after admission", async () => {
+        const send = vi.fn().mockRejectedValueOnce(
+            Object.assign(new Error("stream dropped"), {
+                restoreQueueEntry: false,
+            }),
+        );
+        const view = renderQueue({ send });
+
+        act(() => {
+            view.queue().enqueue(draft("already admitted"));
+            view.queue().enqueue(draft("still waiting"));
+        });
+
+        await waitFor(() => expect(view.queue().paused?.reason).toBe("failed"));
+        expect(view.queue().entries.map((entry) => entry.text)).toEqual([
+            "still waiting",
+        ]);
+        expect(send).toHaveBeenCalledOnce();
+    });
+
+    it("keeps mutations in memory when storage writes fail", () => {
+        const setItem = vi
+            .spyOn(Storage.prototype, "setItem")
+            .mockImplementation(() => {
+                throw new Error("quota");
+            });
+        const view = renderQueue({ isStreaming: true });
+
+        act(() => {
+            view.queue().enqueue(draft("first"));
+            view.queue().enqueue(draft("second"));
+        });
+        expect(view.queue().entries.map((entry) => entry.text)).toEqual([
+            "first",
+            "second",
+        ]);
+        const firstId = view.queue().entries[0].id;
+        act(() => view.queue().reorder(firstId, 1));
+        expect(view.queue().entries.map((entry) => entry.text)).toEqual([
+            "second",
+            "first",
+        ]);
+        act(() => view.queue().remove(firstId));
+        expect(view.queue().entries.map((entry) => entry.text)).toEqual([
+            "second",
+        ]);
+        setItem.mockRestore();
+    });
+
     it("moves a new-chat queue onto the id the chat adopted", () => {
         const view = renderQueue({
             chatKey: chatQueueKey({

@@ -4,12 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
     adoptChatQueue,
     clearChatQueue,
-    enqueueChatQueue,
-    markChatQueuePaused,
+    EMPTY_CHAT_QUEUE,
+    newChatQueueEntry,
     readChatQueue,
-    removeChatQueueEntry,
-    reorderChatQueue,
-    resumeChatQueue,
     writeChatQueue,
     type ChatQueueDraft,
     type ChatQueueEntry,
@@ -109,13 +106,23 @@ export function useChatQueue(
         sendingRef.current = true;
         try {
             await sendRef.current(entry);
-        } catch {
+        } catch (error) {
             const latest = stateRef.current;
+            const restore = !(
+                error &&
+                typeof error === "object" &&
+                "restoreQueueEntry" in error &&
+                error.restoreQueueEntry === false
+            );
             commit({
-                entries: [
-                    entry,
-                    ...latest.entries.filter((item) => item.id !== entry.id),
-                ],
+                entries: restore
+                    ? [
+                          entry,
+                          ...latest.entries.filter(
+                              (item) => item.id !== entry.id,
+                          ),
+                      ]
+                    : latest.entries,
                 paused: { reason: "failed", at: Date.now() },
             });
             return;
@@ -140,9 +147,24 @@ export function useChatQueue(
         // Adoption is unconditional now: the stream the id waited on can
         // end before the key lands, and an orphaned new-chat queue that
         // stayed drainable would auto-send into the next fresh chat.
-        const next = fromKey.endsWith(`:${encodeURIComponent("new-chat")}`)
-            ? adoptChatQueue(fromKey, chatKey)
-            : readChatQueue(chatKey);
+        const adopted = fromKey.endsWith(`:${encodeURIComponent("new-chat")}`);
+        let next: ChatQueueState;
+        if (adopted) {
+            const inMemory = stateRef.current;
+            const existingTo = readChatQueue(chatKey);
+            if (
+                inMemory.entries.length > 0 &&
+                existingTo.entries.length === 0
+            ) {
+                writeChatQueue(chatKey, inMemory);
+                clearChatQueue(fromKey);
+                next = inMemory;
+            } else {
+                next = adoptChatQueue(fromKey, chatKey);
+            }
+        } else {
+            next = readChatQueue(chatKey);
+        }
         stateRef.current = next;
         setState(next);
         scheduleDrain();
@@ -157,7 +179,10 @@ export function useChatQueue(
         if (streamRef.current) return;
         const current = stateRef.current;
         if (current.entries.length === 0 || current.paused) return;
-        commit(markChatQueuePaused(chatKey, "orphaned"));
+        commit({
+            ...current,
+            paused: { reason: "orphaned", at: Date.now() },
+        });
     }, [chatKey, commit]);
 
     useEffect(() => {
@@ -172,7 +197,11 @@ export function useChatQueue(
 
     const enqueue = useCallback(
         (draft: ChatQueueDraft) => {
-            commit(enqueueChatQueue(keyRef.current, draft));
+            const current = stateRef.current;
+            commit({
+                entries: [...current.entries, newChatQueueEntry(draft)],
+                paused: current.paused,
+            });
             scheduleDrain();
         },
         [commit, scheduleDrain],
@@ -180,21 +209,35 @@ export function useChatQueue(
 
     const remove = useCallback(
         (id: string) => {
-            commit(removeChatQueueEntry(keyRef.current, id));
+            const current = stateRef.current;
+            const entries = current.entries.filter((entry) => entry.id !== id);
+            commit({
+                entries,
+                paused: entries.length > 0 ? current.paused : null,
+            });
         },
         [commit],
     );
 
     const reorder = useCallback(
         (id: string, direction: -1 | 1) => {
-            commit(reorderChatQueue(keyRef.current, id, direction));
+            const current = stateRef.current;
+            const index = current.entries.findIndex((entry) => entry.id === id);
+            const target = index + direction;
+            if (index < 0 || target < 0 || target >= current.entries.length) {
+                return;
+            }
+            const entries = [...current.entries];
+            const [moved] = entries.splice(index, 1);
+            entries.splice(target, 0, moved);
+            commit({ ...current, entries });
         },
         [commit],
     );
 
     const clear = useCallback(() => {
         cancelDrain();
-        commit(clearChatQueue(keyRef.current));
+        commit(EMPTY_CHAT_QUEUE);
     }, [cancelDrain, commit]);
 
     const pause = useCallback(
@@ -203,16 +246,17 @@ export function useChatQueue(
             if (current.entries.length === 0) return;
             if (current.paused?.reason === reason) return;
             cancelDrain();
-            commit(markChatQueuePaused(keyRef.current, reason));
+            commit({ ...current, paused: { reason, at: Date.now() } });
         },
         [cancelDrain, commit],
     );
 
     const resume = useCallback(() => {
-        commit(resumeChatQueue(keyRef.current));
+        const current = stateRef.current;
+        if (!current.paused) return;
+        commit({ ...current, paused: null });
         scheduleDrain();
     }, [commit, scheduleDrain]);
-
     return {
         entries: state.entries,
         paused: state.paused,

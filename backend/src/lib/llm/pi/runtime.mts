@@ -2220,6 +2220,11 @@ async function runTurn(runtime: Runtime, params: StreamChatParams): Promise<Stre
       halt: (error) => {
         if (halted) return;
         halted = { error };
+        console.warn("[pi] conversation halted by tool error", {
+          conversationId: conversation.id,
+          chatKey,
+          ...safeError(error),
+        });
         // Not awaited: the abort waits for this very tool to return.
         void conversation.abort(background).catch(() => undefined);
       },

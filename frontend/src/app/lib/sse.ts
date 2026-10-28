@@ -65,6 +65,8 @@ export async function* readSseFrames(
          * can ask for the ones it has not seen (`from=<last id + 1>`).
          */
         onEventId?: (id: string) => void;
+        /** Called when a terminal `data: [DONE]` frame is received. */
+        onDone?: () => void;
     },
 ): AsyncGenerator<unknown> {
     const reader = response.body?.getReader();
@@ -109,6 +111,7 @@ export async function* readSseFrames(
                 pendingId = null;
                 if (payload === "[DONE]") {
                     if (id !== null) opts?.onEventId?.(id);
+                    opts?.onDone?.();
                     finished = true;
                     return;
                 }

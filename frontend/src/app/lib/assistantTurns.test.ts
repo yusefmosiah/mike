@@ -99,6 +99,30 @@ describe("assistant turn history loading", () => {
     turn.finish();
     expect(hasAssistantTurn("a")).toBe(false);
   });
+  it("only cancels a voice turn matching the interrupted answer id", () => {
+    const cancelTyped = vi.fn();
+    const typed = beginAssistantTurn("a", {
+      userMessage: user("typed"),
+      assistant: assistant("Typed", "answer-typed"),
+      cancel: cancelTyped,
+    });
+    cancelAssistantTurn("a", "answer-typed");
+    expect(cancelTyped).not.toHaveBeenCalled();
+    typed.finish();
+
+    const cancelVoice = vi.fn();
+    const voiceTurn = beginAssistantTurn("a", {
+      userMessage: user("spoken"),
+      assistant: assistant("Spoken", "answer-voice"),
+      voice: true,
+      cancel: cancelVoice,
+    });
+    cancelAssistantTurn("a", "other-answer");
+    expect(cancelVoice).not.toHaveBeenCalled();
+    cancelAssistantTurn("a", "answer-voice");
+    expect(cancelVoice).toHaveBeenCalledOnce();
+    voiceTurn.finish();
+  });
   it("gives up when the server never stores the response", async () => {
     // Stop closes the socket; if the backend then fails to write the row, the
     // reader must surface a load error instead of polling for it forever.
@@ -285,6 +309,22 @@ describe("withLiveTurn", () => {
     const named = turnOn({ userMessage: user("hello"), assistant: assistant("Streaming", "answer-1") });
     const onceNamed = withLiveTurn([], named);
     expect(withLiveTurn(onceNamed, named)).toEqual(onceNamed);
+  });
+  it("yields a finished local error overlay to the saved server row for the same message id", () => {
+    const handle = beginAssistantTurn("chat-1", {
+      userMessage: user("hello", "u1"),
+      assistant: {
+        ...assistant("Two partial steps", "answer-1"),
+        error: "Sorry, something went wrong.",
+      },
+      cancel: vi.fn(),
+    });
+    handle.finish();
+    const saved = assistant("Complete saved answer", "answer-1");
+    expect(withLiveTurn([user("hello", "u1"), saved], handle.turn)).toEqual([
+      user("hello", "u1"),
+      saved,
+    ]);
   });
 });
 

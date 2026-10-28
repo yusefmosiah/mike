@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AssistantEvent, Message } from "@/app/components/shared/types";
 import type { ConnectorApprovalItem } from "@mike/contracts";
-import { streamChatTurn } from "./mikeApi";
+import { getChat, streamChatTurn } from "./mikeApi";
 import { beginAssistantTurn } from "./assistantTurns";
 import {
   consumeAssistantTurnStream,
@@ -11,7 +11,12 @@ import {
   TurnInProgressError,
 } from "./assistantTurnStream";
 
-vi.mock("./mikeApi", () => ({ streamChatTurn: vi.fn(), stopChatTurn: vi.fn() }));
+vi.mock("./mikeApi", () => ({
+  getChat: vi.fn(),
+  streamChatTurn: vi.fn(),
+  stopChatTurn: vi.fn(),
+}));
+const getChatMock = vi.mocked(getChat);
 const streamChatTurnMock = vi.mocked(streamChatTurn);
 
 /** An SSE body that emits the given chunks; `fail` makes it error out after them. */
@@ -183,7 +188,7 @@ describe("readAssistantTurn", () => {
     turn.finish();
   });
 
-  it("gives up with the stream's failure when Stop lands during a re-attach", async () => {
+  it("surfaces Stop as an abort when Stop lands during a re-attach", async () => {
     vi.useFakeTimers();
     const turn = begin();
     const sink = createTurnEventSink(turn, []);
@@ -196,9 +201,9 @@ describe("readAssistantTurn", () => {
       throw new DOMException("The operation was aborted.", "AbortError");
     });
     const first = readAssistantTurn({ open: async () => opened(), turn, sink, cursor: createTurnCursor("chat-a"), signal: stopped.signal });
-    const firstOutcome = first.then(() => "resolved", (error: Error) => error.message);
+    const firstOutcome = first.then(() => "resolved", (error: Error) => error.name);
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(await firstOutcome).toBe("network error");
+    expect(await firstOutcome).toBe("AbortError");
 
     const stoppedAgain = new AbortController();
     streamChatTurnMock.mockImplementationOnce(async () => {
@@ -206,9 +211,9 @@ describe("readAssistantTurn", () => {
       throw new TypeError("Failed to fetch");
     });
     const second = readAssistantTurn({ open: async () => opened(), turn, sink, cursor: createTurnCursor("chat-a"), signal: stoppedAgain.signal });
-    const secondOutcome = second.then(() => "resolved", (error: Error) => error.message);
+    const secondOutcome = second.then(() => "resolved", (error: Error) => error.name);
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(await secondOutcome).toBe("network error");
+    expect(await secondOutcome).toBe("AbortError");
     turn.finish();
   });
 
@@ -243,6 +248,90 @@ describe("readAssistantTurn", () => {
     });
     expect(text(turn.turn.assistant)).toBe("Hello world");
     expect(cursor.lastSeq).toBe(4);
+    turn.finish();
+  });
+
+  it("reconnects when a named turn stream ends at EOF without [DONE]", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const cursor = createTurnCursor("chat-a");
+    streamChatTurnMock.mockResolvedValueOnce(
+      sseResponse([
+        frame(3, { type: "content_delta", text: " world" }),
+        "id: 4\ndata: [DONE]\n\n",
+      ]),
+    );
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse([
+          frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1", assistantMessageId: "answer-1" }),
+          frame(2, { type: "content_delta", text: "Hello" }),
+        ]),
+      turn,
+      sink,
+      cursor,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await read;
+    expect(streamChatTurnMock).toHaveBeenCalledWith({
+      chatId: "chat-a",
+      turnId: "turn-1",
+      from: 3,
+      incarnation: undefined,
+      signal: undefined,
+    });
+    expect(text(turn.turn.assistant)).toBe("Hello world");
+    turn.finish();
+  });
+
+  it("resolves a 404 turn_not_found after the replay window to the saved answer", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    streamChatTurnMock
+      .mockResolvedValueOnce(sseResponse([], { status: 404 }))
+      .mockResolvedValueOnce(sseResponse([], { status: 404 }));
+    getChatMock
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        chat: { id: "chat-a" } as never,
+        messages: [
+          { id: "u1", role: "user", content: "hello" },
+          {
+            id: "answer-1",
+            role: "assistant",
+            content: "",
+            events: [{ type: "content", text: "Saved complete answer" }],
+          },
+        ],
+        active_turn: null,
+        generating: null,
+      });
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse(
+          [
+            frame(1, {
+              type: "chat_id",
+              chatId: "chat-a",
+              turnId: "turn-1",
+              assistantMessageId: "answer-1",
+            }),
+            frame(2, { type: "content_delta", text: "Partial" }),
+          ],
+          { fail: true },
+        ),
+      turn,
+      sink,
+      cursor: createTurnCursor("chat-a"),
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await read;
+    expect(streamChatTurnMock).toHaveBeenCalledTimes(2);
+    expect(getChatMock).toHaveBeenCalledWith("chat-a", undefined);
+    expect(text(turn.turn.assistant)).toBe("Saved complete answer");
+    expect(turn.turn.assistant.error).toBeUndefined();
     turn.finish();
   });
 
@@ -1899,7 +1988,7 @@ describe("readAssistantTurn connection handling", () => {
     turn.finish();
   });
 
-  it("gives up on a reconnect when Stop lands during the backoff", async () => {
+  it("surfaces Stop as an abort when Stop lands during the backoff", async () => {
     vi.useFakeTimers();
     const turn = begin();
     const sink = createTurnEventSink(turn, []);
@@ -1916,14 +2005,14 @@ describe("readAssistantTurn connection handling", () => {
     });
     const outcome = read.then(
       () => "resolved",
-      (error: Error) => error.message,
+      (error: Error) => error.name,
     );
     // Let the first connection drop and the retry backoff start.
     await vi.advanceTimersByTimeAsync(0);
     expect(streamChatTurnMock).not.toHaveBeenCalled();
     controller.abort();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(await outcome).toBe("network error");
+    expect(await outcome).toBe("AbortError");
     expect(streamChatTurnMock).not.toHaveBeenCalled();
     turn.finish();
   });

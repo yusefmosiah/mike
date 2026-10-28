@@ -37,6 +37,8 @@ export type LiveAssistantTurn = {
   readonly loadingCitations: boolean;
   /** Set once the stream has ended, whether it finished, failed or was stopped. */
   readonly finished: boolean;
+  /** True when the turn was sent by hands-free voice mode. */
+  readonly voice?: boolean;
   /**
    * Fires after every change to `assistant` or `loadingCitations`, and once
    * more when the turn finishes.
@@ -50,6 +52,7 @@ type TurnRecord = {
   assistant: Message;
   loadingCitations: boolean;
   finished: boolean;
+  voice?: boolean;
   done: Promise<void>;
   cancel: () => void;
   listeners: Set<() => void>;
@@ -90,8 +93,24 @@ export function getAssistantTurn(chatId?: string): LiveAssistantTurn | null {
   return latest;
 }
 
-export function cancelAssistantTurn(chatId?: string) {
-  if (chatId) for (const turn of turns.get(chatId) ?? []) turn.cancel();
+export function cancelAssistantTurn(
+  chatId?: string,
+  expectedAssistantMessageId?: string,
+) {
+  if (!chatId) return;
+  for (const turn of turns.get(chatId) ?? []) {
+    if (expectedAssistantMessageId !== undefined) {
+      if (!turn.voice) continue;
+      if (
+        expectedAssistantMessageId &&
+        turn.assistant.id &&
+        turn.assistant.id !== expectedAssistantMessageId
+      ) {
+        continue;
+      }
+    }
+    turn.cancel();
+  }
 }
 
 export function beginAssistantTurn(
@@ -100,6 +119,7 @@ export function beginAssistantTurn(
     userMessage: Message | null;
     assistant: Message;
     cancel: () => void;
+    voice?: boolean;
   },
 ) {
   let resolve!: () => void;
@@ -109,6 +129,7 @@ export function beginAssistantTurn(
     assistant: options.assistant,
     loadingCitations: false,
     finished: false,
+    voice: options.voice,
     done: new Promise<void>((done) => {
       resolve = done;
     }),
@@ -233,6 +254,18 @@ function overlayTurn(messages: Message[], turn: LiveAssistantTurn): Message[] {
       (message) => message.role === "assistant" && message.id === assistant.id,
     );
     if (index >= 0) {
+      // A finished local error overlay yields once the server's saved row for
+      // the same message id arrives in the transcript.
+      if (
+        turn.finished &&
+        assistant.error &&
+        !messages[index].error &&
+        !messages[index].events?.some(
+          (event) => "isStreaming" in event && event.isStreaming,
+        )
+      ) {
+        return messages;
+      }
       const next = [...messages];
       // A reload knows the answer's branch position; the stream does not.
       const sibling = messages[index].sibling ?? assistant.sibling;

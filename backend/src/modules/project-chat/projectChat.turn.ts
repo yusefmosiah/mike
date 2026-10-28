@@ -501,6 +501,7 @@ export async function driveProjectChatTurn(
             if (isAbortError(err)) {
                 console.log("[project-chat/stream] turn stopped", {
                     chatId,
+                    stopReason: run.stopReason ?? "signal",
                 });
                 if (err instanceof AssistantStreamError) {
                     const partial = buildCancelledAssistantMessage({
