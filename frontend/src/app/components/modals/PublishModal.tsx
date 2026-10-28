@@ -157,7 +157,7 @@ function PublishModalBody({ target, config, onClose }: Props) {
                               ? "Anyone who has a public link can open it, with no sign-in, and the link may be shared onward. "
                               : "Anyone who has the link and its password can open it, with no sign-in. "}
                         {options.followDocument
-                            ? "The link always shows the newest saved version of this document."
+                            ? "Saved changes update this link automatically: it always shows the newest saved version of this document."
                             : "The link keeps a frozen copy of this version: later edits are not shared unless you publish again."}
                     </p>
 

@@ -66,23 +66,41 @@ function Harness({ disabled }: { disabled?: boolean }) {
 }
 
 describe("PublishOptionsForm", () => {
-    it("edits every option", async () => {
+    it("edits every option and keeps freezing secondary to automatic updates", async () => {
         render(<Harness />);
+        expect(
+            screen.getByText("Saved changes update this link automatically."),
+        ).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: /With a password/ }));
         await userEvent.click(screen.getByRole("button", { name: "Generate" }));
         await userEvent.click(screen.getByRole("switch", { name: "Signed-in members only" }));
-        await userEvent.click(screen.getByRole("switch", { name: "Keep the link on the latest version" }));
+        await userEvent.click(
+            screen.getByRole("button", { name: "Freeze this version instead" }),
+        );
+        expect(
+            screen.getByText(/Frozen copy of this version/),
+        ).toBeInTheDocument();
         await userEvent.click(screen.getByRole("button", { name: "7 days" }));
         const value = JSON.parse(screen.getByRole("status").textContent!);
         expect(value).toMatchObject({ audience: "password", requireSignIn: true, expiry: "7", followDocument: false });
         expect(value.password.length).toBeGreaterThanOrEqual(12);
+
+        await userEvent.click(
+            screen.getByRole("button", { name: "Update automatically instead" }),
+        );
+        expect(JSON.parse(screen.getByRole("status").textContent!)).toMatchObject({
+            followDocument: true,
+        });
     });
 
     it("disables the controls while busy", async () => {
         render(<Harness disabled />);
-        for (const name of ["Signed-in members only", "Keep the link on the latest version"]) {
-            expect(screen.getByRole("switch", { name })).toBeDisabled();
-        }
+        expect(
+            screen.getByRole("switch", { name: "Signed-in members only" }),
+        ).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: "Freeze this version instead" }),
+        ).toBeDisabled();
         expect(screen.getByRole("button", { name: "7 days" })).toBeDisabled();
     });
 });

@@ -166,21 +166,6 @@ export function PublishOptionsForm({
                 </p>
             </div>
 
-            <div>
-                <ToggleSwitchUI
-                    checked={value.followDocument}
-                    disabled={disabled}
-                    onCheckedChange={(followDocument) => set({ followDocument })}
-                >
-                    Keep the link on the latest version
-                </ToggleSwitchUI>
-                <p className="mt-1.5 text-xs text-gray-500">
-                    On, readers always see the newest saved version. Off, the
-                    link keeps a copy of this version — later edits are not
-                    shared unless you publish again.
-                </p>
-            </div>
-
             <div role="group" aria-labelledby={expiryLabelId}>
                 <FieldLabel as="p" id={expiryLabelId}>
                     Link expires
@@ -193,6 +178,24 @@ export function PublishOptionsForm({
                     size="sm"
                     className="w-full"
                 />
+            </div>
+
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pt-0.5 text-xs text-gray-500">
+                <span>
+                    {value.followDocument
+                        ? "Saved changes update this link automatically."
+                        : "Frozen copy of this version — later edits are not shared."}
+                </span>
+                <TextButtonUI
+                    type="button"
+                    size="xs"
+                    disabled={disabled}
+                    onClick={() => set({ followDocument: !value.followDocument })}
+                >
+                    {value.followDocument
+                        ? "Freeze this version instead"
+                        : "Update automatically instead"}
+                </TextButtonUI>
             </div>
         </div>
     );

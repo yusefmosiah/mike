@@ -66,6 +66,28 @@ describe("PublishModal", () => {
         expect(within(screen.getByRole("region", { name: "Existing links" })).getByText(/Created Jan 2, 2026 · Never expires/)).toBeInTheDocument();
     });
 
+    it("lets the publisher choose a frozen copy via the secondary option", async () => {
+        api.createPublication.mockResolvedValue({
+            publication: pub({ follow_document: false }),
+            missing_files: [],
+        });
+        open();
+        await userEvent.click(
+            screen.getByRole("button", { name: "Freeze this version instead" }),
+        );
+        expect(
+            screen.getByText(/keeps a frozen copy of this version/),
+        ).toBeInTheDocument();
+        await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+        expect(api.createPublication).toHaveBeenCalledWith({
+            document_id: "d1",
+            version_id: "v1",
+            audience: "public",
+            expires_in_days: 30,
+            follow_document: false,
+        });
+    });
+
     it("sends a password link with a generated passphrase and the chosen expiry", async () => {
         api.createPublication.mockResolvedValue({ publication: pub({ audience: "password" }), missing_files: ["img/a.png"] });
         open();

@@ -33,6 +33,24 @@ begin
     raise exception 'identity conflict was accepted';
   exception when unique_violation then null;
   end;
+  -- Repeated revisions of a generated document (`save_to_mike` replacements)
+  -- allocate distinct increasing version numbers without explicit numbering.
+  result := public.create_document_version(other_doc, jsonb_build_object(
+    'filename', 'gen.html', 'file_type', 'html', 'source', 'generated',
+    'version_number', 1, 'storage_path', 'test/gen-v1.html'));
+  assert (result->>'version_number')::int = 1, 'generated initial version';
+  result := public.create_document_version(other_doc, jsonb_build_object(
+    'filename', 'gen.html', 'file_type', 'html', 'source', 'generated',
+    'storage_path', 'test/gen-v2.html'));
+  assert (result->>'version_number')::int = 2, 'generated second version';
+  result := public.create_document_version(other_doc, jsonb_build_object(
+    'filename', 'gen.html', 'file_type', 'html', 'source', 'generated',
+    'storage_path', 'test/gen-v3.html'));
+  assert (result->>'version_number')::int = 3, 'generated third version';
+  result := public.create_document_version(other_doc, jsonb_build_object(
+    'filename', 'gen.html', 'file_type', 'html', 'source', 'generated',
+    'storage_path', 'test/gen-v4.html'));
+  assert (result->>'version_number')::int = 4, 'generated fourth version';
   select count(*) into before_jobs from public.db_jobs where kind = 'document.cleanup';
   -- Deliberate rollback after creation: neither version nor activation survives.
   begin

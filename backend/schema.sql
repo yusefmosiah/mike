@@ -7623,8 +7623,7 @@ begin
   if v_number is null then
     select coalesce(max(version_number), 1) + 1 into v_number
     from public.document_versions
-    where document_id = p_document_id
-      and source in ('upload', 'user_upload', 'assistant_edit');
+    where document_id = p_document_id;
   end if;
   insert into public.document_versions(
     id, document_id, storage_path, pdf_storage_path, source, version_number,
@@ -8440,5 +8439,6 @@ insert into public.schema_migrations (filename) values
   ('20261026_04_remove_upload_session_limit.sql'),
   ('20261027_01_publication_follow_document.sql'),
   ('20261027_02_doc_confidential.sql'),
-  ('20261027_03_sweep_index.sql')
+  ('20261027_03_sweep_index.sql'),
+  ('20261028_01_generated_version_numbering.sql')
 on conflict (filename) do nothing;
