@@ -11,6 +11,10 @@ import {
   authInputUIClassName,
 } from "@mike/auth-styles-ui";
 
+// Google sign-in is hidden for now; the OAuth dialog and useAuth support stay
+// in place. Flip this to bring the button back.
+const GOOGLE_AUTH_ENABLED = false;
+
 const WEB_APP_URL = (
   process.env.REACT_APP_WEB_APP_URL || "https://app.mikeoss.com"
 ).replace(/\/+$/, "");
@@ -137,19 +141,23 @@ export function LoginPage(): React.ReactElement {
                   {loading ? "Logging in..." : "Log in"}
                 </PillButton>
               </div>
-              <AuthDivider />
-              <PillButton
-                type="button"
-                tone="white"
-                size="normal"
-                className="w-full"
-                disabled={loading || googleLoading}
-                loading={googleLoading}
-                onClick={() => void handleGoogleLogin()}
-              >
-                <GoogleIconUI className="h-4 w-4" />
-                {googleLoading ? "Continuing…" : "Continue with Google"}
-              </PillButton>
+              {GOOGLE_AUTH_ENABLED && (
+                <>
+                  <AuthDivider />
+                  <PillButton
+                    type="button"
+                    tone="white"
+                    size="normal"
+                    className="w-full"
+                    disabled={loading || googleLoading}
+                    loading={googleLoading}
+                    onClick={() => void handleGoogleLogin()}
+                  >
+                    <GoogleIconUI className="h-4 w-4" />
+                    {googleLoading ? "Continuing…" : "Continue with Google"}
+                  </PillButton>
+                </>
+              )}
             </form>
           </div>
           <div className="text-center text-sm text-gray-500">

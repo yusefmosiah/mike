@@ -29,7 +29,10 @@ import {
     newPasswordProblem,
 } from "@/app/components/auth/passwordPolicy";
 import { AuthDivider } from "@/app/components/auth/AuthDivider";
-import { GoogleAuthButton } from "@/app/components/auth/GoogleAuthButton";
+import {
+    GOOGLE_AUTH_ENABLED,
+    GoogleAuthButton,
+} from "@/app/components/auth/GoogleAuthButton";
 import { FieldLabel } from "@/app/components/ui/form-field";
 
 function SignupContent() {
@@ -234,12 +237,16 @@ function SignupContent() {
                             >
                                 {loading ? "Creating account..." : "Sign up"}
                             </PillButtonUI>
-                            <AuthDivider />
-                            <GoogleAuthButton
-                                onError={setError}
-                                disabled={loading}
-                                onLoadingChange={setLoading}
-                            />
+                            {GOOGLE_AUTH_ENABLED && (
+                                <>
+                                    <AuthDivider />
+                                    <GoogleAuthButton
+                                        onError={setError}
+                                        disabled={loading}
+                                        onLoadingChange={setLoading}
+                                    />
+                                </>
+                            )}
                         </div>
                     </form>
                 </div>

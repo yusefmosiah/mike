@@ -5,6 +5,11 @@ import { GoogleIconUI } from "@/shared/ui/GoogleIconUI";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { startGoogleOAuth } from "@/app/lib/authApi";
 
+// Google sign-in is hidden from the login and signup pages for now. The
+// button, OAuth route and backend support stay in place; flip this to bring
+// it back.
+export const GOOGLE_AUTH_ENABLED = false;
+
 interface GoogleAuthButtonProps {
     onError: (message: string) => void;
     disabled?: boolean;

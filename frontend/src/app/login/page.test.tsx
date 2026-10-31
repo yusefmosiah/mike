@@ -64,22 +64,18 @@ describe("LoginPage", () => {
         expect(push).toHaveBeenCalledWith("/assistant");
     });
 
-    it("places Google and SSO after the primary login action", () => {
+    it("places SSO after the primary login action and hides Google", () => {
         render(<LoginPage />);
 
         const login = screen.getByRole("button", { name: "Log in" });
-        const google = screen.getByRole("button", {
-            name: "Continue with Google",
-        });
         const sso = screen.getByRole("button", { name: "Continue with SSO" });
         expect(
-            login.compareDocumentPosition(google) &
+            login.compareDocumentPosition(sso) &
                 Node.DOCUMENT_POSITION_FOLLOWING,
         ).toBeTruthy();
         expect(
-            google.compareDocumentPosition(sso) &
-                Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBeTruthy();
+            screen.queryByRole("button", { name: "Continue with Google" }),
+        ).not.toBeInTheDocument();
     });
 
     it("returns to the page the visitor asked for after signing in", async () => {

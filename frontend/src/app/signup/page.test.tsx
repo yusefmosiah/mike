@@ -74,17 +74,12 @@ describe("SignupPage", () => {
         expect(push).toHaveBeenCalledWith("/signup/check-email");
     });
 
-    it("places Google after the primary signup action without offering SSO", () => {
+    it("offers neither Google nor SSO", () => {
         render(<SignupPage />);
 
-        const signup = screen.getByRole("button", { name: "Sign up" });
-        const google = screen.getByRole("button", {
-            name: "Continue with Google",
-        });
         expect(
-            signup.compareDocumentPosition(google) &
-                Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBeTruthy();
+            screen.queryByRole("button", { name: "Continue with Google" }),
+        ).not.toBeInTheDocument();
         expect(
             screen.queryByRole("button", { name: "Continue with SSO" }),
         ).not.toBeInTheDocument();

@@ -15,7 +15,10 @@ import {
 } from "@/app/components/auth/authStyles";
 import { AuthDivider } from "@/app/components/auth/AuthDivider";
 import { SsoAuthButton } from "@/app/components/auth/SsoAuthButton";
-import { GoogleAuthButton } from "@/app/components/auth/GoogleAuthButton";
+import {
+    GOOGLE_AUTH_ENABLED,
+    GoogleAuthButton,
+} from "@/app/components/auth/GoogleAuthButton";
 import { FieldLabel } from "@/app/components/ui/form-field";
 import { safeAuthNext } from "@/app/lib/authRedirects";
 import { knownErrorCodeMessage } from "@/app/lib/userFacingError";
@@ -147,11 +150,13 @@ export default function LoginPage() {
                             </PillButtonUI>
                         </div>
                         <AuthDivider />
-                        <GoogleAuthButton
-                            onError={setError}
-                            disabled={loading}
-                            onLoadingChange={setLoading}
-                        />
+                        {GOOGLE_AUTH_ENABLED && (
+                            <GoogleAuthButton
+                                onError={setError}
+                                disabled={loading}
+                                onLoadingChange={setLoading}
+                            />
+                        )}
                         <SsoAuthButton disabled={loading} />
                     </form>
                 </div>

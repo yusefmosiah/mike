@@ -24,9 +24,10 @@ test.describe("auth flow", () => {
     // to the LoginPage rather than getting stuck on the spinner.
     await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Log In" })).toBeVisible();
+    // Google sign-in is hidden for now (GOOGLE_AUTH_ENABLED in LoginPage.tsx).
     await expect(
       page.getByRole("button", { name: "Continue with Google" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Sign up" })).toBeVisible();
     await expect(page.getByText("Mike", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign up" })).toHaveCount(0);
@@ -161,7 +162,8 @@ test.describe("auth flow", () => {
     expect(await addin.getRefreshToken()).toBeNull();
   });
 
-  test("Google OAuth redeems a one-time handoff into a task-pane cookie session", async ({
+  // Skipped while GOOGLE_AUTH_ENABLED is false in LoginPage.tsx.
+  test.skip("Google OAuth redeems a one-time handoff into a task-pane cookie session", async ({
     addin,
     page,
   }) => {
@@ -209,7 +211,8 @@ test.describe("auth flow", () => {
     expect(await addin.getRefreshToken()).toBeNull();
   });
 
-  test("Google OAuth rejects a response from another origin", async ({
+  // Skipped while GOOGLE_AUTH_ENABLED is false in LoginPage.tsx.
+  test.skip("Google OAuth rejects a response from another origin", async ({
     addin,
     page,
   }) => {
@@ -250,7 +253,8 @@ test.describe("auth flow", () => {
     expect(await addin.getRefreshToken()).toBeNull();
   });
 
-  test("Google OAuth surfaces provider errors", async ({ addin, page }) => {
+  // Skipped while GOOGLE_AUTH_ENABLED is false in LoginPage.tsx.
+  test.skip("Google OAuth surfaces provider errors", async ({ addin, page }) => {
     await addin.gotoTaskpane();
     await page.getByRole("button", { name: "Continue with Google" }).click();
 
@@ -280,7 +284,8 @@ test.describe("auth flow", () => {
     expect(await addin.getToken()).toBeNull();
   });
 
-  test("Google OAuth rejects malformed dialog messages", async ({
+  // Skipped while GOOGLE_AUTH_ENABLED is false in LoginPage.tsx.
+  test.skip("Google OAuth rejects malformed dialog messages", async ({
     addin,
     page,
   }) => {
@@ -302,7 +307,8 @@ test.describe("auth flow", () => {
     expect(await addin.getToken()).toBeNull();
   });
 
-  test("Google OAuth reports when the user closes the dialog", async ({
+  // Skipped while GOOGLE_AUTH_ENABLED is false in LoginPage.tsx.
+  test.skip("Google OAuth reports when the user closes the dialog", async ({
     addin,
     page,
   }) => {
