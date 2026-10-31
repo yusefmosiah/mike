@@ -20,7 +20,7 @@ const getChatMock = vi.mocked(getChat);
 const streamChatTurnMock = vi.mocked(streamChatTurn);
 
 /** An SSE body that emits the given chunks; `fail` makes it error out after them. */
-function sseResponse(chunks: string[], opts?: { fail?: boolean; status?: number }) {
+function sseResponse(chunks: string[], opts?: { fail?: boolean | Error; status?: number }) {
   const encoder = new TextEncoder();
   // `fail` errors the stream only once the consumer has drained the queued
   // chunks (pull runs when it asks for more), so the frames arrive first.
@@ -30,7 +30,9 @@ function sseResponse(chunks: string[], opts?: { fail?: boolean; status?: number 
       if (!opts?.fail) controller.close();
     },
     pull(controller) {
-      if (opts?.fail) controller.error(new TypeError("network error"));
+      if (opts?.fail) {
+        controller.error(opts.fail instanceof Error ? opts.fail : new TypeError("network error"));
+      }
     },
   });
   return new Response(stream, { status: opts?.status ?? 200 });
@@ -163,6 +165,29 @@ describe("readAssistantTurn", () => {
       cursor,
     });
     expect(cursor.incarnation).toBeUndefined();
+    turn.finish();
+  });
+
+  it("resumes a stream that WebKit aborted without a Stop", async () => {
+    vi.useFakeTimers();
+    const turn = begin();
+    const sink = createTurnEventSink(turn, []);
+    const backgrounded = new DOMException("Fetch is aborted", "AbortError");
+    streamChatTurnMock
+      .mockRejectedValueOnce(new DOMException("Fetch is aborted", "AbortError"))
+      .mockResolvedValueOnce(sseResponse([frame(2, { type: "content_delta", text: "still going" }), "id: 3\ndata: [DONE]\n\n"]));
+    const read = readAssistantTurn({
+      open: async () =>
+        sseResponse([frame(1, { type: "chat_id", chatId: "chat-a", turnId: "turn-1" })], { fail: backgrounded }),
+      turn,
+      sink,
+      cursor: createTurnCursor("chat-a"),
+      signal: new AbortController().signal,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await read;
+    expect(streamChatTurnMock).toHaveBeenCalledTimes(2);
+    expect(text(turn.turn.assistant)).toBe("still going");
     turn.finish();
   });
 

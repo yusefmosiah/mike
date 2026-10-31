@@ -1756,7 +1756,10 @@ export async function readAssistantTurn(args: {
     } catch (caught) {
       error = caught;
     }
-    if (isAbortError(error) || signal?.aborted || !cursor.chatId || !cursor.turnId) {
+    // Only our own signal is a Stop. WebKit can fail a read with an
+    // AbortError on its own, for one when an app in the background loses
+    // its connection; that is a dropped stream to resume, not the person.
+    if (signal?.aborted || !cursor.chatId || !cursor.turnId) {
       throw signal?.aborted ? abortReason(error) : error;
     }
     if (cursor.lastSeq !== seenBefore) policy.recovered();
@@ -1775,7 +1778,7 @@ export async function readAssistantTurn(args: {
           signal,
         });
       } catch (fetchError) {
-        if (isAbortError(fetchError) || signal?.aborted) {
+        if (signal?.aborted) {
           throw abortReason(fetchError);
         }
         failure = { kind: "unreachable" };

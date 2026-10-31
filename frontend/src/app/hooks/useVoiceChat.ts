@@ -68,6 +68,9 @@ export function activityOf(state: VoiceEngineState): VoiceActivity {
 
 /** Without a sign of the answer this long after sending, the send failed. */
 export const SEND_TIMEOUT_MS = 4000;
+/** How long after the page was hidden its voice events are still backgrounding, not the person. */
+const BACKGROUND_GRACE_MS = 5000;
+
 /** How long after the chat opens the voice models start loading in the background. */
 export const PREWARM_DELAY_MS = 2000;
 
@@ -365,6 +368,24 @@ export function useVoiceChat({
         [flushHeard],
     );
 
+    // When the page was last hidden or left (0: never).
+    const hiddenAtRef = useRef(0);
+    useEffect(() => {
+        const mark = () => {
+            hiddenAtRef.current = Date.now();
+        };
+        const onVisibility = () => {
+            // Also stamped on return: queued events arrive after it.
+            if (document.visibilityState === "hidden" || hiddenAtRef.current) mark();
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        window.addEventListener("pagehide", mark);
+        return () => {
+            document.removeEventListener("visibilitychange", onVisibility);
+            window.removeEventListener("pagehide", mark);
+        };
+    }, []);
+
     /** Cuts the turn's answer off: no more clauses, and the chat turn stops if it still streams. */
     const cutOff = useCallback((turn: VoiceTurn) => {
         if (pendingRef.current === turn) {
@@ -375,9 +396,13 @@ export function useVoiceChat({
         }
         const answer = answerOf(turn, latest.current.messages);
         if (answer?.id) turn.answerId = answer.id;
+        // Backgrounding ends capture and can interrupt the audio session; the
+        // engine's events about that reach the page while hidden, or queued
+        // just after it is visible again. None is the person stopping.
         const backgrounded =
             typeof document !== "undefined" &&
-            document.visibilityState === "hidden";
+            (document.visibilityState === "hidden" ||
+                Date.now() - hiddenAtRef.current < BACKGROUND_GRACE_MS);
         const streaming =
             !backgrounded &&
             turn === turnRef.current &&
