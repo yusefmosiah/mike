@@ -57,9 +57,19 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
     return response.json() as Promise<T>;
 }
 
+/**
+ * Every page waits on the session read, so it gives up sooner than other
+ * auth requests; AuthProvider retries a failed first read once.
+ */
+export const SESSION_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function getAuthSession(): Promise<AuthUser | null> {
     try {
-        return (await authRequest<{ user: AuthUser }>("/session")).user;
+        return (
+            await authRequest<{ user: AuthUser }>("/session", {
+                signal: AbortSignal.timeout(SESSION_REQUEST_TIMEOUT_MS),
+            })
+        ).user;
     } catch (error) {
         if (error instanceof AuthApiError && error.status === 401) return null;
         throw error;

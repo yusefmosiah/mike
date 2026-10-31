@@ -101,6 +101,7 @@ import {
     getUserExportStatus,
     getUserMemory,
     getUserProfile,
+    PROFILE_REQUEST_TIMEOUT_MS,
     getWorkflow,
     getWorkflowPeople,
     getWorkflowAddon,
@@ -330,6 +331,17 @@ describe("apiRequest plumbing (via thin wrappers)", () => {
             Accept: "application/json",
         });
         expect(init.credentials).toBe("include");
+    });
+
+    it("bounds the profile read so a stalled request cannot hold the loader", async () => {
+        const timeout = vi.spyOn(AbortSignal, "timeout");
+        fetchMock.mockResolvedValue(jsonResponse({ tier: "free" }));
+
+        await getUserProfile();
+
+        expect(timeout).toHaveBeenCalledWith(PROFILE_REQUEST_TIMEOUT_MS);
+        expect(lastFetchCall().init.signal).toBeInstanceOf(AbortSignal);
+        timeout.mockRestore();
     });
 
     it("never attaches an Authorization header", async () => {

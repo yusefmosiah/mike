@@ -172,7 +172,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.addEventListener("focus", onFocus);
         document.addEventListener("visibilitychange", onVisibilityChange);
 
+        // The first read gets one fresh attempt: a page reloaded as the app
+        // returns from the background can send it over a connection that
+        // died meanwhile, and failing it outright would sign the user out.
         void fetchAndApplySession()
+            .catch(() => fetchAndApplySession())
             .catch(() => {
                 setAuthError(SESSION_ERROR_MESSAGE);
             })

@@ -103,6 +103,25 @@ describe("AuthProvider", () => {
         );
     });
 
+    it("retries a failed first session read once before giving up", async () => {
+        getAuthSession
+            .mockRejectedValueOnce(new DOMException("stalled", "TimeoutError"))
+            .mockResolvedValueOnce(user);
+
+        render(
+            <AuthProvider>
+                <Consumer />
+            </AuthProvider>,
+        );
+
+        await waitFor(() =>
+            expect(screen.getByTestId("user")).toHaveTextContent(user.email),
+        );
+        expect(screen.getByTestId("loading")).toHaveTextContent("false");
+        expect(screen.getByTestId("error")).toHaveTextContent("");
+        expect(getAuthSession).toHaveBeenCalledTimes(2);
+    });
+
     it("clears stale in-memory auth when an API request returns 401", async () => {
         getAuthSession.mockResolvedValue(user);
         render(

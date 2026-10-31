@@ -959,8 +959,17 @@ export async function exportAuditHistory(params: {
     return apiBlobRequest(`/audit/export?${qs.toString()}`);
 }
 
+/**
+ * Every signed-in page waits on the profile behind the full-screen loader, so
+ * a read that stalls (a connection that died while the app was in the
+ * background) must fail, letting UserProfileProvider retry and then fall back.
+ */
+export const PROFILE_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function getUserProfile(): Promise<UserProfile> {
-    return apiRequest<UserProfile>("/user/profile");
+    return apiRequest<UserProfile>("/user/profile", {
+        signal: AbortSignal.timeout(PROFILE_REQUEST_TIMEOUT_MS),
+    });
 }
 
 export async function lookupUserByEmail(

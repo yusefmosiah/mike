@@ -338,6 +338,20 @@
         opacity: 0;
     }
 
+    /* FullScreenLoader's "taking longer than usual" line: hidden, then
+       shown 12s after the loader mounts. Visibility, not opacity, so its
+       link cannot take focus before it shows. */
+    .slow-load-notice {
+        visibility: hidden;
+        animation: slowLoadNotice 0s linear 12s forwards;
+    }
+
+    @keyframes slowLoadNotice {
+        to {
+            visibility: visible;
+        }
+    }
+
     @keyframes sidebarFadeIn {
         from {
             opacity: 0;

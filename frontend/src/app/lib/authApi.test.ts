@@ -7,6 +7,7 @@ import {
     exchangeAuthCode,
     getAuthSession,
     getMfaAssurance,
+    SESSION_REQUEST_TIMEOUT_MS,
     listMfaFactors,
     login,
     logout,
@@ -89,6 +90,25 @@ describe("cookie auth client", () => {
         );
 
         await expect(getAuthSession()).resolves.toEqual(user);
+    });
+
+    it("gives the session read its own short deadline", async () => {
+        const timeout = vi.spyOn(AbortSignal, "timeout");
+        fetchMock.mockResolvedValue(
+            new Response(JSON.stringify({ user }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            }),
+        );
+
+        await getAuthSession();
+
+        expect(timeout).toHaveBeenCalledWith(SESSION_REQUEST_TIMEOUT_MS);
+        expect(SESSION_REQUEST_TIMEOUT_MS).toBeLessThan(30_000);
+        expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(
+            AbortSignal,
+        );
+        timeout.mockRestore();
     });
 
     it("does not hide non-401 session errors", async () => {
