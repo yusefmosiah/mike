@@ -618,6 +618,12 @@ test("keeps the pinned turn steady when a tall activity strip completes", async 
   await expect(
     assistantTurn.getByRole("button", { name: "Working" }),
   ).toBeVisible();
+  // Thinking starts closed; open it so the strip is tall when it completes.
+  const reasoning = assistantTurn.getByRole("button", {
+    name: /^(Thinking|Pondering|Analyzing|Reviewing|Reasoning)\.\.\.$/,
+  });
+  await reasoning.click();
+  await expect(reasoning).toHaveAttribute("aria-expanded", "true");
   await expect(
     assistantTurn.getByText("Considering clause 50", { exact: false }),
   ).toBeVisible();

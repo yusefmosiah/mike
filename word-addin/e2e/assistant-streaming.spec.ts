@@ -81,9 +81,12 @@ test("sixteen exchanges keep reasoning, resizing and disclosure updates bounded"
         await expect.poll(() => page.getByTestId("messages-container").evaluate((element) =>
           Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight),
         )).toBeLessThan(2);
-        await disclosure.click();
+        // The disclosure is now far above the pinned bottom, and WebKit keeps
+        // reporting it outside the viewport while the pane owns scrolling, so
+        // toggle it from the keyboard instead of a pointer click.
+        await disclosure.press("Enter");
         await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-        await disclosure.click();
+        await disclosure.press("Enter");
         await expect(disclosure).toHaveAttribute("aria-expanded", "true");
         await page.setViewportSize({ width: 420, height: 720 });
         await page.evaluate(() => (window as Window & { finishReasoning?: () => void }).finishReasoning?.());
